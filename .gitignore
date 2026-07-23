@@ -1,0 +1,57 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test and quality caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Logs and local runtime files
+*.log
+logs/
+tmp/
+temp/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local credentials and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+
+# Unsanitized workflow exports
+exports-private/
+secrets/
