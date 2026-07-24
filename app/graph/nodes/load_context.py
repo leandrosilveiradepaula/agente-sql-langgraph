@@ -1,5 +1,9 @@
 from collections.abc import Callable
 
+from app.domain.context_validator import (
+    ContextValidationIssue,
+    validate_context_snapshot,
+)
 from app.graph.state import AgentError, GraphState
 from app.ports.context_repository import (
     ContextRepository,
@@ -14,7 +18,8 @@ def create_load_context_node(
     Cria o node load_context com seu repositório injetado.
 
     O node não conhece Supabase, Postgres ou arquivos.
-    Ele conhece somente o contrato ContextRepository.
+    Ele recebe um snapshot canônico pelo ContextRepository e valida
+    esse snapshot antes de disponibilizá-lo aos próximos estágios.
     """
 
     def load_context(state: GraphState) -> GraphState:
@@ -75,63 +80,64 @@ def create_load_context_node(
                 "failure_stage": "load_context",
             }
 
-        context_version = context.get("version", "")
-        allowed_schemas = context.get(
-            "allowed_schemas",
-            [],
-        )
-        tables = context.get("tables", [])
+        validation_result = validate_context_snapshot(context)
 
-        missing_fields: list[str] = []
+        validation_errors = [
+            _validation_issue_to_agent_error(issue)
+            for issue in validation_result["errors"]
+        ]
+        validation_warnings = [
+            _validation_issue_to_agent_error(issue)
+            for issue in validation_result["warnings"]
+        ]
 
-        if not context_version:
-            missing_fields.append("version")
-
-        if not isinstance(allowed_schemas, list):
-            missing_fields.append("allowed_schemas")
-
-        elif not allowed_schemas:
-            missing_fields.append("allowed_schemas")
-
-        if not isinstance(tables, list):
-            missing_fields.append("tables")
-
-        elif not tables:
-            missing_fields.append("tables")
-
-        if missing_fields:
-            agent_error = {
-                "code": "INVALID_CONTEXT_SNAPSHOT",
-                "message": (
-                    "O contexto carregado está incompleto "
-                    "ou possui formato inválido."
-                ),
-                "source": "context_repository",
-                "stage": "load_context",
-                "repairable": False,
-                "details": {
-                    "missing_or_invalid_fields": (
-                        missing_fields
-                    ),
-                },
-            }
-
+        if validation_result["status"] == "invalid":
             return {
                 "errors": [
                     *state.get("errors", []),
-                    agent_error,
+                    *validation_errors,
+                ],
+                "warnings": [
+                    *state.get("warnings", []),
+                    *validation_warnings,
                 ],
                 "current_stage": "load_context",
                 "final_status": "infrastructure_error",
                 "failure_stage": "load_context",
             }
 
+        context_version = context["version"]
+
         return {
             "context": context,
             "context_version": context_version,
+            "warnings": [
+                *state.get("warnings", []),
+                *validation_warnings,
+            ],
             "current_stage": "load_context",
             "final_status": "processing",
             "failure_stage": "",
         }
 
     return load_context
+
+
+def _validation_issue_to_agent_error(
+    issue: ContextValidationIssue,
+) -> AgentError:
+    """
+    Converte uma ocorrência do validador para o formato comum do grafo.
+    """
+
+    return {
+        "code": issue["code"],
+        "message": issue["message"],
+        "source": "context_validator",
+        "stage": "load_context",
+        "repairable": False,
+        "details": {
+            "validation_path": issue["path"],
+            **issue["details"],
+        },
+    }
