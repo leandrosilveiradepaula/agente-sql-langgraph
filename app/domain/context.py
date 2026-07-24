@@ -52,8 +52,8 @@ class EntityAlias(TypedDict, total=False):
     entity_type: str
     user_term: str
     canonical_value: str
-    target_table: str
-    target_column: str
+    target_table: str | None
+    target_column: str | None
     sql_filter_hint: Any
     business_rule: Any
     priority: int
@@ -93,7 +93,7 @@ class QueryPattern(TypedDict, total=False):
     required_tables: list[str]
     required_rules: list[str]
     sql_pattern: str
-    notes: str
+    notes: str | None
     priority: int
 
 
@@ -108,7 +108,7 @@ class CatalogColumn(TypedDict, total=False):
     name: str
     data_type: str
     nullable: bool
-    description: str
+    description: str | None
 
 
 class TableCatalogEntry(TypedDict, total=False):
@@ -119,7 +119,7 @@ class TableCatalogEntry(TypedDict, total=False):
     table_name: str
     schema_name: str
     table_type: str
-    description: str
+    description: str | None
     grain: Any
     primary_key: Any
     key_columns: Any
@@ -141,22 +141,29 @@ class CatalogTable(TypedDict, total=False):
 
     schema: str
     name: str
-    description: str
+    description: str | None
     columns: list[CatalogColumn]
 
 
 class IntentResolutionSignal(TypedDict, total=False):
     """
     Sinal normalizado para o resolvedor determinístico de intenção.
+
+    A intenção é obtida de canonical_value. O padrão bruto vem de
+    user_term e os parâmetros de resolução são obtidos de
+    sql_filter_hint.resolver.
     """
 
-    entity_type: str
-    user_term: str
     intent_name: str
+    raw_pattern: str
+    normalized_pattern: str
     match_mode: str
     polarity: str
     score: float
-    priority: int
+    priority: float | None
+    entity_type: str | None
+    target_table: str | None
+    target_column: str | None
 
 
 class IntentResolutionContext(TypedDict, total=False):
