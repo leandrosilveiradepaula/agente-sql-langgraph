@@ -1,4 +1,20 @@
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
+
+
+IntentMatchMode = Literal[
+    "exact",
+    "contains",
+    "starts_with",
+    "ends_with",
+    "all_tokens",
+    "any_token",
+    "regex",
+]
+
+IntentSignalPolarity = Literal[
+    "positive",
+    "negative",
+]
 
 
 class ContextVersions(TypedDict, total=False):
@@ -145,6 +161,40 @@ class CatalogTable(TypedDict, total=False):
     columns: list[CatalogColumn]
 
 
+class IntentTokenFallbackConfig(TypedDict, total=False):
+    """
+    Configuração genérica do fallback por cobertura de tokens.
+
+    Os valores são carregados do contexto versionado. O Python não
+    define termos de negócio, stop words ou limiares escondidos.
+    """
+
+    enabled: bool
+    apply_to_polarities: list[IntentSignalPolarity]
+    apply_to_match_modes: list[IntentMatchMode]
+    ignored_tokens: list[str]
+    minimum_pattern_tokens: int
+    minimum_matched_tokens: int
+    minimum_pattern_coverage: float
+    maximum_unmatched_pattern_tokens: int
+    allow_prefix_equivalence: bool
+    minimum_prefix_length: int
+    minimum_prefix_ratio: float
+
+
+class IntentResolverConfig(TypedDict, total=False):
+    """
+    Configuração operacional do resolvedor determinístico de intenção.
+    """
+
+    component: str
+    minimum_score: float
+    ambiguity_margin: float
+    applied_confidence: float
+    fallback_to_previous_intent: bool
+    token_fallback: IntentTokenFallbackConfig | None
+
+
 class IntentResolutionSignal(TypedDict, total=False):
     """
     Sinal normalizado para o resolvedor determinístico de intenção.
@@ -157,8 +207,8 @@ class IntentResolutionSignal(TypedDict, total=False):
     intent_name: str
     raw_pattern: str
     normalized_pattern: str
-    match_mode: str
-    polarity: str
+    match_mode: IntentMatchMode
+    polarity: IntentSignalPolarity
     score: float
     priority: float | None
     entity_type: str | None
@@ -171,7 +221,7 @@ class IntentResolutionContext(TypedDict, total=False):
     Configuração e sinais derivados para resolução de intenção.
     """
 
-    config: dict[str, Any]
+    config: IntentResolverConfig
     signals: list[IntentResolutionSignal]
 
 

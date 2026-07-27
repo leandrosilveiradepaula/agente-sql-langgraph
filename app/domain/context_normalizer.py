@@ -115,7 +115,9 @@ def normalize_context_snapshot(raw_snapshot: Mapping[str, Any]) -> ContextSnapsh
 
     component_configs = _derive_component_configs(rules)
     intent_resolution = {
-        "config": deepcopy(component_configs.get("intent_resolver", {})),
+        "config": _derive_intent_resolution_config(
+            component_configs.get("intent_resolver", {})
+        ),
         "signals": _derive_intent_resolution_signals(entities),
     }
 
@@ -558,6 +560,149 @@ def _derive_component_configs(
     return configs
 
 
+def _derive_intent_resolution_config(
+    raw_config: Any,
+) -> dict[str, Any]:
+    if not isinstance(raw_config, Mapping):
+        return {}
+
+    config = {
+        str(key): deepcopy(value)
+        for key, value in raw_config.items()
+    }
+
+    if "component" in config:
+        config["component"] = _normalize_text(
+            config.get("component")
+        )
+
+    for field_name in (
+        "minimum_score",
+        "ambiguity_margin",
+        "applied_confidence",
+    ):
+        if field_name in config:
+            config[field_name] = _normalize_number(
+                config.get(field_name)
+            )
+
+    if "fallback_to_previous_intent" in config:
+        config["fallback_to_previous_intent"] = (
+            _normalize_boolean(
+                config.get("fallback_to_previous_intent")
+            )
+        )
+
+    if "token_fallback" in config:
+        config["token_fallback"] = (
+            _normalize_token_fallback_config(
+                config.get("token_fallback")
+            )
+        )
+
+    return config
+
+
+def _normalize_token_fallback_config(
+    raw_config: Any,
+) -> Any:
+    parsed = _parse_json_like(
+        raw_config,
+        "intent_resolution.config.token_fallback",
+    )
+    if parsed is None or not isinstance(parsed, Mapping):
+        return parsed
+
+    config = {
+        str(key): deepcopy(value)
+        for key, value in parsed.items()
+    }
+
+    if "enabled" in config:
+        config["enabled"] = _normalize_boolean(
+            config.get("enabled")
+        )
+
+    for field_name in (
+        "apply_to_polarities",
+        "apply_to_match_modes",
+    ):
+        if field_name in config:
+            config[field_name] = _normalize_config_text_set(
+                config.get(field_name),
+                field_name=(
+                    "intent_resolution.config.token_fallback."
+                    f"{field_name}"
+                ),
+                normalize_search=False,
+            )
+
+    if "ignored_tokens" in config:
+        config["ignored_tokens"] = _normalize_config_text_set(
+            config.get("ignored_tokens"),
+            field_name=(
+                "intent_resolution.config.token_fallback."
+                "ignored_tokens"
+            ),
+            normalize_search=True,
+        )
+
+    for field_name in (
+        "minimum_pattern_tokens",
+        "minimum_matched_tokens",
+        "maximum_unmatched_pattern_tokens",
+        "minimum_prefix_length",
+    ):
+        if field_name in config:
+            config[field_name] = _normalize_integer(
+                config.get(field_name)
+            )
+
+    for field_name in (
+        "minimum_pattern_coverage",
+        "minimum_prefix_ratio",
+    ):
+        if field_name in config:
+            config[field_name] = _normalize_number(
+                config.get(field_name)
+            )
+
+    if "allow_prefix_equivalence" in config:
+        config["allow_prefix_equivalence"] = (
+            _normalize_boolean(
+                config.get("allow_prefix_equivalence")
+            )
+        )
+
+    return config
+
+
+def _normalize_config_text_set(
+    value: Any,
+    *,
+    field_name: str,
+    normalize_search: bool,
+) -> Any:
+    parsed = _parse_json_like(value, field_name)
+    if not isinstance(parsed, (list, tuple)):
+        return parsed
+
+    normalized_values: set[str] = set()
+    for item in parsed:
+        if not isinstance(item, str):
+            return deepcopy(parsed)
+
+        text = (
+            _normalize_search_text(item)
+            if normalize_search
+            else _normalize_text(item).casefold()
+        )
+        if text:
+            normalized_values.add(text)
+
+    return sorted(normalized_values, key=str.casefold)
+
+
 def _derive_intent_resolution_signals(
     entities: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -577,6 +722,13 @@ def _derive_intent_resolution_signals(
         if not intent_name or not raw_pattern:
             continue
 
+        match_mode = _normalize_text(
+            resolver.get("match_mode")
+        ).casefold()
+        polarity = _normalize_text(
+            resolver.get("polarity")
+        ).casefold()
+
         priority = _normalize_number(
             _first_present(
                 resolver,
@@ -588,9 +740,13 @@ def _derive_intent_resolution_signals(
         signal: dict[str, Any] = {
             "intent_name": intent_name,
             "raw_pattern": raw_pattern,
-            "normalized_pattern": _normalize_search_text(raw_pattern),
-            "match_mode": _normalize_text(resolver.get("match_mode")),
-            "polarity": _normalize_text(resolver.get("polarity")),
+            "normalized_pattern": (
+                raw_pattern
+                if match_mode == "regex"
+                else _normalize_search_text(raw_pattern)
+            ),
+            "match_mode": match_mode,
+            "polarity": polarity,
             "score": _normalize_number(resolver.get("score")),
             "priority": priority,
             "entity_type": _normalize_optional_text(
@@ -623,7 +779,13 @@ def _normalize_search_text(value: str) -> str:
         if not unicodedata.combining(character)
     )
     casefolded = without_accents.casefold()
-    return re.sub(r"\s+", " ", casefolded).strip()
+    alphanumeric_or_space = "".join(
+        character
+        if character.isalnum() or character.isspace()
+        else " "
+        for character in casefolded
+    )
+    return re.sub(r"\s+", " ", alphanumeric_or_space).strip()
 
 
 def _derive_legacy_aliases(

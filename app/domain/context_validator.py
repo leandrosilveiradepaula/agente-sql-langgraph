@@ -46,6 +46,21 @@ _COUNT_KEYS = {
 
 _FINGERPRINT_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
+_INTENT_MATCH_MODES = {
+    "exact",
+    "contains",
+    "starts_with",
+    "ends_with",
+    "all_tokens",
+    "any_token",
+    "regex",
+}
+
+_INTENT_SIGNAL_POLARITIES = {
+    "positive",
+    "negative",
+}
+
 
 def validate_context_snapshot(
     snapshot: Mapping[str, Any],
@@ -672,6 +687,8 @@ def _validate_intent_resolution(
             path="intent_resolution.config",
             details={"received_type": type(config).__name__},
         )
+    else:
+        _validate_intent_resolver_config(config, errors)
 
     signals = intent_resolution.get("signals")
     if not isinstance(signals, list):
@@ -685,71 +702,494 @@ def _validate_intent_resolution(
         return
 
     for index, signal in enumerate(signals):
-        path = f"intent_resolution.signals[{index}]"
-        if not isinstance(signal, Mapping):
-            _add_issue(
-                errors,
-                code="INTENT_SIGNAL_INVALID",
-                message="Cada sinal de intenção deve ser um objeto.",
-                path=path,
-                details={"received_type": type(signal).__name__},
-            )
-            continue
+        _validate_intent_signal(
+            signal,
+            index=index,
+            intent_names=intent_names,
+            errors=errors,
+        )
 
-        intent_name = signal.get("intent_name")
-        if not _is_non_empty_text(intent_name):
+
+def _validate_intent_resolver_config(
+    config: Mapping[str, Any],
+    errors: list[ContextValidationIssue],
+) -> None:
+    path = "intent_resolution.config"
+
+    component = config.get("component")
+    if component != "intent_resolver":
+        _add_issue(
+            errors,
+            code="INTENT_RESOLVER_COMPONENT_INVALID",
+            message=(
+                "component deve identificar o componente "
+                "intent_resolver."
+            ),
+            path=f"{path}.component",
+            details={"received_value": component},
+        )
+
+    _validate_required_non_negative_number(
+        config,
+        field_name="minimum_score",
+        path=path,
+        errors=errors,
+        code="INTENT_RESOLVER_MINIMUM_SCORE_INVALID",
+    )
+    _validate_required_non_negative_number(
+        config,
+        field_name="ambiguity_margin",
+        path=path,
+        errors=errors,
+        code="INTENT_RESOLVER_AMBIGUITY_MARGIN_INVALID",
+    )
+    _validate_required_ratio(
+        config,
+        field_name="applied_confidence",
+        path=path,
+        errors=errors,
+        code="INTENT_RESOLVER_CONFIDENCE_INVALID",
+    )
+
+    fallback = config.get("fallback_to_previous_intent")
+    if not isinstance(fallback, bool):
+        _add_issue(
+            errors,
+            code="INTENT_RESOLVER_FALLBACK_FLAG_INVALID",
+            message=(
+                "fallback_to_previous_intent deve ser booleano."
+            ),
+            path=f"{path}.fallback_to_previous_intent",
+            details={"received_value": fallback},
+        )
+
+    token_fallback = config.get("token_fallback")
+    if token_fallback is not None:
+        _validate_token_fallback_config(
+            token_fallback,
+            errors,
+        )
+
+
+def _validate_token_fallback_config(
+    config: Any,
+    errors: list[ContextValidationIssue],
+) -> None:
+    path = "intent_resolution.config.token_fallback"
+
+    if not isinstance(config, Mapping):
+        _add_issue(
+            errors,
+            code="INTENT_TOKEN_FALLBACK_INVALID",
+            message="token_fallback deve ser um objeto ou nulo.",
+            path=path,
+            details={"received_type": type(config).__name__},
+        )
+        return
+
+    enabled = config.get("enabled")
+    if not isinstance(enabled, bool):
+        _add_issue(
+            errors,
+            code="INTENT_TOKEN_FALLBACK_ENABLED_INVALID",
+            message="token_fallback.enabled deve ser booleano.",
+            path=f"{path}.enabled",
+            details={"received_value": enabled},
+        )
+        return
+
+    if not enabled:
+        return
+
+    _validate_allowed_text_list(
+        config,
+        field_name="apply_to_polarities",
+        path=path,
+        allowed_values=_INTENT_SIGNAL_POLARITIES,
+        errors=errors,
+        code="INTENT_TOKEN_FALLBACK_POLARITIES_INVALID",
+        allow_empty=False,
+    )
+    _validate_allowed_text_list(
+        config,
+        field_name="apply_to_match_modes",
+        path=path,
+        allowed_values=_INTENT_MATCH_MODES,
+        errors=errors,
+        code="INTENT_TOKEN_FALLBACK_MATCH_MODES_INVALID",
+        allow_empty=False,
+    )
+    _validate_text_list(
+        config,
+        field_name="ignored_tokens",
+        path=path,
+        errors=errors,
+        code="INTENT_TOKEN_FALLBACK_IGNORED_TOKENS_INVALID",
+        allow_empty=True,
+    )
+
+    for field_name, code in (
+        (
+            "minimum_pattern_tokens",
+            "INTENT_TOKEN_FALLBACK_MINIMUM_PATTERN_TOKENS_INVALID",
+        ),
+        (
+            "minimum_matched_tokens",
+            "INTENT_TOKEN_FALLBACK_MINIMUM_MATCHED_TOKENS_INVALID",
+        ),
+        (
+            "minimum_prefix_length",
+            "INTENT_TOKEN_FALLBACK_MINIMUM_PREFIX_LENGTH_INVALID",
+        ),
+    ):
+        _validate_required_positive_integer(
+            config,
+            field_name=field_name,
+            path=path,
+            errors=errors,
+            code=code,
+        )
+
+    _validate_required_non_negative_integer(
+        config,
+        field_name="maximum_unmatched_pattern_tokens",
+        path=path,
+        errors=errors,
+        code=(
+            "INTENT_TOKEN_FALLBACK_MAXIMUM_UNMATCHED_TOKENS_INVALID"
+        ),
+    )
+
+    for field_name, code in (
+        (
+            "minimum_pattern_coverage",
+            "INTENT_TOKEN_FALLBACK_COVERAGE_INVALID",
+        ),
+        (
+            "minimum_prefix_ratio",
+            "INTENT_TOKEN_FALLBACK_PREFIX_RATIO_INVALID",
+        ),
+    ):
+        _validate_required_ratio(
+            config,
+            field_name=field_name,
+            path=path,
+            errors=errors,
+            code=code,
+        )
+
+    allow_prefix = config.get("allow_prefix_equivalence")
+    if not isinstance(allow_prefix, bool):
+        _add_issue(
+            errors,
+            code="INTENT_TOKEN_FALLBACK_PREFIX_FLAG_INVALID",
+            message=(
+                "allow_prefix_equivalence deve ser booleano."
+            ),
+            path=f"{path}.allow_prefix_equivalence",
+            details={"received_value": allow_prefix},
+        )
+
+
+def _validate_intent_signal(
+    signal: Any,
+    *,
+    index: int,
+    intent_names: set[str],
+    errors: list[ContextValidationIssue],
+) -> None:
+    path = f"intent_resolution.signals[{index}]"
+    if not isinstance(signal, Mapping):
+        _add_issue(
+            errors,
+            code="INTENT_SIGNAL_INVALID",
+            message="Cada sinal de intenção deve ser um objeto.",
+            path=path,
+            details={"received_type": type(signal).__name__},
+        )
+        return
+
+    intent_name = signal.get("intent_name")
+    if not _is_non_empty_text(intent_name):
+        _add_issue(
+            errors,
+            code="INTENT_SIGNAL_NAME_REQUIRED",
+            message="intent_name deve ser um texto não vazio.",
+            path=f"{path}.intent_name",
+            details={"received_value": intent_name},
+        )
+    elif intent_name.strip().casefold() not in intent_names:
+        _add_issue(
+            errors,
+            code="INTENT_SIGNAL_UNKNOWN_INTENT",
+            message=(
+                "O sinal aponta para uma intenção inexistente entre "
+                "os padrões ativos."
+            ),
+            path=f"{path}.intent_name",
+            details={"intent_name": intent_name},
+        )
+
+    for field_name in ("raw_pattern", "normalized_pattern"):
+        value = signal.get(field_name)
+        if not _is_non_empty_text(value):
             _add_issue(
                 errors,
-                code="INTENT_SIGNAL_NAME_REQUIRED",
-                message="intent_name deve ser um texto não vazio.",
-                path=f"{path}.intent_name",
-                details={"received_value": intent_name},
+                code="INTENT_SIGNAL_PATTERN_REQUIRED",
+                message=f"{field_name} deve ser um texto não vazio.",
+                path=f"{path}.{field_name}",
+                details={"received_value": value},
             )
-        elif intent_name.strip().casefold() not in intent_names:
-            _add_issue(
-                errors,
-                code="INTENT_SIGNAL_UNKNOWN_INTENT",
-                message=(
-                    "O sinal aponta para uma intenção inexistente entre "
-                    "os padrões ativos."
+
+    match_mode = signal.get("match_mode")
+    if match_mode not in _INTENT_MATCH_MODES:
+        _add_issue(
+            errors,
+            code="INTENT_SIGNAL_MATCH_MODE_INVALID",
+            message="match_mode não pertence ao contrato suportado.",
+            path=f"{path}.match_mode",
+            details={
+                "received_value": match_mode,
+                "allowed_values": sorted(_INTENT_MATCH_MODES),
+            },
+        )
+    elif (
+        match_mode == "regex"
+        and signal.get("normalized_pattern")
+        != signal.get("raw_pattern")
+    ):
+        _add_issue(
+            errors,
+            code="INTENT_SIGNAL_REGEX_PATTERN_CHANGED",
+            message=(
+                "Padrões regex devem preservar o conteúdo bruto em "
+                "normalized_pattern."
+            ),
+            path=f"{path}.normalized_pattern",
+            details={
+                "raw_pattern": signal.get("raw_pattern"),
+                "normalized_pattern": signal.get(
+                    "normalized_pattern"
                 ),
-                path=f"{path}.intent_name",
-                details={"intent_name": intent_name},
-            )
+            },
+        )
 
-        for field_name in ("raw_pattern", "normalized_pattern"):
-            value = signal.get(field_name)
-            if not _is_non_empty_text(value):
-                _add_issue(
-                    errors,
-                    code="INTENT_SIGNAL_PATTERN_REQUIRED",
-                    message=f"{field_name} deve ser um texto não vazio.",
-                    path=f"{path}.{field_name}",
-                    details={"received_value": value},
-                )
+    polarity = signal.get("polarity")
+    if polarity not in _INTENT_SIGNAL_POLARITIES:
+        _add_issue(
+            errors,
+            code="INTENT_SIGNAL_POLARITY_INVALID",
+            message="polarity deve ser positive ou negative.",
+            path=f"{path}.polarity",
+            details={
+                "received_value": polarity,
+                "allowed_values": sorted(_INTENT_SIGNAL_POLARITIES),
+            },
+        )
 
-        score = signal.get("score")
-        if not _is_finite_number(score):
-            _add_issue(
-                errors,
-                code="INTENT_SIGNAL_SCORE_INVALID",
-                message="score deve ser numérico, finito e não booleano.",
-                path=f"{path}.score",
-                details={"received_value": score},
-            )
+    score = signal.get("score")
+    if not _is_finite_number(score) or float(score) < 0:
+        _add_issue(
+            errors,
+            code="INTENT_SIGNAL_SCORE_INVALID",
+            message=(
+                "score deve ser numérico, finito, não booleano e "
+                "não negativo."
+            ),
+            path=f"{path}.score",
+            details={"received_value": score},
+        )
 
-        priority = signal.get("priority")
-        if priority is not None and not _is_finite_number(priority):
-            _add_issue(
-                errors,
-                code="INTENT_SIGNAL_PRIORITY_INVALID",
-                message=(
-                    "priority deve ser numérico, finito, nulo ou ausente."
-                ),
-                path=f"{path}.priority",
-                details={"received_value": priority},
-            )
+    priority = signal.get("priority")
+    if (
+        priority is not None
+        and (
+            not _is_finite_number(priority)
+            or float(priority) < 0
+        )
+    ):
+        _add_issue(
+            errors,
+            code="INTENT_SIGNAL_PRIORITY_INVALID",
+            message=(
+                "priority deve ser numérico, finito, não negativo, "
+                "nulo ou ausente."
+            ),
+            path=f"{path}.priority",
+            details={"received_value": priority},
+        )
 
+
+def _validate_required_non_negative_number(
+    config: Mapping[str, Any],
+    *,
+    field_name: str,
+    path: str,
+    errors: list[ContextValidationIssue],
+    code: str,
+) -> None:
+    value = config.get(field_name)
+    if not _is_finite_number(value) or float(value) < 0:
+        _add_issue(
+            errors,
+            code=code,
+            message=(
+                f"{field_name} deve ser numérico, finito, "
+                "não booleano e não negativo."
+            ),
+            path=f"{path}.{field_name}",
+            details={"received_value": value},
+        )
+
+
+def _validate_required_ratio(
+    config: Mapping[str, Any],
+    *,
+    field_name: str,
+    path: str,
+    errors: list[ContextValidationIssue],
+    code: str,
+) -> None:
+    value = config.get(field_name)
+    if (
+        not _is_finite_number(value)
+        or float(value) < 0
+        or float(value) > 1
+    ):
+        _add_issue(
+            errors,
+            code=code,
+            message=f"{field_name} deve estar entre 0 e 1.",
+            path=f"{path}.{field_name}",
+            details={"received_value": value},
+        )
+
+
+def _validate_required_positive_integer(
+    config: Mapping[str, Any],
+    *,
+    field_name: str,
+    path: str,
+    errors: list[ContextValidationIssue],
+    code: str,
+) -> None:
+    value = config.get(field_name)
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or value <= 0
+    ):
+        _add_issue(
+            errors,
+            code=code,
+            message=f"{field_name} deve ser um inteiro positivo.",
+            path=f"{path}.{field_name}",
+            details={"received_value": value},
+        )
+
+
+def _validate_required_non_negative_integer(
+    config: Mapping[str, Any],
+    *,
+    field_name: str,
+    path: str,
+    errors: list[ContextValidationIssue],
+    code: str,
+) -> None:
+    value = config.get(field_name)
+    if not _is_non_negative_integer(value):
+        _add_issue(
+            errors,
+            code=code,
+            message=(
+                f"{field_name} deve ser um inteiro não negativo."
+            ),
+            path=f"{path}.{field_name}",
+            details={"received_value": value},
+        )
+
+
+def _validate_allowed_text_list(
+    config: Mapping[str, Any],
+    *,
+    field_name: str,
+    path: str,
+    allowed_values: set[str],
+    errors: list[ContextValidationIssue],
+    code: str,
+    allow_empty: bool,
+) -> None:
+    value = config.get(field_name)
+    if not isinstance(value, list):
+        _add_issue(
+            errors,
+            code=code,
+            message=f"{field_name} deve ser uma lista.",
+            path=f"{path}.{field_name}",
+            details={"received_type": type(value).__name__},
+        )
+        return
+
+    invalid_values = [
+        item
+        for item in value
+        if item not in allowed_values
+    ]
+    if (not allow_empty and not value) or invalid_values:
+        _add_issue(
+            errors,
+            code=code,
+            message=(
+                f"{field_name} deve conter somente valores "
+                "suportados pelo contrato."
+            ),
+            path=f"{path}.{field_name}",
+            details={
+                "received_value": value,
+                "invalid_values": invalid_values,
+                "allowed_values": sorted(allowed_values),
+            },
+        )
+
+
+def _validate_text_list(
+    config: Mapping[str, Any],
+    *,
+    field_name: str,
+    path: str,
+    errors: list[ContextValidationIssue],
+    code: str,
+    allow_empty: bool,
+) -> None:
+    value = config.get(field_name)
+    if not isinstance(value, list):
+        _add_issue(
+            errors,
+            code=code,
+            message=f"{field_name} deve ser uma lista de textos.",
+            path=f"{path}.{field_name}",
+            details={"received_type": type(value).__name__},
+        )
+        return
+
+    invalid_values = [
+        item
+        for item in value
+        if not _is_non_empty_text(item)
+    ]
+    if (not allow_empty and not value) or invalid_values:
+        _add_issue(
+            errors,
+            code=code,
+            message=(
+                f"{field_name} deve conter somente textos não vazios."
+            ),
+            path=f"{path}.{field_name}",
+            details={
+                "received_value": value,
+                "invalid_values": invalid_values,
+            },
+        )
 
 def _is_non_empty_text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())

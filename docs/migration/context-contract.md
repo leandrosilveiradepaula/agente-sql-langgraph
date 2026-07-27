@@ -235,6 +235,20 @@ Esses sinais deverão ser normalizados em uma coleção derivada chamada `intent
 
 Essa coleção será derivada dos registros de entidades e não constitui, nesta fase, uma nova tabela física.
 
+Os modos técnicos suportados pelo contrato são:
+
+- `exact`
+- `contains`
+- `starts_with`
+- `ends_with`
+- `all_tokens`
+- `any_token`
+- `regex`
+
+As polaridades suportadas são `positive` e `negative`.
+
+Para modos textuais, o padrão será normalizado com case folding, remoção de acentos, substituição de pontuação por espaços e compactação de espaços. Para `regex`, o padrão bruto será preservado porque sua pontuação e seus metacaracteres fazem parte da expressão.
+
 ---
 
 ## 8. Mapeamento DRE
@@ -569,6 +583,33 @@ A configuração do resolvedor de intenção deverá ser derivada de uma configu
 
 `intent_resolution.config`
 
+O contrato operacional atual contém:
+
+- `component`
+- `minimum_score`
+- `ambiguity_margin`
+- `applied_confidence`
+- `fallback_to_previous_intent`
+- `token_fallback` opcional
+
+Os campos numéricos e booleanos deverão ser normalizados sem definir valores padrão escondidos no código. A ausência ou invalidade de um campo obrigatório deverá ser detectada pelo validator.
+
+`token_fallback`, quando presente, poderá conter:
+
+- `enabled`
+- `apply_to_polarities`
+- `apply_to_match_modes`
+- `ignored_tokens`
+- `minimum_pattern_tokens`
+- `minimum_matched_tokens`
+- `minimum_pattern_coverage`
+- `maximum_unmatched_pattern_tokens`
+- `allow_prefix_equivalence`
+- `minimum_prefix_length`
+- `minimum_prefix_ratio`
+
+Listas que funcionem semanticamente como conjuntos deverão ser normalizadas de forma determinística. Nenhum token ignorado, limiar ou equivalência poderá ser criado no Python.
+
 ### 13.7 Sinais do resolvedor
 
 Registros de entidade que contenham uma configuração válida em:
@@ -650,17 +691,50 @@ Toda regra referenciada em `query_patterns[].required_rules` deverá existir no 
 
 A forma exata de identificação da regra deverá ser definida antes da implementação do validator.
 
-### 14.7 Sinais de intenção
+### 14.7 Configuração do resolvedor
 
-Todo sinal normalizado do resolvedor deverá apontar para uma intenção existente entre os padrões ativos.
+`intent_resolution.config` deverá ser um objeto e deverá identificar `component = intent_resolver`.
 
-Nenhum sinal poderá criar uma intenção nova.
+Os campos abaixo são obrigatórios:
 
-### 14.8 Prioridades
+- `minimum_score`: número finito e não negativo;
+- `ambiguity_margin`: número finito e não negativo;
+- `applied_confidence`: número entre 0 e 1;
+- `fallback_to_previous_intent`: booleano.
+
+A presença do campo de compatibilidade `fallback_to_previous_intent` não obriga o LangGraph a implementar um classificador legado. O uso operacional desse campo será definido no estágio de classificação.
+
+Quando `token_fallback.enabled = true`:
+
+- `apply_to_polarities` deverá ser uma lista não vazia contendo somente polaridades suportadas;
+- `apply_to_match_modes` deverá ser uma lista não vazia contendo somente modos suportados;
+- `ignored_tokens` deverá ser uma lista de textos, podendo ser vazia;
+- `minimum_pattern_tokens`, `minimum_matched_tokens` e `minimum_prefix_length` deverão ser inteiros positivos;
+- `maximum_unmatched_pattern_tokens` deverá ser inteiro não negativo;
+- `minimum_pattern_coverage` e `minimum_prefix_ratio` deverão estar entre 0 e 1;
+- `allow_prefix_equivalence` deverá ser booleano.
+
+Quando `token_fallback.enabled = false`, o objeto mínimo `{"enabled": false}` será válido.
+
+### 14.8 Sinais de intenção
+
+Todo sinal normalizado do resolvedor deverá apontar para uma intenção existente entre os padrões ativos. Nenhum sinal poderá criar uma intenção nova.
+
+Cada sinal deverá possuir:
+
+- `raw_pattern` e `normalized_pattern` não vazios;
+- `match_mode` pertencente ao contrato técnico;
+- `polarity` igual a `positive` ou `negative`;
+- `score` numérico, finito e não negativo;
+- `priority` numérica, finita e não negativa quando informada.
+
+Para `match_mode = regex`, `normalized_pattern` deverá preservar o padrão bruto.
+
+### 14.9 Prioridades
 
 Valores de prioridade, quando informados, deverão ser numéricos e não booleanos.
 
-### 14.9 Contagens
+### 14.10 Contagens
 
 As contagens informadas pelo banco deverão ser comparadas com o tamanho das coleções normalizadas.
 
@@ -671,7 +745,7 @@ A política inicial recomendada é:
 - divergência causada por transformação segura: warning;
 - divergência causada por perda ou conteúdo inválido: error.
 
-### 14.10 Duplicidades
+### 14.11 Duplicidades
 
 Duplicidades idênticas poderão ser normalizadas de forma controlada.
 

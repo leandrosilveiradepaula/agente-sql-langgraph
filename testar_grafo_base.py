@@ -17,7 +17,7 @@ def _raw_context_snapshot() -> dict:
     """
 
     return {
-        "semantic_agent_version": "context-test-v2",
+        "semantic_agent_version": "context-test-v3",
         "semantic_context_source": (
             "postgres_versioned_semantic_context"
         ),
@@ -28,6 +28,12 @@ def _raw_context_snapshot() -> dict:
                 "rule_content": {
                     "component": "intent_resolver",
                     "minimum_score": 100,
+                    "ambiguity_margin": 20,
+                    "applied_confidence": 0.98,
+                    "fallback_to_previous_intent": True,
+                    "token_fallback": {
+                        "enabled": False,
+                    },
                 },
                 "applies_to_intents": [],
                 "validation_hint": None,
@@ -222,7 +228,7 @@ def _assert_valid_context(result: GraphState) -> None:
         == "ready_for_classify_intent"
     )
     assert result["failure_stage"] == ""
-    assert result["context_version"] == "context-test-v2"
+    assert result["context_version"] == "context-test-v3"
     assert result["errors"] == []
     assert result["warnings"] == []
 
@@ -234,6 +240,9 @@ def _assert_valid_context(result: GraphState) -> None:
     assert context["table_catalog"][0]["table_name"] == (
         "table_test"
     )
+    assert context["intent_resolution"]["config"][
+        "ambiguity_margin"
+    ] == 20.0
 
 
 def _assert_invalid_context(result: GraphState) -> None:
