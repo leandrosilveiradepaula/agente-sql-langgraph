@@ -1,5 +1,9 @@
 from typing import Any, Literal, TypedDict
 
+from app.domain.intent_resolver import (
+    IntentResolutionResult,
+)
+
 
 class UserContext(TypedDict, total=False):
     """
@@ -91,8 +95,9 @@ class GraphState(TypedDict, total=False):
     context_version: str
 
     # Entendimento e planejamento
-    intent: str
-    intent_confidence: float
+    intent: str | None
+    intent_confidence: float | None
+    intent_resolution_result: IntentResolutionResult
     query_plan: dict[str, Any]
 
     # SQL

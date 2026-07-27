@@ -135,6 +135,7 @@ class SuccessContextRepository:
         *,
         user_profile: str,
     ) -> ContextSnapshot:
+        del user_profile
         return normalize_context_snapshot(
             _raw_context_snapshot()
         )
@@ -150,6 +151,7 @@ class InvalidContextRepository:
         *,
         user_profile: str,
     ) -> ContextSnapshot:
+        del user_profile
         context = normalize_context_snapshot(
             _raw_context_snapshot()
         )
@@ -171,6 +173,7 @@ class FailureContextRepository:
         *,
         user_profile: str,
     ) -> ContextSnapshot:
+        del user_profile
         raise ContextRepositoryError(
             "Falha simulada ao carregar o contexto."
         )
@@ -186,6 +189,7 @@ class ShouldNotBeCalledRepository:
         *,
         user_profile: str,
     ) -> ContextSnapshot:
+        del user_profile
         raise AssertionError(
             "O repositório não deveria ser chamado."
         )
@@ -221,16 +225,27 @@ def run_test(
     print()
 
 
-def _assert_valid_context(result: GraphState) -> None:
+def _assert_classified_intent(
+    result: GraphState,
+) -> None:
     assert result["final_status"] == "processing"
-    assert (
-        result["current_stage"]
-        == "ready_for_classify_intent"
-    )
+    assert result["current_stage"] == "classify_intent"
     assert result["failure_stage"] == ""
     assert result["context_version"] == "context-test-v3"
+    assert result["intent"] == "generic_test_intent"
+    assert result["intent_confidence"] == 0.98
     assert result["errors"] == []
     assert result["warnings"] == []
+
+    resolution = result["intent_resolution_result"]
+    assert resolution["applied"] is True
+    assert resolution["reason"] == (
+        "configured_intent_selected"
+    )
+    assert resolution["best_candidate"] is not None
+    assert resolution["best_candidate"][
+        "intent_name"
+    ] == "generic_test_intent"
 
     context = result["context"]
     assert len(context["fingerprint"]) == 64
@@ -240,9 +255,31 @@ def _assert_valid_context(result: GraphState) -> None:
     assert context["table_catalog"][0]["table_name"] == (
         "table_test"
     )
-    assert context["intent_resolution"]["config"][
-        "ambiguity_margin"
-    ] == 20.0
+
+
+def _assert_unresolved_intent(
+    result: GraphState,
+) -> None:
+    assert result["final_status"] == "rejected"
+    assert result["current_stage"] == "classify_intent"
+    assert result["failure_stage"] == "classify_intent"
+    assert result["intent"] is None
+    assert result["intent_confidence"] is None
+
+    resolution = result["intent_resolution_result"]
+    assert resolution["applied"] is False
+    assert resolution["reason"] == (
+        "minimum_score_not_reached"
+    )
+
+    error_codes = {
+        error["code"]
+        for error in result["errors"]
+    }
+    assert (
+        "INTENT_RESOLUTION_MINIMUM_SCORE_NOT_REACHED"
+        in error_codes
+    )
 
 
 def _assert_invalid_context(result: GraphState) -> None:
@@ -292,7 +329,24 @@ def _assert_invalid_input(result: GraphState) -> None:
 
 def main() -> None:
     valid_initial_state: GraphState = {
-        "question": "Execute uma consulta genérica de teste.",
+        "question": "Execute uma generic analysis de teste.",
+        "user": {
+            "id": "usuario-1",
+            "email": "admin@local.com",
+            "profile": "admin",
+        },
+        "options": {
+            "use_cache": False,
+            "max_repair_attempts": 2,
+            "shadow_mode": False,
+        },
+    }
+
+    unresolved_initial_state: GraphState = {
+        "question": (
+            "Execute uma operação sem correspondência "
+            "semântica configurada."
+        ),
         "user": {
             "id": "usuario-1",
             "email": "admin@local.com",
@@ -306,28 +360,35 @@ def main() -> None:
     }
 
     run_test(
-        "TESTE 1 — CONTEXTO CANÔNICO VÁLIDO",
+        "TESTE 1 — INTENÇÃO CLASSIFICADA",
         SuccessContextRepository(),
         valid_initial_state,
-        _assert_valid_context,
+        _assert_classified_intent,
     )
 
     run_test(
-        "TESTE 2 — CONTEXTO CANÔNICO INVÁLIDO",
+        "TESTE 2 — INTENÇÃO NÃO RESOLVIDA",
+        SuccessContextRepository(),
+        unresolved_initial_state,
+        _assert_unresolved_intent,
+    )
+
+    run_test(
+        "TESTE 3 — CONTEXTO CANÔNICO INVÁLIDO",
         InvalidContextRepository(),
         valid_initial_state,
         _assert_invalid_context,
     )
 
     run_test(
-        "TESTE 3 — FALHA AO CARREGAR CONTEXTO",
+        "TESTE 4 — FALHA AO CARREGAR CONTEXTO",
         FailureContextRepository(),
         valid_initial_state,
         _assert_repository_failure,
     )
 
     run_test(
-        "TESTE 4 — ENTRADA INVÁLIDA NÃO ACESSA CONTEXTO",
+        "TESTE 5 — ENTRADA INVÁLIDA NÃO ACESSA CONTEXTO",
         ShouldNotBeCalledRepository(),
         {
             "question": "   ",

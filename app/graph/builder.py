@@ -1,5 +1,8 @@
 from langgraph.graph import END, START, StateGraph
 
+from app.graph.nodes.classify_intent import (
+    classify_intent,
+)
 from app.graph.nodes.finalize_infrastructure_error import (
     finalize_infrastructure_error,
 )
@@ -8,9 +11,6 @@ from app.graph.nodes.finalize_invalid_request import (
 )
 from app.graph.nodes.load_context import (
     create_load_context_node,
-)
-from app.graph.nodes.mark_ready_for_intent import (
-    mark_ready_for_intent,
 )
 from app.graph.nodes.receive_question import (
     receive_question,
@@ -51,8 +51,8 @@ def create_graph(
     )
 
     builder.add_node(
-        "mark_ready_for_intent",
-        mark_ready_for_intent,
+        "classify_intent",
+        classify_intent,
     )
 
     builder.add_node(
@@ -85,7 +85,7 @@ def create_graph(
         "load_context",
         route_after_load_context,
         {
-            "continue": "mark_ready_for_intent",
+            "continue": "classify_intent",
             "infrastructure_error": (
                 "finalize_infrastructure_error"
             ),
@@ -93,7 +93,7 @@ def create_graph(
     )
 
     builder.add_edge(
-        "mark_ready_for_intent",
+        "classify_intent",
         END,
     )
 
