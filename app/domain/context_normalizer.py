@@ -4,7 +4,6 @@ import hashlib
 import json
 import math
 import re
-import unicodedata
 from collections.abc import Mapping
 from copy import deepcopy
 from datetime import date, datetime
@@ -12,6 +11,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.domain.context import ContextSnapshot
+from app.domain.search_text import normalize_search_text
 
 
 class ContextNormalizationError(ValueError):
@@ -693,7 +693,7 @@ def _normalize_config_text_set(
             return deepcopy(parsed)
 
         text = (
-            _normalize_search_text(item)
+            normalize_search_text(item)
             if normalize_search
             else _normalize_text(item).casefold()
         )
@@ -743,7 +743,7 @@ def _derive_intent_resolution_signals(
             "normalized_pattern": (
                 raw_pattern
                 if match_mode == "regex"
-                else _normalize_search_text(raw_pattern)
+                else normalize_search_text(raw_pattern)
             ),
             "match_mode": match_mode,
             "polarity": polarity,
@@ -770,22 +770,6 @@ def _derive_intent_resolution_signals(
     )
     return signals
 
-
-def _normalize_search_text(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", value)
-    without_accents = "".join(
-        character
-        for character in decomposed
-        if not unicodedata.combining(character)
-    )
-    casefolded = without_accents.casefold()
-    alphanumeric_or_space = "".join(
-        character
-        if character.isalnum() or character.isspace()
-        else " "
-        for character in casefolded
-    )
-    return re.sub(r"\s+", " ", alphanumeric_or_space).strip()
 
 
 def _derive_legacy_aliases(
