@@ -267,7 +267,7 @@ regras compostas do intent_catalog
 → candidatos
 ```
 
-A política de agregação será definida na etapa do motor.
+A política de agregação é definida na seção 16 deste documento.
 
 ## 15. Neutralidade
 
@@ -276,7 +276,56 @@ O Python conhecerá somente estruturas técnicas, modos e efeitos.
 Não conhecerá cliente, versão específica, intenção real, domínio,
 benchmark, tabelas de negócio ou métricas específicas.
 
-## 16. Incrementos
+## 16. Política determinística de agregação
+
+O motor deverá avaliar primeiro os sinais simples e depois todas as
+entradas normalizadas de `intent_resolution.intent_catalog`.
+
+Para cada conceito:
+
+- cada termo será avaliado pelo `match_mode` configurado;
+- um conceito será satisfeito quando `matched_term_count` atingir
+  `minimum_term_matches`;
+- termos distintos serão contabilizados separadamente;
+- nenhum fallback por tokens será aplicado implicitamente aos conceitos.
+
+Para cada regra:
+
+- uma regra será satisfeita quando `matched_concept_count` atingir
+  `minimum_concept_matches`;
+- `positive_score` adicionará seu score ao candidato;
+- `negative_score` subtrairá seu score do candidato;
+- todas as regras `require` de uma intenção deverão ser satisfeitas;
+- qualquer regra `exclude` satisfeita bloqueará a intenção.
+
+A intenção bloqueada por `require` ou `exclude` não participará do
+ranking nem do cálculo de ambiguidade, mesmo que possua score acumulado
+por sinais ou regras de pontuação.
+
+Uma regra de pontuação poderá criar um candidato mesmo quando não houver
+sinal simples correspondente. Regras `require` e `exclude`, isoladamente,
+não criarão candidato com score.
+
+A prioridade efetiva do candidato será o menor valor configurado entre
+as evidências que efetivamente contribuíram ou restringiram a intenção.
+Uma regra de pontuação não satisfeita não poderá alterar a prioridade de
+um candidato existente.
+
+O ranking será determinado por:
+
+1. maior score final;
+2. menor prioridade efetiva;
+3. nome da intenção em ordem estável, para desempate técnico.
+
+A aplicação continuará dependente de `minimum_score` e
+`ambiguity_margin` da configuração versionada do resolvedor.
+
+O resultado deverá preservar diagnóstico completo das entradas,
+conceitos, termos e regras avaliados, inclusive regras não satisfeitas e
+intenções bloqueadas. O catálogo ausente será tratado como lista vazia,
+sem alterar a resolução baseada apenas em sinais.
+
+## 17. Incrementos
 
 ```text
 7D.1 contrato e tipos
