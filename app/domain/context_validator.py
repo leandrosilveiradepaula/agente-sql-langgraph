@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any, Literal, TypedDict
 
+from app.domain.search_text import normalize_search_text
+
 
 class ContextValidationIssue(TypedDict):
     """
@@ -61,6 +63,13 @@ _INTENT_SIGNAL_POLARITIES = {
     "negative",
 }
 
+_INTENT_CATALOG_RULE_EFFECTS = {
+    "positive_score",
+    "negative_score",
+    "require",
+    "exclude",
+}
+
 
 def validate_context_snapshot(
     snapshot: Mapping[str, Any],
@@ -102,6 +111,11 @@ def validate_context_snapshot(
         table_index,
         errors,
     )
+    intent_definitions = _validate_entities(
+        collections["entities"],
+        intent_names,
+        errors,
+    )
 
     _validate_priorities(collections, errors)
     _validate_counts(snapshot, collections, errors)
@@ -115,6 +129,7 @@ def validate_context_snapshot(
     _validate_intent_resolution(
         snapshot,
         intent_names,
+        intent_definitions,
         errors,
     )
 
@@ -200,6 +215,152 @@ def _validate_collections(
                 )
 
     return collections
+
+
+def _validate_entities(
+    entities: list[Any],
+    intent_names: set[str],
+    errors: list[ContextValidationIssue],
+) -> dict[str, dict[str, Any]]:
+    definitions: dict[str, dict[str, Any]] = {}
+
+    for index, entity in enumerate(entities):
+        if not isinstance(entity, Mapping):
+            continue
+
+        entity_type = entity.get("entity_type")
+        if not (
+            _is_non_empty_text(entity_type)
+            and entity_type.strip().casefold() == "intent_definition"
+        ):
+            continue
+
+        path = f"entities[{index}]"
+        definition_name = entity.get("user_term")
+        intent_name = entity.get("canonical_value")
+
+        if not _is_non_empty_text(definition_name):
+            _add_issue(
+                errors,
+                code="INTENT_DEFINITION_NAME_REQUIRED",
+                message="user_term deve identificar a definição.",
+                path=f"{path}.user_term",
+                details={"received_value": definition_name},
+            )
+
+        intent_key: str | None = None
+        if not _is_non_empty_text(intent_name):
+            _add_issue(
+                errors,
+                code="INTENT_DEFINITION_INTENT_REQUIRED",
+                message="canonical_value deve identificar a intenção.",
+                path=f"{path}.canonical_value",
+                details={"received_value": intent_name},
+            )
+        else:
+            intent_key = intent_name.strip().casefold()
+            if intent_key not in intent_names:
+                _add_issue(
+                    errors,
+                    code="INTENT_DEFINITION_UNKNOWN_INTENT",
+                    message=(
+                        "A definição aponta para uma intenção inexistente "
+                        "entre os padrões ativos."
+                    ),
+                    path=f"{path}.canonical_value",
+                    details={"intent_name": intent_name},
+                )
+
+            if intent_key in definitions:
+                _add_issue(
+                    errors,
+                    code="INTENT_DEFINITION_DUPLICATE",
+                    message=(
+                        "Deve existir no máximo uma definição ativa por "
+                        "intenção."
+                    ),
+                    path=path,
+                    details={
+                        "intent_name": intent_name,
+                        "first_occurrence": definitions[intent_key]["path"],
+                    },
+                )
+            else:
+                definitions[intent_key] = {
+                    "path": path,
+                    "definition_name": definition_name,
+                    "intent_name": intent_name,
+                    "priority": entity.get("priority"),
+                    "expected_catalog": None,
+                }
+
+        for field_name in ("target_table", "target_column"):
+            value = entity.get(field_name)
+            if value is not None:
+                _add_issue(
+                    errors,
+                    code="INTENT_DEFINITION_PHYSICAL_TARGET_INVALID",
+                    message=(
+                        "Definições de intenção não podem apontar para "
+                        "tabela ou coluna física."
+                    ),
+                    path=f"{path}.{field_name}",
+                    details={"received_value": value},
+                )
+
+        hint = entity.get("sql_filter_hint")
+        if isinstance(hint, Mapping) and "resolver" in hint:
+            _add_issue(
+                errors,
+                code="INTENT_DEFINITION_RESOLVER_HINT_FORBIDDEN",
+                message=(
+                    "intent_definition não pode conter "
+                    "sql_filter_hint.resolver."
+                ),
+                path=f"{path}.sql_filter_hint.resolver",
+                details={"received_value": hint.get("resolver")},
+            )
+
+        business_rule = entity.get("business_rule")
+        if not isinstance(business_rule, Mapping):
+            _add_issue(
+                errors,
+                code="INTENT_DEFINITION_BUSINESS_RULE_INVALID",
+                message="business_rule deve ser um objeto.",
+                path=f"{path}.business_rule",
+                details={
+                    "received_type": type(business_rule).__name__,
+                },
+            )
+            continue
+
+        catalog_payload = business_rule.get("intent_catalog")
+        if not isinstance(catalog_payload, Mapping):
+            _add_issue(
+                errors,
+                code="INTENT_DEFINITION_CATALOG_PAYLOAD_INVALID",
+                message="business_rule.intent_catalog deve ser um objeto.",
+                path=f"{path}.business_rule.intent_catalog",
+                details={
+                    "received_type": type(catalog_payload).__name__,
+                },
+            )
+            continue
+
+        if intent_key is not None and intent_key in definitions:
+            definition = definitions[intent_key]
+            if definition.get("path") == path:
+                definition["expected_catalog"] = {
+                    "intent_name": intent_name,
+                    "definition_name": definition_name,
+                    "semantic_description": catalog_payload.get(
+                        "semantic_description"
+                    ),
+                    "rules": catalog_payload.get("rules"),
+                    "priority": entity.get("priority"),
+                }
+
+    return definitions
 
 
 def _validate_table_catalog(
@@ -665,6 +826,7 @@ def _validate_component_configs(
 def _validate_intent_resolution(
     snapshot: Mapping[str, Any],
     intent_names: set[str],
+    intent_definitions: dict[str, dict[str, Any]],
     errors: list[ContextValidationIssue],
 ) -> None:
     intent_resolution = snapshot.get("intent_resolution")
@@ -707,6 +869,540 @@ def _validate_intent_resolution(
             index=index,
             intent_names=intent_names,
             errors=errors,
+        )
+
+    intent_catalog = intent_resolution.get("intent_catalog")
+    if not isinstance(intent_catalog, list):
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_INVALID",
+            message="intent_resolution.intent_catalog deve ser uma lista.",
+            path="intent_resolution.intent_catalog",
+            details={
+                "received_type": type(intent_catalog).__name__,
+            },
+        )
+        return
+
+    catalog_index: dict[str, dict[str, Any]] = {}
+    for index, entry in enumerate(intent_catalog):
+        intent_key = _validate_intent_catalog_entry(
+            entry,
+            index=index,
+            intent_names=intent_names,
+            errors=errors,
+        )
+        if intent_key is None:
+            continue
+
+        path = f"intent_resolution.intent_catalog[{index}]"
+        if intent_key in catalog_index:
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_DUPLICATE",
+                message=(
+                    "Deve existir no máximo uma entrada de catálogo por "
+                    "intenção."
+                ),
+                path=path,
+                details={
+                    "intent_name": entry.get("intent_name")
+                    if isinstance(entry, Mapping)
+                    else None,
+                    "first_occurrence": catalog_index[intent_key]["path"],
+                },
+            )
+        else:
+            catalog_index[intent_key] = {
+                "path": path,
+                "definition_name": entry.get("definition_name")
+                if isinstance(entry, Mapping)
+                else None,
+                "entry": entry,
+            }
+
+    for intent_key, definition in intent_definitions.items():
+        catalog_entry = catalog_index.get(intent_key)
+        if catalog_entry is None:
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_PROJECTION_MISSING",
+                message=(
+                    "Cada intent_definition deve gerar uma entrada em "
+                    "intent_resolution.intent_catalog."
+                ),
+                path="intent_resolution.intent_catalog",
+                details={
+                    "definition_path": definition["path"],
+                    "intent_name": intent_key,
+                },
+            )
+            continue
+
+        expected_catalog = definition.get("expected_catalog")
+        received_catalog = catalog_entry.get("entry")
+        if (
+            isinstance(expected_catalog, Mapping)
+            and isinstance(received_catalog, Mapping)
+            and dict(received_catalog) != dict(expected_catalog)
+        ):
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_PROJECTION_MISMATCH",
+                message=(
+                    "A entrada canônica deve corresponder integralmente "
+                    "à entidade intent_definition de origem."
+                ),
+                path=catalog_entry["path"],
+                details={
+                    "definition_path": definition["path"],
+                },
+            )
+
+    for intent_key, catalog_entry in catalog_index.items():
+        if intent_key not in intent_definitions:
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_ORPHAN_ENTRY",
+                message=(
+                    "Toda entrada do catálogo deve ser derivada de uma "
+                    "entidade intent_definition."
+                ),
+                path=catalog_entry["path"],
+                details={"intent_name": intent_key},
+            )
+
+
+def _validate_intent_catalog_entry(
+    entry: Any,
+    *,
+    index: int,
+    intent_names: set[str],
+    errors: list[ContextValidationIssue],
+) -> str | None:
+    path = f"intent_resolution.intent_catalog[{index}]"
+    if not isinstance(entry, Mapping):
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_ENTRY_INVALID",
+            message="Cada entrada do catálogo deve ser um objeto.",
+            path=path,
+            details={"received_type": type(entry).__name__},
+        )
+        return None
+
+    intent_name = entry.get("intent_name")
+    intent_key: str | None = None
+    if not _is_non_empty_text(intent_name):
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_INTENT_REQUIRED",
+            message="intent_name deve ser um texto não vazio.",
+            path=f"{path}.intent_name",
+            details={"received_value": intent_name},
+        )
+    else:
+        intent_key = intent_name.strip().casefold()
+        if intent_key not in intent_names:
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_UNKNOWN_INTENT",
+                message=(
+                    "A entrada aponta para uma intenção inexistente entre "
+                    "os padrões ativos."
+                ),
+                path=f"{path}.intent_name",
+                details={"intent_name": intent_name},
+            )
+
+    if not _is_non_empty_text(entry.get("definition_name")):
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_DEFINITION_NAME_REQUIRED",
+            message="definition_name deve ser um texto não vazio.",
+            path=f"{path}.definition_name",
+            details={"received_value": entry.get("definition_name")},
+        )
+
+    if not _is_non_empty_text(entry.get("semantic_description")):
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_DESCRIPTION_REQUIRED",
+            message="semantic_description deve ser um texto não vazio.",
+            path=f"{path}.semantic_description",
+            details={
+                "received_value": entry.get("semantic_description"),
+            },
+        )
+
+    _validate_optional_non_negative_number(
+        entry.get("priority"),
+        path=f"{path}.priority",
+        errors=errors,
+        code="INTENT_CATALOG_PRIORITY_INVALID",
+    )
+
+    rules = entry.get("rules")
+    if not isinstance(rules, list) or not rules:
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_RULES_INVALID",
+            message="rules deve ser uma lista não vazia.",
+            path=f"{path}.rules",
+            details={"received_type": type(rules).__name__},
+        )
+        return intent_key
+
+    rule_names: dict[str, str] = {}
+    for rule_index, rule in enumerate(rules):
+        rule_name = _validate_intent_catalog_rule(
+            rule,
+            path=f"{path}.rules[{rule_index}]",
+            errors=errors,
+        )
+        if rule_name is None:
+            continue
+
+        rule_key = rule_name.casefold()
+        rule_path = f"{path}.rules[{rule_index}]"
+        if rule_key in rule_names:
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_RULE_DUPLICATE",
+                message="rule_name deve ser único dentro da intenção.",
+                path=rule_path,
+                details={
+                    "rule_name": rule_name,
+                    "first_occurrence": rule_names[rule_key],
+                },
+            )
+        else:
+            rule_names[rule_key] = rule_path
+
+    return intent_key
+
+
+def _validate_intent_catalog_rule(
+    rule: Any,
+    *,
+    path: str,
+    errors: list[ContextValidationIssue],
+) -> str | None:
+    if not isinstance(rule, Mapping):
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_RULE_INVALID",
+            message="Cada regra do catálogo deve ser um objeto.",
+            path=path,
+            details={"received_type": type(rule).__name__},
+        )
+        return None
+
+    rule_name = rule.get("rule_name")
+    normalized_rule_name = (
+        rule_name.strip() if _is_non_empty_text(rule_name) else None
+    )
+    if normalized_rule_name is None:
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_RULE_NAME_REQUIRED",
+            message="rule_name deve ser um texto não vazio.",
+            path=f"{path}.rule_name",
+            details={"received_value": rule_name},
+        )
+
+    effect = rule.get("effect")
+    if effect not in _INTENT_CATALOG_RULE_EFFECTS:
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_RULE_EFFECT_INVALID",
+            message="effect não pertence ao contrato suportado.",
+            path=f"{path}.effect",
+            details={
+                "received_value": effect,
+                "allowed_values": sorted(_INTENT_CATALOG_RULE_EFFECTS),
+            },
+        )
+
+    score = rule.get("score")
+    if effect in {"positive_score", "negative_score"}:
+        if not _is_finite_number(score) or float(score) < 0:
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_RULE_SCORE_INVALID",
+                message=(
+                    "Regras de pontuação exigem score numérico, finito "
+                    "e não negativo."
+                ),
+                path=f"{path}.score",
+                details={"received_value": score},
+            )
+    elif effect in {"require", "exclude"} and score is not None:
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_RULE_SCORE_FORBIDDEN",
+            message="Regras require e exclude não podem possuir score.",
+            path=f"{path}.score",
+            details={"received_value": score},
+        )
+
+    _validate_optional_non_negative_number(
+        rule.get("priority"),
+        path=f"{path}.priority",
+        errors=errors,
+        code="INTENT_CATALOG_RULE_PRIORITY_INVALID",
+    )
+
+    concepts = rule.get("concepts")
+    if not isinstance(concepts, list) or not concepts:
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_CONCEPTS_INVALID",
+            message="concepts deve ser uma lista não vazia.",
+            path=f"{path}.concepts",
+            details={"received_type": type(concepts).__name__},
+        )
+        return normalized_rule_name
+
+    minimum_concept_matches = rule.get("minimum_concept_matches")
+    if (
+        not isinstance(minimum_concept_matches, int)
+        or isinstance(minimum_concept_matches, bool)
+        or minimum_concept_matches <= 0
+        or minimum_concept_matches > len(concepts)
+    ):
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_MINIMUM_CONCEPT_MATCHES_INVALID",
+            message=(
+                "minimum_concept_matches deve ser inteiro positivo e "
+                "não superar a quantidade de conceitos."
+            ),
+            path=f"{path}.minimum_concept_matches",
+            details={
+                "received_value": minimum_concept_matches,
+                "concept_count": len(concepts),
+            },
+        )
+
+    concept_names: dict[str, str] = {}
+    for concept_index, concept in enumerate(concepts):
+        concept_name = _validate_intent_catalog_concept(
+            concept,
+            path=f"{path}.concepts[{concept_index}]",
+            errors=errors,
+        )
+        if concept_name is None:
+            continue
+
+        concept_key = concept_name.casefold()
+        concept_path = f"{path}.concepts[{concept_index}]"
+        if concept_key in concept_names:
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_CONCEPT_DUPLICATE",
+                message="concept_name deve ser único dentro da regra.",
+                path=concept_path,
+                details={
+                    "concept_name": concept_name,
+                    "first_occurrence": concept_names[concept_key],
+                },
+            )
+        else:
+            concept_names[concept_key] = concept_path
+
+    return normalized_rule_name
+
+
+def _validate_intent_catalog_concept(
+    concept: Any,
+    *,
+    path: str,
+    errors: list[ContextValidationIssue],
+) -> str | None:
+    if not isinstance(concept, Mapping):
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_CONCEPT_INVALID",
+            message="Cada conceito do catálogo deve ser um objeto.",
+            path=path,
+            details={"received_type": type(concept).__name__},
+        )
+        return None
+
+    concept_name = concept.get("concept_name")
+    normalized_concept_name = (
+        concept_name.strip()
+        if _is_non_empty_text(concept_name)
+        else None
+    )
+    if normalized_concept_name is None:
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_CONCEPT_NAME_REQUIRED",
+            message="concept_name deve ser um texto não vazio.",
+            path=f"{path}.concept_name",
+            details={"received_value": concept_name},
+        )
+
+    match_mode = concept.get("match_mode")
+    if match_mode not in _INTENT_MATCH_MODES:
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_MATCH_MODE_INVALID",
+            message="match_mode não pertence ao contrato suportado.",
+            path=f"{path}.match_mode",
+            details={
+                "received_value": match_mode,
+                "allowed_values": sorted(_INTENT_MATCH_MODES),
+            },
+        )
+
+    terms = concept.get("terms")
+    normalized_terms = concept.get("normalized_terms")
+    if not isinstance(terms, list) or not terms:
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_TERMS_INVALID",
+            message="terms deve ser uma lista não vazia de textos.",
+            path=f"{path}.terms",
+            details={"received_type": type(terms).__name__},
+        )
+        terms = []
+
+    if not isinstance(normalized_terms, list):
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_NORMALIZED_TERMS_INVALID",
+            message="normalized_terms deve ser uma lista.",
+            path=f"{path}.normalized_terms",
+            details={
+                "received_type": type(normalized_terms).__name__,
+            },
+        )
+        normalized_terms = []
+
+    if len(terms) != len(normalized_terms):
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_TERM_COUNT_MISMATCH",
+            message="terms e normalized_terms devem possuir o mesmo tamanho.",
+            path=f"{path}.normalized_terms",
+            details={
+                "term_count": len(terms),
+                "normalized_term_count": len(normalized_terms),
+            },
+        )
+
+    seen_terms: dict[str, str] = {}
+    for term_index, raw_term in enumerate(terms):
+        term_path = f"{path}.terms[{term_index}]"
+        normalized_term = (
+            normalized_terms[term_index]
+            if term_index < len(normalized_terms)
+            else None
+        )
+        if not _is_non_empty_text(raw_term):
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_TERM_INVALID",
+                message="Cada termo deve ser um texto não vazio.",
+                path=term_path,
+                details={"received_value": raw_term},
+            )
+            continue
+
+        if not _is_non_empty_text(normalized_term):
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_NORMALIZED_TERM_INVALID",
+                message="Cada termo normalizado deve ser texto não vazio.",
+                path=f"{path}.normalized_terms[{term_index}]",
+                details={"received_value": normalized_term},
+            )
+            continue
+
+        expected = (
+            raw_term.strip()
+            if match_mode == "regex"
+            else normalize_search_text(raw_term)
+        )
+        if normalized_term != expected:
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_TERM_NORMALIZATION_INVALID",
+                message=(
+                    "normalized_terms deve corresponder à normalização "
+                    "canônica de terms."
+                ),
+                path=f"{path}.normalized_terms[{term_index}]",
+                details={
+                    "received_value": normalized_term,
+                    "expected_value": expected,
+                },
+            )
+
+        normalized_key = normalized_term.casefold()
+        if normalized_key in seen_terms:
+            _add_issue(
+                errors,
+                code="INTENT_CATALOG_TERM_DUPLICATE",
+                message=(
+                    "Um conceito não pode conter termos duplicados após "
+                    "normalização."
+                ),
+                path=term_path,
+                details={
+                    "normalized_term": normalized_term,
+                    "first_occurrence": seen_terms[normalized_key],
+                },
+            )
+        else:
+            seen_terms[normalized_key] = term_path
+
+    minimum_term_matches = concept.get("minimum_term_matches")
+    if (
+        not isinstance(minimum_term_matches, int)
+        or isinstance(minimum_term_matches, bool)
+        or minimum_term_matches <= 0
+        or minimum_term_matches > len(terms)
+    ):
+        _add_issue(
+            errors,
+            code="INTENT_CATALOG_MINIMUM_TERM_MATCHES_INVALID",
+            message=(
+                "minimum_term_matches deve ser inteiro positivo e não "
+                "superar a quantidade de termos."
+            ),
+            path=f"{path}.minimum_term_matches",
+            details={
+                "received_value": minimum_term_matches,
+                "term_count": len(terms),
+            },
+        )
+
+    return normalized_concept_name
+
+
+def _validate_optional_non_negative_number(
+    value: Any,
+    *,
+    path: str,
+    errors: list[ContextValidationIssue],
+    code: str,
+) -> None:
+    if value is None:
+        return
+    if not _is_finite_number(value) or float(value) < 0:
+        _add_issue(
+            errors,
+            code=code,
+            message=(
+                "O valor deve ser numérico, finito, não booleano, "
+                "não negativo, nulo ou ausente."
+            ),
+            path=path,
+            details={"received_value": value},
         )
 
 

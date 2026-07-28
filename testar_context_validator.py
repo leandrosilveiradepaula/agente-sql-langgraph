@@ -4,9 +4,66 @@ from app.domain.context_normalizer import normalize_context_snapshot
 from app.domain.context_validator import validate_context_snapshot
 
 
+def _intent_definition() -> dict:
+    return {
+        "entity_type": "intent_definition",
+        "user_term": "generic_definition",
+        "canonical_value": "intent_test",
+        "target_table": None,
+        "target_column": None,
+        "sql_filter_hint": None,
+        "business_rule": {
+            "intent_catalog": {
+                "semantic_description": (
+                    "Definição semântica genérica para validação."
+                ),
+                "rules": [
+                    {
+                        "rule_name": "required_rule",
+                        "effect": "require",
+                        "concepts": [
+                            {
+                                "concept_name": "first_concept",
+                                "terms": ["alpha", "alpha synonym"],
+                                "match_mode": "contains",
+                                "minimum_term_matches": 1,
+                            },
+                            {
+                                "concept_name": "second_concept",
+                                "terms": ["beta"],
+                                "match_mode": "all_tokens",
+                                "minimum_term_matches": 1,
+                            },
+                        ],
+                        "minimum_concept_matches": 2,
+                        "score": None,
+                        "priority": 1,
+                    },
+                    {
+                        "rule_name": "score_rule",
+                        "effect": "positive_score",
+                        "concepts": [
+                            {
+                                "concept_name": "score_concept",
+                                "terms": ["gamma"],
+                                "match_mode": "contains",
+                                "minimum_term_matches": 1,
+                            }
+                        ],
+                        "minimum_concept_matches": 1,
+                        "score": 120,
+                        "priority": 2,
+                    },
+                ],
+            }
+        },
+        "priority": 2,
+    }
+
+
 def _raw_snapshot() -> dict:
     return {
-        "semantic_agent_version": "context-validator-test-v2",
+        "semantic_agent_version": "context-validator-test-v3",
         "semantic_context_source": (
             "postgres_versioned_semantic_context"
         ),
@@ -22,12 +79,8 @@ def _raw_snapshot() -> dict:
                     "fallback_to_previous_intent": True,
                     "token_fallback": {
                         "enabled": True,
-                        "apply_to_polarities": [
-                            "positive",
-                        ],
-                        "apply_to_match_modes": [
-                            "contains",
-                        ],
+                        "apply_to_polarities": ["positive"],
+                        "apply_to_match_modes": ["contains"],
                         "ignored_tokens": [],
                         "minimum_pattern_tokens": 2,
                         "minimum_matched_tokens": 2,
@@ -69,7 +122,8 @@ def _raw_snapshot() -> dict:
                 },
                 "business_rule": None,
                 "priority": 1,
-            }
+            },
+            _intent_definition(),
         ],
         "dre": [],
         "padroes": [
@@ -77,9 +131,7 @@ def _raw_snapshot() -> dict:
                 "intent_name": "intent_test",
                 "pattern_name": "pattern_test",
                 "business_question_examples": [],
-                "required_tables": [
-                    "schema_test.table_test"
-                ],
+                "required_tables": ["schema_test.table_test"],
                 "required_rules": ["rule_test"],
                 "sql_pattern": "SELECT 1",
                 "notes": None,
@@ -104,7 +156,7 @@ def _raw_snapshot() -> dict:
         ],
         "context_counts": {
             "regras": 2,
-            "entidades": 1,
+            "entidades": 2,
             "dre": 0,
             "padroes": 1,
             "catalogo": 1,
@@ -126,6 +178,18 @@ def test_aceita_snapshot_valido() -> None:
     assert result["status"] == "valid"
     assert result["errors"] == []
     assert result["warnings"] == []
+
+
+def test_aceita_catalogo_ausente() -> None:
+    raw = _raw_snapshot()
+    raw["entidades"] = raw["entidades"][:1]
+    raw["context_counts"]["entidades"] = 1
+    snapshot = normalize_context_snapshot(raw)
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "valid"
+    assert snapshot["intent_resolution"]["intent_catalog"] == []
 
 
 def test_aceita_token_fallback_desabilitado() -> None:
@@ -316,6 +380,234 @@ def test_rejeita_token_fallback_com_valores_nao_suportados() -> None:
     assert "INTENT_TOKEN_FALLBACK_COVERAGE_INVALID" in codes
 
 
+def test_rejeita_definicao_com_intencao_inexistente() -> None:
+    raw = _raw_snapshot()
+    raw["entidades"][1]["canonical_value"] = "unknown_intent"
+    snapshot = normalize_context_snapshot(raw)
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "INTENT_DEFINITION_UNKNOWN_INTENT" in codes
+    assert "INTENT_CATALOG_UNKNOWN_INTENT" in codes
+
+
+def test_rejeita_definicao_duplicada() -> None:
+    raw = _raw_snapshot()
+    duplicate = deepcopy(raw["entidades"][1])
+    duplicate["user_term"] = "second_definition"
+    duplicate["priority"] = 3
+    raw["entidades"].append(duplicate)
+    raw["context_counts"]["entidades"] = 3
+    snapshot = normalize_context_snapshot(raw)
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "INTENT_DEFINITION_DUPLICATE" in codes
+    assert "INTENT_CATALOG_DUPLICATE" in codes
+
+
+def test_rejeita_alvo_fisico_e_resolver_na_definicao() -> None:
+    raw = _raw_snapshot()
+    definition = raw["entidades"][1]
+    definition["target_table"] = "schema_test.table_test"
+    definition["sql_filter_hint"] = {
+        "resolver": {
+            "match_mode": "contains",
+            "polarity": "positive",
+            "score": 100,
+        }
+    }
+    snapshot = normalize_context_snapshot(raw)
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "INTENT_DEFINITION_PHYSICAL_TARGET_INVALID" in codes
+    assert "INTENT_DEFINITION_RESOLVER_HINT_FORBIDDEN" in codes
+
+
+def test_rejeita_payload_e_descricao_invalidos() -> None:
+    raw = _raw_snapshot()
+    raw["entidades"][1]["business_rule"] = None
+    snapshot = normalize_context_snapshot(raw)
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "INTENT_DEFINITION_BUSINESS_RULE_INVALID" in codes
+    assert "INTENT_CATALOG_DESCRIPTION_REQUIRED" in codes
+    assert "INTENT_CATALOG_RULES_INVALID" in codes
+
+
+def test_rejeita_regras_e_conceitos_duplicados() -> None:
+    snapshot = _valid_snapshot()
+    entry = snapshot["intent_resolution"]["intent_catalog"][0]
+    duplicate_rule = deepcopy(entry["rules"][0])
+    duplicate_rule["priority"] = 3
+    entry["rules"].append(duplicate_rule)
+    duplicate_concept = deepcopy(entry["rules"][0]["concepts"][0])
+    entry["rules"][0]["concepts"].append(duplicate_concept)
+    entry["rules"][0]["minimum_concept_matches"] = 2
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "INTENT_CATALOG_RULE_DUPLICATE" in codes
+    assert "INTENT_CATALOG_CONCEPT_DUPLICATE" in codes
+
+
+def test_rejeita_termos_duplicados_apos_normalizacao() -> None:
+    snapshot = _valid_snapshot()
+    concept = snapshot["intent_resolution"]["intent_catalog"][0][
+        "rules"
+    ][0]["concepts"][0]
+    concept["terms"] = ["Álpha", "alpha"]
+    concept["normalized_terms"] = ["alpha", "alpha"]
+    concept["minimum_term_matches"] = 1
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "invalid"
+    assert "INTENT_CATALOG_TERM_DUPLICATE" in _error_codes(result)
+
+
+def test_rejeita_normalizacao_e_match_mode_invalidos() -> None:
+    snapshot = _valid_snapshot()
+    concept = snapshot["intent_resolution"]["intent_catalog"][0][
+        "rules"
+    ][0]["concepts"][0]
+    concept["match_mode"] = "semantic"
+    concept["normalized_terms"][0] = "wrong"
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "INTENT_CATALOG_MATCH_MODE_INVALID" in codes
+    assert "INTENT_CATALOG_TERM_NORMALIZATION_INVALID" in codes
+
+
+def test_rejeita_minimos_fora_do_intervalo() -> None:
+    snapshot = _valid_snapshot()
+    rule = snapshot["intent_resolution"]["intent_catalog"][0][
+        "rules"
+    ][0]
+    rule["minimum_concept_matches"] = 99
+    rule["concepts"][0]["minimum_term_matches"] = 99
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "INTENT_CATALOG_MINIMUM_CONCEPT_MATCHES_INVALID" in codes
+    assert "INTENT_CATALOG_MINIMUM_TERM_MATCHES_INVALID" in codes
+
+
+def test_rejeita_efeito_e_score_invalidos() -> None:
+    snapshot = _valid_snapshot()
+    rules = snapshot["intent_resolution"]["intent_catalog"][0][
+        "rules"
+    ]
+    rules[0]["effect"] = "unknown_effect"
+    rules[1]["score"] = None
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "INTENT_CATALOG_RULE_EFFECT_INVALID" in codes
+    assert "INTENT_CATALOG_RULE_SCORE_INVALID" in codes
+
+
+def test_rejeita_score_em_regra_require() -> None:
+    snapshot = _valid_snapshot()
+    rule = snapshot["intent_resolution"]["intent_catalog"][0][
+        "rules"
+    ][0]
+    rule["score"] = 10
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "invalid"
+    assert "INTENT_CATALOG_RULE_SCORE_FORBIDDEN" in _error_codes(
+        result
+    )
+
+
+def test_rejeita_projecao_ausente_e_orfa() -> None:
+    snapshot = _valid_snapshot()
+    original = deepcopy(
+        snapshot["intent_resolution"]["intent_catalog"][0]
+    )
+    snapshot["intent_resolution"]["intent_catalog"] = []
+
+    missing_result = validate_context_snapshot(snapshot)
+    assert "INTENT_CATALOG_PROJECTION_MISSING" in _error_codes(
+        missing_result
+    )
+
+    raw = _raw_snapshot()
+    raw["entidades"] = raw["entidades"][:1]
+    raw["context_counts"]["entidades"] = 1
+    orphan_snapshot = normalize_context_snapshot(raw)
+    orphan_snapshot["intent_resolution"]["intent_catalog"] = [
+        original
+    ]
+
+    orphan_result = validate_context_snapshot(orphan_snapshot)
+    assert "INTENT_CATALOG_ORPHAN_ENTRY" in _error_codes(
+        orphan_result
+    )
+
+
+def test_rejeita_nomes_obrigatorios_da_definicao() -> None:
+    raw = _raw_snapshot()
+    definition = raw["entidades"][1]
+    definition["user_term"] = ""
+    definition["canonical_value"] = ""
+    snapshot = normalize_context_snapshot(raw)
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "INTENT_DEFINITION_NAME_REQUIRED" in codes
+    assert "INTENT_DEFINITION_INTENT_REQUIRED" in codes
+    assert "INTENT_CATALOG_DEFINITION_NAME_REQUIRED" in codes
+    assert "INTENT_CATALOG_INTENT_REQUIRED" in codes
+
+
+def test_rejeita_prioridades_invalidas_do_catalogo() -> None:
+    snapshot = _valid_snapshot()
+    entry = snapshot["intent_resolution"]["intent_catalog"][0]
+    entry["priority"] = -1
+    entry["rules"][0]["priority"] = float("inf")
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "INTENT_CATALOG_PRIORITY_INVALID" in codes
+    assert "INTENT_CATALOG_RULE_PRIORITY_INVALID" in codes
+
+
+def test_rejeita_catalogo_canonico_ausente() -> None:
+    snapshot = _valid_snapshot()
+    del snapshot["intent_resolution"]["intent_catalog"]
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "invalid"
+    assert "INTENT_CATALOG_INVALID" in _error_codes(result)
+
+
 def test_rejeita_contagem_inconsistente() -> None:
     snapshot = _valid_snapshot()
     snapshot["counts"]["rules"] = 99
@@ -329,6 +621,7 @@ def test_rejeita_contagem_inconsistente() -> None:
 def main() -> None:
     tests = [
         ("aceita snapshot válido", test_aceita_snapshot_valido),
+        ("aceita catálogo ausente", test_aceita_catalogo_ausente),
         (
             "aceita token fallback desabilitado",
             test_aceita_token_fallback_desabilitado,
@@ -371,6 +664,62 @@ def main() -> None:
         (
             "rejeita token fallback com valores não suportados",
             test_rejeita_token_fallback_com_valores_nao_suportados,
+        ),
+        (
+            "rejeita definição com intenção inexistente",
+            test_rejeita_definicao_com_intencao_inexistente,
+        ),
+        (
+            "rejeita definição duplicada",
+            test_rejeita_definicao_duplicada,
+        ),
+        (
+            "rejeita alvo físico e resolver na definição",
+            test_rejeita_alvo_fisico_e_resolver_na_definicao,
+        ),
+        (
+            "rejeita payload e descrição inválidos",
+            test_rejeita_payload_e_descricao_invalidos,
+        ),
+        (
+            "rejeita regras e conceitos duplicados",
+            test_rejeita_regras_e_conceitos_duplicados,
+        ),
+        (
+            "rejeita termos duplicados após normalização",
+            test_rejeita_termos_duplicados_apos_normalizacao,
+        ),
+        (
+            "rejeita normalização e match mode inválidos",
+            test_rejeita_normalizacao_e_match_mode_invalidos,
+        ),
+        (
+            "rejeita mínimos fora do intervalo",
+            test_rejeita_minimos_fora_do_intervalo,
+        ),
+        (
+            "rejeita efeito e score inválidos",
+            test_rejeita_efeito_e_score_invalidos,
+        ),
+        (
+            "rejeita score em regra require",
+            test_rejeita_score_em_regra_require,
+        ),
+        (
+            "rejeita projeção ausente e órfã",
+            test_rejeita_projecao_ausente_e_orfa,
+        ),
+        (
+            "rejeita nomes obrigatórios da definição",
+            test_rejeita_nomes_obrigatorios_da_definicao,
+        ),
+        (
+            "rejeita prioridades inválidas do catálogo",
+            test_rejeita_prioridades_invalidas_do_catalogo,
+        ),
+        (
+            "rejeita catálogo canônico ausente",
+            test_rejeita_catalogo_canonico_ausente,
         ),
         (
             "rejeita contagem inconsistente",

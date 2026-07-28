@@ -119,6 +119,7 @@ def normalize_context_snapshot(raw_snapshot: Mapping[str, Any]) -> ContextSnapsh
             component_configs.get("intent_resolver", {})
         ),
         "signals": _derive_intent_resolution_signals(entities),
+        "intent_catalog": _derive_intent_catalog(entities),
     }
 
     counts = _normalize_counts(
@@ -372,10 +373,58 @@ def _normalize_entities(value: Any) -> list[dict[str, Any]]:
             record.get("business_rule"),
             f"entidades[{index}].business_rule",
         )
+        if item["entity_type"].casefold() == "intent_definition":
+            item["business_rule"] = (
+                _normalize_intent_definition_business_rule(
+                    item.get("business_rule"),
+                    entity_index=index,
+                )
+            )
         item["priority"] = _normalize_integer(record.get("priority"))
         normalized.append(item)
 
     return normalized
+
+
+def _normalize_intent_definition_business_rule(
+    value: Any,
+    *,
+    entity_index: int,
+) -> Any:
+    if not isinstance(value, Mapping):
+        return deepcopy(value)
+
+    business_rule = {
+        str(key): deepcopy(item)
+        for key, item in value.items()
+    }
+    if "intent_catalog" not in business_rule:
+        return business_rule
+
+    field_name = (
+        f"entidades[{entity_index}].business_rule.intent_catalog"
+    )
+    parsed_catalog = _parse_json_like(
+        business_rule.get("intent_catalog"),
+        field_name,
+    )
+    if not isinstance(parsed_catalog, Mapping):
+        business_rule["intent_catalog"] = deepcopy(parsed_catalog)
+        return business_rule
+
+    normalized_catalog = {
+        str(key): deepcopy(item)
+        for key, item in parsed_catalog.items()
+    }
+    normalized_catalog["semantic_description"] = _normalize_text(
+        parsed_catalog.get("semantic_description")
+    )
+    normalized_catalog["rules"] = _normalize_intent_catalog_rules(
+        parsed_catalog.get("rules"),
+        field_name=f"{field_name}.rules",
+    )
+    business_rule["intent_catalog"] = normalized_catalog
+    return business_rule
 
 
 def _normalize_dre_mappings(value: Any) -> list[dict[str, Any]]:
@@ -703,12 +752,222 @@ def _normalize_config_text_set(
     return sorted(normalized_values, key=str.casefold)
 
 
+def _derive_intent_catalog(
+    entities: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    catalog: list[dict[str, Any]] = []
+
+    for entity_index, entity in enumerate(entities):
+        entity_type = _normalize_text(
+            entity.get("entity_type")
+        ).casefold()
+        if entity_type != "intent_definition":
+            continue
+
+        business_rule = entity.get("business_rule")
+        raw_catalog = (
+            business_rule.get("intent_catalog")
+            if isinstance(business_rule, Mapping)
+            else None
+        )
+        parsed_catalog = _parse_json_like(
+            raw_catalog,
+            (
+                f"entidades[{entity_index}].business_rule."
+                "intent_catalog"
+            ),
+        )
+
+        if isinstance(parsed_catalog, Mapping):
+            semantic_description = _normalize_text(
+                parsed_catalog.get("semantic_description")
+            )
+            rules = _normalize_intent_catalog_rules(
+                parsed_catalog.get("rules"),
+                field_name=(
+                    f"entidades[{entity_index}].business_rule."
+                    "intent_catalog.rules"
+                ),
+            )
+        else:
+            semantic_description = ""
+            rules = deepcopy(parsed_catalog)
+
+        catalog.append(
+            {
+                "intent_name": _normalize_text(
+                    entity.get("canonical_value")
+                ),
+                "definition_name": _normalize_text(
+                    entity.get("user_term")
+                ),
+                "semantic_description": semantic_description,
+                "rules": rules,
+                "priority": _normalize_number(
+                    entity.get("priority")
+                ),
+            }
+        )
+
+    catalog.sort(
+        key=lambda item: (
+            _numeric_sort_value(item.get("priority")),
+            _normalize_text(item.get("intent_name")).casefold(),
+            _normalize_text(item.get("definition_name")).casefold(),
+        )
+    )
+    return catalog
+
+
+def _normalize_intent_catalog_rules(
+    value: Any,
+    *,
+    field_name: str,
+) -> Any:
+    parsed = _parse_json_like(value, field_name)
+    if not isinstance(parsed, (list, tuple)):
+        return deepcopy(parsed)
+
+    rules: list[Any] = []
+    for rule_index, raw_rule in enumerate(parsed):
+        if not isinstance(raw_rule, Mapping):
+            rules.append(deepcopy(raw_rule))
+            continue
+
+        rule_path = f"{field_name}[{rule_index}]"
+        rule = {
+            "rule_name": _normalize_text(
+                raw_rule.get("rule_name")
+            ),
+            "effect": _normalize_text(
+                raw_rule.get("effect")
+            ).casefold(),
+            "concepts": _normalize_intent_catalog_concepts(
+                raw_rule.get("concepts"),
+                field_name=f"{rule_path}.concepts",
+            ),
+            "minimum_concept_matches": _normalize_integer(
+                raw_rule.get("minimum_concept_matches")
+            ),
+            "score": _normalize_number(raw_rule.get("score")),
+            "priority": _normalize_number(
+                raw_rule.get("priority")
+            ),
+        }
+        rules.append(rule)
+
+    if all(isinstance(item, Mapping) for item in rules):
+        rules.sort(
+            key=lambda item: (
+                _numeric_sort_value(item.get("priority")),
+                _normalize_text(item.get("rule_name")).casefold(),
+            )
+        )
+
+    return rules
+
+
+def _normalize_intent_catalog_concepts(
+    value: Any,
+    *,
+    field_name: str,
+) -> Any:
+    parsed = _parse_json_like(value, field_name)
+    if not isinstance(parsed, (list, tuple)):
+        return deepcopy(parsed)
+
+    concepts: list[Any] = []
+    for concept_index, raw_concept in enumerate(parsed):
+        if not isinstance(raw_concept, Mapping):
+            concepts.append(deepcopy(raw_concept))
+            continue
+
+        concept_path = f"{field_name}[{concept_index}]"
+        match_mode = _normalize_text(
+            raw_concept.get("match_mode")
+        ).casefold()
+        terms, normalized_terms = _normalize_intent_catalog_terms(
+            raw_concept.get("terms"),
+            match_mode=match_mode,
+            field_name=f"{concept_path}.terms",
+        )
+        concept = {
+            "concept_name": _normalize_text(
+                raw_concept.get("concept_name")
+            ),
+            "terms": terms,
+            "normalized_terms": normalized_terms,
+            "match_mode": match_mode,
+            "minimum_term_matches": _normalize_integer(
+                raw_concept.get("minimum_term_matches")
+            ),
+        }
+        concepts.append(concept)
+
+    if all(isinstance(item, Mapping) for item in concepts):
+        concepts.sort(
+            key=lambda item: _normalize_text(
+                item.get("concept_name")
+            ).casefold()
+        )
+
+    return concepts
+
+
+def _normalize_intent_catalog_terms(
+    value: Any,
+    *,
+    match_mode: str,
+    field_name: str,
+) -> tuple[Any, Any]:
+    parsed = _parse_json_like(value, field_name)
+    if not isinstance(parsed, (list, tuple)):
+        copied = deepcopy(parsed)
+        return copied, deepcopy(copied)
+
+    pairs: list[tuple[Any, Any]] = []
+    for raw_term in parsed:
+        if isinstance(raw_term, str):
+            term = _normalize_text(raw_term)
+            normalized_term = (
+                term
+                if match_mode == "regex"
+                else normalize_search_text(term)
+            )
+        else:
+            term = deepcopy(raw_term)
+            normalized_term = deepcopy(raw_term)
+        pairs.append((term, normalized_term))
+
+    if all(
+        isinstance(term, str) and isinstance(normalized, str)
+        for term, normalized in pairs
+    ):
+        pairs.sort(
+            key=lambda pair: (
+                pair[1].casefold(),
+                pair[0].casefold(),
+            )
+        )
+
+    return (
+        [term for term, _ in pairs],
+        [normalized for _, normalized in pairs],
+    )
+
+
 def _derive_intent_resolution_signals(
     entities: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     signals: list[dict[str, Any]] = []
 
     for entity in entities:
+        entity_type = _normalize_text(
+            entity.get("entity_type")
+        ).casefold()
+        if entity_type == "intent_definition":
+            continue
+
         hint = entity.get("sql_filter_hint")
         if not isinstance(hint, Mapping):
             continue
@@ -778,6 +1037,12 @@ def _derive_legacy_aliases(
     aliases: dict[str, str] = {}
 
     for entity in entities:
+        entity_type = _normalize_text(
+            entity.get("entity_type")
+        ).casefold()
+        if entity_type == "intent_definition":
+            continue
+
         user_term = _normalize_text(entity.get("user_term"))
         canonical_value = _normalize_text(entity.get("canonical_value"))
         if user_term and canonical_value:
