@@ -43,3 +43,31 @@ def route_after_load_context(
         return "continue"
 
     return "infrastructure_error"
+
+
+def route_after_classify_intent(
+    state: GraphState,
+) -> Literal[
+    "complete",
+    "infrastructure_error",
+]:
+    """
+    Decide o encerramento depois da classificação de intenção.
+
+    Resoluções aplicadas e rejeições semânticas são resultados normais
+    desta etapa. Falhas de contrato ou erros inesperados do classificador
+    seguem para o finalizador comum de infraestrutura.
+    """
+
+    final_status = state.get(
+        "final_status",
+        "infrastructure_error",
+    )
+
+    if final_status in {
+        "processing",
+        "rejected",
+    }:
+        return "complete"
+
+    return "infrastructure_error"

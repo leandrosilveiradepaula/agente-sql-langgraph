@@ -325,7 +325,32 @@ conceitos, termos e regras avaliados, inclusive regras não satisfeitas e
 intenções bloqueadas. O catálogo ausente será tratado como lista vazia,
 sem alterar a resolução baseada apenas em sinais.
 
-## 17. Incrementos
+## 17. Integração com o grafo
+
+`load_context` deverá validar o snapshot completo antes de disponibilizar
+`context.intent_resolution` para o classificador.
+
+`classify_intent` deverá encaminhar ao motor a projeção completa, incluindo:
+
+- `config`;
+- `signals`;
+- `intent_catalog`.
+
+O resultado integral de `resolve_intent` deverá ser preservado em
+`GraphState.intent_resolution_result`, incluindo o diagnóstico do catálogo.
+
+Depois da classificação:
+
+- resolução aplicada seguirá com `final_status = processing`;
+- rejeição semântica encerrará com `final_status = rejected`;
+- falha de contrato ou erro inesperado seguirá para
+  `finalize_infrastructure_error`;
+- o erro original e `failure_stage = classify_intent` deverão ser
+  preservados pelo finalizador.
+
+O catálogo ausente deverá manter o fluxo anterior baseado somente em sinais.
+
+## 18. Incrementos
 
 ```text
 7D.1 contrato e tipos
