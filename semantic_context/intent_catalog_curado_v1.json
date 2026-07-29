@@ -1,0 +1,895 @@
+{
+  "catalog_version": "intent-catalog-curado-v1",
+  "description": "Catálogo semântico curado para validação offline. Os registros seguem o contrato físico de intent_definition.",
+  "definitions": [
+    {
+      "entity_type": "intent_definition",
+      "user_term": "resultado_por_marca_catalog_v1",
+      "canonical_value": "resultado_por_marca",
+      "target_table": null,
+      "target_column": null,
+      "sql_filter_hint": null,
+      "business_rule": {
+        "intent_catalog": {
+          "semantic_description": "Resultado e desempenho por marca sem comparação explícita entre entidades.",
+          "rules": [
+            {
+              "rule_name": "require_brand_result",
+              "effect": "require",
+              "concepts": [
+                {
+                  "concept_name": "brand_dimension",
+                  "terms": [
+                    "\\bmarc(?:a|as)\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "result_metric",
+                  "terms": [
+                    "\\bresultado(?:s)?\\b",
+                    "\\bresultado liquido\\b",
+                    "\\brol\\b",
+                    "\\bmargem\\b",
+                    "\\bdesempenho\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": null,
+              "priority": 1
+            },
+            {
+              "rule_name": "exclude_explicit_comparison",
+              "effect": "exclude",
+              "concepts": [
+                {
+                  "concept_name": "comparison_operation",
+                  "terms": [
+                    "\\bcompare\\b",
+                    "\\bcomparar\\b",
+                    "\\bcomparativo\\b",
+                    "\\bversus\\b",
+                    "\\bvs\\b",
+                    "\\bmelhor desempenho\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "comparison_relation",
+                  "terms": [
+                    "\\bcom\\b",
+                    "\\bou\\b",
+                    "\\bentre\\b",
+                    "\\be\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": null,
+              "priority": 1
+            },
+            {
+              "rule_name": "exclude_opex_focus",
+              "effect": "exclude",
+              "concepts": [
+                {
+                  "concept_name": "opex_metric",
+                  "terms": [
+                    "\\bopex\\b",
+                    "\\bdespesa(?:s)? operacional(?:is)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 1,
+              "score": null,
+              "priority": 1
+            },
+            {
+              "rule_name": "score_brand_result",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "brand_dimension",
+                  "terms": [
+                    "\\bmarc(?:a|as)\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "result_metric",
+                  "terms": [
+                    "\\bresultado(?:s)?\\b",
+                    "\\bresultado liquido\\b",
+                    "\\brol\\b",
+                    "\\bmargem\\b",
+                    "\\bdesempenho\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": 135,
+              "priority": 1
+            }
+          ]
+        }
+      },
+      "priority": 1
+    },
+    {
+      "entity_type": "intent_definition",
+      "user_term": "opex_por_marca_catalog_v1",
+      "canonical_value": "opex_por_marca",
+      "target_table": null,
+      "target_column": null,
+      "sql_filter_hint": null,
+      "business_rule": {
+        "intent_catalog": {
+          "semantic_description": "OPEX agregado ou proporcional por marca.",
+          "rules": [
+            {
+              "rule_name": "require_brand_opex",
+              "effect": "require",
+              "concepts": [
+                {
+                  "concept_name": "brand_dimension",
+                  "terms": [
+                    "\\bmarc(?:a|as)\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "opex_metric",
+                  "terms": [
+                    "\\bopex\\b",
+                    "\\bdespesa(?:s)? operacional(?:is)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": null,
+              "priority": 1
+            },
+            {
+              "rule_name": "exclude_sector_breakdown",
+              "effect": "exclude",
+              "concepts": [
+                {
+                  "concept_name": "cost_center_dimension",
+                  "terms": [
+                    "\\bcentro(?:s)? de custo\\b",
+                    "\\bsetor(?:es)?\\b",
+                    "\\barea(?:s)?\\b",
+                    "\\bdepartamento(?:s)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 1,
+              "score": null,
+              "priority": 1
+            },
+            {
+              "rule_name": "score_brand_opex",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "brand_dimension",
+                  "terms": [
+                    "\\bmarc(?:a|as)\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "opex_metric",
+                  "terms": [
+                    "\\bopex\\b",
+                    "\\bdespesa(?:s)? operacional(?:is)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": 145,
+              "priority": 1
+            }
+          ]
+        }
+      },
+      "priority": 2
+    },
+    {
+      "entity_type": "intent_definition",
+      "user_term": "opex_por_centro_custo_catalog_v1",
+      "canonical_value": "opex_por_centro_custo",
+      "target_table": null,
+      "target_column": null,
+      "sql_filter_hint": null,
+      "business_rule": {
+        "intent_catalog": {
+          "semantic_description": "OPEX, consumo, controle ou desempenho orçamentário por centro de custo, setor ou área.",
+          "rules": [
+            {
+              "rule_name": "require_cost_center",
+              "effect": "require",
+              "concepts": [
+                {
+                  "concept_name": "cost_center_dimension",
+                  "terms": [
+                    "\\bcentro(?:s)? de custo\\b",
+                    "\\bsetor(?:es)?\\b",
+                    "\\barea(?:s)?\\b",
+                    "\\bdepartamento(?:s)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 1,
+              "score": null,
+              "priority": 1
+            },
+            {
+              "rule_name": "score_center_opex",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "cost_center_dimension",
+                  "terms": [
+                    "\\bcentro(?:s)? de custo\\b",
+                    "\\bsetor(?:es)?\\b",
+                    "\\barea(?:s)?\\b",
+                    "\\bdepartamento(?:s)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "opex_metric",
+                  "terms": [
+                    "\\bopex\\b",
+                    "\\bdespesa(?:s)? operacional(?:is)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": 150,
+              "priority": 1
+            },
+            {
+              "rule_name": "score_center_budget_control",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "cost_center_dimension",
+                  "terms": [
+                    "\\bcentro(?:s)? de custo\\b",
+                    "\\bsetor(?:es)?\\b",
+                    "\\barea(?:s)?\\b",
+                    "\\bdepartamento(?:s)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "budget_metric",
+                  "terms": [
+                    "\\borcamento\\b",
+                    "\\borcado\\b",
+                    "\\borcada\\b",
+                    "\\borcamentari\\w*\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "budget_control",
+                  "terms": [
+                    "\\bcontrole\\b",
+                    "\\bconsum\\w*\\b",
+                    "\\beconom\\w*\\b",
+                    "\\bgast\\w* menos\\b",
+                    "\\babaixo do orcamento\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 3,
+              "score": 150,
+              "priority": 2
+            },
+            {
+              "rule_name": "score_center_overrun",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "cost_center_dimension",
+                  "terms": [
+                    "\\bcentro(?:s)? de custo\\b",
+                    "\\bsetor(?:es)?\\b",
+                    "\\barea(?:s)?\\b",
+                    "\\bdepartamento(?:s)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "budget_overrun",
+                  "terms": [
+                    "\\bestour\\w*\\b",
+                    "\\bacima do orcamento\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": 140,
+              "priority": 3
+            }
+          ]
+        }
+      },
+      "priority": 3
+    },
+    {
+      "entity_type": "intent_definition",
+      "user_term": "orcado_vs_realizado_catalog_v1",
+      "canonical_value": "orcado_vs_realizado",
+      "target_table": null,
+      "target_column": null,
+      "sql_filter_hint": null,
+      "business_rule": {
+        "intent_catalog": {
+          "semantic_description": "Comparação entre orçamento e realizado, variações, desvios ou impacto em grupos DRE.",
+          "rules": [
+            {
+              "rule_name": "score_budget_actual",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "budget_metric",
+                  "terms": [
+                    "\\borcamento\\b",
+                    "\\borcado\\b",
+                    "\\borcada\\b",
+                    "\\borcamentari\\w*\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "actual_metric",
+                  "terms": [
+                    "\\brealizado\\b",
+                    "\\brealizada\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": 160,
+              "priority": 1
+            },
+            {
+              "rule_name": "score_variance_period",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "variance_metric",
+                  "terms": [
+                    "\\bdesvio(?:s)?\\b",
+                    "\\bvariac\\w*\\b",
+                    "\\bvariancia(?:s)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "monthly_period",
+                  "terms": [
+                    "\\bmes\\b",
+                    "\\bmensal\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": 135,
+              "priority": 2
+            },
+            {
+              "rule_name": "score_dre_negative_impact",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "dre_structure",
+                  "terms": [
+                    "\\bdre\\b",
+                    "\\bdemonstrativo\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "impact_metric",
+                  "terms": [
+                    "\\bimpact\\w*\\b",
+                    "\\bpes\\w*\\b",
+                    "\\brepresent\\w*\\b",
+                    "\\bcust\\w*\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "negative_impact",
+                  "terms": [
+                    "\\bnegativ\\w*\\b",
+                    "\\bpior\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 3,
+              "score": 155,
+              "priority": 3
+            }
+          ]
+        }
+      },
+      "priority": 4
+    },
+    {
+      "entity_type": "intent_definition",
+      "user_term": "estouro_orcamento_catalog_v1",
+      "canonical_value": "estouro_orcamento",
+      "target_table": null,
+      "target_column": null,
+      "sql_filter_hint": null,
+      "business_rule": {
+        "intent_catalog": {
+          "semantic_description": "Estouro orçamentário por conta, centro de custo ou localização gerencial.",
+          "rules": [
+            {
+              "rule_name": "score_overrun_budget",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "budget_overrun",
+                  "terms": [
+                    "\\bestour\\w*\\b",
+                    "\\bacima do orcamento\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "budget_metric",
+                  "terms": [
+                    "\\borcamento\\b",
+                    "\\borcado\\b",
+                    "\\borcada\\b",
+                    "\\borcamentari\\w*\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": 165,
+              "priority": 1
+            },
+            {
+              "rule_name": "score_overrun_account",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "budget_overrun",
+                  "terms": [
+                    "\\bestour\\w*\\b",
+                    "\\bacima do orcamento\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "account_dimension",
+                  "terms": [
+                    "\\bconta(?:s)?\\b",
+                    "\\bcontabil\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": 150,
+              "priority": 2
+            },
+            {
+              "rule_name": "score_overrun_period",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "budget_overrun",
+                  "terms": [
+                    "\\bestour\\w*\\b",
+                    "\\bacima do orcamento\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "monthly_period",
+                  "terms": [
+                    "\\bmes\\b",
+                    "\\bmensal\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": 130,
+              "priority": 3
+            }
+          ]
+        }
+      },
+      "priority": 5
+    },
+    {
+      "entity_type": "intent_definition",
+      "user_term": "dre_mensal_catalog_v1",
+      "canonical_value": "dre_mensal",
+      "target_table": null,
+      "target_column": null,
+      "sql_filter_hint": null,
+      "business_rule": {
+        "intent_catalog": {
+          "semantic_description": "Análise mensal da demonstração de resultado total ou por marca.",
+          "rules": [
+            {
+              "rule_name": "score_dre",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "dre_structure",
+                  "terms": [
+                    "\\bdre\\b",
+                    "\\bdemonstrativo\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 1,
+              "score": 125,
+              "priority": 1
+            }
+          ]
+        }
+      },
+      "priority": 7
+    },
+    {
+      "entity_type": "intent_definition",
+      "user_term": "comparativo_marcas_catalog_v1",
+      "canonical_value": "comparativo_marcas",
+      "target_table": null,
+      "target_column": null,
+      "sql_filter_hint": null,
+      "business_rule": {
+        "intent_catalog": {
+          "semantic_description": "Comparação explícita entre duas ou mais marcas ou entidades comerciais.",
+          "rules": [
+            {
+              "rule_name": "require_comparison_relation",
+              "effect": "require",
+              "concepts": [
+                {
+                  "concept_name": "comparison_operation",
+                  "terms": [
+                    "\\bcompare\\b",
+                    "\\bcomparar\\b",
+                    "\\bcomparativo\\b",
+                    "\\bversus\\b",
+                    "\\bvs\\b",
+                    "\\bmelhor desempenho\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "comparison_relation",
+                  "terms": [
+                    "\\bcom\\b",
+                    "\\bou\\b",
+                    "\\bentre\\b",
+                    "\\be\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": null,
+              "priority": 1
+            },
+            {
+              "rule_name": "exclude_budget_comparison",
+              "effect": "exclude",
+              "concepts": [
+                {
+                  "concept_name": "budget_metric",
+                  "terms": [
+                    "\\borcamento\\b",
+                    "\\borcado\\b",
+                    "\\borcada\\b",
+                    "\\borcamentari\\w*\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "actual_metric",
+                  "terms": [
+                    "\\brealizado\\b",
+                    "\\brealizada\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 1,
+              "score": null,
+              "priority": 1
+            },
+            {
+              "rule_name": "score_explicit_comparison",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "comparison_operation",
+                  "terms": [
+                    "\\bcompare\\b",
+                    "\\bcomparar\\b",
+                    "\\bcomparativo\\b",
+                    "\\bversus\\b",
+                    "\\bvs\\b",
+                    "\\bmelhor desempenho\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "comparison_relation",
+                  "terms": [
+                    "\\bcom\\b",
+                    "\\bou\\b",
+                    "\\bentre\\b",
+                    "\\be\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": 170,
+              "priority": 1
+            }
+          ]
+        }
+      },
+      "priority": 8
+    },
+    {
+      "entity_type": "intent_definition",
+      "user_term": "impacto_setor_marca_catalog_v1",
+      "canonical_value": "impacto_setor_marca",
+      "target_table": null,
+      "target_column": null,
+      "sql_filter_hint": null,
+      "business_rule": {
+        "intent_catalog": {
+          "semantic_description": "Impacto, peso ou representatividade de OPEX por setor dentro de cada marca.",
+          "rules": [
+            {
+              "rule_name": "require_sector",
+              "effect": "require",
+              "concepts": [
+                {
+                  "concept_name": "cost_center_dimension",
+                  "terms": [
+                    "\\bcentro(?:s)? de custo\\b",
+                    "\\bsetor(?:es)?\\b",
+                    "\\barea(?:s)?\\b",
+                    "\\bdepartamento(?:s)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 1,
+              "score": null,
+              "priority": 1
+            },
+            {
+              "rule_name": "score_sector_opex_scope",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "cost_center_dimension",
+                  "terms": [
+                    "\\bcentro(?:s)? de custo\\b",
+                    "\\bsetor(?:es)?\\b",
+                    "\\barea(?:s)?\\b",
+                    "\\bdepartamento(?:s)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "opex_metric",
+                  "terms": [
+                    "\\bopex\\b",
+                    "\\bdespesa(?:s)? operacional(?:is)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "within_brand_scope",
+                  "terms": [
+                    "\\bpor marca\\b",
+                    "\\bde cada marca\\b",
+                    "\\bdentro da\\b",
+                    "\\bdentro de\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 3,
+              "score": 180,
+              "priority": 1
+            },
+            {
+              "rule_name": "score_sector_impact_brand",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "cost_center_dimension",
+                  "terms": [
+                    "\\bcentro(?:s)? de custo\\b",
+                    "\\bsetor(?:es)?\\b",
+                    "\\barea(?:s)?\\b",
+                    "\\bdepartamento(?:s)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "impact_metric",
+                  "terms": [
+                    "\\bimpact\\w*\\b",
+                    "\\bpes\\w*\\b",
+                    "\\brepresent\\w*\\b",
+                    "\\bcust\\w*\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "brand_dimension",
+                  "terms": [
+                    "\\bmarc(?:a|as)\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 3,
+              "score": 175,
+              "priority": 2
+            }
+          ]
+        }
+      },
+      "priority": 9
+    },
+    {
+      "entity_type": "intent_definition",
+      "user_term": "responsavel_centro_custo_catalog_v1",
+      "canonical_value": "responsavel_centro_custo",
+      "target_table": null,
+      "target_column": null,
+      "sql_filter_hint": null,
+      "business_rule": {
+        "intent_catalog": {
+          "semantic_description": "Consulta cadastral de responsável ou gestor por centro de custo e unidade.",
+          "rules": [
+            {
+              "rule_name": "score_responsibility_center",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "responsibility_lookup",
+                  "terms": [
+                    "\\bresponsav\\w*\\b",
+                    "\\bgestor(?:es)?\\b",
+                    "\\badministra\\w*\\b",
+                    "\\bresponde\\b",
+                    "\\bdono\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                },
+                {
+                  "concept_name": "cost_center_dimension",
+                  "terms": [
+                    "\\bcentro(?:s)? de custo\\b",
+                    "\\bsetor(?:es)?\\b",
+                    "\\barea(?:s)?\\b",
+                    "\\bdepartamento(?:s)?\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 2,
+              "score": 155,
+              "priority": 1
+            },
+            {
+              "rule_name": "score_responsibility_lookup",
+              "effect": "positive_score",
+              "concepts": [
+                {
+                  "concept_name": "responsibility_lookup",
+                  "terms": [
+                    "\\bresponsav\\w*\\b",
+                    "\\bgestor(?:es)?\\b",
+                    "\\badministra\\w*\\b",
+                    "\\bresponde\\b",
+                    "\\bdono\\b"
+                  ],
+                  "match_mode": "regex",
+                  "minimum_term_matches": 1
+                }
+              ],
+              "minimum_concept_matches": 1,
+              "score": 120,
+              "priority": 2
+            }
+          ]
+        }
+      },
+      "priority": 10
+    }
+  ]
+}

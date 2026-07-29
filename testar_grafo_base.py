@@ -5,6 +5,7 @@ from typing import Callable
 from app.domain.context import ContextSnapshot
 from app.domain.context_normalizer import normalize_context_snapshot
 from app.graph.builder import create_graph
+from app.graph.routing import route_after_classify_intent
 from app.graph.state import GraphState
 from app.ports.context_repository import (
     ContextRepositoryError,
@@ -125,6 +126,58 @@ def _raw_context_snapshot() -> dict:
     }
 
 
+def _catalog_only_raw_context_snapshot() -> dict:
+    """
+    Fixture em que a intenção é resolvida sem sinal simples.
+    """
+
+    snapshot = deepcopy(_raw_context_snapshot())
+    snapshot["entidades"] = [
+        {
+            "entity_type": "intent_definition",
+            "user_term": "generic_catalog_definition",
+            "canonical_value": "generic_test_intent",
+            "target_table": None,
+            "target_column": None,
+            "sql_filter_hint": None,
+            "business_rule": {
+                "intent_catalog": {
+                    "semantic_description": (
+                        "Definição semântica genérica usada "
+                        "somente no teste."
+                    ),
+                    "rules": [
+                        {
+                            "rule_name": (
+                                "generic_catalog_score"
+                            ),
+                            "effect": "positive_score",
+                            "concepts": [
+                                {
+                                    "concept_name": (
+                                        "generic_subject"
+                                    ),
+                                    "terms": [
+                                        "generic analysis",
+                                    ],
+                                    "match_mode": "contains",
+                                    "minimum_term_matches": 1,
+                                }
+                            ],
+                            "minimum_concept_matches": 1,
+                            "score": 120,
+                            "priority": 1,
+                        }
+                    ],
+                }
+            },
+            "priority": 1,
+        }
+    ]
+    snapshot["context_counts"]["entidades"] = 1
+    return snapshot
+
+
 class SuccessContextRepository:
     """
     Retorna um snapshot canônico válido para o grafo.
@@ -138,6 +191,22 @@ class SuccessContextRepository:
         del user_profile
         return normalize_context_snapshot(
             _raw_context_snapshot()
+        )
+
+
+class CatalogOnlyContextRepository:
+    """
+    Retorna contexto cuja intenção depende apenas do catálogo.
+    """
+
+    def load_active_context(
+        self,
+        *,
+        user_profile: str,
+    ) -> ContextSnapshot:
+        del user_profile
+        return normalize_context_snapshot(
+            _catalog_only_raw_context_snapshot()
         )
 
 
@@ -246,6 +315,9 @@ def _assert_classified_intent(
     assert resolution["best_candidate"][
         "intent_name"
     ] == "generic_test_intent"
+    assert resolution["intent_catalog"][
+        "available"
+    ] is False
 
     context = result["context"]
     assert len(context["fingerprint"]) == 64
@@ -255,6 +327,40 @@ def _assert_classified_intent(
     assert context["table_catalog"][0]["table_name"] == (
         "table_test"
     )
+
+
+def _assert_catalog_only_classification(
+    result: GraphState,
+) -> None:
+    assert result["final_status"] == "processing"
+    assert result["current_stage"] == "classify_intent"
+    assert result["failure_stage"] == ""
+    assert result["intent"] == "generic_test_intent"
+    assert result["intent_confidence"] == 0.98
+    assert result["errors"] == []
+
+    context = result["context"]
+    intent_resolution = context["intent_resolution"]
+    assert intent_resolution["signals"] == []
+    assert len(intent_resolution["intent_catalog"]) == 1
+    assert "generic_catalog_definition" not in (
+        context["aliases"]
+    )
+
+    resolution = result["intent_resolution_result"]
+    diagnostic = resolution["intent_catalog"]
+    assert resolution["applied"] is True
+    assert diagnostic["available"] is True
+    assert diagnostic["entries_evaluated"] == 1
+    assert diagnostic["used_for_selected_intent"] is True
+    assert diagnostic[
+        "contributed_score_to_selected_intent"
+    ] is True
+    assert diagnostic["evaluations"][0]["eligible"] is True
+    assert resolution["best_candidate"] is not None
+    assert resolution["best_candidate"]["matches"][0][
+        "match_strategy"
+    ] == "intent_catalog_rule"
 
 
 def _assert_unresolved_intent(
@@ -327,6 +433,27 @@ def _assert_invalid_input(result: GraphState) -> None:
     assert "EMPTY_QUESTION" in error_codes
 
 
+def test_classify_routing() -> None:
+    assert route_after_classify_intent(
+        {
+            "final_status": "processing",
+        }
+    ) == "complete"
+    assert route_after_classify_intent(
+        {
+            "final_status": "rejected",
+        }
+    ) == "complete"
+    assert route_after_classify_intent(
+        {
+            "final_status": "infrastructure_error",
+        }
+    ) == "infrastructure_error"
+    assert route_after_classify_intent({}) == (
+        "infrastructure_error"
+    )
+
+
 def main() -> None:
     valid_initial_state: GraphState = {
         "question": "Execute uma generic analysis de teste.",
@@ -360,35 +487,42 @@ def main() -> None:
     }
 
     run_test(
-        "TESTE 1 — INTENÇÃO CLASSIFICADA",
+        "TESTE 1 — INTENÇÃO CLASSIFICADA POR SINAL",
         SuccessContextRepository(),
         valid_initial_state,
         _assert_classified_intent,
     )
 
     run_test(
-        "TESTE 2 — INTENÇÃO NÃO RESOLVIDA",
+        "TESTE 2 — INTENÇÃO CLASSIFICADA PELO CATÁLOGO",
+        CatalogOnlyContextRepository(),
+        valid_initial_state,
+        _assert_catalog_only_classification,
+    )
+
+    run_test(
+        "TESTE 3 — INTENÇÃO NÃO RESOLVIDA",
         SuccessContextRepository(),
         unresolved_initial_state,
         _assert_unresolved_intent,
     )
 
     run_test(
-        "TESTE 3 — CONTEXTO CANÔNICO INVÁLIDO",
+        "TESTE 4 — CONTEXTO CANÔNICO INVÁLIDO",
         InvalidContextRepository(),
         valid_initial_state,
         _assert_invalid_context,
     )
 
     run_test(
-        "TESTE 4 — FALHA AO CARREGAR CONTEXTO",
+        "TESTE 5 — FALHA AO CARREGAR CONTEXTO",
         FailureContextRepository(),
         valid_initial_state,
         _assert_repository_failure,
     )
 
     run_test(
-        "TESTE 5 — ENTRADA INVÁLIDA NÃO ACESSA CONTEXTO",
+        "TESTE 6 — ENTRADA INVÁLIDA NÃO ACESSA CONTEXTO",
         ShouldNotBeCalledRepository(),
         {
             "question": "   ",
@@ -398,6 +532,12 @@ def main() -> None:
         },
         _assert_invalid_input,
     )
+
+    print("=" * 70)
+    print("TESTE 7 — ROTEAMENTO APÓS CLASSIFICAÇÃO")
+    print("=" * 70)
+    test_classify_routing()
+    print("ASSERTIONS: OK")
 
 
 if __name__ == "__main__":

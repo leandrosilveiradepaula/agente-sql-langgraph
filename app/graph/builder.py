@@ -16,6 +16,7 @@ from app.graph.nodes.receive_question import (
     receive_question,
 )
 from app.graph.routing import (
+    route_after_classify_intent,
     route_after_load_context,
     route_after_receive_question,
 )
@@ -92,9 +93,15 @@ def create_graph(
         },
     )
 
-    builder.add_edge(
+    builder.add_conditional_edges(
         "classify_intent",
-        END,
+        route_after_classify_intent,
+        {
+            "complete": END,
+            "infrastructure_error": (
+                "finalize_infrastructure_error"
+            ),
+        },
     )
 
     builder.add_edge(

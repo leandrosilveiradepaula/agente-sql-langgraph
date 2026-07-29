@@ -53,14 +53,69 @@ def _signal(
     }
 
 
+def _concept(
+    *,
+    concept_name: str,
+    terms: list[str],
+    match_mode: str = "contains",
+    minimum_term_matches: int = 1,
+) -> dict:
+    return {
+        "concept_name": concept_name,
+        "terms": terms,
+        "normalized_terms": terms,
+        "match_mode": match_mode,
+        "minimum_term_matches": minimum_term_matches,
+    }
+
+
+def _rule(
+    *,
+    rule_name: str,
+    effect: str,
+    concepts: list[dict],
+    minimum_concept_matches: int = 1,
+    score: float | None = None,
+    priority: float | None = 1,
+) -> dict:
+    return {
+        "rule_name": rule_name,
+        "effect": effect,
+        "concepts": concepts,
+        "minimum_concept_matches": minimum_concept_matches,
+        "score": score,
+        "priority": priority,
+    }
+
+
+def _catalog_entry(
+    *,
+    intent_name: str,
+    rules: list[dict],
+    definition_name: str | None = None,
+    priority: float | None = 1,
+) -> dict:
+    return {
+        "intent_name": intent_name,
+        "definition_name": (
+            definition_name or f"{intent_name}_definition"
+        ),
+        "semantic_description": "Generic semantic definition.",
+        "rules": rules,
+        "priority": priority,
+    }
+
+
 def _context(
     signals: list[dict],
     *,
     config: dict | None = None,
+    intent_catalog: list[dict] | None = None,
 ) -> dict:
     return {
         "config": config or _config(),
         "signals": signals,
+        "intent_catalog": intent_catalog or [],
     }
 
 
@@ -413,6 +468,454 @@ def test_rejeita_uso_fora_do_contrato_validado() -> None:
         )
 
 
+def test_catalogo_ausente_preserva_comportamento() -> None:
+    legacy_context = {
+        "config": _config(),
+        "signals": [
+            _signal(
+                intent_name="generic_intent",
+                pattern="alpha",
+            )
+        ],
+    }
+
+    result = resolve_intent("alpha", legacy_context)
+
+    assert result["applied"] is True
+    assert result["intent"] == "generic_intent"
+    assert result["intent_catalog"] == {
+        "available": False,
+        "entries_evaluated": 0,
+        "used_for_selected_intent": False,
+        "contributed_score_to_selected_intent": False,
+        "evaluations": [],
+    }
+
+
+def test_aplica_positive_score_sem_sinal_simples() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _rule(
+                    rule_name="composite_positive",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="first_concept",
+                            terms=["alpha"],
+                        ),
+                        _concept(
+                            concept_name="second_concept",
+                            terms=["beta"],
+                        ),
+                    ],
+                    minimum_concept_matches=2,
+                    score=120,
+                )
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha beta",
+        _context([], intent_catalog=catalog),
+    )
+
+    assert result["applied"] is True
+    assert result["intent"] == "generic_intent"
+    assert result["best_candidate"]["score"] == 120
+    assert result["best_candidate"]["positive_score"] == 120
+    assert (
+        result["best_candidate"]["matches"][0]
+        ["match_strategy"]
+        == "intent_catalog_rule"
+    )
+
+
+def test_agrega_negative_score_do_catalogo_com_sinal() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _rule(
+                    rule_name="configured_penalty",
+                    effect="negative_score",
+                    concepts=[
+                        _concept(
+                            concept_name="blocking_concept",
+                            terms=["blocked"],
+                        )
+                    ],
+                    score=30,
+                )
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha blocked",
+        _context(
+            [
+                _signal(
+                    intent_name="generic_intent",
+                    pattern="alpha",
+                    score=140,
+                )
+            ],
+            intent_catalog=catalog,
+        ),
+    )
+
+    assert result["applied"] is True
+    assert result["best_candidate"]["score"] == 110
+    assert result["best_candidate"]["positive_score"] == 140
+    assert result["best_candidate"]["negative_score"] == 30
+
+
+def test_require_satisfeita_mantem_candidato() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _rule(
+                    rule_name="required_context",
+                    effect="require",
+                    concepts=[
+                        _concept(
+                            concept_name="required_concept",
+                            terms=["beta"],
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha beta",
+        _context(
+            [
+                _signal(
+                    intent_name="generic_intent",
+                    pattern="alpha",
+                )
+            ],
+            intent_catalog=catalog,
+        ),
+    )
+
+    assert result["applied"] is True
+    evaluation = result["intent_catalog"]["evaluations"][0]
+    assert evaluation["eligible"] is True
+    assert evaluation["satisfied_require_rule_count"] == 1
+
+
+def test_require_nao_satisfeita_bloqueia_candidato() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _rule(
+                    rule_name="required_context",
+                    effect="require",
+                    concepts=[
+                        _concept(
+                            concept_name="required_concept",
+                            terms=["beta"],
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha",
+        _context(
+            [
+                _signal(
+                    intent_name="generic_intent",
+                    pattern="alpha",
+                )
+            ],
+            intent_catalog=catalog,
+        ),
+    )
+
+    assert result["applied"] is False
+    assert result["candidates"] == []
+    evaluation = result["intent_catalog"]["evaluations"][0]
+    assert evaluation["eligible"] is False
+    assert evaluation["excluded"] is False
+
+
+def test_exclude_satisfeita_bloqueia_candidato() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _rule(
+                    rule_name="excluded_context",
+                    effect="exclude",
+                    concepts=[
+                        _concept(
+                            concept_name="excluded_concept",
+                            terms=["blocked"],
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha blocked",
+        _context(
+            [
+                _signal(
+                    intent_name="generic_intent",
+                    pattern="alpha",
+                )
+            ],
+            intent_catalog=catalog,
+        ),
+    )
+
+    assert result["applied"] is False
+    assert result["candidates"] == []
+    evaluation = result["intent_catalog"]["evaluations"][0]
+    assert evaluation["excluded"] is True
+    assert evaluation["eligible"] is False
+
+
+def test_avalia_limites_compostos_de_termos_e_conceitos() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _rule(
+                    rule_name="composite_threshold",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="multi_term_concept",
+                            terms=["alpha", "gamma"],
+                            minimum_term_matches=2,
+                        ),
+                        _concept(
+                            concept_name="single_term_concept",
+                            terms=["beta"],
+                        ),
+                    ],
+                    minimum_concept_matches=2,
+                    score=120,
+                )
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha beta gamma",
+        _context([], intent_catalog=catalog),
+    )
+
+    assert result["applied"] is True
+    rule = result["intent_catalog"]["evaluations"][0]["rules"][0]
+    assert rule["matched_concept_count"] == 2
+    assert rule["satisfied"] is True
+    assert rule["concepts"][0]["matched_term_count"] == 2
+
+
+def test_agrega_sinais_catalogo_e_prioridade_deterministica() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="intent_a",
+            priority=2,
+            rules=[
+                _rule(
+                    rule_name="catalog_a",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="concept_a",
+                            terms=["gamma"],
+                        )
+                    ],
+                    score=20,
+                    priority=2,
+                )
+            ],
+        ),
+        _catalog_entry(
+            intent_name="intent_b",
+            priority=1,
+            rules=[
+                _rule(
+                    rule_name="catalog_b",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="concept_b",
+                            terms=["beta"],
+                        )
+                    ],
+                    score=120,
+                    priority=1,
+                )
+            ],
+        ),
+    ]
+
+    result = resolve_intent(
+        "alpha beta gamma",
+        _context(
+            [
+                _signal(
+                    intent_name="intent_a",
+                    pattern="alpha",
+                    score=100,
+                    priority=3,
+                )
+            ],
+            config=_config(ambiguity_margin=0),
+            intent_catalog=catalog,
+        ),
+    )
+
+    assert result["applied"] is True
+    assert result["intent"] == "intent_b"
+    assert result["best_candidate"]["score"] == 120
+    assert result["second_candidate"]["score"] == 120
+    assert result["best_candidate"]["best_priority"] == 1
+
+
+
+def test_regra_nao_satisfeita_nao_altera_prioridade() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="intent_a",
+            priority=1,
+            rules=[
+                _rule(
+                    rule_name="unmatched_score",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="unmatched_concept",
+                            terms=["gamma"],
+                        )
+                    ],
+                    score=50,
+                    priority=1,
+                )
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha beta",
+        _context(
+            [
+                _signal(
+                    intent_name="intent_a",
+                    pattern="alpha",
+                    score=120,
+                    priority=3,
+                ),
+                _signal(
+                    intent_name="intent_b",
+                    pattern="beta",
+                    score=120,
+                    priority=2,
+                ),
+            ],
+            config=_config(ambiguity_margin=0),
+            intent_catalog=catalog,
+        ),
+    )
+
+    assert result["applied"] is True
+    assert result["intent"] == "intent_b"
+    assert result["second_candidate"]["intent_name"] == "intent_a"
+    assert result["second_candidate"]["best_priority"] == 3
+
+def test_diagnostico_completo_do_catalogo_sem_mutacao() -> None:
+    resolution_context = _context(
+        [],
+        intent_catalog=[
+            _catalog_entry(
+                intent_name="generic_intent",
+                rules=[
+                    _rule(
+                        rule_name="required_context",
+                        effect="require",
+                        concepts=[
+                            _concept(
+                                concept_name="required_concept",
+                                terms=["alpha"],
+                            )
+                        ],
+                    ),
+                    _rule(
+                        rule_name="positive_context",
+                        effect="positive_score",
+                        concepts=[
+                            _concept(
+                                concept_name="scored_concept",
+                                terms=["beta"],
+                            )
+                        ],
+                        score=120,
+                        priority=2,
+                    ),
+                ],
+            )
+        ],
+    )
+    original = deepcopy(resolution_context)
+
+    first = resolve_intent("alpha beta", resolution_context)
+    second = resolve_intent("alpha beta", resolution_context)
+
+    assert first == second
+    assert resolution_context == original
+    diagnostic = first["intent_catalog"]
+    assert diagnostic["available"] is True
+    assert diagnostic["entries_evaluated"] == 1
+    assert diagnostic["used_for_selected_intent"] is True
+    assert diagnostic["contributed_score_to_selected_intent"] is True
+    evaluation = diagnostic["evaluations"][0]
+    assert evaluation["eligible"] is True
+    assert evaluation["score_delta"] == 120
+    assert len(evaluation["rules"]) == 2
+    assert all(rule["satisfied"] for rule in evaluation["rules"])
+
+
+def test_rejeita_catalogo_fora_do_contrato_validado() -> None:
+    invalid_context = _context(
+        [],
+        intent_catalog=[
+            {
+                "intent_name": "generic_intent",
+                "definition_name": "generic_definition",
+                "semantic_description": "Generic definition.",
+                "rules": [],
+                "priority": 1,
+            }
+        ],
+    )
+
+    try:
+        resolve_intent("alpha", invalid_context)
+    except IntentResolverInputError as error:
+        assert "rules deve ser uma lista não vazia" in str(error)
+    else:
+        raise AssertionError(
+            "Era esperado IntentResolverInputError."
+        )
+
+
 def main() -> None:
     tests = [
         (
@@ -462,6 +965,50 @@ def main() -> None:
         (
             "rejeita uso fora do contrato validado",
             test_rejeita_uso_fora_do_contrato_validado,
+        ),
+        (
+            "catálogo ausente preserva comportamento",
+            test_catalogo_ausente_preserva_comportamento,
+        ),
+        (
+            "aplica positive_score sem sinal simples",
+            test_aplica_positive_score_sem_sinal_simples,
+        ),
+        (
+            "agrega negative_score com sinal simples",
+            test_agrega_negative_score_do_catalogo_com_sinal,
+        ),
+        (
+            "require satisfeita mantém candidato",
+            test_require_satisfeita_mantem_candidato,
+        ),
+        (
+            "require não satisfeita bloqueia candidato",
+            test_require_nao_satisfeita_bloqueia_candidato,
+        ),
+        (
+            "exclude satisfeita bloqueia candidato",
+            test_exclude_satisfeita_bloqueia_candidato,
+        ),
+        (
+            "avalia limites compostos",
+            test_avalia_limites_compostos_de_termos_e_conceitos,
+        ),
+        (
+            "agrega sinais, catálogo e prioridade",
+            test_agrega_sinais_catalogo_e_prioridade_deterministica,
+        ),
+        (
+            "regra não satisfeita não altera prioridade",
+            test_regra_nao_satisfeita_nao_altera_prioridade,
+        ),
+        (
+            "diagnóstico completo sem mutação",
+            test_diagnostico_completo_do_catalogo_sem_mutacao,
+        ),
+        (
+            "rejeita catálogo fora do contrato",
+            test_rejeita_catalogo_fora_do_contrato_validado,
         ),
     ]
 

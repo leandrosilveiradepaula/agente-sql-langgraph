@@ -16,6 +16,13 @@ IntentSignalPolarity = Literal[
     "negative",
 ]
 
+IntentCatalogRuleEffect = Literal[
+    "positive_score",
+    "negative_score",
+    "require",
+    "exclude",
+]
+
 
 class ContextVersions(TypedDict, total=False):
     """
@@ -216,13 +223,59 @@ class IntentResolutionSignal(TypedDict, total=False):
     target_column: str | None
 
 
+class IntentCatalogConcept(TypedDict, total=False):
+    """
+    Conceito semântico configurável usado por uma regra composta.
+
+    terms representa alternativas semânticas do mesmo conceito, e não
+    perguntas completas ou frases literais de benchmark.
+    """
+
+    concept_name: str
+    terms: list[str]
+    normalized_terms: list[str]
+    match_mode: IntentMatchMode
+    minimum_term_matches: int
+
+
+class IntentCatalogRule(TypedDict, total=False):
+    """
+    Regra composta e configurável de uma intenção.
+
+    minimum_concept_matches permite expressar combinações determinísticas
+    sem nomes de intenções, termos de negócio ou limiares no Python.
+    """
+
+    rule_name: str
+    effect: IntentCatalogRuleEffect
+    concepts: list[IntentCatalogConcept]
+    minimum_concept_matches: int
+    score: float | None
+    priority: float | None
+
+
+class IntentCatalogEntry(TypedDict, total=False):
+    """
+    Definição semântica derivada de uma entidade intent_definition.
+
+    A entrada aponta para uma intenção já existente em query_patterns.
+    """
+
+    intent_name: str
+    definition_name: str
+    semantic_description: str
+    rules: list[IntentCatalogRule]
+    priority: float | None
+
+
 class IntentResolutionContext(TypedDict, total=False):
     """
-    Configuração e sinais derivados para resolução de intenção.
+    Configuração, sinais e catálogo derivados para resolução de intenção.
     """
 
     config: IntentResolverConfig
     signals: list[IntentResolutionSignal]
+    intent_catalog: list[IntentCatalogEntry]
 
 
 class ContextSnapshot(TypedDict, total=False):

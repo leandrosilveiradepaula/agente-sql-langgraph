@@ -62,6 +62,10 @@ def _print_safe_graph_summary(
     best_candidate: Any = None
     second_candidate: Any = None
     token_fallback_used = False
+    catalog_available = False
+    catalog_entries_evaluated = 0
+    catalog_used_for_selected_intent = False
+    catalog_contributed_score = False
 
     if isinstance(resolution, Mapping):
         reason = str(resolution.get("reason", ""))
@@ -78,6 +82,33 @@ def _print_safe_graph_summary(
             token_fallback_used = bool(
                 token_fallback.get(
                     "used_for_selected_intent",
+                    False,
+                )
+            )
+
+        intent_catalog = resolution.get("intent_catalog")
+        if isinstance(intent_catalog, Mapping):
+            catalog_available = bool(
+                intent_catalog.get("available", False)
+            )
+            raw_entries = intent_catalog.get(
+                "entries_evaluated",
+                0,
+            )
+            if (
+                isinstance(raw_entries, int)
+                and not isinstance(raw_entries, bool)
+            ):
+                catalog_entries_evaluated = raw_entries
+            catalog_used_for_selected_intent = bool(
+                intent_catalog.get(
+                    "used_for_selected_intent",
+                    False,
+                )
+            )
+            catalog_contributed_score = bool(
+                intent_catalog.get(
+                    "contributed_score_to_selected_intent",
                     False,
                 )
             )
@@ -131,6 +162,22 @@ def _print_safe_graph_summary(
         "SECOND_CANDIDATE: "
         f"{_candidate_summary(second_candidate)}"
     )
+    print(
+        "INTENT_CATALOG_AVAILABLE: "
+        f"{'sim' if catalog_available else 'nao'}"
+    )
+    print(
+        "INTENT_CATALOG_ENTRIES_EVALUATED: "
+        f"{catalog_entries_evaluated}"
+    )
+    print(
+        "INTENT_CATALOG_USED_FOR_SELECTED_INTENT: "
+        f"{'sim' if catalog_used_for_selected_intent else 'nao'}"
+    )
+    print(
+        "INTENT_CATALOG_CONTRIBUTED_SCORE: "
+        f"{'sim' if catalog_contributed_score else 'nao'}"
+    )
 
     errors = result.get("errors", [])
     if isinstance(errors, list) and errors:
@@ -150,43 +197,124 @@ def _print_safe_graph_summary(
 
 def _result_exit_code(
     result: Mapping[str, Any],
+    *,
+    expected_context_version: str,
+    expected_context_fingerprint: str,
+    expected_intent: str,
+    expected_catalog_entries: int,
 ) -> int:
     final_status = result.get("final_status")
     current_stage = result.get("current_stage")
     intent = result.get("intent")
     confidence = result.get("intent_confidence")
+    context_version = str(
+        result.get("context_version", "")
+    )
 
-    if (
-        final_status == "processing"
-        and current_stage == "classify_intent"
-        and isinstance(intent, str)
-        and bool(intent.strip())
-        and isinstance(confidence, (int, float))
-        and not isinstance(confidence, bool)
-    ):
-        print("CLASSIFICACAO_INTENCAO: OK")
+    context = result.get("context")
+    context_fingerprint = ""
+    normalized_catalog_entries = -1
+
+    if isinstance(context, Mapping):
+        context_fingerprint = str(
+            context.get("fingerprint", "")
+        )
+        intent_resolution = context.get("intent_resolution")
+        if isinstance(intent_resolution, Mapping):
+            intent_catalog = intent_resolution.get(
+                "intent_catalog"
+            )
+            if isinstance(intent_catalog, list):
+                normalized_catalog_entries = len(
+                    intent_catalog
+                )
+
+    resolution = result.get("intent_resolution_result")
+    catalog_available = False
+    catalog_entries_evaluated = -1
+    catalog_used = False
+    catalog_contributed_score = False
+
+    if isinstance(resolution, Mapping):
+        catalog_diagnostic = resolution.get(
+            "intent_catalog"
+        )
+        if isinstance(catalog_diagnostic, Mapping):
+            catalog_available = bool(
+                catalog_diagnostic.get("available", False)
+            )
+            raw_entries = catalog_diagnostic.get(
+                "entries_evaluated",
+                -1,
+            )
+            if (
+                isinstance(raw_entries, int)
+                and not isinstance(raw_entries, bool)
+            ):
+                catalog_entries_evaluated = raw_entries
+            catalog_used = bool(
+                catalog_diagnostic.get(
+                    "used_for_selected_intent",
+                    False,
+                )
+            )
+            catalog_contributed_score = bool(
+                catalog_diagnostic.get(
+                    "contributed_score_to_selected_intent",
+                    False,
+                )
+            )
+
+    checks = {
+        "final_status_processing": (
+            final_status == "processing"
+        ),
+        "current_stage_classify_intent": (
+            current_stage == "classify_intent"
+        ),
+        "intent_matches": intent == expected_intent,
+        "confidence_present": (
+            isinstance(confidence, (int, float))
+            and not isinstance(confidence, bool)
+        ),
+        "context_version_matches": (
+            context_version == expected_context_version
+        ),
+        "context_fingerprint_matches": (
+            context_fingerprint
+            == expected_context_fingerprint
+        ),
+        "normalized_catalog_entries_match": (
+            normalized_catalog_entries
+            == expected_catalog_entries
+        ),
+        "catalog_available": catalog_available,
+        "catalog_entries_evaluated_match": (
+            catalog_entries_evaluated
+            == expected_catalog_entries
+        ),
+        "catalog_used_for_selected_intent": (
+            catalog_used
+        ),
+        "catalog_contributed_score": (
+            catalog_contributed_score
+        ),
+    }
+
+    print()
+    print("=" * 70)
+    print("ASSERTIONS")
+    print("=" * 70)
+
+    for name, passed in checks.items():
+        print(f"- {name}={passed}")
+
+    if all(checks.values()):
+        print("LANGGRAPH_POSTGRES_INTENT_CATALOG: OK")
         return 0
 
-    if (
-        final_status == "rejected"
-        and current_stage == "classify_intent"
-    ):
-        print("CLASSIFICACAO_INTENCAO: NAO_RESOLVIDA")
-        return 7
-
-    if final_status == "invalid_request":
-        print("CLASSIFICACAO_INTENCAO: ENTRADA_INVALIDA")
-        return 5
-
-    if final_status == "infrastructure_error":
-        print(
-            "CLASSIFICACAO_INTENCAO: "
-            "ERRO_DE_INFRAESTRUTURA"
-        )
-        return 4
-
-    print("CLASSIFICACAO_INTENCAO: RESULTADO_INESPERADO")
-    return 6
+    print("LANGGRAPH_POSTGRES_INTENT_CATALOG: FALHOU")
+    return 8
 
 
 def main() -> int:
@@ -227,6 +355,16 @@ def main() -> int:
             default=DEFAULT_CONNECT_TIMEOUT_SECONDS,
         )
         question = _required_input("QUESTION")
+        expected_context_fingerprint = _required_input(
+            "EXPECTED_CONTEXT_FINGERPRINT"
+        )
+        expected_intent = _required_input(
+            "EXPECTED_INTENT"
+        )
+        expected_catalog_entries = _positive_integer_input(
+            "EXPECTED_INTENT_CATALOG_ENTRIES",
+            default=1,
+        )
 
         dsn = make_conninfo(
             host=host,
@@ -284,7 +422,19 @@ def main() -> int:
 
         _print_safe_graph_summary(result)
 
-        return _result_exit_code(result)
+        return _result_exit_code(
+            result,
+            expected_context_version=(
+                semantic_agent_version
+            ),
+            expected_context_fingerprint=(
+                expected_context_fingerprint
+            ),
+            expected_intent=expected_intent,
+            expected_catalog_entries=(
+                expected_catalog_entries
+            ),
+        )
 
     except RuntimeConfigError as error:
         print()
