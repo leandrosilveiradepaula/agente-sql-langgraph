@@ -583,6 +583,23 @@ def _assert_repaired_sql_security_rejected(result: GraphState) -> None:
     assert result["engine_preflight_result"]["status"] == "not_run"
 
 
+def _assert_repaired_sql_contract_rejected(result: GraphState) -> None:
+    assert result["final_status"] == "rejected"
+    assert result["current_stage"] == "contract_gate"
+    assert result["failure_stage"] == "contract_gate"
+    assert result["generated_sql"] == (
+        "SELECT id FROM schema_test.table_test"
+    )
+    assert result["current_sql"] == (
+        "SELECT missing_column FROM schema_test.table_test"
+    )
+    assert result["repair_attempts"] == 1
+    assert len(result["repair_history"]) == 1
+    assert result["security_result"]["status"] == "approved"
+    assert result["contract_result"]["status"] == "rejected"
+    assert result["engine_preflight_result"]["status"] == "not_run"
+
+
 def _assert_engine_preflight_infra(result: GraphState) -> None:
     assert result["final_status"] == "infrastructure_error"
     assert result["current_stage"] == "finalize_infrastructure_error"
@@ -992,13 +1009,40 @@ def main() -> None:
     assert security_after_repair_preflight.calls == 1
     assert security_bad_repairer.calls == 1
 
+    contract_after_repair_preflight = FakeEnginePreflight(
+        responses=[
+            {
+                "status": "rejected",
+                "provider_name": "fake_engine_preflight",
+                "failure_category": "column_not_found",
+                "message": "column not found",
+                "repairable": True,
+                "executed": False,
+                "rows_returned": 0,
+            },
+        ]
+    )
+    contract_bad_repairer = FakeSqlRepairer(
+        responses=["SELECT missing_column FROM schema_test.table_test"]
+    )
+    run_test(
+        "TESTE 14 - CONTRACT REJEITA SQL REPARADA",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_repaired_sql_contract_rejected,
+        engine_preflight=contract_after_repair_preflight,
+        sql_repairer=contract_bad_repairer,
+    )
+    assert contract_after_repair_preflight.calls == 1
+    assert contract_bad_repairer.calls == 1
+
     infra_preflight = FakeEnginePreflight(
         status="error",
         failure_category="provider_unavailable",
         message="provider unavailable",
     )
     run_test(
-        "TESTE 14 - PREFLIGHT INFRA VAI AO FINALIZADOR",
+        "TESTE 15 - PREFLIGHT INFRA VAI AO FINALIZADOR",
         SuccessContextRepository(),
         valid_initial_state,
         _assert_engine_preflight_infra,
