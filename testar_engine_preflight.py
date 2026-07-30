@@ -90,6 +90,13 @@ def test_requisicao_usa_current_sql() -> None:
     assert request["sql"] == "SELECT value FROM schema_test.table_test"
 
 
+def test_requisicao_preserva_current_sql_sem_reescrita() -> None:
+    sql = "  SELECT id FROM schema_test.table_test  "
+    request = _request(sql)
+
+    assert request["sql"] == sql
+
+
 def test_requisicao_nao_contem_context_snapshot_ou_credenciais() -> None:
     request = _request()
     serialized = repr(request).casefold()
@@ -284,6 +291,57 @@ def test_sanitiza_mensagem_dsn_senha_token() -> None:
     assert "api_key=abc" not in serialized
 
 
+def test_sanitiza_sql_authorization_e_warning() -> None:
+    request = _request()
+    sql = request["sql"]
+    result = normalize_engine_preflight_result(
+        request=request,
+        provider_result={
+            "status": "rejected",
+            "provider_name": f"provider {sql} authorization=Bearer abc",
+            "provider_version": f"v1 {sql} token=secret",
+            "failure_category": "syntax_error",
+            "message": f"bad sql: {sql} authorization=Bearer abc",
+            "hint": f"near {sql} Bearer xyz",
+            "related_object": f"host=db.local {sql}",
+            "warnings": [f"warning for {sql} api_key=secret"],
+            "executed": False,
+            "rows_returned": 0,
+        },
+    )
+    serialized = repr(result).casefold()
+
+    assert sql.casefold() not in serialized
+    assert "authorization=bearer" not in serialized
+    assert "bearer abc" not in serialized
+    assert "bearer xyz" not in serialized
+    assert "db.local" not in serialized
+    assert "secret" not in serialized
+
+
+def test_rejeita_approved_com_erro_estruturado() -> None:
+    result = normalize_engine_preflight_result(
+        request=_request(),
+        provider_result={
+            "status": "approved",
+            "provider_name": "fake_engine_preflight",
+            "failure_category": "syntax_error",
+            "error_code": "ENGINE_PREFLIGHT_SYNTAX_ERROR",
+            "repairable": True,
+            "executed": False,
+            "rows_returned": 0,
+        },
+    )
+
+    assert result["status"] == "error"
+    assert result["approved"] is False
+    assert result["repairable"] is False
+    assert result["failure_category"] == "adapter_error"
+    assert result["errors"][0]["code"] == (
+        "ENGINE_PREFLIGHT_RESPONSE_INVALID"
+    )
+
+
 def test_provider_nao_pode_marcar_execucao() -> None:
     result = normalize_engine_preflight_result(
         request=_request(),
@@ -320,6 +378,10 @@ def main() -> None:
         ("constroi requisicao", test_constroi_requisicao_minima),
         ("usa current_sql", test_requisicao_usa_current_sql),
         (
+            "preserva current_sql",
+            test_requisicao_preserva_current_sql_sem_reescrita,
+        ),
+        (
             "sem snapshot ou credenciais",
             test_requisicao_nao_contem_context_snapshot_ou_credenciais,
         ),
@@ -333,6 +395,14 @@ def main() -> None:
         ("categorias infraestrutura", test_categorias_infraestrutura),
         ("resposta invalida", test_resposta_invalida),
         ("sanitiza mensagem", test_sanitiza_mensagem_dsn_senha_token),
+        (
+            "sanitiza SQL e authorization",
+            test_sanitiza_sql_authorization_e_warning,
+        ),
+        (
+            "rejeita approved inconsistente",
+            test_rejeita_approved_com_erro_estruturado,
+        ),
         ("executed false", test_provider_nao_pode_marcar_execucao),
         ("determinismo", test_comportamento_deterministico),
     ]

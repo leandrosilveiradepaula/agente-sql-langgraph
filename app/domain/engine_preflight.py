@@ -151,7 +151,7 @@ def build_engine_preflight_request(
             "query_plan.planning_context esta ausente.",
         )
 
-    sql = current_sql.strip()
+    sql = current_sql
     request: EnginePreflightRequest = {
         "contract_version": ENGINE_PREFLIGHT_CONTRACT_VERSION,
         "sql": sql,
@@ -199,6 +199,12 @@ def normalize_engine_preflight_result(
         )
 
     category = _provider_category(provider_result, status)
+    if _approved_with_error(provider_result, status, category):
+        return _invalid_provider_response(
+            request,
+            message="Provider aprovou preflight com erro estruturado.",
+        )
+
     infrastructure = category in _INFRASTRUCTURE_CATEGORIES or status == "error"
     approved = status == "approved"
     result_status: EnginePreflightStatus = (
@@ -214,11 +220,19 @@ def normalize_engine_preflight_result(
     if infrastructure:
         repairable = False
 
+    forbidden_texts = (request["sql"],)
     code = _provider_code(provider_result, category, infrastructure)
-    message = safe_message(provider_result.get("message"))
-    provider_name = safe_provider_name(provider_result.get("provider_name"))
+    message = safe_message(
+        provider_result.get("message"),
+        forbidden_texts=forbidden_texts,
+    )
+    provider_name = safe_provider_name(
+        provider_result.get("provider_name"),
+        forbidden_texts=forbidden_texts,
+    )
     provider_version = safe_optional_text(
-        provider_result.get("provider_version")
+        provider_result.get("provider_version"),
+        forbidden_texts=forbidden_texts,
     )
     capabilities = _capabilities(provider_result.get("capabilities"))
     duration_ms = _non_negative_int(provider_result.get("duration_ms"))
@@ -245,6 +259,7 @@ def normalize_engine_preflight_result(
             message=message,
             repairable=repairable,
             provider_result=provider_result,
+            forbidden_texts=forbidden_texts,
         )
         if not approved
         else None
@@ -276,7 +291,10 @@ def normalize_engine_preflight_result(
             for item in findings
             if item["severity"] == "error"
         ],
-        "warnings": safe_warnings(provider_result.get("warnings")),
+        "warnings": safe_warnings(
+            provider_result.get("warnings"),
+            forbidden_texts=forbidden_texts,
+        ),
         "provider_name": provider_name,
         "provider_version": provider_version,
         "preflight_contract_version": ENGINE_PREFLIGHT_CONTRACT_VERSION,
@@ -347,6 +365,7 @@ def _finding(
     message: str,
     repairable: bool,
     provider_result: Mapping[str, Any],
+    forbidden_texts: tuple[str, ...],
 ) -> EnginePreflightFinding:
     return {
         "code": code,
@@ -362,9 +381,13 @@ def _finding(
         "line": _optional_int(provider_result.get("line")),
         "column": _optional_int(provider_result.get("column")),
         "related_object": safe_optional_text(
-            provider_result.get("related_object")
+            provider_result.get("related_object"),
+            forbidden_texts=forbidden_texts,
         ),
-        "sanitized_hint": safe_optional_text(provider_result.get("hint")),
+        "sanitized_hint": safe_optional_text(
+            provider_result.get("hint"),
+            forbidden_texts=forbidden_texts,
+        ),
         "details": {},
     }
 
@@ -418,6 +441,21 @@ def _provider_code(
         if infrastructure
         else "ENGINE_PREFLIGHT_UNKNOWN_SQL_ERROR"
     )
+
+
+def _approved_with_error(
+    provider_result: Mapping[str, Any],
+    status: str,
+    category: EnginePreflightFailureCategory,
+) -> bool:
+    if status != "approved":
+        return False
+    if category != "none":
+        return True
+    if provider_result.get("repairable") is True:
+        return True
+    code = provider_result.get("error_code")
+    return isinstance(code, str) and code.startswith("ENGINE_PREFLIGHT_")
 
 
 def _diagnostic(
