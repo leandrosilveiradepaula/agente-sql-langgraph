@@ -14,6 +14,7 @@ from app.graph.builder import create_graph
 from app.ports.context_repository import ContextRepository
 from app.ports.engine_preflight import EnginePreflight
 from app.ports.sql_generator import SqlGenerator
+from app.ports.sql_repairer import SqlRepairer
 
 
 RuntimeEnvironment = Mapping[str, str]
@@ -26,7 +27,7 @@ RepositoryFactory = Callable[
     ContextRepository,
 ]
 GraphFactory = Callable[
-    [ContextRepository, SqlGenerator, EnginePreflight],
+    [ContextRepository, SqlGenerator, EnginePreflight, SqlRepairer],
     Any,
 ]
 
@@ -53,6 +54,7 @@ def create_postgres_context_graph(
     *,
     sql_generator: SqlGenerator | None = None,
     engine_preflight: EnginePreflight | None = None,
+    sql_repairer: SqlRepairer | None = None,
     config_loader: ConfigLoader = (
         load_postgres_context_runtime_config
     ),
@@ -68,7 +70,9 @@ def create_postgres_context_graph(
     ambiente externo
     -> configuracao validada
     -> PostgresContextRepository
-    -> create_graph(repository, sql_generator, engine_preflight)
+    -> create_graph(
+       repository, sql_generator, engine_preflight, sql_repairer
+    )
     -> grafo compilado
 
     Esta fase nao define providers padrao. Os adapters devem ser
@@ -88,4 +92,14 @@ def create_postgres_context_graph(
             "engine_preflight deve ser injetado no composition root."
         )
 
-    return graph_factory(repository, sql_generator, engine_preflight)
+    if sql_repairer is None:
+        raise RuntimeError(
+            "sql_repairer deve ser injetado no composition root."
+        )
+
+    return graph_factory(
+        repository,
+        sql_generator,
+        engine_preflight,
+        sql_repairer,
+    )

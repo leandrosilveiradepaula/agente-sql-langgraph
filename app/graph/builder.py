@@ -25,6 +25,9 @@ from app.graph.nodes.load_context import (
 from app.graph.nodes.receive_question import (
     receive_question,
 )
+from app.graph.nodes.repair_sql import (
+    create_repair_sql_node,
+)
 from app.graph.nodes.security_gate import (
     security_gate,
 )
@@ -36,6 +39,7 @@ from app.graph.routing import (
     route_after_generate_sql,
     route_after_load_context,
     route_after_receive_question,
+    route_after_repair_sql,
     route_after_security_gate,
 )
 from app.graph.state import GraphState
@@ -44,12 +48,14 @@ from app.ports.context_repository import (
 )
 from app.ports.engine_preflight import EnginePreflight
 from app.ports.sql_generator import SqlGenerator
+from app.ports.sql_repairer import SqlRepairer
 
 
 def create_graph(
     context_repository: ContextRepository,
     sql_generator: SqlGenerator,
     engine_preflight: EnginePreflight,
+    sql_repairer: SqlRepairer,
 ):
     """
     Monta e compila o grafo-base do agente.
@@ -65,6 +71,9 @@ def create_graph(
     )
     engine_preflight_node = create_engine_preflight_node(
         engine_preflight,
+    )
+    repair_sql_node = create_repair_sql_node(
+        sql_repairer,
     )
 
     builder = StateGraph(GraphState)
@@ -107,6 +116,11 @@ def create_graph(
     builder.add_node(
         "engine_preflight",
         engine_preflight_node,
+    )
+
+    builder.add_node(
+        "repair_sql",
+        repair_sql_node,
     )
 
     builder.add_node(
@@ -210,6 +224,19 @@ def create_graph(
         "engine_preflight",
         route_after_engine_preflight,
         {
+            "repair_sql": "repair_sql",
+            "complete": END,
+            "infrastructure_error": (
+                "finalize_infrastructure_error"
+            ),
+        },
+    )
+
+    builder.add_conditional_edges(
+        "repair_sql",
+        route_after_repair_sql,
+        {
+            "security_gate": "security_gate",
             "complete": END,
             "infrastructure_error": (
                 "finalize_infrastructure_error"

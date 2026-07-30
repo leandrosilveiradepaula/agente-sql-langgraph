@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from app.adapters.testing.fake_engine_preflight import FakeEnginePreflight
+from app.adapters.testing.fake_sql_repairer import FakeSqlRepairer
 from app.domain.context_normalizer import normalize_context_snapshot
 from app.domain.planner import build_query_plan
 from app.domain.sql_generation import SqlGenerationProviderError
@@ -205,7 +206,13 @@ def test_query_plan_invalido_gera_erro_de_contrato() -> None:
 def test_grafo_nao_chama_generator_quando_intencao_rejeitada() -> None:
     generator = FakeSqlGenerator()
     preflight = FakeEnginePreflight()
-    graph = create_graph(SuccessContextRepository(), generator, preflight)
+    repairer = FakeSqlRepairer()
+    graph = create_graph(
+        SuccessContextRepository(),
+        generator,
+        preflight,
+        repairer,
+    )
 
     result = graph.invoke(
         _graph_state(
@@ -225,6 +232,7 @@ def test_grafo_nao_chama_generator_quando_intencao_rejeitada() -> None:
 def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
     generator = FakeSqlGenerator()
     preflight = FakeEnginePreflight()
+    repairer = FakeSqlRepairer()
     raw_context = _raw_context_snapshot()
     raw_context["padroes"][0]["required_rules"] = [
         "missing_rule",
@@ -233,6 +241,7 @@ def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
         SuccessContextRepository(raw_context),
         generator,
         preflight,
+        repairer,
     )
 
     result = graph.invoke(
@@ -252,7 +261,13 @@ def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
 def test_grafo_chama_generator_apos_build_plan_processing() -> None:
     generator = FakeSqlGenerator()
     preflight = FakeEnginePreflight()
-    graph = create_graph(SuccessContextRepository(), generator, preflight)
+    repairer = FakeSqlRepairer()
+    graph = create_graph(
+        SuccessContextRepository(),
+        generator,
+        preflight,
+        repairer,
+    )
 
     result = graph.invoke(
         _graph_state("Execute uma generic analysis de teste."),
@@ -271,6 +286,7 @@ def test_grafo_chama_generator_apos_build_plan_processing() -> None:
     assert result["engine_preflight_result"]["status"] == "approved"
     assert generator.calls == 1
     assert preflight.calls == 1
+    assert repairer.calls == 0
 
 
 def main() -> None:

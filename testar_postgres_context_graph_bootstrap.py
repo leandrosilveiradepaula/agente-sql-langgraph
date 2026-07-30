@@ -41,11 +41,21 @@ class FakeEnginePreflight:
         }
 
 
+class FakeSqlRepairer:
+    def repair(self, request):
+        del request
+        return {
+            "provider_name": "fake_sql_repairer",
+            "output_text": "SELECT 1",
+        }
+
+
 def test_bootstrap_padrao_compila_sem_abrir_conexao() -> None:
     graph = create_postgres_context_graph(
         FAKE_ENVIRONMENT,
         sql_generator=FakeSqlGenerator(),
         engine_preflight=FakeEnginePreflight(),
+        sql_repairer=FakeSqlRepairer(),
     )
 
     assert callable(getattr(graph, "invoke", None))
@@ -56,6 +66,7 @@ def test_entrada_invalida_nao_acessa_postgres() -> None:
         FAKE_ENVIRONMENT,
         sql_generator=FakeSqlGenerator(),
         engine_preflight=FakeEnginePreflight(),
+        sql_repairer=FakeSqlRepairer(),
     )
 
     result = graph.invoke(
@@ -95,6 +106,7 @@ def test_factories_recebem_dependencias_corretas() -> None:
     expected_graph = object()
     expected_sql_generator = FakeSqlGenerator()
     expected_engine_preflight = FakeEnginePreflight()
+    expected_sql_repairer = FakeSqlRepairer()
 
     class FakeRepository:
         def load_active_context(
@@ -128,16 +140,19 @@ def test_factories_recebem_dependencias_corretas() -> None:
         repository: ContextRepository,
         sql_generator,
         engine_preflight,
+        sql_repairer,
     ) -> Any:
         captured["repository"] = repository
         captured["sql_generator"] = sql_generator
         captured["engine_preflight"] = engine_preflight
+        captured["sql_repairer"] = sql_repairer
         return expected_graph
 
     graph = create_postgres_context_graph(
         expected_environment,
         sql_generator=expected_sql_generator,
         engine_preflight=expected_engine_preflight,
+        sql_repairer=expected_sql_repairer,
         config_loader=fake_config_loader,
         repository_factory=fake_repository_factory,
         graph_factory=fake_graph_factory,
@@ -153,6 +168,7 @@ def test_factories_recebem_dependencias_corretas() -> None:
     )
     assert captured["sql_generator"] is expected_sql_generator
     assert captured["engine_preflight"] is expected_engine_preflight
+    assert captured["sql_repairer"] is expected_sql_repairer
 
 
 def test_bootstrap_exige_preflight_explicito() -> None:
@@ -160,10 +176,26 @@ def test_bootstrap_exige_preflight_explicito() -> None:
         create_postgres_context_graph(
             FAKE_ENVIRONMENT,
             sql_generator=FakeSqlGenerator(),
+            sql_repairer=FakeSqlRepairer(),
         )
     except RuntimeError as error:
         assert str(error) == (
             "engine_preflight deve ser injetado no composition root."
+        )
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+
+def test_bootstrap_exige_repairer_explicito() -> None:
+    try:
+        create_postgres_context_graph(
+            FAKE_ENVIRONMENT,
+            sql_generator=FakeSqlGenerator(),
+            engine_preflight=FakeEnginePreflight(),
+        )
+    except RuntimeError as error:
+        assert str(error) == (
+            "sql_repairer deve ser injetado no composition root."
         )
     else:
         raise AssertionError("Era esperado RuntimeError.")
@@ -198,6 +230,10 @@ def main() -> None:
         (
             "bootstrap exige preflight explicito",
             test_bootstrap_exige_preflight_explicito,
+        ),
+        (
+            "bootstrap exige repairer explicito",
+            test_bootstrap_exige_repairer_explicito,
         ),
         (
             "configuracao invalida interrompe bootstrap",
