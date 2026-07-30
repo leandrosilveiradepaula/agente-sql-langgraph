@@ -31,11 +31,25 @@ STEPS = [
         "testar_build_plan.py",
         [sys.executable, "testar_build_plan.py"],
     ),
+    (
+        "testar_sql_generation.py",
+        [sys.executable, "testar_sql_generation.py"],
+    ),
+    (
+        "testar_generate_sql.py",
+        [sys.executable, "testar_generate_sql.py"],
+    ),
     ("testar_grafo_base.py", [sys.executable, "testar_grafo_base.py"]),
     (
         "testar_postgres_context_repository.py",
         [sys.executable, "testar_postgres_context_repository.py"],
     ),
+    (
+        "testar_postgres_context_graph_bootstrap.py",
+        [sys.executable, "testar_postgres_context_graph_bootstrap.py"],
+    ),
+    ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
+    ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),
     ("pip check", [sys.executable, "-m", "pip", "check"]),
 ]
 

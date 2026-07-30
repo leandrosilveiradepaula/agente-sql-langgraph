@@ -8,6 +8,7 @@ from app.graph.builder import create_graph
 from app.graph.routing import (
     route_after_build_plan,
     route_after_classify_intent,
+    route_after_generate_sql,
 )
 from app.graph.state import GraphState
 from app.ports.context_repository import (
@@ -267,17 +268,42 @@ class ShouldNotBeCalledRepository:
         )
 
 
+class FakeSqlGenerator:
+    def __init__(
+        self,
+        output_text: str = (
+            "SELECT id FROM schema_test.table_test"
+        ),
+    ) -> None:
+        self.output_text = output_text
+        self.calls = 0
+        self.last_request = None
+
+    def generate(self, request):
+        self.calls += 1
+        self.last_request = deepcopy(request)
+        assert "context" not in request
+        return {
+            "provider_name": "fake_sql_generator",
+            "output_text": self.output_text,
+            "duration_ms": 1,
+        }
+
+
 def run_test(
     title: str,
     repository,
     initial_state: GraphState,
     assertion: Callable[[GraphState], None],
+    *,
+    sql_generator: FakeSqlGenerator | None = None,
 ) -> None:
     print("=" * 70)
     print(title)
     print("=" * 70)
 
-    graph = create_graph(repository)
+    generator = sql_generator or FakeSqlGenerator()
+    graph = create_graph(repository, generator)
 
     result = graph.invoke(
         initial_state,
@@ -301,7 +327,7 @@ def _assert_classified_intent(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "processing"
-    assert result["current_stage"] == "build_plan"
+    assert result["current_stage"] == "generate_sql"
     assert result["failure_stage"] == ""
     assert result["context_version"] == "context-test-v3"
     assert result["intent"] == "generic_test_intent"
@@ -313,6 +339,11 @@ def _assert_classified_intent(
     assert result["query_plan"]["planning_context"][
         "required_tables"
     ][0]["qualified_name"] == "schema_test.table_test"
+    assert result["generated_sql"] == (
+        "SELECT id FROM schema_test.table_test"
+    )
+    assert result["current_sql"] == result["generated_sql"]
+    assert result["sql_generation_result"]["status"] == "generated"
     assert result["errors"] == []
     assert result["warnings"] == []
 
@@ -343,11 +374,15 @@ def _assert_catalog_only_classification(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "processing"
-    assert result["current_stage"] == "build_plan"
+    assert result["current_stage"] == "generate_sql"
     assert result["failure_stage"] == ""
     assert result["intent"] == "generic_test_intent"
     assert result["intent_confidence"] == 0.98
     assert result["query_plan"]["intent_name"] == "generic_test_intent"
+    assert result["generated_sql"] == (
+        "SELECT id FROM schema_test.table_test"
+    )
+    assert result["current_sql"] == result["generated_sql"]
     assert result["errors"] == []
 
     context = result["context"]
@@ -478,13 +513,31 @@ def test_classify_routing() -> None:
                 "intent_name": "generic_test_intent",
             },
         }
-    ) == "complete"
+    ) == "generate_sql"
     assert route_after_build_plan(
         {
             "final_status": "rejected",
         }
     ) == "complete"
     assert route_after_build_plan(
+        {
+            "final_status": "infrastructure_error",
+        }
+    ) == "infrastructure_error"
+
+    assert route_after_generate_sql(
+        {
+            "final_status": "processing",
+            "generated_sql": "SELECT 1",
+            "current_sql": "SELECT 1",
+        }
+    ) == "complete"
+    assert route_after_generate_sql(
+        {
+            "final_status": "rejected",
+        }
+    ) == "complete"
+    assert route_after_generate_sql(
         {
             "final_status": "infrastructure_error",
         }

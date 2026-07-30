@@ -12,6 +12,7 @@ from app.config.postgres_context import (
 )
 from app.graph.builder import create_graph
 from app.ports.context_repository import ContextRepository
+from app.ports.sql_generator import SqlGenerator
 
 
 RuntimeEnvironment = Mapping[str, str]
@@ -24,7 +25,7 @@ RepositoryFactory = Callable[
     ContextRepository,
 ]
 GraphFactory = Callable[
-    [ContextRepository],
+    [ContextRepository, SqlGenerator],
     Any,
 ]
 
@@ -33,9 +34,9 @@ def create_postgres_context_repository(
     config: PostgresContextRuntimeConfig,
 ) -> PostgresContextRepository:
     """
-    Cria o repositório PostgreSQL a partir da configuração validada.
+    Cria o repositorio PostgreSQL a partir da configuracao validada.
 
-    Nenhuma conexão é aberta durante esta etapa. A conexão ocorre
+    Nenhuma conexao e aberta durante esta etapa. A conexao ocorre
     somente quando o grafo executa load_active_context.
     """
 
@@ -49,6 +50,7 @@ def create_postgres_context_repository(
 def create_postgres_context_graph(
     environ: RuntimeEnvironment | None = None,
     *,
+    sql_generator: SqlGenerator | None = None,
     config_loader: ConfigLoader = (
         load_postgres_context_runtime_config
     ),
@@ -62,17 +64,21 @@ def create_postgres_context_graph(
 
     Fluxo de montagem:
     ambiente externo
-    -> configuração validada
+    -> configuracao validada
     -> PostgresContextRepository
-    -> create_graph(repository)
+    -> create_graph(repository, sql_generator)
     -> grafo compilado
 
-    O parâmetro environ permite testes determinísticos sem alterar
-    os.environ. As factories são injetáveis somente para testes e
-    outros composition roots controlados.
+    Esta fase nao define provider SQL padrao. O adapter deve ser
+    injetado explicitamente pelo composition root chamador.
     """
 
     config = config_loader(environ)
     repository = repository_factory(config)
 
-    return graph_factory(repository)
+    if sql_generator is None:
+        raise RuntimeError(
+            "sql_generator deve ser injetado no composition root."
+        )
+
+    return graph_factory(repository, sql_generator)

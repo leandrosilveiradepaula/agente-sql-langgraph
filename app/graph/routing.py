@@ -70,11 +70,12 @@ def route_after_classify_intent(
 def route_after_build_plan(
     state: GraphState,
 ) -> Literal[
+    "generate_sql",
     "complete",
     "infrastructure_error",
 ]:
     """
-    Decide o encerramento depois da construcao do plano.
+    Decide o caminho depois da construcao do plano.
     """
 
     final_status = state.get(
@@ -83,6 +84,34 @@ def route_after_build_plan(
     )
 
     if final_status == "processing" and state.get("query_plan"):
+        return "generate_sql"
+
+    if final_status == "rejected":
+        return "complete"
+
+    return "infrastructure_error"
+
+
+def route_after_generate_sql(
+    state: GraphState,
+) -> Literal[
+    "complete",
+    "infrastructure_error",
+]:
+    """
+    Decide o encerramento depois da geracao SQL.
+    """
+
+    final_status = state.get(
+        "final_status",
+        "infrastructure_error",
+    )
+
+    if (
+        final_status == "processing"
+        and state.get("generated_sql")
+        and state.get("current_sql")
+    ):
         return "complete"
 
     if final_status == "rejected":

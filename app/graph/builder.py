@@ -10,6 +10,9 @@ from app.graph.nodes.finalize_infrastructure_error import (
 from app.graph.nodes.finalize_invalid_request import (
     finalize_invalid_request,
 )
+from app.graph.nodes.generate_sql import (
+    create_generate_sql_node,
+)
 from app.graph.nodes.load_context import (
     create_load_context_node,
 )
@@ -19,6 +22,7 @@ from app.graph.nodes.receive_question import (
 from app.graph.routing import (
     route_after_build_plan,
     route_after_classify_intent,
+    route_after_generate_sql,
     route_after_load_context,
     route_after_receive_question,
 )
@@ -26,19 +30,24 @@ from app.graph.state import GraphState
 from app.ports.context_repository import (
     ContextRepository,
 )
+from app.ports.sql_generator import SqlGenerator
 
 
 def create_graph(
     context_repository: ContextRepository,
+    sql_generator: SqlGenerator,
 ):
     """
-    Monta e compila o grafo-base do Agente SQL Financeiro.
+    Monta e compila o grafo-base do agente.
 
-    O repositório de contexto é recebido externamente.
+    Repositorio de contexto e gerador SQL sao recebidos externamente.
     """
 
     load_context = create_load_context_node(
         context_repository,
+    )
+    generate_sql = create_generate_sql_node(
+        sql_generator,
     )
 
     builder = StateGraph(GraphState)
@@ -61,6 +70,11 @@ def create_graph(
     builder.add_node(
         "build_plan",
         build_plan,
+    )
+
+    builder.add_node(
+        "generate_sql",
+        generate_sql,
     )
 
     builder.add_node(
@@ -115,6 +129,18 @@ def create_graph(
     builder.add_conditional_edges(
         "build_plan",
         route_after_build_plan,
+        {
+            "generate_sql": "generate_sql",
+            "complete": END,
+            "infrastructure_error": (
+                "finalize_infrastructure_error"
+            ),
+        },
+    )
+
+    builder.add_conditional_edges(
+        "generate_sql",
+        route_after_generate_sql,
         {
             "complete": END,
             "infrastructure_error": (

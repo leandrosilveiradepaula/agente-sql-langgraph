@@ -9,7 +9,9 @@ autocontido depois da resolucao de intencao.
 ## Limites da fase
 
 O planner nao gera SQL final, nao chama LLM, nao usa embeddings, nao acessa
-PostgreSQL novamente e nao chama servicos externos. O campo legado
+PostgreSQL novamente e nao chama servicos externos. A fase posterior de
+geracao SQL consome somente o `QueryPlan` e chama um `SqlGenerator` injetado
+externamente. O campo legado
 `sql_pattern` e preservado apenas como metadado de compatibilidade.
 
 ## Tipos
@@ -102,12 +104,26 @@ inesperadas seguem para `finalize_infrastructure_error`.
 
 Fluxo final:
 
-`START -> receive_question -> load_context -> classify_intent -> build_plan -> END`
+`START -> receive_question -> load_context -> classify_intent -> build_plan -> generate_sql -> END`
 
 Depois de `classify_intent`, `processing` com intencao aplicada vai para
 `build_plan`, `rejected` encerra e `infrastructure_error` segue ao finalizador.
-Depois de `build_plan`, `processing` com `query_plan` encerra, `rejected`
-encerra e `infrastructure_error` segue ao finalizador.
+Depois de `build_plan`, `processing` com `query_plan` vai para `generate_sql`,
+`rejected` encerra e `infrastructure_error` segue ao finalizador. Depois de
+`generate_sql`, `processing` com `generated_sql` e `current_sql` encerra,
+`rejected` encerra e `infrastructure_error` segue ao finalizador.
+
+## Geracao SQL
+
+O contrato de geracao fica em `app/domain/sql_generation.py`. A requisicao ao
+provider e deterministica, autocontida e derivada exclusivamente do `QueryPlan`:
+versoes, fingerprint do contexto, intencao, pergunta normalizada, padrao
+selecionado, regras aplicaveis, tabelas autorizadas, colunas, joins,
+entidades operacionais, mapeamentos DRE projetados e metadados do padrao.
+
+A resposta aceita e somente texto SQL puro, com uma unica instrucao `SELECT` ou
+`WITH`. Markdown, explicacoes, multiplas instrucoes e comandos de escrita/DDL
+sao rejeitados estruturalmente antes de preencher `generated_sql`.
 
 ## Determinismo e imutabilidade
 
@@ -121,6 +137,5 @@ nao e contrato de SQL pronto para execucao.
 
 ## Proxima fase
 
-A geracao SQL devera consumir o `QueryPlan` e sua `PlanningContextProjection`
-sem reler o snapshot completo e sem inferir tabelas, colunas, joins ou regras
-fora do contrato projetado.
+As proximas fases deverao validar seguranca, contrato e preflight do SQL
+gerado antes de qualquer execucao.

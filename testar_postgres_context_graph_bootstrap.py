@@ -21,9 +21,19 @@ FAKE_ENVIRONMENT = {
 }
 
 
+class FakeSqlGenerator:
+    def generate(self, request):
+        del request
+        return {
+            "provider_name": "fake_sql_generator",
+            "output_text": "SELECT 1",
+        }
+
+
 def test_bootstrap_padrao_compila_sem_abrir_conexao() -> None:
     graph = create_postgres_context_graph(
-        FAKE_ENVIRONMENT
+        FAKE_ENVIRONMENT,
+        sql_generator=FakeSqlGenerator(),
     )
 
     assert callable(getattr(graph, "invoke", None))
@@ -31,7 +41,8 @@ def test_bootstrap_padrao_compila_sem_abrir_conexao() -> None:
 
 def test_entrada_invalida_nao_acessa_postgres() -> None:
     graph = create_postgres_context_graph(
-        FAKE_ENVIRONMENT
+        FAKE_ENVIRONMENT,
+        sql_generator=FakeSqlGenerator(),
     )
 
     result = graph.invoke(
@@ -69,6 +80,7 @@ def test_factories_recebem_dependencias_corretas() -> None:
         connect_timeout_seconds=5,
     )
     expected_graph = object()
+    expected_sql_generator = FakeSqlGenerator()
 
     class FakeRepository:
         def load_active_context(
@@ -100,12 +112,15 @@ def test_factories_recebem_dependencias_corretas() -> None:
 
     def fake_graph_factory(
         repository: ContextRepository,
+        sql_generator,
     ) -> Any:
         captured["repository"] = repository
+        captured["sql_generator"] = sql_generator
         return expected_graph
 
     graph = create_postgres_context_graph(
         expected_environment,
+        sql_generator=expected_sql_generator,
         config_loader=fake_config_loader,
         repository_factory=fake_repository_factory,
         graph_factory=fake_graph_factory,
@@ -119,6 +134,7 @@ def test_factories_recebem_dependencias_corretas() -> None:
     assert captured["repository"] is (
         expected_repository
     )
+    assert captured["sql_generator"] is expected_sql_generator
 
 
 def test_configuracao_invalida_interrompe_bootstrap() -> None:
