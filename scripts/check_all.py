@@ -36,6 +36,26 @@ STEPS = [
         [sys.executable, "testar_sql_generation.py"],
     ),
     (
+        "testar_sql_analysis.py",
+        [sys.executable, "testar_sql_analysis.py"],
+    ),
+    (
+        "testar_sql_security.py",
+        [sys.executable, "testar_sql_security.py"],
+    ),
+    (
+        "testar_security_gate.py",
+        [sys.executable, "testar_security_gate.py"],
+    ),
+    (
+        "testar_sql_contract.py",
+        [sys.executable, "testar_sql_contract.py"],
+    ),
+    (
+        "testar_contract_gate.py",
+        [sys.executable, "testar_contract_gate.py"],
+    ),
+    (
         "testar_generate_sql.py",
         [sys.executable, "testar_generate_sql.py"],
     ),

@@ -4,7 +4,10 @@ from app.domain.intent_resolver import (
     IntentResolutionResult,
 )
 from app.domain.planning import QueryPlan
+from app.domain.sql_analysis import SqlStatementAnalysis
+from app.domain.sql_contract import SqlContractResult
 from app.domain.sql_generation import SqlGenerationResult
+from app.domain.sql_security import SqlSecurityResult
 
 
 class UserContext(TypedDict, total=False):
@@ -102,6 +105,7 @@ class GraphState(TypedDict, total=False):
     intent_resolution_result: IntentResolutionResult
     query_plan: QueryPlan
     sql_generation_result: SqlGenerationResult
+    sql_analysis: SqlStatementAnalysis
 
     # SQL
     generated_sql: str
@@ -115,8 +119,8 @@ class GraphState(TypedDict, total=False):
     repair_history: list[RepairRecord]
 
     # Resultados dos gates
-    security_result: GateResult
-    contract_result: GateResult
+    security_result: SqlSecurityResult
+    contract_result: SqlContractResult
     engine_preflight_result: GateResult
 
     # Resultado geral

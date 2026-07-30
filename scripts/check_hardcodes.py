@@ -26,9 +26,14 @@ PLANNER_FORBIDDEN_EXTERNALS = {
 PLANNER_FILES = {
     "app/domain/planner.py",
     "app/domain/planning.py",
+    "app/domain/sql_analysis.py",
+    "app/domain/sql_contract.py",
     "app/domain/sql_generation.py",
+    "app/domain/sql_security.py",
     "app/graph/nodes/build_plan.py",
+    "app/graph/nodes/contract_gate.py",
     "app/graph/nodes/generate_sql.py",
+    "app/graph/nodes/security_gate.py",
     "app/ports/sql_generator.py",
 }
 
