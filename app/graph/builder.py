@@ -1,5 +1,6 @@
 from langgraph.graph import END, START, StateGraph
 
+from app.graph.nodes.build_plan import build_plan
 from app.graph.nodes.classify_intent import (
     classify_intent,
 )
@@ -16,6 +17,7 @@ from app.graph.nodes.receive_question import (
     receive_question,
 )
 from app.graph.routing import (
+    route_after_build_plan,
     route_after_classify_intent,
     route_after_load_context,
     route_after_receive_question,
@@ -54,6 +56,11 @@ def create_graph(
     builder.add_node(
         "classify_intent",
         classify_intent,
+    )
+
+    builder.add_node(
+        "build_plan",
+        build_plan,
     )
 
     builder.add_node(
@@ -96,6 +103,18 @@ def create_graph(
     builder.add_conditional_edges(
         "classify_intent",
         route_after_classify_intent,
+        {
+            "build_plan": "build_plan",
+            "complete": END,
+            "infrastructure_error": (
+                "finalize_infrastructure_error"
+            ),
+        },
+    )
+
+    builder.add_conditional_edges(
+        "build_plan",
+        route_after_build_plan,
         {
             "complete": END,
             "infrastructure_error": (

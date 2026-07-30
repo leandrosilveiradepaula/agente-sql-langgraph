@@ -3,6 +3,7 @@ from typing import Any, Literal, TypedDict
 from app.domain.intent_resolver import (
     IntentResolutionResult,
 )
+from app.domain.planning import QueryPlan
 
 
 class UserContext(TypedDict, total=False):
@@ -98,7 +99,7 @@ class GraphState(TypedDict, total=False):
     intent: str | None
     intent_confidence: float | None
     intent_resolution_result: IntentResolutionResult
-    query_plan: dict[str, Any]
+    query_plan: QueryPlan
 
     # SQL
     generated_sql: str
