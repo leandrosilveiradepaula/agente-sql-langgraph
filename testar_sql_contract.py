@@ -1,0 +1,331 @@
+from __future__ import annotations
+
+from copy import deepcopy
+
+from app.domain.planner import build_query_plan
+from app.domain.sql_contract import (
+    build_sql_contract_policy,
+    run_sql_contract_gate,
+)
+from testar_planner import _context
+
+
+def _query_plan() -> dict:
+    result = build_query_plan(
+        context=_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="generic analysis",
+    )
+    assert result["query_plan"] is not None
+    return result["query_plan"]
+
+
+def _with_rule(rule_content: dict) -> dict:
+    plan = deepcopy(_query_plan())
+    plan["planning_context"]["rules"][0]["rule_content"] = rule_content
+    return plan
+
+
+def _with_second_table(*, authorized_join: bool = True) -> dict:
+    plan = deepcopy(_query_plan())
+    projection = plan["planning_context"]
+    projection["required_tables"].append(
+        {
+            "schema_name": "schema_test",
+            "table_name": "table_other",
+            "qualified_name": "schema_test.table_other",
+            "primary_key": ["id"],
+            "key_columns": ["id"],
+            "metric_columns": ["other_value"],
+            "date_columns": ["event_date"],
+            "join_rules": [],
+            "columns": [
+                {"name": "id"},
+                {"name": "other_value"},
+                {"name": "event_date"},
+            ],
+        }
+    )
+    projection["relevant_columns"]["schema_test.table_other"] = [
+        {"name": "id"},
+        {"name": "other_value"},
+        {"name": "event_date"},
+    ]
+    if authorized_join:
+        projection["authorized_joins"] = [
+            {
+                "source_table": "schema_test.table_test",
+                "join_rules": [
+                    {"target_table": "schema_test.table_other"}
+                ],
+                "interpretation": "preserved_selected_table_rules",
+            }
+        ]
+    else:
+        projection["authorized_joins"] = []
+    return plan
+
+
+def _with_opaque_join() -> dict:
+    plan = _with_second_table(authorized_join=False)
+    plan["planning_context"]["authorized_joins"] = [
+        {
+            "source_table": "schema_test.table_test",
+            "join_rules": {"opaque": True},
+            "interpretation": "preserved_uninterpreted",
+        }
+    ]
+    return plan
+
+
+def _run(sql: str, plan: dict | None = None):
+    return run_sql_contract_gate(
+        current_sql=sql,
+        query_plan=plan or _query_plan(),
+    )[0]
+
+
+def test_contrato_valido_aprovado() -> None:
+    result = _run("SELECT id, value FROM schema_test.table_test")
+
+    assert result["status"] == "approved"
+    assert result["required_tables"][0]["status"] == "satisfied"
+
+
+def test_required_table_ausente() -> None:
+    result = _run(
+        "SELECT id FROM schema_test.table_test",
+        _with_second_table(),
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["code"] == "SQL_CONTRACT_REQUIRED_TABLE_MISSING"
+        for error in result["errors"]
+    )
+
+
+def test_tabela_adicional() -> None:
+    result = _run("SELECT id FROM schema_test.table_other")
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["code"] == "SQL_CONTRACT_UNPLANNED_TABLE"
+        for error in result["errors"]
+    )
+
+
+def test_coluna_inexistente() -> None:
+    result = _run("SELECT missing_column FROM schema_test.table_test")
+
+    assert result["status"] == "rejected"
+    assert result["errors"][0]["code"] == "SQL_CONTRACT_UNKNOWN_COLUMN"
+
+
+def test_alias_invalido() -> None:
+    result = _run("SELECT x.id FROM schema_test.table_test t")
+
+    assert result["status"] == "rejected"
+    assert result["errors"][0]["code"] == "SQL_CONTRACT_INVALID_ALIAS"
+
+
+def test_coluna_nao_qualificada_ambigua() -> None:
+    result = _run(
+        "SELECT id FROM schema_test.table_test t "
+        "JOIN schema_test.table_other o ON t.id = o.id",
+        _with_second_table(),
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["code"] == "SQL_CONTRACT_AMBIGUOUS_COLUMN"
+        for error in result["errors"]
+    )
+
+
+def test_required_rule_estruturada_satisfeita() -> None:
+    result = _run(
+        "SELECT id FROM schema_test.table_test WHERE value = 1",
+        _with_rule({"required_filters": ["where value ="]}),
+    )
+
+    assert result["status"] == "approved"
+    assert result["rules"][0]["status"] == "satisfied"
+
+
+def test_required_rule_estruturada_ausente() -> None:
+    result = _run(
+        "SELECT id FROM schema_test.table_test",
+        _with_rule({"required_filters": ["where value ="]}),
+    )
+
+    assert result["status"] == "rejected"
+    assert result["errors"][0]["code"] == "SQL_CONTRACT_RULE_VIOLATED"
+
+
+def test_forbidden_fragment_presente() -> None:
+    result = _run(
+        "SELECT id FROM schema_test.table_test WHERE value = 1",
+        _with_rule({"forbidden_sql_fragments": ["where value ="]}),
+    )
+
+    assert result["status"] == "rejected"
+
+
+def test_required_filter_presente_e_ausente() -> None:
+    present = _run(
+        "SELECT id FROM schema_test.table_test WHERE value = 1",
+        _with_rule({"required_filters": ["where value ="]}),
+    )
+    missing = _run(
+        "SELECT id FROM schema_test.table_test",
+        _with_rule({"required_filters": ["where value ="]}),
+    )
+
+    assert present["status"] == "approved"
+    assert missing["status"] == "rejected"
+
+
+def test_limit_proibido_permitido_e_exigido() -> None:
+    forbidden = _run(
+        "SELECT id FROM schema_test.table_test LIMIT 10",
+        _with_rule({"limit_policy": "forbid"}),
+    )
+    allowed = _run(
+        "SELECT id FROM schema_test.table_test LIMIT 10",
+        _with_rule({"limit_policy": "allow"}),
+    )
+    required = _run(
+        "SELECT id FROM schema_test.table_test",
+        _with_rule({"limit_policy": "require"}),
+    )
+
+    assert forbidden["status"] == "rejected"
+    assert allowed["status"] == "approved"
+    assert required["status"] == "rejected"
+
+
+def test_join_autorizado() -> None:
+    result = _run(
+        "SELECT t.value, o.other_value "
+        "FROM schema_test.table_test t "
+        "JOIN schema_test.table_other o ON t.id = o.id",
+        _with_second_table(),
+    )
+
+    assert result["status"] == "approved"
+    assert result["joins"][0]["status"] == "satisfied"
+
+
+def test_join_divergente() -> None:
+    result = _run(
+        "SELECT t.value, o.other_value "
+        "FROM schema_test.table_test t "
+        "JOIN schema_test.table_other o ON t.id = o.id",
+        _with_second_table(authorized_join=False),
+    )
+
+    assert result["status"] == "rejected"
+    assert result["errors"][0]["code"] == "SQL_CONTRACT_JOIN_VIOLATED"
+
+
+def test_join_opaco_unverifiable() -> None:
+    result = _run(
+        "SELECT t.value, o.other_value "
+        "FROM schema_test.table_test t "
+        "JOIN schema_test.table_other o ON t.id = o.id",
+        _with_opaque_join(),
+    )
+
+    assert result["status"] == "approved"
+    assert result["joins"][0]["status"] == "unverifiable"
+
+
+def test_regra_opaca_unverifiable() -> None:
+    result = _run("SELECT id FROM schema_test.table_test")
+
+    assert result["status"] == "approved"
+    assert result["unverifiable_rules"]
+
+
+def test_select_star_politica_padrao_e_rejeicao() -> None:
+    default = _run("SELECT * FROM schema_test.table_test")
+    rejected = _run(
+        "SELECT * FROM schema_test.table_test",
+        _with_rule({"select_star_policy": "reject"}),
+    )
+
+    assert default["status"] == "approved"
+    assert default["warnings"]
+    assert rejected["status"] == "rejected"
+
+
+def test_table_star_politica_padrao() -> None:
+    result = _run("SELECT t.* FROM schema_test.table_test t")
+
+    assert result["status"] == "approved"
+    assert result["warnings"]
+
+
+def test_cte_e_subquery_validas() -> None:
+    cte = _run(
+        "WITH generic_cte AS ("
+        "SELECT id FROM schema_test.table_test"
+        ") SELECT id FROM generic_cte"
+    )
+    subquery = _run(
+        "SELECT id FROM ("
+        "SELECT id FROM schema_test.table_test"
+        ") AS generic_subquery"
+    )
+
+    assert cte["status"] == "approved"
+    assert subquery["status"] == "approved"
+
+
+def test_diagnostico_determinismo_e_sem_mutacao() -> None:
+    plan = _query_plan()
+    original = deepcopy(plan)
+    sql = "SELECT id FROM schema_test.table_test"
+
+    first = _run(sql, plan)
+    second = _run(sql, plan)
+
+    assert first["status"] == second["status"] == "approved"
+    assert first["sql_fingerprint"] == second["sql_fingerprint"]
+    assert build_sql_contract_policy(plan) == build_sql_contract_policy(plan)
+    assert plan == original
+    assert sql not in repr(first)
+
+
+def main() -> None:
+    tests = [
+        ("contrato valido", test_contrato_valido_aprovado),
+        ("required_table ausente", test_required_table_ausente),
+        ("tabela adicional", test_tabela_adicional),
+        ("coluna inexistente", test_coluna_inexistente),
+        ("alias invalido", test_alias_invalido),
+        ("coluna ambigua", test_coluna_nao_qualificada_ambigua),
+        ("regra satisfeita", test_required_rule_estruturada_satisfeita),
+        ("regra ausente", test_required_rule_estruturada_ausente),
+        ("fragmento proibido", test_forbidden_fragment_presente),
+        ("filtro presente ausente", test_required_filter_presente_e_ausente),
+        ("LIMIT politicas", test_limit_proibido_permitido_e_exigido),
+        ("join autorizado", test_join_autorizado),
+        ("join divergente", test_join_divergente),
+        ("join opaco", test_join_opaco_unverifiable),
+        ("regra opaca", test_regra_opaca_unverifiable),
+        ("SELECT star", test_select_star_politica_padrao_e_rejeicao),
+        ("table star", test_table_star_politica_padrao),
+        ("CTE subquery", test_cte_e_subquery_validas),
+        ("diagnostico determinismo", test_diagnostico_determinismo_e_sem_mutacao),
+    ]
+
+    for index, (name, test_function) in enumerate(tests, start=1):
+        test_function()
+        print(f"TESTE {index} - {name}: OK")
+
+
+if __name__ == "__main__":
+    main()

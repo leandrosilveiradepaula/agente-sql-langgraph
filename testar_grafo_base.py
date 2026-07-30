@@ -8,7 +8,9 @@ from app.graph.builder import create_graph
 from app.graph.routing import (
     route_after_build_plan,
     route_after_classify_intent,
+    route_after_contract_gate,
     route_after_generate_sql,
+    route_after_security_gate,
 )
 from app.graph.state import GraphState
 from app.ports.context_repository import (
@@ -297,7 +299,7 @@ def run_test(
     assertion: Callable[[GraphState], None],
     *,
     sql_generator: FakeSqlGenerator | None = None,
-) -> None:
+) -> GraphState:
     print("=" * 70)
     print(title)
     print("=" * 70)
@@ -321,13 +323,14 @@ def run_test(
 
     print("ASSERTIONS: OK")
     print()
+    return result
 
 
 def _assert_classified_intent(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "processing"
-    assert result["current_stage"] == "generate_sql"
+    assert result["current_stage"] == "contract_gate"
     assert result["failure_stage"] == ""
     assert result["context_version"] == "context-test-v3"
     assert result["intent"] == "generic_test_intent"
@@ -344,6 +347,9 @@ def _assert_classified_intent(
     )
     assert result["current_sql"] == result["generated_sql"]
     assert result["sql_generation_result"]["status"] == "generated"
+    assert result["security_result"]["status"] == "approved"
+    assert result["contract_result"]["status"] == "approved"
+    assert result["sql_analysis"]["statement_type"] == "select"
     assert result["errors"] == []
     assert result["warnings"] == []
 
@@ -374,7 +380,7 @@ def _assert_catalog_only_classification(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "processing"
-    assert result["current_stage"] == "generate_sql"
+    assert result["current_stage"] == "contract_gate"
     assert result["failure_stage"] == ""
     assert result["intent"] == "generic_test_intent"
     assert result["intent_confidence"] == 0.98
@@ -383,6 +389,8 @@ def _assert_catalog_only_classification(
         "SELECT id FROM schema_test.table_test"
     )
     assert result["current_sql"] == result["generated_sql"]
+    assert result["security_result"]["status"] == "approved"
+    assert result["contract_result"]["status"] == "approved"
     assert result["errors"] == []
 
     context = result["context"]
@@ -479,6 +487,31 @@ def _assert_invalid_input(result: GraphState) -> None:
     assert "EMPTY_QUESTION" in error_codes
 
 
+def _assert_generate_sql_rejected(result: GraphState) -> None:
+    assert result["final_status"] == "rejected"
+    assert result["current_stage"] == "generate_sql"
+    assert result["failure_stage"] == "generate_sql"
+    assert result["sql_generation_result"]["status"] == "rejected"
+    assert result["security_result"]["status"] == "not_run"
+    assert result["contract_result"]["status"] == "not_run"
+
+
+def _assert_security_rejected(result: GraphState) -> None:
+    assert result["final_status"] == "rejected"
+    assert result["current_stage"] == "security_gate"
+    assert result["failure_stage"] == "security_gate"
+    assert result["security_result"]["status"] == "rejected"
+    assert result["contract_result"]["status"] == "not_run"
+
+
+def _assert_contract_rejected(result: GraphState) -> None:
+    assert result["final_status"] == "rejected"
+    assert result["current_stage"] == "contract_gate"
+    assert result["failure_stage"] == "contract_gate"
+    assert result["security_result"]["status"] == "approved"
+    assert result["contract_result"]["status"] == "rejected"
+
+
 def test_classify_routing() -> None:
     assert route_after_classify_intent(
         {
@@ -530,14 +563,55 @@ def test_classify_routing() -> None:
             "final_status": "processing",
             "generated_sql": "SELECT 1",
             "current_sql": "SELECT 1",
+            "query_plan": {
+                "intent_name": "generic_test_intent",
+            },
         }
-    ) == "complete"
+    ) == "security_gate"
     assert route_after_generate_sql(
         {
             "final_status": "rejected",
         }
     ) == "complete"
     assert route_after_generate_sql(
+        {
+            "final_status": "infrastructure_error",
+        }
+    ) == "infrastructure_error"
+
+    assert route_after_security_gate(
+        {
+            "final_status": "processing",
+            "security_result": {
+                "status": "approved",
+            },
+        }
+    ) == "contract_gate"
+    assert route_after_security_gate(
+        {
+            "final_status": "rejected",
+        }
+    ) == "complete"
+    assert route_after_security_gate(
+        {
+            "final_status": "infrastructure_error",
+        }
+    ) == "infrastructure_error"
+
+    assert route_after_contract_gate(
+        {
+            "final_status": "processing",
+            "contract_result": {
+                "status": "approved",
+            },
+        }
+    ) == "complete"
+    assert route_after_contract_gate(
+        {
+            "final_status": "rejected",
+        }
+    ) == "complete"
+    assert route_after_contract_gate(
         {
             "final_status": "infrastructure_error",
         }
@@ -623,8 +697,44 @@ def main() -> None:
         _assert_invalid_input,
     )
 
+    rejected_generator = FakeSqlGenerator(
+        "UPDATE schema_test.table_test SET id = 1"
+    )
+    run_test(
+        "TESTE 7 — GERAÇÃO SQL REJEITADA NÃO CHAMA SECURITY",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_generate_sql_rejected,
+        sql_generator=rejected_generator,
+    )
+    assert rejected_generator.calls == 1
+
+    security_generator = FakeSqlGenerator(
+        "SELECT id FROM schema_test.table_other"
+    )
+    run_test(
+        "TESTE 8 — SECURITY REJEITADO NÃO CHAMA CONTRACT",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_security_rejected,
+        sql_generator=security_generator,
+    )
+    assert security_generator.calls == 1
+
+    contract_generator = FakeSqlGenerator(
+        "SELECT missing_column FROM schema_test.table_test"
+    )
+    run_test(
+        "TESTE 9 — CONTRACT REJEITADO ENCERRA REJECTED",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_contract_rejected,
+        sql_generator=contract_generator,
+    )
+    assert contract_generator.calls == 1
+
     print("=" * 70)
-    print("TESTE 7 — ROTEAMENTO APÓS CLASSIFICAÇÃO")
+    print("TESTE 10 — ROTEAMENTO APÓS CLASSIFICAÇÃO")
     print("=" * 70)
     test_classify_routing()
     print("ASSERTIONS: OK")

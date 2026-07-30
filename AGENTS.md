@@ -4,8 +4,10 @@
 
 O LangGraph local carrega um `ContextSnapshot` canonico, resolve uma unica
 intencao, constroi um `QueryPlan` deterministico e gera SQL por um
-`SqlGenerator` injetado. O planner usa somente o snapshot versionado ja
-validado e a geracao SQL consome somente o `QueryPlan`.
+`SqlGenerator` injetado. Depois, o Security Gate valida read-only e
+autorizacao estrutural, e o Contract Gate valida aderencia ao `QueryPlan`.
+O planner usa somente o snapshot versionado ja validado; geracao e gates
+consomem somente o `QueryPlan` e a SQL corrente.
 
 ## Comandos principais
 
@@ -15,6 +17,11 @@ validado e a geracao SQL consome somente o `QueryPlan`.
 - `python testar_planner.py`
 - `python testar_build_plan.py`
 - `python testar_sql_generation.py`
+- `python testar_sql_analysis.py`
+- `python testar_sql_security.py`
+- `python testar_security_gate.py`
+- `python testar_sql_contract.py`
+- `python testar_contract_gate.py`
 - `python testar_generate_sql.py`
 - `python testar_grafo_base.py`
 - `python scripts/check_all.py`
@@ -29,7 +36,8 @@ planner.
 
 Nao colocar termos de negocio, nomes reais de clientes, fabricantes, tabelas,
 colunas ou exemplos de benchmark em regras Python. Decisoes devem vir do
-`ContextSnapshot`.
+`ContextSnapshot` e, depois do planejamento, do `QueryPlan`. Gates nao releem
+o snapshot completo, nao executam SQL e nao corrigem SQL automaticamente.
 
 ## Testes
 

@@ -255,10 +255,12 @@ def test_grafo_chama_generator_apos_build_plan_processing() -> None:
     )
 
     assert result["final_status"] == "processing"
-    assert result["current_stage"] == "generate_sql"
+    assert result["current_stage"] == "contract_gate"
     assert result["generated_sql"] == (
         "SELECT id FROM schema_test.table_test"
     )
+    assert result["security_result"]["status"] == "approved"
+    assert result["contract_result"]["status"] == "approved"
     assert generator.calls == 1
 
 

@@ -4,6 +4,9 @@ from app.graph.nodes.build_plan import build_plan
 from app.graph.nodes.classify_intent import (
     classify_intent,
 )
+from app.graph.nodes.contract_gate import (
+    contract_gate,
+)
 from app.graph.nodes.finalize_infrastructure_error import (
     finalize_infrastructure_error,
 )
@@ -19,12 +22,17 @@ from app.graph.nodes.load_context import (
 from app.graph.nodes.receive_question import (
     receive_question,
 )
+from app.graph.nodes.security_gate import (
+    security_gate,
+)
 from app.graph.routing import (
     route_after_build_plan,
     route_after_classify_intent,
+    route_after_contract_gate,
     route_after_generate_sql,
     route_after_load_context,
     route_after_receive_question,
+    route_after_security_gate,
 )
 from app.graph.state import GraphState
 from app.ports.context_repository import (
@@ -75,6 +83,16 @@ def create_graph(
     builder.add_node(
         "generate_sql",
         generate_sql,
+    )
+
+    builder.add_node(
+        "security_gate",
+        security_gate,
+    )
+
+    builder.add_node(
+        "contract_gate",
+        contract_gate,
     )
 
     builder.add_node(
@@ -141,6 +159,30 @@ def create_graph(
     builder.add_conditional_edges(
         "generate_sql",
         route_after_generate_sql,
+        {
+            "security_gate": "security_gate",
+            "complete": END,
+            "infrastructure_error": (
+                "finalize_infrastructure_error"
+            ),
+        },
+    )
+
+    builder.add_conditional_edges(
+        "security_gate",
+        route_after_security_gate,
+        {
+            "contract_gate": "contract_gate",
+            "complete": END,
+            "infrastructure_error": (
+                "finalize_infrastructure_error"
+            ),
+        },
+    )
+
+    builder.add_conditional_edges(
+        "contract_gate",
+        route_after_contract_gate,
         {
             "complete": END,
             "infrastructure_error": (
