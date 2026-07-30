@@ -5,7 +5,10 @@ from typing import Callable
 from app.domain.context import ContextSnapshot
 from app.domain.context_normalizer import normalize_context_snapshot
 from app.graph.builder import create_graph
-from app.graph.routing import route_after_classify_intent
+from app.graph.routing import (
+    route_after_build_plan,
+    route_after_classify_intent,
+)
 from app.graph.state import GraphState
 from app.ports.context_repository import (
     ContextRepositoryError,
@@ -298,11 +301,18 @@ def _assert_classified_intent(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "processing"
-    assert result["current_stage"] == "classify_intent"
+    assert result["current_stage"] == "build_plan"
     assert result["failure_stage"] == ""
     assert result["context_version"] == "context-test-v3"
     assert result["intent"] == "generic_test_intent"
     assert result["intent_confidence"] == 0.98
+    assert result["query_plan"]["intent_name"] == "generic_test_intent"
+    assert result["query_plan"]["selected_pattern"]["pattern_name"] == (
+        "generic_test_pattern"
+    )
+    assert result["query_plan"]["planning_context"][
+        "required_tables"
+    ][0]["qualified_name"] == "schema_test.table_test"
     assert result["errors"] == []
     assert result["warnings"] == []
 
@@ -333,10 +343,11 @@ def _assert_catalog_only_classification(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "processing"
-    assert result["current_stage"] == "classify_intent"
+    assert result["current_stage"] == "build_plan"
     assert result["failure_stage"] == ""
     assert result["intent"] == "generic_test_intent"
     assert result["intent_confidence"] == 0.98
+    assert result["query_plan"]["intent_name"] == "generic_test_intent"
     assert result["errors"] == []
 
     context = result["context"]
@@ -437,8 +448,15 @@ def test_classify_routing() -> None:
     assert route_after_classify_intent(
         {
             "final_status": "processing",
+            "intent": "generic_test_intent",
         }
-    ) == "complete"
+    ) == "build_plan"
+    assert route_after_classify_intent(
+        {
+            "final_status": "processing",
+            "intent": None,
+        }
+    ) == "infrastructure_error"
     assert route_after_classify_intent(
         {
             "final_status": "rejected",
@@ -452,6 +470,25 @@ def test_classify_routing() -> None:
     assert route_after_classify_intent({}) == (
         "infrastructure_error"
     )
+
+    assert route_after_build_plan(
+        {
+            "final_status": "processing",
+            "query_plan": {
+                "intent_name": "generic_test_intent",
+            },
+        }
+    ) == "complete"
+    assert route_after_build_plan(
+        {
+            "final_status": "rejected",
+        }
+    ) == "complete"
+    assert route_after_build_plan(
+        {
+            "final_status": "infrastructure_error",
+        }
+    ) == "infrastructure_error"
 
 
 def main() -> None:

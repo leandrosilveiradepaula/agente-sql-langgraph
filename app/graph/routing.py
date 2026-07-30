@@ -7,7 +7,7 @@ def route_after_receive_question(
     state: GraphState,
 ) -> Literal["continue", "invalid_request"]:
     """
-    Decide o caminho depois da validação inicial.
+    Decide o caminho depois da validacao inicial.
     """
 
     if state.get("final_status") == "processing":
@@ -36,10 +36,7 @@ def route_after_load_context(
         "",
     )
 
-    if (
-        final_status == "processing"
-        and context_version
-    ):
+    if final_status == "processing" and context_version:
         return "continue"
 
     return "infrastructure_error"
@@ -48,15 +45,12 @@ def route_after_load_context(
 def route_after_classify_intent(
     state: GraphState,
 ) -> Literal[
+    "build_plan",
     "complete",
     "infrastructure_error",
 ]:
     """
-    Decide o encerramento depois da classificação de intenção.
-
-    Resoluções aplicadas e rejeições semânticas são resultados normais
-    desta etapa. Falhas de contrato ou erros inesperados do classificador
-    seguem para o finalizador comum de infraestrutura.
+    Decide o caminho depois da classificacao de intencao.
     """
 
     final_status = state.get(
@@ -64,10 +58,34 @@ def route_after_classify_intent(
         "infrastructure_error",
     )
 
-    if final_status in {
-        "processing",
-        "rejected",
-    }:
+    if final_status == "processing" and state.get("intent"):
+        return "build_plan"
+
+    if final_status == "rejected":
+        return "complete"
+
+    return "infrastructure_error"
+
+
+def route_after_build_plan(
+    state: GraphState,
+) -> Literal[
+    "complete",
+    "infrastructure_error",
+]:
+    """
+    Decide o encerramento depois da construcao do plano.
+    """
+
+    final_status = state.get(
+        "final_status",
+        "infrastructure_error",
+    )
+
+    if final_status == "processing" and state.get("query_plan"):
+        return "complete"
+
+    if final_status == "rejected":
         return "complete"
 
     return "infrastructure_error"
