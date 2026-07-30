@@ -3,6 +3,7 @@ from pprint import pprint
 from typing import Callable
 
 from app.adapters.testing.fake_engine_preflight import FakeEnginePreflight
+from app.adapters.testing.fake_sql_repairer import FakeSqlRepairer
 from app.domain.context import ContextSnapshot
 from app.domain.context_normalizer import normalize_context_snapshot
 from app.graph.builder import create_graph
@@ -12,6 +13,7 @@ from app.graph.routing import (
     route_after_contract_gate,
     route_after_engine_preflight,
     route_after_generate_sql,
+    route_after_repair_sql,
     route_after_security_gate,
 )
 from app.graph.state import GraphState
@@ -302,6 +304,7 @@ def run_test(
     *,
     sql_generator: FakeSqlGenerator | None = None,
     engine_preflight: FakeEnginePreflight | None = None,
+    sql_repairer: FakeSqlRepairer | None = None,
 ) -> GraphState:
     print("=" * 70)
     print(title)
@@ -309,12 +312,13 @@ def run_test(
 
     generator = sql_generator or FakeSqlGenerator()
     preflight = engine_preflight or FakeEnginePreflight()
-    graph = create_graph(repository, generator, preflight)
+    repairer = sql_repairer or FakeSqlRepairer()
+    graph = create_graph(repository, generator, preflight, repairer)
 
     result = graph.invoke(
         initial_state,
         config={
-            "recursion_limit": 12,
+            "recursion_limit": 20,
         },
     )
 
@@ -534,6 +538,68 @@ def _assert_engine_preflight_rejected(result: GraphState) -> None:
     )
 
 
+def _assert_repair_loop_success(result: GraphState) -> None:
+    assert result["final_status"] == "processing"
+    assert result["current_stage"] == "engine_preflight"
+    assert result["failure_stage"] == ""
+    assert result["generated_sql"] == (
+        "SELECT id FROM schema_test.table_test"
+    )
+    assert result["current_sql"] == (
+        "SELECT value FROM schema_test.table_test"
+    )
+    assert result["repair_attempts"] == 1
+    assert len(result["repair_history"]) == 1
+    assert result["repair_history"][0]["repair_applied"] is True
+    assert "sql_before_fingerprint" in result["repair_history"][0]
+    assert "sql_after_fingerprint" in result["repair_history"][0]
+    assert "SELECT missing_column" not in repr(result["repair_history"])
+    assert result["security_result"]["status"] == "approved"
+    assert result["contract_result"]["status"] == "approved"
+    assert result["engine_preflight_result"]["status"] == "approved"
+
+
+def _assert_repair_limit_reached(result: GraphState) -> None:
+    assert result["final_status"] == "rejected"
+    assert result["current_stage"] == "repair_sql"
+    assert result["failure_stage"] == "repair_sql"
+    assert result["errors"][-1]["code"] == "SQL_REPAIR_LIMIT_REACHED"
+    assert result["repair_attempts"] == 1
+    assert len(result["repair_history"]) == 1
+
+
+def _assert_repaired_sql_security_rejected(result: GraphState) -> None:
+    assert result["final_status"] == "rejected"
+    assert result["current_stage"] == "security_gate"
+    assert result["failure_stage"] == "security_gate"
+    assert result["generated_sql"] == (
+        "SELECT id FROM schema_test.table_test"
+    )
+    assert result["current_sql"] == (
+        "SELECT id FROM schema_test.table_other"
+    )
+    assert result["repair_attempts"] == 1
+    assert len(result["repair_history"]) == 1
+    assert result["engine_preflight_result"]["status"] == "not_run"
+
+
+def _assert_repaired_sql_contract_rejected(result: GraphState) -> None:
+    assert result["final_status"] == "rejected"
+    assert result["current_stage"] == "contract_gate"
+    assert result["failure_stage"] == "contract_gate"
+    assert result["generated_sql"] == (
+        "SELECT id FROM schema_test.table_test"
+    )
+    assert result["current_sql"] == (
+        "SELECT missing_column FROM schema_test.table_test"
+    )
+    assert result["repair_attempts"] == 1
+    assert len(result["repair_history"]) == 1
+    assert result["security_result"]["status"] == "approved"
+    assert result["contract_result"]["status"] == "rejected"
+    assert result["engine_preflight_result"]["status"] == "not_run"
+
+
 def _assert_engine_preflight_infra(result: GraphState) -> None:
     assert result["final_status"] == "infrastructure_error"
     assert result["current_stage"] == "finalize_infrastructure_error"
@@ -657,9 +723,42 @@ def test_classify_routing() -> None:
     assert route_after_engine_preflight(
         {
             "final_status": "rejected",
+            "engine_preflight_result": {
+                "status": "rejected",
+                "repairable": True,
+            },
+        }
+    ) == "repair_sql"
+    assert route_after_engine_preflight(
+        {
+            "final_status": "rejected",
+            "engine_preflight_result": {
+                "status": "rejected",
+                "repairable": False,
+            },
         }
     ) == "complete"
     assert route_after_engine_preflight(
+        {
+            "final_status": "infrastructure_error",
+        }
+    ) == "infrastructure_error"
+
+    assert route_after_repair_sql(
+        {
+            "final_status": "processing",
+            "current_sql": "SELECT 1",
+            "query_plan": {
+                "intent_name": "generic_test_intent",
+            },
+        }
+    ) == "security_gate"
+    assert route_after_repair_sql(
+        {
+            "final_status": "rejected",
+        }
+    ) == "complete"
+    assert route_after_repair_sql(
         {
             "final_status": "infrastructure_error",
         }
@@ -794,6 +893,7 @@ def main() -> None:
         status="rejected",
         failure_category="column_not_found",
         message="column not found",
+        repairable=False,
     )
     run_test(
         "TESTE 10 - PREFLIGHT SQL INVALIDO ENCERRA REJECTED",
@@ -804,13 +904,145 @@ def main() -> None:
     )
     assert rejected_preflight.calls == 1
 
+    repairable_then_approved = FakeEnginePreflight(
+        responses=[
+            {
+                "status": "rejected",
+                "provider_name": "fake_engine_preflight",
+                "failure_category": "column_not_found",
+                "message": "column not found",
+                "repairable": True,
+                "executed": False,
+                "rows_returned": 0,
+            },
+            {
+                "status": "approved",
+                "provider_name": "fake_engine_preflight",
+                "duration_ms": 1,
+                "statement_planned": True,
+                "executed": False,
+                "rows_returned": 0,
+            },
+        ]
+    )
+    successful_repairer = FakeSqlRepairer(
+        responses=["SELECT value FROM schema_test.table_test"]
+    )
+    success_result = run_test(
+        "TESTE 11 - PREFLIGHT REPARAVEL VOLTA AOS GATES",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_repair_loop_success,
+        engine_preflight=repairable_then_approved,
+        sql_repairer=successful_repairer,
+    )
+    assert success_result["repair_attempts"] == 1
+    assert repairable_then_approved.calls == 2
+    assert successful_repairer.calls == 1
+
+    limit_preflight = FakeEnginePreflight(
+        responses=[
+            {
+                "status": "rejected",
+                "provider_name": "fake_engine_preflight",
+                "failure_category": "column_not_found",
+                "message": "column not found",
+                "repairable": True,
+                "executed": False,
+                "rows_returned": 0,
+            },
+            {
+                "status": "rejected",
+                "provider_name": "fake_engine_preflight",
+                "failure_category": "column_not_found",
+                "message": "column not found again",
+                "repairable": True,
+                "executed": False,
+                "rows_returned": 0,
+            },
+        ]
+    )
+    one_attempt_state = deepcopy(valid_initial_state)
+    one_attempt_state["options"] = {
+        "use_cache": False,
+        "max_repair_attempts": 1,
+        "shadow_mode": False,
+    }
+    limit_repairer = FakeSqlRepairer(
+        responses=["SELECT value FROM schema_test.table_test"]
+    )
+    run_test(
+        "TESTE 12 - LIMITE DE REPARO ENCERRA REJECTED",
+        SuccessContextRepository(),
+        one_attempt_state,
+        _assert_repair_limit_reached,
+        engine_preflight=limit_preflight,
+        sql_repairer=limit_repairer,
+    )
+    assert limit_preflight.calls == 2
+    assert limit_repairer.calls == 1
+
+    security_after_repair_preflight = FakeEnginePreflight(
+        responses=[
+            {
+                "status": "rejected",
+                "provider_name": "fake_engine_preflight",
+                "failure_category": "column_not_found",
+                "message": "column not found",
+                "repairable": True,
+                "executed": False,
+                "rows_returned": 0,
+            },
+        ]
+    )
+    security_bad_repairer = FakeSqlRepairer(
+        responses=["SELECT id FROM schema_test.table_other"]
+    )
+    run_test(
+        "TESTE 13 - SECURITY REJEITA SQL REPARADA",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_repaired_sql_security_rejected,
+        engine_preflight=security_after_repair_preflight,
+        sql_repairer=security_bad_repairer,
+    )
+    assert security_after_repair_preflight.calls == 1
+    assert security_bad_repairer.calls == 1
+
+    contract_after_repair_preflight = FakeEnginePreflight(
+        responses=[
+            {
+                "status": "rejected",
+                "provider_name": "fake_engine_preflight",
+                "failure_category": "column_not_found",
+                "message": "column not found",
+                "repairable": True,
+                "executed": False,
+                "rows_returned": 0,
+            },
+        ]
+    )
+    contract_bad_repairer = FakeSqlRepairer(
+        responses=["SELECT missing_column FROM schema_test.table_test"]
+    )
+    run_test(
+        "TESTE 14 - CONTRACT REJEITA SQL REPARADA",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_repaired_sql_contract_rejected,
+        engine_preflight=contract_after_repair_preflight,
+        sql_repairer=contract_bad_repairer,
+    )
+    assert contract_after_repair_preflight.calls == 1
+    assert contract_bad_repairer.calls == 1
+
     infra_preflight = FakeEnginePreflight(
         status="error",
         failure_category="provider_unavailable",
         message="provider unavailable",
     )
     run_test(
-        "TESTE 11 - PREFLIGHT INFRA VAI AO FINALIZADOR",
+        "TESTE 15 - PREFLIGHT INFRA VAI AO FINALIZADOR",
         SuccessContextRepository(),
         valid_initial_state,
         _assert_engine_preflight_infra,

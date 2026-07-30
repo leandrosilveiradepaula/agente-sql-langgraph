@@ -8,6 +8,7 @@ from app.domain.planning import QueryPlan
 from app.domain.sql_analysis import SqlStatementAnalysis
 from app.domain.sql_contract import SqlContractResult
 from app.domain.sql_generation import SqlGenerationResult
+from app.domain.sql_repair import SqlRepairResult
 from app.domain.sql_security import SqlSecurityResult
 
 
@@ -75,6 +76,18 @@ class RepairRecord(TypedDict, total=False):
 
     sql_before: str
     sql_after: str
+    failure_category: str
+    provider_code: str | None
+    error_code: str | None
+    sql_before_fingerprint: str
+    sql_after_fingerprint: str | None
+    request_fingerprint: str
+    response_fingerprint: str | None
+    repair_applied: bool
+    reason: str
+    provider_name: str
+    duration_ms: int | None
+    warnings: list[str]
 
     errors: list[AgentError]
 
@@ -106,6 +119,7 @@ class GraphState(TypedDict, total=False):
     intent_resolution_result: IntentResolutionResult
     query_plan: QueryPlan
     sql_generation_result: SqlGenerationResult
+    sql_repair_result: SqlRepairResult
     sql_analysis: SqlStatementAnalysis
 
     # SQL

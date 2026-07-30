@@ -24,6 +24,7 @@ class FakeEnginePreflight:
         message: str = "preflight approved",
         repairable: bool | None = None,
         raises: Exception | None = None,
+        responses: list[EnginePreflightProviderResult] | None = None,
         duration_ms: int = 3,
         provider_name: str = "fake_engine_preflight",
         provider_version: str = "test-v1",
@@ -33,6 +34,7 @@ class FakeEnginePreflight:
         self.message = message
         self.repairable = repairable
         self.raises = raises
+        self.responses = list(responses or [])
         self.duration_ms = duration_ms
         self.provider_name = provider_name
         self.provider_version = provider_version
@@ -51,6 +53,8 @@ class FakeEnginePreflight:
         assert "token" not in repr(request).casefold()
         if self.raises is not None:
             raise self.raises
+        if self.responses:
+            return deepcopy(self.responses.pop(0))
         result: EnginePreflightProviderResult = {
             "status": self.status,  # type: ignore[typeddict-item]
             "provider_name": self.provider_name,

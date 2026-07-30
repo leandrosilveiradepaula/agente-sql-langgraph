@@ -184,6 +184,7 @@ def route_after_contract_gate(
 def route_after_engine_preflight(
     state: GraphState,
 ) -> Literal[
+    "repair_sql",
     "complete",
     "infrastructure_error",
 ]:
@@ -206,6 +207,43 @@ def route_after_engine_preflight(
         and engine_preflight_result.get("status") == "approved"
     ):
         return "complete"
+
+    if (
+        final_status == "rejected"
+        and isinstance(engine_preflight_result, dict)
+        and engine_preflight_result.get("status") == "rejected"
+        and engine_preflight_result.get("repairable") is True
+    ):
+        return "repair_sql"
+
+    if final_status == "rejected":
+        return "complete"
+
+    return "infrastructure_error"
+
+
+def route_after_repair_sql(
+    state: GraphState,
+) -> Literal[
+    "security_gate",
+    "complete",
+    "infrastructure_error",
+]:
+    """
+    Decide o caminho depois do reparo SQL.
+    """
+
+    final_status = state.get(
+        "final_status",
+        "infrastructure_error",
+    )
+
+    if (
+        final_status == "processing"
+        and state.get("current_sql")
+        and state.get("query_plan")
+    ):
+        return "security_gate"
 
     if final_status == "rejected":
         return "complete"

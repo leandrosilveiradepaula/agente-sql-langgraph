@@ -32,14 +32,18 @@ PLANNER_FILES = {
     "app/domain/sql_analysis.py",
     "app/domain/sql_contract.py",
     "app/domain/sql_generation.py",
+    "app/domain/sql_repair.py",
+    "app/domain/sql_repair_types.py",
     "app/domain/sql_security.py",
     "app/graph/nodes/build_plan.py",
     "app/graph/nodes/contract_gate.py",
     "app/graph/nodes/engine_preflight.py",
     "app/graph/nodes/generate_sql.py",
+    "app/graph/nodes/repair_sql.py",
     "app/graph/nodes/security_gate.py",
     "app/ports/engine_preflight.py",
     "app/ports/sql_generator.py",
+    "app/ports/sql_repairer.py",
 }
 
 
