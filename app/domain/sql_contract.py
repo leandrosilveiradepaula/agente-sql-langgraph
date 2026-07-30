@@ -14,7 +14,7 @@ from app.domain.sql_analysis import (
     SqlObjectReference,
     SqlStatementAnalysis,
     analyze_sql,
-    sanitized_sql_text,
+    normalized_sql_tokens,
 )
 
 
@@ -171,7 +171,10 @@ def run_sql_contract_gate(
     try:
         policy = build_sql_contract_policy(query_plan)
         sql_analysis = analysis or analyze_sql(current_sql)
-        sanitized = sanitized_sql_text(current_sql)
+        sql_token_norms = normalized_sql_tokens(
+            current_sql,
+            include_string_values=True,
+        )
     except SqlAnalysisError as error:
         finding = _finding(
             "SQL_CONTRACT_ANALYSIS_FAILED",
@@ -224,7 +227,7 @@ def run_sql_contract_gate(
     column_results = _verify_columns(sql_analysis, policy, findings)
     join_results = _verify_joins(sql_analysis, query_plan, findings)
     rule_results = _verify_rules(
-        sanitized=sanitized,
+        sql_token_norms=sql_token_norms,
         analysis=sql_analysis,
         query_plan=query_plan,
         policy=policy,
@@ -343,7 +346,10 @@ def _verify_columns(
         if column.get("is_wildcard"):
             continue
         column_name = column["column"].casefold()
-        if column_name in expression_aliases:
+        if (
+            column_name in expression_aliases
+            and column.get("clause") in {"select", "group", "order"}
+        ):
             results.append(
                 {
                     "column": column_name,
@@ -451,7 +457,7 @@ def _verify_joins(
 
 def _verify_rules(
     *,
-    sanitized: str,
+    sql_token_norms: list[str],
     analysis: SqlStatementAnalysis,
     query_plan: QueryPlan,
     policy: SqlContractPolicy,
@@ -475,7 +481,11 @@ def _verify_rules(
                 _rule_result(name, "unverifiable", "no_structural_keys", [])
             )
             continue
-        violations = _rule_violations(content, sanitized, analysis)
+        violations = _rule_violations(
+            content,
+            sql_token_norms,
+            analysis,
+        )
         if violations:
             findings.append(
                 _finding(
@@ -540,24 +550,24 @@ def _verify_wildcards(
 
 def _rule_violations(
     content: Mapping[str, Any],
-    sanitized: str,
+    sql_token_norms: list[str],
     analysis: SqlStatementAnalysis,
 ) -> list[str]:
     violations: list[str] = []
     for fragment in _text_list(content.get("required_sql_fragments")):
-        if fragment.casefold() not in sanitized:
+        if not _fragment_present(fragment, sql_token_norms):
             violations.append("required_sql_fragment_missing")
     for fragment in _text_list(content.get("required_filters")):
-        if fragment.casefold() not in sanitized:
+        if not _fragment_present(fragment, sql_token_norms):
             violations.append("required_filter_missing")
     for fragment in _text_list(content.get("required_groupings")):
-        if fragment.casefold() not in sanitized:
+        if not _fragment_present(fragment, sql_token_norms):
             violations.append("required_grouping_missing")
     for fragment in _text_list(content.get("forbidden_sql_fragments")):
-        if fragment.casefold() in sanitized:
+        if _fragment_present(fragment, sql_token_norms):
             violations.append("forbidden_sql_fragment_present")
     for fragment in _text_list(content.get("forbidden_filters")):
-        if fragment.casefold() in sanitized:
+        if _fragment_present(fragment, sql_token_norms):
             violations.append("forbidden_filter_present")
     for keyword in _text_list(content.get("forbidden_keywords")):
         if keyword.casefold() in set(analysis["token_norms"]):
@@ -582,6 +592,28 @@ def _rule_violations(
         if not required_columns <= used_columns:
             violations.append("required_column_missing")
     return sorted(set(violations))
+
+
+def _fragment_present(
+    fragment: str,
+    sql_token_norms: list[str],
+) -> bool:
+    try:
+        fragment_tokens = normalized_sql_tokens(
+            fragment,
+            include_string_values=True,
+        )
+    except SqlAnalysisError:
+        return fragment.casefold() in " ".join(sql_token_norms)
+    if not fragment_tokens:
+        return False
+    if len(fragment_tokens) > len(sql_token_norms):
+        return False
+    width = len(fragment_tokens)
+    return any(
+        sql_token_norms[index : index + width] == fragment_tokens
+        for index in range(0, len(sql_token_norms) - width + 1)
+    )
 
 
 def _resolve_column_table(

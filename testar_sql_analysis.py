@@ -69,7 +69,7 @@ def test_aliases() -> None:
     )
 
     assert analysis["aliases"]["t"] == "schema_test.table_test"
-    assert "generic_alias" in analysis["expression_aliases"]
+    assert analysis["expression_aliases"] == ["generic_alias"]
 
 
 def test_string_com_palavra_perigosa() -> None:

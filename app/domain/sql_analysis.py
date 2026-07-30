@@ -320,6 +320,23 @@ def sanitized_sql_text(sql: str) -> str:
     ).casefold()
 
 
+def normalized_sql_tokens(
+    sql: str,
+    *,
+    include_string_values: bool,
+) -> list[str]:
+    tokens, _ = _tokenize(sql)
+    statement_tokens = _single_statement(tokens)
+    return [
+        (
+            token["normalized"]
+            if include_string_values or token["kind"] != "string"
+            else "<string>"
+        )
+        for token in statement_tokens
+    ]
+
+
 def _tokenize(sql: str) -> tuple[list[SqlToken], int]:
     tokens: list[SqlToken] = []
     comment_count = 0
@@ -612,7 +629,10 @@ def _extract_columns(
             current_clause in {"select", "where", "on", "group", "order", "having"}
             and _is_identifier(tokens[index])
             and norm not in _RESERVED_WORDS
-            and norm not in expression_aliases
+            and not (
+                norm in expression_aliases
+                and current_clause in {"select", "group", "order"}
+            )
             and not _is_table_position(tokens, index)
             and _norm_at(tokens, index + 1) != "("
             and _norm_at(tokens, index - 1) != "."
@@ -685,9 +705,31 @@ def _extract_joins(
 def _extract_expression_aliases(tokens: list[SqlToken]) -> list[str]:
     aliases: set[str] = set()
     for index, token in enumerate(tokens[:-1]):
-        if token["normalized"] == "as" and _is_identifier(tokens[index + 1]):
+        if (
+            token["normalized"] == "as"
+            and _is_identifier(tokens[index + 1])
+            and _clause_before(tokens, index) == "select"
+        ):
             aliases.add(tokens[index + 1]["normalized"])
     return sorted(aliases)
+
+
+def _clause_before(tokens: list[SqlToken], target_index: int) -> str:
+    depth = 0
+    clauses_by_depth: dict[int, str] = {}
+    for index, token in enumerate(tokens):
+        if index >= target_index:
+            break
+        if token["value"] == "(":
+            depth += 1
+            continue
+        if token["value"] == ")":
+            depth = max(0, depth - 1)
+            continue
+        norm = token["normalized"]
+        if norm in _CLAUSE_KEYWORDS:
+            clauses_by_depth[depth] = norm
+    return clauses_by_depth.get(depth, "")
 
 
 def _extract_functions(tokens: list[SqlToken]) -> list[str]:

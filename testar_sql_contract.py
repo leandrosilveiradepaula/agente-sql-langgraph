@@ -130,6 +130,16 @@ def test_alias_invalido() -> None:
     assert result["errors"][0]["code"] == "SQL_CONTRACT_INVALID_ALIAS"
 
 
+def test_alias_de_expressao_no_where_rejeitado() -> None:
+    result = _run(
+        "SELECT value AS generic_alias FROM schema_test.table_test "
+        "WHERE generic_alias = 1"
+    )
+
+    assert result["status"] == "rejected"
+    assert result["errors"][0]["code"] == "SQL_CONTRACT_UNKNOWN_COLUMN"
+
+
 def test_coluna_nao_qualificada_ambigua() -> None:
     result = _run(
         "SELECT id FROM schema_test.table_test t "
@@ -185,6 +195,17 @@ def test_required_filter_presente_e_ausente() -> None:
 
     assert present["status"] == "approved"
     assert missing["status"] == "rejected"
+
+
+def test_forbidden_filter_com_literal_rejeita() -> None:
+    result = _run(
+        "SELECT id FROM schema_test.table_test WHERE value = 'cancelled'",
+        _with_rule({"forbidden_filters": ["value = 'cancelled'"]}),
+    )
+
+    assert result["status"] == "rejected"
+    assert result["errors"][0]["code"] == "SQL_CONTRACT_RULE_VIOLATED"
+    assert "cancelled" not in str(result)
 
 
 def test_limit_proibido_permitido_e_exigido() -> None:
@@ -306,11 +327,13 @@ def main() -> None:
         ("tabela adicional", test_tabela_adicional),
         ("coluna inexistente", test_coluna_inexistente),
         ("alias invalido", test_alias_invalido),
+        ("alias expressao where", test_alias_de_expressao_no_where_rejeitado),
         ("coluna ambigua", test_coluna_nao_qualificada_ambigua),
         ("regra satisfeita", test_required_rule_estruturada_satisfeita),
         ("regra ausente", test_required_rule_estruturada_ausente),
         ("fragmento proibido", test_forbidden_fragment_presente),
         ("filtro presente ausente", test_required_filter_presente_e_ausente),
+        ("filtro proibido literal", test_forbidden_filter_com_literal_rejeita),
         ("LIMIT politicas", test_limit_proibido_permitido_e_exigido),
         ("join autorizado", test_join_autorizado),
         ("join divergente", test_join_divergente),
