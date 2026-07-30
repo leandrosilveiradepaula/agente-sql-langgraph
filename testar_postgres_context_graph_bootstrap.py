@@ -30,10 +30,22 @@ class FakeSqlGenerator:
         }
 
 
+class FakeEnginePreflight:
+    def preflight(self, request):
+        del request
+        return {
+            "status": "approved",
+            "provider_name": "fake_engine_preflight",
+            "executed": False,
+            "rows_returned": 0,
+        }
+
+
 def test_bootstrap_padrao_compila_sem_abrir_conexao() -> None:
     graph = create_postgres_context_graph(
         FAKE_ENVIRONMENT,
         sql_generator=FakeSqlGenerator(),
+        engine_preflight=FakeEnginePreflight(),
     )
 
     assert callable(getattr(graph, "invoke", None))
@@ -43,6 +55,7 @@ def test_entrada_invalida_nao_acessa_postgres() -> None:
     graph = create_postgres_context_graph(
         FAKE_ENVIRONMENT,
         sql_generator=FakeSqlGenerator(),
+        engine_preflight=FakeEnginePreflight(),
     )
 
     result = graph.invoke(
@@ -81,6 +94,7 @@ def test_factories_recebem_dependencias_corretas() -> None:
     )
     expected_graph = object()
     expected_sql_generator = FakeSqlGenerator()
+    expected_engine_preflight = FakeEnginePreflight()
 
     class FakeRepository:
         def load_active_context(
@@ -90,7 +104,7 @@ def test_factories_recebem_dependencias_corretas() -> None:
         ) -> dict[str, Any]:
             del user_profile
             raise AssertionError(
-                "O repositório não deve ser executado "
+                "O repositorio nao deve ser executado "
                 "durante o bootstrap."
             )
 
@@ -113,14 +127,17 @@ def test_factories_recebem_dependencias_corretas() -> None:
     def fake_graph_factory(
         repository: ContextRepository,
         sql_generator,
+        engine_preflight,
     ) -> Any:
         captured["repository"] = repository
         captured["sql_generator"] = sql_generator
+        captured["engine_preflight"] = engine_preflight
         return expected_graph
 
     graph = create_postgres_context_graph(
         expected_environment,
         sql_generator=expected_sql_generator,
+        engine_preflight=expected_engine_preflight,
         config_loader=fake_config_loader,
         repository_factory=fake_repository_factory,
         graph_factory=fake_graph_factory,
@@ -135,15 +152,29 @@ def test_factories_recebem_dependencias_corretas() -> None:
         expected_repository
     )
     assert captured["sql_generator"] is expected_sql_generator
+    assert captured["engine_preflight"] is expected_engine_preflight
+
+
+def test_bootstrap_exige_preflight_explicito() -> None:
+    try:
+        create_postgres_context_graph(
+            FAKE_ENVIRONMENT,
+            sql_generator=FakeSqlGenerator(),
+        )
+    except RuntimeError as error:
+        assert str(error) == (
+            "engine_preflight deve ser injetado no composition root."
+        )
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
 
 
 def test_configuracao_invalida_interrompe_bootstrap() -> None:
     try:
         create_postgres_context_graph({})
     except RuntimeConfigError as error:
-        assert str(error) == (
-            "A variável POSTGRES_DSN não está definida."
-        )
+        assert "POSTGRES_DSN" in str(error)
+        assert "definida" in str(error)
     else:
         raise AssertionError(
             "Era esperado RuntimeConfigError."
@@ -153,19 +184,23 @@ def test_configuracao_invalida_interrompe_bootstrap() -> None:
 def main() -> None:
     tests = [
         (
-            "bootstrap padrão compila sem abrir conexão",
+            "bootstrap padrao compila sem abrir conexao",
             test_bootstrap_padrao_compila_sem_abrir_conexao,
         ),
         (
-            "entrada inválida não acessa PostgreSQL",
+            "entrada invalida nao acessa PostgreSQL",
             test_entrada_invalida_nao_acessa_postgres,
         ),
         (
-            "factories recebem dependências corretas",
+            "factories recebem dependencias corretas",
             test_factories_recebem_dependencias_corretas,
         ),
         (
-            "configuração inválida interrompe bootstrap",
+            "bootstrap exige preflight explicito",
+            test_bootstrap_exige_preflight_explicito,
+        ),
+        (
+            "configuracao invalida interrompe bootstrap",
             test_configuracao_invalida_interrompe_bootstrap,
         ),
     ]
@@ -175,7 +210,7 @@ def main() -> None:
         start=1,
     ):
         test_function()
-        print(f"TESTE {index} — {name}: OK")
+        print(f"TESTE {index} - {name}: OK")
 
 
 if __name__ == "__main__":

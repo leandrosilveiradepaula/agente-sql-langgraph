@@ -12,6 +12,7 @@ from app.config.postgres_context import (
 )
 from app.graph.builder import create_graph
 from app.ports.context_repository import ContextRepository
+from app.ports.engine_preflight import EnginePreflight
 from app.ports.sql_generator import SqlGenerator
 
 
@@ -25,7 +26,7 @@ RepositoryFactory = Callable[
     ContextRepository,
 ]
 GraphFactory = Callable[
-    [ContextRepository, SqlGenerator],
+    [ContextRepository, SqlGenerator, EnginePreflight],
     Any,
 ]
 
@@ -51,6 +52,7 @@ def create_postgres_context_graph(
     environ: RuntimeEnvironment | None = None,
     *,
     sql_generator: SqlGenerator | None = None,
+    engine_preflight: EnginePreflight | None = None,
     config_loader: ConfigLoader = (
         load_postgres_context_runtime_config
     ),
@@ -66,11 +68,11 @@ def create_postgres_context_graph(
     ambiente externo
     -> configuracao validada
     -> PostgresContextRepository
-    -> create_graph(repository, sql_generator)
+    -> create_graph(repository, sql_generator, engine_preflight)
     -> grafo compilado
 
-    Esta fase nao define provider SQL padrao. O adapter deve ser
-    injetado explicitamente pelo composition root chamador.
+    Esta fase nao define providers padrao. Os adapters devem ser
+    injetados explicitamente pelo composition root chamador.
     """
 
     config = config_loader(environ)
@@ -81,4 +83,9 @@ def create_postgres_context_graph(
             "sql_generator deve ser injetado no composition root."
         )
 
-    return graph_factory(repository, sql_generator)
+    if engine_preflight is None:
+        raise RuntimeError(
+            "engine_preflight deve ser injetado no composition root."
+        )
+
+    return graph_factory(repository, sql_generator, engine_preflight)
