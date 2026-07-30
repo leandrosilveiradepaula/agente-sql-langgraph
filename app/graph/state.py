@@ -4,6 +4,7 @@ from app.domain.intent_resolver import (
     IntentResolutionResult,
 )
 from app.domain.planning import QueryPlan
+from app.domain.sql_generation import SqlGenerationResult
 
 
 class UserContext(TypedDict, total=False):
@@ -100,6 +101,7 @@ class GraphState(TypedDict, total=False):
     intent_confidence: float | None
     intent_resolution_result: IntentResolutionResult
     query_plan: QueryPlan
+    sql_generation_result: SqlGenerationResult
 
     # SQL
     generated_sql: str
