@@ -36,6 +36,10 @@ STEPS = [
         [sys.executable, "testar_sql_generation.py"],
     ),
     (
+        "testar_engine_preflight.py",
+        [sys.executable, "testar_engine_preflight.py"],
+    ),
+    (
         "testar_sql_analysis.py",
         [sys.executable, "testar_sql_analysis.py"],
     ),
@@ -54,6 +58,10 @@ STEPS = [
     (
         "testar_contract_gate.py",
         [sys.executable, "testar_contract_gate.py"],
+    ),
+    (
+        "testar_engine_preflight_node.py",
+        [sys.executable, "testar_engine_preflight_node.py"],
     ),
     (
         "testar_generate_sql.py",

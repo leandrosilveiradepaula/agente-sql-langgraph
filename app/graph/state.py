@@ -3,6 +3,7 @@ from typing import Any, Literal, TypedDict
 from app.domain.intent_resolver import (
     IntentResolutionResult,
 )
+from app.domain.engine_preflight import EnginePreflightResult
 from app.domain.planning import QueryPlan
 from app.domain.sql_analysis import SqlStatementAnalysis
 from app.domain.sql_contract import SqlContractResult
@@ -121,7 +122,7 @@ class GraphState(TypedDict, total=False):
     # Resultados dos gates
     security_result: SqlSecurityResult
     contract_result: SqlContractResult
-    engine_preflight_result: GateResult
+    engine_preflight_result: EnginePreflightResult
 
     # Resultado geral
     errors: list[AgentError]

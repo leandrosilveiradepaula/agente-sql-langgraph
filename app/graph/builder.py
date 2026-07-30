@@ -7,6 +7,9 @@ from app.graph.nodes.classify_intent import (
 from app.graph.nodes.contract_gate import (
     contract_gate,
 )
+from app.graph.nodes.engine_preflight import (
+    create_engine_preflight_node,
+)
 from app.graph.nodes.finalize_infrastructure_error import (
     finalize_infrastructure_error,
 )
@@ -29,6 +32,7 @@ from app.graph.routing import (
     route_after_build_plan,
     route_after_classify_intent,
     route_after_contract_gate,
+    route_after_engine_preflight,
     route_after_generate_sql,
     route_after_load_context,
     route_after_receive_question,
@@ -38,12 +42,14 @@ from app.graph.state import GraphState
 from app.ports.context_repository import (
     ContextRepository,
 )
+from app.ports.engine_preflight import EnginePreflight
 from app.ports.sql_generator import SqlGenerator
 
 
 def create_graph(
     context_repository: ContextRepository,
     sql_generator: SqlGenerator,
+    engine_preflight: EnginePreflight,
 ):
     """
     Monta e compila o grafo-base do agente.
@@ -56,6 +62,9 @@ def create_graph(
     )
     generate_sql = create_generate_sql_node(
         sql_generator,
+    )
+    engine_preflight_node = create_engine_preflight_node(
+        engine_preflight,
     )
 
     builder = StateGraph(GraphState)
@@ -93,6 +102,11 @@ def create_graph(
     builder.add_node(
         "contract_gate",
         contract_gate,
+    )
+
+    builder.add_node(
+        "engine_preflight",
+        engine_preflight_node,
     )
 
     builder.add_node(
@@ -183,6 +197,18 @@ def create_graph(
     builder.add_conditional_edges(
         "contract_gate",
         route_after_contract_gate,
+        {
+            "engine_preflight": "engine_preflight",
+            "complete": END,
+            "infrastructure_error": (
+                "finalize_infrastructure_error"
+            ),
+        },
+    )
+
+    builder.add_conditional_edges(
+        "engine_preflight",
+        route_after_engine_preflight,
         {
             "complete": END,
             "infrastructure_error": (

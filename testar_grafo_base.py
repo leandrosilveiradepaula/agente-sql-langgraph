@@ -2,6 +2,7 @@ from copy import deepcopy
 from pprint import pprint
 from typing import Callable
 
+from app.adapters.testing.fake_engine_preflight import FakeEnginePreflight
 from app.domain.context import ContextSnapshot
 from app.domain.context_normalizer import normalize_context_snapshot
 from app.graph.builder import create_graph
@@ -9,6 +10,7 @@ from app.graph.routing import (
     route_after_build_plan,
     route_after_classify_intent,
     route_after_contract_gate,
+    route_after_engine_preflight,
     route_after_generate_sql,
     route_after_security_gate,
 )
@@ -299,18 +301,20 @@ def run_test(
     assertion: Callable[[GraphState], None],
     *,
     sql_generator: FakeSqlGenerator | None = None,
+    engine_preflight: FakeEnginePreflight | None = None,
 ) -> GraphState:
     print("=" * 70)
     print(title)
     print("=" * 70)
 
     generator = sql_generator or FakeSqlGenerator()
-    graph = create_graph(repository, generator)
+    preflight = engine_preflight or FakeEnginePreflight()
+    graph = create_graph(repository, generator, preflight)
 
     result = graph.invoke(
         initial_state,
         config={
-            "recursion_limit": 10,
+            "recursion_limit": 12,
         },
     )
 
@@ -330,7 +334,7 @@ def _assert_classified_intent(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "processing"
-    assert result["current_stage"] == "contract_gate"
+    assert result["current_stage"] == "engine_preflight"
     assert result["failure_stage"] == ""
     assert result["context_version"] == "context-test-v3"
     assert result["intent"] == "generic_test_intent"
@@ -349,6 +353,8 @@ def _assert_classified_intent(
     assert result["sql_generation_result"]["status"] == "generated"
     assert result["security_result"]["status"] == "approved"
     assert result["contract_result"]["status"] == "approved"
+    assert result["engine_preflight_result"]["status"] == "approved"
+    assert result["engine_preflight_result"]["executed"] is False
     assert result["sql_analysis"]["statement_type"] == "select"
     assert result["errors"] == []
     assert result["warnings"] == []
@@ -380,7 +386,7 @@ def _assert_catalog_only_classification(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "processing"
-    assert result["current_stage"] == "contract_gate"
+    assert result["current_stage"] == "engine_preflight"
     assert result["failure_stage"] == ""
     assert result["intent"] == "generic_test_intent"
     assert result["intent_confidence"] == 0.98
@@ -391,6 +397,7 @@ def _assert_catalog_only_classification(
     assert result["current_sql"] == result["generated_sql"]
     assert result["security_result"]["status"] == "approved"
     assert result["contract_result"]["status"] == "approved"
+    assert result["engine_preflight_result"]["status"] == "approved"
     assert result["errors"] == []
 
     context = result["context"]
@@ -494,6 +501,7 @@ def _assert_generate_sql_rejected(result: GraphState) -> None:
     assert result["sql_generation_result"]["status"] == "rejected"
     assert result["security_result"]["status"] == "not_run"
     assert result["contract_result"]["status"] == "not_run"
+    assert result["engine_preflight_result"]["status"] == "not_run"
 
 
 def _assert_security_rejected(result: GraphState) -> None:
@@ -502,6 +510,7 @@ def _assert_security_rejected(result: GraphState) -> None:
     assert result["failure_stage"] == "security_gate"
     assert result["security_result"]["status"] == "rejected"
     assert result["contract_result"]["status"] == "not_run"
+    assert result["engine_preflight_result"]["status"] == "not_run"
 
 
 def _assert_contract_rejected(result: GraphState) -> None:
@@ -510,6 +519,26 @@ def _assert_contract_rejected(result: GraphState) -> None:
     assert result["failure_stage"] == "contract_gate"
     assert result["security_result"]["status"] == "approved"
     assert result["contract_result"]["status"] == "rejected"
+    assert result["engine_preflight_result"]["status"] == "not_run"
+
+
+def _assert_engine_preflight_rejected(result: GraphState) -> None:
+    assert result["final_status"] == "rejected"
+    assert result["current_stage"] == "engine_preflight"
+    assert result["failure_stage"] == "engine_preflight"
+    assert result["security_result"]["status"] == "approved"
+    assert result["contract_result"]["status"] == "approved"
+    assert result["engine_preflight_result"]["status"] == "rejected"
+    assert result["errors"][0]["code"] == (
+        "ENGINE_PREFLIGHT_COLUMN_NOT_FOUND"
+    )
+
+
+def _assert_engine_preflight_infra(result: GraphState) -> None:
+    assert result["final_status"] == "infrastructure_error"
+    assert result["current_stage"] == "finalize_infrastructure_error"
+    assert result["failure_stage"] == "engine_preflight"
+    assert result["engine_preflight_result"]["status"] == "error"
 
 
 def test_classify_routing() -> None:
@@ -605,13 +634,32 @@ def test_classify_routing() -> None:
                 "status": "approved",
             },
         }
-    ) == "complete"
+    ) == "engine_preflight"
     assert route_after_contract_gate(
         {
             "final_status": "rejected",
         }
     ) == "complete"
     assert route_after_contract_gate(
+        {
+            "final_status": "infrastructure_error",
+        }
+    ) == "infrastructure_error"
+
+    assert route_after_engine_preflight(
+        {
+            "final_status": "processing",
+            "engine_preflight_result": {
+                "status": "approved",
+            },
+        }
+    ) == "complete"
+    assert route_after_engine_preflight(
+        {
+            "final_status": "rejected",
+        }
+    ) == "complete"
+    assert route_after_engine_preflight(
         {
             "final_status": "infrastructure_error",
         }
@@ -700,38 +748,75 @@ def main() -> None:
     rejected_generator = FakeSqlGenerator(
         "UPDATE schema_test.table_test SET id = 1"
     )
+    should_not_preflight_1 = FakeEnginePreflight()
     run_test(
         "TESTE 7 — GERAÇÃO SQL REJEITADA NÃO CHAMA SECURITY",
         SuccessContextRepository(),
         valid_initial_state,
         _assert_generate_sql_rejected,
         sql_generator=rejected_generator,
+        engine_preflight=should_not_preflight_1,
     )
     assert rejected_generator.calls == 1
+    assert should_not_preflight_1.calls == 0
 
     security_generator = FakeSqlGenerator(
         "SELECT id FROM schema_test.table_other"
     )
+    should_not_preflight_2 = FakeEnginePreflight()
     run_test(
         "TESTE 8 — SECURITY REJEITADO NÃO CHAMA CONTRACT",
         SuccessContextRepository(),
         valid_initial_state,
         _assert_security_rejected,
         sql_generator=security_generator,
+        engine_preflight=should_not_preflight_2,
     )
     assert security_generator.calls == 1
+    assert should_not_preflight_2.calls == 0
 
     contract_generator = FakeSqlGenerator(
         "SELECT missing_column FROM schema_test.table_test"
     )
+    should_not_preflight_3 = FakeEnginePreflight()
     run_test(
         "TESTE 9 — CONTRACT REJEITADO ENCERRA REJECTED",
         SuccessContextRepository(),
         valid_initial_state,
         _assert_contract_rejected,
         sql_generator=contract_generator,
+        engine_preflight=should_not_preflight_3,
     )
     assert contract_generator.calls == 1
+    assert should_not_preflight_3.calls == 0
+
+    rejected_preflight = FakeEnginePreflight(
+        status="rejected",
+        failure_category="column_not_found",
+        message="column not found",
+    )
+    run_test(
+        "TESTE 10 - PREFLIGHT SQL INVALIDO ENCERRA REJECTED",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_engine_preflight_rejected,
+        engine_preflight=rejected_preflight,
+    )
+    assert rejected_preflight.calls == 1
+
+    infra_preflight = FakeEnginePreflight(
+        status="error",
+        failure_category="provider_unavailable",
+        message="provider unavailable",
+    )
+    run_test(
+        "TESTE 11 - PREFLIGHT INFRA VAI AO FINALIZADOR",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_engine_preflight_infra,
+        engine_preflight=infra_preflight,
+    )
+    assert infra_preflight.calls == 1
 
     print("=" * 70)
     print("TESTE 10 — ROTEAMENTO APÓS CLASSIFICAÇÃO")

@@ -154,6 +154,7 @@ def route_after_security_gate(
 def route_after_contract_gate(
     state: GraphState,
 ) -> Literal[
+    "engine_preflight",
     "complete",
     "infrastructure_error",
 ]:
@@ -171,6 +172,38 @@ def route_after_contract_gate(
         final_status == "processing"
         and isinstance(contract_result, dict)
         and contract_result.get("status") == "approved"
+    ):
+        return "engine_preflight"
+
+    if final_status == "rejected":
+        return "complete"
+
+    return "infrastructure_error"
+
+
+def route_after_engine_preflight(
+    state: GraphState,
+) -> Literal[
+    "complete",
+    "infrastructure_error",
+]:
+    """
+    Decide o encerramento depois do Engine Preflight.
+    """
+
+    final_status = state.get(
+        "final_status",
+        "infrastructure_error",
+    )
+    engine_preflight_result = state.get(
+        "engine_preflight_result",
+        {},
+    )
+
+    if (
+        final_status == "processing"
+        and isinstance(engine_preflight_result, dict)
+        and engine_preflight_result.get("status") == "approved"
     ):
         return "complete"
 

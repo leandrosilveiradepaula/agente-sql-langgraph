@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from app.adapters.testing.fake_engine_preflight import FakeEnginePreflight
 from app.domain.context_normalizer import normalize_context_snapshot
 from app.domain.planner import build_query_plan
 from app.domain.sql_generation import SqlGenerationProviderError
@@ -203,7 +204,8 @@ def test_query_plan_invalido_gera_erro_de_contrato() -> None:
 
 def test_grafo_nao_chama_generator_quando_intencao_rejeitada() -> None:
     generator = FakeSqlGenerator()
-    graph = create_graph(SuccessContextRepository(), generator)
+    preflight = FakeEnginePreflight()
+    graph = create_graph(SuccessContextRepository(), generator, preflight)
 
     result = graph.invoke(
         _graph_state(
@@ -217,10 +219,12 @@ def test_grafo_nao_chama_generator_quando_intencao_rejeitada() -> None:
     assert result["final_status"] == "rejected"
     assert result["current_stage"] == "classify_intent"
     assert generator.calls == 0
+    assert preflight.calls == 0
 
 
 def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
     generator = FakeSqlGenerator()
+    preflight = FakeEnginePreflight()
     raw_context = _raw_context_snapshot()
     raw_context["padroes"][0]["required_rules"] = [
         "missing_rule",
@@ -228,6 +232,7 @@ def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
     graph = create_graph(
         SuccessContextRepository(raw_context),
         generator,
+        preflight,
     )
 
     result = graph.invoke(
@@ -241,11 +246,13 @@ def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
     assert result["current_stage"] == "build_plan"
     assert result["failure_stage"] == "build_plan"
     assert generator.calls == 0
+    assert preflight.calls == 0
 
 
 def test_grafo_chama_generator_apos_build_plan_processing() -> None:
     generator = FakeSqlGenerator()
-    graph = create_graph(SuccessContextRepository(), generator)
+    preflight = FakeEnginePreflight()
+    graph = create_graph(SuccessContextRepository(), generator, preflight)
 
     result = graph.invoke(
         _graph_state("Execute uma generic analysis de teste."),
@@ -255,13 +262,15 @@ def test_grafo_chama_generator_apos_build_plan_processing() -> None:
     )
 
     assert result["final_status"] == "processing"
-    assert result["current_stage"] == "contract_gate"
+    assert result["current_stage"] == "engine_preflight"
     assert result["generated_sql"] == (
         "SELECT id FROM schema_test.table_test"
     )
     assert result["security_result"]["status"] == "approved"
     assert result["contract_result"]["status"] == "approved"
+    assert result["engine_preflight_result"]["status"] == "approved"
     assert generator.calls == 1
+    assert preflight.calls == 1
 
 
 def main() -> None:
