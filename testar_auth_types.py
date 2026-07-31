@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
 
 from app.security.auth_policy import ScopeAuthorizationPolicy
 from app.security.auth_types import (
@@ -130,6 +131,19 @@ def test_token_ausente_do_principal() -> None:
     assert not hasattr(principal, "token")
 
 
+def test_bearer_credential_nao_serializa_token() -> None:
+    token = "test-secret-token"
+    credential = BearerCredential(token)
+    assert token not in repr(credential)
+    assert token not in str(credential)
+    try:
+        asdict(credential)  # type: ignore[arg-type]
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("BearerCredential nao deve ser serializavel por asdict.")
+
+
 def test_campos_desconhecidos() -> None:
     _raises(_principal, claims={"sub": "principal-1"})
 
@@ -244,6 +258,7 @@ def main() -> None:
         test_attribute_valido,
         test_attribute_aninhado_invalido,
         test_token_ausente_do_principal,
+        test_bearer_credential_nao_serializa_token,
         test_campos_desconhecidos,
         test_imutabilidade,
         test_copia_independente,

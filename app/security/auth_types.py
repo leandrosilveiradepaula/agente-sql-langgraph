@@ -50,15 +50,33 @@ class AuthSecurityLimits(TypedDict):
     max_diagnostic_message_bytes: int
 
 
-@dataclass(frozen=True)
 class BearerCredential:
-    _value: str = field(repr=False)
+    __slots__ = ("_value",)
+
+    def __init__(self, value: str) -> None:
+        if not isinstance(value, str) or not value:
+            raise ValueError("Credencial invalida.")
+        object.__setattr__(self, "_value", value)
 
     def reveal_for_authenticator(self) -> str:
         return self._value
 
     def __str__(self) -> str:
         return "BearerCredential(<redacted>)"
+
+    def __repr__(self) -> str:
+        return "BearerCredential(<redacted>)"
+
+    def __setattr__(self, name: str, value: object) -> None:
+        del name, value
+        raise AttributeError("BearerCredential e imutavel.")
+
+    def __copy__(self) -> "BearerCredential":
+        return self
+
+    def __deepcopy__(self, memo: dict[int, object]) -> "BearerCredential":
+        del memo
+        return self
 
 
 @dataclass(frozen=True)
