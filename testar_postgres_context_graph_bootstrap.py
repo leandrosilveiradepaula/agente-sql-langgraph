@@ -148,10 +148,12 @@ def test_entrada_invalida_nao_acessa_postgres() -> None:
 
     assert result["final_status"] == "invalid_request"
     assert result["failure_stage"] == "receive_question"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["run_record"]["previous_stage"] == (
         "finalize_invalid_request"
     )
+    assert result["application_response"]["status"] == "rejected"
+    assert result["application_response"]["data"] is None
     assert result["errors"][0]["code"] == "EMPTY_QUESTION"
 
 

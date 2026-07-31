@@ -239,7 +239,8 @@ def test_grafo_nao_chama_generator_quando_intencao_rejeitada() -> None:
     )
 
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
+    assert result["application_response"]["status"] == "rejected"
     assert result["run_record"]["previous_stage"] == "classify_intent"
     assert generator.calls == 0
     assert preflight.calls == 0
@@ -274,7 +275,8 @@ def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
     )
 
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
+    assert result["application_response"]["status"] == "rejected"
     assert result["run_record"]["previous_stage"] == "build_plan"
     assert result["failure_stage"] == "build_plan"
     assert generator.calls == 0
@@ -306,7 +308,8 @@ def test_grafo_chama_generator_apos_build_plan_processing() -> None:
     )
 
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
+    assert result["application_response"]["status"] == "success"
     assert result["run_record"]["previous_stage"] == "serialize_result"
     assert result["generated_sql"] == (
         "SELECT id FROM schema_test.table_test"

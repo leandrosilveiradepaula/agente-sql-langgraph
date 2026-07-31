@@ -345,7 +345,7 @@ def run_test(
     result = graph.invoke(
         initial_state,
         config={
-            "recursion_limit": 20,
+            "recursion_limit": 24,
         },
     )
 
@@ -355,17 +355,64 @@ def run_test(
     )
 
     assertion(result)
+    _assert_application_response(result)
 
     print("ASSERTIONS: OK")
     print()
     return result
 
 
+def _assert_application_response(result: GraphState) -> None:
+    response = result.get("application_response")
+    assert isinstance(response, dict)
+    assert response["original_outcome"] == result["original_outcome"]
+    assert response["request_id"] == result["request_id"]
+    assert response["run_id"] == result["run_id"]
+    assert response["response_fingerprint"]
+    assert response["finalization"]["status"] in {
+        "completed",
+        "persistence_failed",
+        "audit_failed",
+        "observability_degraded",
+        "record_failed",
+        "incomplete",
+    }
+    response_finalization = response["finalization"]["status"]
+    if result["original_outcome"] == "success" and response_finalization in {
+        "completed",
+        "observability_degraded",
+    }:
+        assert response["status"] == "success"
+        assert response["data"] is not None
+        assert response["data"]["result"]["rows"] == result[
+            "serialized_result"
+        ]["rows"]
+    elif result["original_outcome"] == "rejected":
+        assert response["status"] == "rejected"
+        assert response["data"] is None
+    else:
+        assert response["status"] == "infrastructure_error"
+        assert response["data"] is None
+    if result["finalization_status"] in {
+        "persistence_failed",
+        "audit_failed",
+        "record_failed",
+    }:
+        assert response["status"] == "infrastructure_error"
+        assert response["data"] is None
+    text = repr(response).casefold()
+    assert "select id from" not in text
+    assert "query_plan':" not in text
+    assert "contextsnapshot" not in text
+    assert "authorization" not in text
+    assert "bearer" not in text
+
+
 def _assert_classified_intent(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["original_outcome"] == "success"
     assert result["finalization_status"] == "observed"
     assert result["run_record"]["previous_stage"] == "serialize_result"
@@ -427,7 +474,7 @@ def _assert_catalog_only_classification(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["original_outcome"] == "success"
     assert result["run_record"]["previous_stage"] == "serialize_result"
     assert result["failure_stage"] == ""
@@ -474,7 +521,7 @@ def _assert_unresolved_intent(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["original_outcome"] == "rejected"
     assert result["run_record"]["previous_stage"] == "classify_intent"
     assert result["failure_stage"] == "classify_intent"
@@ -499,7 +546,7 @@ def _assert_unresolved_intent(
 
 def _assert_invalid_context(result: GraphState) -> None:
     assert result["final_status"] == "infrastructure_error"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["original_outcome"] == "infrastructure_error"
     assert result["run_record"]["previous_stage"] == (
         "finalize_infrastructure_error"
@@ -515,7 +562,7 @@ def _assert_invalid_context(result: GraphState) -> None:
 
 def _assert_repository_failure(result: GraphState) -> None:
     assert result["final_status"] == "infrastructure_error"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["original_outcome"] == "infrastructure_error"
     assert result["run_record"]["previous_stage"] == (
         "finalize_infrastructure_error"
@@ -531,7 +578,7 @@ def _assert_repository_failure(result: GraphState) -> None:
 
 def _assert_invalid_input(result: GraphState) -> None:
     assert result["final_status"] == "invalid_request"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["original_outcome"] == "rejected"
     assert result["run_record"]["previous_stage"] == (
         "finalize_invalid_request"
@@ -547,7 +594,7 @@ def _assert_invalid_input(result: GraphState) -> None:
 
 def _assert_generate_sql_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["run_record"]["previous_stage"] == "generate_sql"
     assert result["failure_stage"] == "generate_sql"
     assert result["sql_generation_result"]["status"] == "rejected"
@@ -558,7 +605,7 @@ def _assert_generate_sql_rejected(result: GraphState) -> None:
 
 def _assert_security_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["run_record"]["previous_stage"] == "security_gate"
     assert result["failure_stage"] == "security_gate"
     assert result["security_result"]["status"] == "rejected"
@@ -568,7 +615,7 @@ def _assert_security_rejected(result: GraphState) -> None:
 
 def _assert_contract_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["run_record"]["previous_stage"] == "contract_gate"
     assert result["failure_stage"] == "contract_gate"
     assert result["security_result"]["status"] == "approved"
@@ -578,7 +625,7 @@ def _assert_contract_rejected(result: GraphState) -> None:
 
 def _assert_engine_preflight_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["run_record"]["previous_stage"] == "engine_preflight"
     assert result["failure_stage"] == "engine_preflight"
     assert result["security_result"]["status"] == "approved"
@@ -591,7 +638,7 @@ def _assert_engine_preflight_rejected(result: GraphState) -> None:
 
 def _assert_repair_loop_success(result: GraphState) -> None:
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["run_record"]["previous_stage"] == "serialize_result"
     assert result["failure_stage"] == ""
     assert result["generated_sql"] == (
@@ -616,7 +663,7 @@ def _assert_repair_loop_success(result: GraphState) -> None:
 
 def _assert_repair_limit_reached(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["run_record"]["previous_stage"] == "repair_sql"
     assert result["failure_stage"] == "repair_sql"
     assert result["errors"][-1]["code"] == "SQL_REPAIR_LIMIT_REACHED"
@@ -626,7 +673,7 @@ def _assert_repair_limit_reached(result: GraphState) -> None:
 
 def _assert_repaired_sql_security_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["run_record"]["previous_stage"] == "security_gate"
     assert result["failure_stage"] == "security_gate"
     assert result["generated_sql"] == (
@@ -642,7 +689,7 @@ def _assert_repaired_sql_security_rejected(result: GraphState) -> None:
 
 def _assert_repaired_sql_contract_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["run_record"]["previous_stage"] == "contract_gate"
     assert result["failure_stage"] == "contract_gate"
     assert result["generated_sql"] == (
@@ -660,7 +707,7 @@ def _assert_repaired_sql_contract_rejected(result: GraphState) -> None:
 
 def _assert_engine_preflight_infra(result: GraphState) -> None:
     assert result["final_status"] == "infrastructure_error"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["run_record"]["previous_stage"] == (
         "finalize_infrastructure_error"
     )
@@ -670,25 +717,31 @@ def _assert_engine_preflight_infra(result: GraphState) -> None:
 
 def _assert_persistence_failure(result: GraphState) -> None:
     assert result["final_status"] == "infrastructure_error"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["failure_stage"] == "persist_run"
     assert result["persistence_result"]["status"] == "error"
     assert "audit_result" not in result or result["audit_result"] is None
     assert result["observability_result"]["status"] == "emitted"
+    assert result["application_response"]["finalization"]["status"] == (
+        "persistence_failed"
+    )
 
 
 def _assert_audit_failure(result: GraphState) -> None:
     assert result["final_status"] == "infrastructure_error"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["failure_stage"] == "record_audit"
     assert result["persistence_result"]["status"] == "persisted"
     assert result["audit_result"]["status"] == "error"
     assert result["observability_result"]["status"] == "emitted"
+    assert result["application_response"]["finalization"]["status"] == (
+        "audit_failed"
+    )
 
 
 def _assert_observability_failure(result: GraphState) -> None:
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "emit_observability"
+    assert result["current_stage"] == "build_application_response"
     assert result["failure_stage"] == ""
     assert result["observability_degraded"] is True
     assert result["observability_result"]["status"] == "degraded"

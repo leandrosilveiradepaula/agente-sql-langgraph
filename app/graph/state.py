@@ -23,6 +23,10 @@ from app.domain.run_record_types import (
     RunOutcome,
     RunRecord,
 )
+from app.domain.application_response_types import (
+    ApplicationResponse,
+    ApplicationResponseLimits,
+)
 from app.domain.sql_security import SqlSecurityResult
 
 
@@ -50,6 +54,7 @@ class GenerateOptions(TypedDict, total=False):
     sql_execution_limits: dict[str, int]
     result_normalization_limits: dict[str, int]
     run_finalization_limits: RunFinalizationLimits
+    application_response_limits: ApplicationResponseLimits
     execution_attempt: int
 
 
@@ -167,6 +172,7 @@ class GraphState(TypedDict, total=False):
     observability_result: ObservabilityResult
     finalization_status: FinalizationStatus
     observability_degraded: bool
+    application_response: ApplicationResponse
 
     # Resultado geral
     errors: list[AgentError]
