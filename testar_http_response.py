@@ -117,6 +117,7 @@ def test_resposta_acima_do_limite_e_copia_independente() -> None:
     )
     body = _body(http)
     assert http["status_code"] == 503
+    assert len(http["body"]) <= 900
     assert body["status"] == "infrastructure_error"
     assert body["data"] is None
     assert body["errors"][0]["code"] == "HTTP_RESPONSE_TOO_LARGE"

@@ -152,7 +152,33 @@ def test_exception_tipo_invalido_sem_vazamento_e_sem_retry() -> None:
     graph_state = _handler(
         FakeApplicationService(
             response={
-                "final_status": "approved",
+                "contract_version": APPLICATION_RESPONSE_CONTRACT_VERSION,
+                "response_id": "response-1",
+                "request_id": "req-1",
+                "run_id": "run-1",
+                "status": "success",
+                "original_outcome": "success",
+                "message": "Public message",
+                "data": {
+                    "result": {
+                        "contract_version": "v1",
+                        "columns": [],
+                        "rows": [],
+                        "result_fingerprint": "result-1",
+                    },
+                    "pagination": {
+                        "mode": "none",
+                        "has_more": False,
+                        "next_cursor": None,
+                        "total_rows": 0,
+                        "returned_rows": 0,
+                    },
+                },
+                "errors": [],
+                "warnings": [],
+                "metadata": {"lineage": {}},
+                "finalization": {"status": "completed"},
+                "response_fingerprint": "not-canonical",
                 "current_sql": "SELECT 1",
                 "GraphState": True,
             }
@@ -162,6 +188,26 @@ def test_exception_tipo_invalido_sem_vazamento_e_sem_retry() -> None:
     serialized = repr(_body(graph_state)).casefold()
     assert "select 1" not in serialized
     assert "graphstate" not in serialized
+
+
+def test_accept_q_zero_nao_chama_service() -> None:
+    service = FakeApplicationService()
+    http = _handler(service).handle(
+        _request(headers={"Content-Type": "application/json", "Accept": "application/json;q=0"})
+    )
+    assert service.calls == 0
+    assert http["status_code"] == 406
+    assert _body(http)["errors"][0]["code"] == "HTTP_NOT_ACCEPTABLE"
+
+
+def test_retorno_com_fingerprint_divergente_nao_atravessa() -> None:
+    response = _response()
+    response["response_fingerprint"] = "wrong"
+    http = _handler(FakeApplicationService(response=response)).handle(_request())
+    assert http["status_code"] == 500
+    body = _body(http)
+    assert body["status"] == "infrastructure_error"
+    assert "wrong" not in repr(body)
 
 
 def test_headers_ids_json_safe_response_limit_e_imutabilidade() -> None:
@@ -199,6 +245,8 @@ def main() -> None:
         test_status_mapping,
         test_erros_de_transporte_status_e_allow,
         test_exception_tipo_invalido_sem_vazamento_e_sem_retry,
+        test_accept_q_zero_nao_chama_service,
+        test_retorno_com_fingerprint_divergente_nao_atravessa,
         test_headers_ids_json_safe_response_limit_e_imutabilidade,
         test_sem_graphstate_sql_body_em_erros,
     ]

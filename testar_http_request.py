@@ -49,6 +49,7 @@ def test_post_valido_content_type_e_accept() -> None:
     _validate(_request(headers={"Content-Type": "application/json; charset=utf-8"}))
     _validate(_request(headers={"Content-Type": "application/json", "Accept": "application/json"}))
     _validate(_request(headers={"Content-Type": "application/json", "Accept": "*/*"}))
+    _validate(_request(headers={"Content-Type": "application/json", "Accept": "text/html, application/json"}))
     _validate(_request(headers={"Content-Type": "application/json"}))
     assert _parse(_request()) == {"question": "ok"}
 
@@ -60,6 +61,7 @@ def test_metodo_rota_content_type_e_accept_invalidos() -> None:
     _raises("HTTP_UNSUPPORTED_MEDIA_TYPE", _validate, _request(headers={"Content-Type": "text/plain"}))
     _raises("HTTP_CHARSET_UNSUPPORTED", _validate, _request(headers={"Content-Type": "application/json; charset=latin1"}))
     _raises("HTTP_NOT_ACCEPTABLE", _validate, _request(headers={"Content-Type": "application/json", "Accept": "text/html"}))
+    _raises("HTTP_NOT_ACCEPTABLE", _validate, _request(headers={"Content-Type": "application/json", "Accept": "application/json;q=0"}))
     _raises("HTTP_JSON_INVALID", _validate, _request(headers={"Content-Type": "application/json", "Authorization": "Bearer secret"}))
 
 
@@ -106,6 +108,7 @@ def test_content_length_e_tamanho_real() -> None:
     _raises("HTTP_CONTENT_LENGTH_INVALID", _parse, _request(headers={"Content-Type": "application/json", "Content-Length": "abc"}))
     _raises("HTTP_CONTENT_LENGTH_INVALID", _parse, _request(headers={"Content-Type": "application/json", "Content-Length": "-1"}))
     _raises("HTTP_CONTENT_LENGTH_INVALID", _parse, _request(headers={"Content-Type": "application/json", "Content-Length": "1,2"}))
+    _raises("HTTP_CONTENT_LENGTH_INVALID", _parse, _request(headers={"Content-Type": "application/json", "Content-Length": "1"}))
     _raises(
         "HTTP_BODY_TOO_LARGE",
         _parse,

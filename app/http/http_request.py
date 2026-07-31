@@ -179,16 +179,39 @@ def _validate_content_length(
         raise HttpRequestError("HTTP_BODY_TOO_LARGE")
     if actual_size > limits["max_request_body_bytes"]:
         raise HttpRequestError("HTTP_BODY_TOO_LARGE")
+    if declared != actual_size:
+        raise HttpRequestError("HTTP_CONTENT_LENGTH_INVALID")
 
 
 def _validate_accept(headers: Mapping[str, str]) -> None:
     value = _header(headers, "accept")
     if value is None or not value.strip():
         return
-    accepted = [item.split(";", 1)[0].strip().lower() for item in value.split(",")]
-    if "*/*" in accepted or "application/json" in accepted:
-        return
+    for item in value.split(","):
+        if _accept_item_allows_json(item):
+            return
     raise HttpRequestError("HTTP_NOT_ACCEPTABLE")
+
+
+def _accept_item_allows_json(item: str) -> bool:
+    parts = [part.strip().lower() for part in item.split(";")]
+    media_type = parts[0]
+    if media_type not in {"application/json", "*/*"}:
+        return False
+    quality = 1.0
+    for parameter in parts[1:]:
+        if not parameter:
+            continue
+        if not parameter.startswith("q="):
+            continue
+        try:
+            quality = float(parameter[2:])
+        except ValueError as error:
+            del error
+            raise HttpRequestError("HTTP_NOT_ACCEPTABLE")
+        if quality < 0 or quality > 1:
+            raise HttpRequestError("HTTP_NOT_ACCEPTABLE")
+    return quality > 0
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

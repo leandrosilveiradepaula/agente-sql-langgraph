@@ -5,7 +5,11 @@ from copy import deepcopy
 from typing import Any, Protocol
 
 from app.application.application_request_types import ApplicationRequest
-from app.domain.application_response_types import ApplicationResponse
+from app.domain.application_response_types import (
+    APPLICATION_RESPONSE_CONTRACT_VERSION,
+    ApplicationResponse,
+)
+from app.domain.result_normalization import stable_fingerprint
 from app.http.http_request import (
     HttpRequestError,
     default_http_request_limits,
@@ -138,12 +142,110 @@ def create_sql_agent_http_handler(
 
 
 def _valid_application_response_shape(response: object) -> bool:
-    return (
-        isinstance(response, Mapping)
-        and response.get("contract_version") == "v1.0.0-application-response"
-        and response.get("status")
-        in {"success", "rejected", "infrastructure_error"}
-        and isinstance(response.get("response_fingerprint"), str)
-        and bool(response.get("response_fingerprint"))
-        and isinstance(response.get("response_id"), str)
-    )
+    if not isinstance(response, Mapping):
+        return False
+    allowed_keys = {
+        "contract_version",
+        "response_id",
+        "request_id",
+        "run_id",
+        "status",
+        "original_outcome",
+        "message",
+        "data",
+        "errors",
+        "warnings",
+        "metadata",
+        "finalization",
+        "response_fingerprint",
+    }
+    if set(response) - allowed_keys:
+        return False
+    if response.get("contract_version") != APPLICATION_RESPONSE_CONTRACT_VERSION:
+        return False
+    status = response.get("status")
+    if status not in {"success", "rejected", "infrastructure_error"}:
+        return False
+    if response.get("original_outcome") not in {
+        "success",
+        "rejected",
+        "infrastructure_error",
+    }:
+        return False
+    for key in ["response_id", "request_id", "run_id", "message"]:
+        if not isinstance(response.get(key), str):
+            return False
+    if not response.get("response_id") or not response.get("message"):
+        return False
+    if status == "success":
+        if not _valid_public_data(response.get("data")):
+            return False
+    elif response.get("data") is not None:
+        return False
+    if not isinstance(response.get("errors"), list):
+        return False
+    if not isinstance(response.get("warnings"), list):
+        return False
+    if not isinstance(response.get("metadata"), Mapping):
+        return False
+    if "canonical_json" in response["metadata"]:
+        return False
+    if not isinstance(response.get("finalization"), Mapping):
+        return False
+    finalization_status = response["finalization"].get("status")
+    if status == "success" and finalization_status not in {
+        "completed",
+        "observability_degraded",
+    }:
+        return False
+    fingerprint = response.get("response_fingerprint")
+    if not isinstance(fingerprint, str) or not fingerprint:
+        return False
+    payload = deepcopy(dict(response))
+    payload.pop("response_fingerprint", None)
+    return stable_fingerprint(payload) == fingerprint
+
+
+def _valid_public_data(data: object) -> bool:
+    if not isinstance(data, Mapping) or set(data) != {"result", "pagination"}:
+        return False
+    result = data.get("result")
+    pagination = data.get("pagination")
+    if not isinstance(result, Mapping) or set(result) != {
+        "contract_version",
+        "columns",
+        "rows",
+        "result_fingerprint",
+    }:
+        return False
+    if not isinstance(result.get("contract_version"), str):
+        return False
+    if not isinstance(result.get("columns"), list):
+        return False
+    if not isinstance(result.get("rows"), list):
+        return False
+    if not isinstance(result.get("result_fingerprint"), str):
+        return False
+    if not result.get("result_fingerprint"):
+        return False
+    if not isinstance(pagination, Mapping) or set(pagination) != {
+        "mode",
+        "has_more",
+        "next_cursor",
+        "total_rows",
+        "returned_rows",
+    }:
+        return False
+    if pagination.get("mode") != "none":
+        return False
+    if pagination.get("has_more") is not False:
+        return False
+    if pagination.get("next_cursor") is not None:
+        return False
+    for key in ["total_rows", "returned_rows"]:
+        value = pagination.get(key)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+        ):
+            return False
+    return True

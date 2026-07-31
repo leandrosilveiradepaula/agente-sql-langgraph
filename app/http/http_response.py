@@ -18,6 +18,8 @@ from app.http.http_response_types import (
 from app.http.security_headers import security_headers
 from app.http.status_mapping import http_status_for_application_response
 
+_MIN_RESPONSE_BODY_BYTES = 640
+
 
 def default_http_response_limits() -> HttpResponseLimits:
     return {
@@ -45,6 +47,8 @@ def validate_http_response_limits(
             raise ValueError("Limite HTTP invalido.")
         if value <= 0 or value > maximum:
             raise ValueError("Limite HTTP fora da faixa.")
+        if key == "max_response_body_bytes" and value < _MIN_RESPONSE_BODY_BYTES:
+            raise ValueError("Limite HTTP fora da faixa.")
         output[key] = value
     return output  # type: ignore[return-value]
 
@@ -63,6 +67,9 @@ def application_response_to_http_response(
             code="HTTP_RESPONSE_TOO_LARGE",
         )
         body = _json_bytes(safe_response)
+        if len(body) > limits["max_response_body_bytes"]:
+            safe_response = _tiny_http_application_response()
+            body = _json_bytes(safe_response)
         status_code = 503
     headers = _response_headers(safe_response, limits)
     return {
@@ -140,6 +147,43 @@ def minimal_http_application_response(
             "observability_degraded": False,
             "error_codes": [code],
         },
+        "response_fingerprint": "",
+    }
+    payload = deepcopy(response)
+    payload.pop("response_fingerprint", None)
+    response["response_fingerprint"] = stable_fingerprint(payload)
+    return deepcopy(response)
+
+
+def _tiny_http_application_response() -> ApplicationResponse:
+    response: ApplicationResponse = {
+        "contract_version": APPLICATION_RESPONSE_CONTRACT_VERSION,
+        "response_id": stable_fingerprint(
+            {
+                "contract_version": APPLICATION_RESPONSE_CONTRACT_VERSION,
+                "source": "http_entry_adapter",
+                "code": "HTTP_RESPONSE_TOO_LARGE",
+                "fallback": "tiny",
+            }
+        ),
+        "request_id": "",
+        "run_id": "",
+        "status": "infrastructure_error",
+        "original_outcome": "infrastructure_error",
+        "message": "O processamento HTTP nao pode ser concluido.",
+        "data": None,
+        "errors": [
+            {
+                "code": "HTTP_RESPONSE_TOO_LARGE",
+                "category": "http",
+                "stage": "http_entry_adapter",
+                "message": "O processamento HTTP nao pode ser concluido.",
+                "retryable": True,
+            }
+        ],
+        "warnings": [],
+        "metadata": {"lineage": {}},
+        "finalization": {"status": "incomplete"},
         "response_fingerprint": "",
     }
     payload = deepcopy(response)
