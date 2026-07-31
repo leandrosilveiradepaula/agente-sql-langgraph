@@ -232,8 +232,8 @@ def validate_application_response_limits(
         "max_error_message_length": (16, 512),
         "max_warning_message_length": (16, 512),
         "max_lineage_fields": (1, 32),
-        "max_data_rows": (0, 100_000),
-        "max_data_columns": (0, 10_000),
+        "max_data_rows": (1, 100_000),
+        "max_data_columns": (1, 10_000),
         "max_metadata_fields": (1, 32),
     }
     output: dict[str, int] = {}
@@ -269,7 +269,7 @@ def _data_allowed(
         and execution_result.get("executed") is True
         and _status_of(normalized_result) == "success"
         and _status_of(serialized_result) == "success"
-        and _persisted(persistence_result)
+        and _persisted(persistence_result, run_record=None)
         and _audited(audit_result)
         and finalization["status"] in {"completed", "observability_degraded"}
     )
@@ -334,15 +334,16 @@ def _finalization(
 ) -> ApplicationResponseFinalization:
     raw_status = str(finalization_status or "")
     status: ApplicationResponseFinalizationStatus
-    if raw_status == "record_failed" or not isinstance(run_record, Mapping):
+    if raw_status == "record_failed" or not _run_record_built(run_record):
         status = "record_failed"
-    elif raw_status == "persistence_failed" or _failed_persistence(
-        persistence_result
+    elif raw_status == "persistence_failed" or not _persisted(
+        persistence_result,
+        run_record=run_record,
     ):
         status = "persistence_failed"
-    elif raw_status == "audit_failed" or _failed_audit(audit_result):
+    elif raw_status == "audit_failed" or not _audited(audit_result):
         status = "audit_failed"
-    elif raw_status == "observed" and _persisted(persistence_result) and _audited(audit_result):
+    elif raw_status == "observed":
         status = "completed"
     elif raw_status == "observability_degraded":
         status = "observability_degraded"
@@ -355,18 +356,21 @@ def _finalization(
             errors.append(code)
     return {
         "status": status,
-        "run_record_built": isinstance(run_record, Mapping)
-        and run_record.get("status") == "built",
-        "persisted": _persisted(persistence_result),
+        "run_record_built": _run_record_built(run_record),
+        "persisted": _persisted(
+            persistence_result,
+            run_record=run_record,
+        ),
         "persistence_record_id": _safe_id(
             persistence_result.get("record_id")
-            if isinstance(persistence_result, Mapping)
+            if _persisted(persistence_result, run_record=run_record)
+            and isinstance(persistence_result, Mapping)
             else None
         ),
         "audited": _audited(audit_result),
         "audit_event_id": _safe_id(
             audit_result.get("event_id")
-            if isinstance(audit_result, Mapping)
+            if _audited(audit_result) and isinstance(audit_result, Mapping)
             else None
         ),
         "observability_emitted": isinstance(observability_result, Mapping)
@@ -417,10 +421,7 @@ def _metadata(
         if isinstance(metrics, Mapping)
         else False,
         "repair_attempts": _int_metric(metrics, "repair_attempts"),
-        "duration_ms": metrics.get("duration_ms")
-        if isinstance(metrics, Mapping)
-        and isinstance(metrics.get("duration_ms"), int)
-        else None,
+        "duration_ms": _optional_non_negative_int(metrics, "duration_ms"),
         "persisted": finalization["persisted"],
         "audited": finalization["audited"],
         "observability_degraded": finalization["observability_degraded"],
@@ -469,7 +470,7 @@ def _lineage(
             output[target_key] = _safe_id(value)  # type: ignore[literal-required]
     if isinstance(run_record, Mapping) and isinstance(run_record.get("fingerprint"), str):
         output["run_record_fingerprint"] = str(run_record["fingerprint"])
-    if _persisted(persistence_result) and isinstance(persistence_result, Mapping):
+    if _persisted(persistence_result, run_record=run_record) and isinstance(persistence_result, Mapping):
         output["persistence_record_id"] = _safe_id(persistence_result.get("record_id"))
         if isinstance(persistence_result.get("persisted_fingerprint"), str):
             output["persistence_fingerprint"] = str(
@@ -744,34 +745,52 @@ def _status_of(value: object) -> str:
     return ""
 
 
-def _persisted(value: object) -> bool:
+def _run_record_built(value: object) -> bool:
     return (
         isinstance(value, Mapping)
-        and value.get("status") in {"persisted", "already_persisted"}
-        and isinstance(value.get("record_id"), str)
+        and value.get("status") == "built"
+        and isinstance(value.get("fingerprint"), str)
+        and bool(value.get("fingerprint"))
     )
 
 
-def _failed_persistence(value: object) -> bool:
-    return isinstance(value, Mapping) and value.get("status") in {
-        "rejected",
-        "error",
-    }
+def _persisted(
+    value: object,
+    *,
+    run_record: object | None,
+) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    if value.get("status") not in {"persisted", "already_persisted"}:
+        return False
+    if value.get("failure_category") != "none":
+        return False
+    if value.get("diagnostic") is not None:
+        return False
+    if not _non_empty_text(value.get("record_id")):
+        return False
+    if not _non_empty_text(value.get("persisted_fingerprint")):
+        return False
+    if isinstance(run_record, Mapping):
+        record_fingerprint = run_record.get("fingerprint")
+        if (
+            isinstance(record_fingerprint, str)
+            and record_fingerprint
+            and value.get("persisted_fingerprint") != record_fingerprint
+        ):
+            return False
+    return True
 
 
 def _audited(value: object) -> bool:
     return (
         isinstance(value, Mapping)
         and value.get("status") in {"written", "already_written"}
-        and isinstance(value.get("event_id"), str)
+        and value.get("failure_category") == "none"
+        and value.get("diagnostic") is None
+        and _non_empty_text(value.get("event_id"))
+        and _non_empty_text(value.get("event_fingerprint"))
     )
-
-
-def _failed_audit(value: object) -> bool:
-    return isinstance(value, Mapping) and value.get("status") in {
-        "rejected",
-        "error",
-    }
 
 
 def _diagnostic_code(value: object) -> str:
@@ -789,6 +808,18 @@ def _int_metric(value: object, key: str) -> int:
         if isinstance(item, int) and not isinstance(item, bool) and item >= 0:
             return item
     return 0
+
+
+def _optional_non_negative_int(value: object, key: str) -> int | None:
+    if isinstance(value, Mapping):
+        item = value.get(key)
+        if isinstance(item, int) and not isinstance(item, bool) and item >= 0:
+            return item
+    return None
+
+
+def _non_empty_text(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _safe_provider(

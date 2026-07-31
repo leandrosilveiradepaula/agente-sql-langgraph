@@ -483,10 +483,77 @@ def test_data_presente_somente_em_success_finalizado() -> None:
         _response(execution_result={"status": "success", "executed": False}),
         _response(persistence_result=None),
         _response(audit_result=None),
+        _response(
+            run_record={**_run_record(), "status": "rejected"},
+        ),
+        _response(
+            persistence_result={
+                **_persisted(),
+                "persisted_fingerprint": "mismatch",
+            },
+        ),
+        _response(
+            persistence_result={
+                **_persisted(),
+                "record_id": "",
+            },
+        ),
+        _response(
+            audit_result={
+                **_audited(),
+                "event_id": "",
+            },
+        ),
+        _response(
+            audit_result={
+                **_audited(),
+                "failure_category": "unexpected_error",
+            },
+        ),
     ]
     for response in cases:
         assert response["status"] == "infrastructure_error"
         assert response["data"] is None
+
+
+def test_estado_inconsistente_nao_vira_completed() -> None:
+    run_record_invalid = _response(
+        run_record={**_run_record(), "status": "rejected"},
+    )
+    persistence_mismatch = _response(
+        persistence_result={
+            **_persisted(),
+            "persisted_fingerprint": "mismatch",
+        },
+    )
+    audit_invalid = _response(
+        audit_result={
+            **_audited(),
+            "event_fingerprint": "",
+        },
+    )
+    negative_duration = _response(
+        run_record=_run_record(
+            metrics={
+                "row_count": 1,
+                "column_count": 1,
+                "bytes": 100,
+                "duration_ms": -1,
+                "truncated": False,
+                "repair_attempts": 0,
+            }
+        )
+    )
+    assert run_record_invalid["finalization"]["status"] == "record_failed"
+    assert persistence_mismatch["finalization"]["status"] == (
+        "persistence_failed"
+    )
+    assert persistence_mismatch["finalization"]["persisted"] is False
+    assert persistence_mismatch["finalization"]["persistence_record_id"] == ""
+    assert audit_invalid["finalization"]["status"] == "audit_failed"
+    assert audit_invalid["finalization"]["audited"] is False
+    assert audit_invalid["finalization"]["audit_event_id"] == ""
+    assert negative_duration["metadata"]["duration_ms"] is None
 
 
 def main() -> None:
@@ -507,6 +574,7 @@ def main() -> None:
         test_json_safe_e_canonical_sob_demanda,
         test_limite_de_bytes_erros_warnings_e_data,
         test_data_presente_somente_em_success_finalizado,
+        test_estado_inconsistente_nao_vira_completed,
     ]
     for index, test in enumerate(tests, start=1):
         test()
