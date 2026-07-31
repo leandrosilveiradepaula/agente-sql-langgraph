@@ -3,6 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 
 from app.adapters.testing.fake_engine_preflight import FakeEnginePreflight
+from app.adapters.testing.fake_audit_sink import FakeAuditSink
+from app.adapters.testing.fake_observability_sink import FakeObservabilitySink
+from app.adapters.testing.fake_run_repository import FakeRunRepository
 from app.adapters.testing.fake_sql_executor import FakeSqlExecutor
 from app.adapters.testing.fake_sql_repairer import FakeSqlRepairer
 from app.domain.context_normalizer import normalize_context_snapshot
@@ -221,6 +224,9 @@ def test_grafo_nao_chama_generator_quando_intencao_rejeitada() -> None:
         preflight,
         repairer,
         executor,
+        FakeRunRepository(),
+        FakeAuditSink(),
+        FakeObservabilitySink(),
     )
 
     result = graph.invoke(
@@ -233,7 +239,8 @@ def test_grafo_nao_chama_generator_quando_intencao_rejeitada() -> None:
     )
 
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "classify_intent"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == "classify_intent"
     assert generator.calls == 0
     assert preflight.calls == 0
     assert executor.calls == 0
@@ -254,6 +261,9 @@ def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
         preflight,
         repairer,
         executor,
+        FakeRunRepository(),
+        FakeAuditSink(),
+        FakeObservabilitySink(),
     )
 
     result = graph.invoke(
@@ -264,7 +274,8 @@ def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
     )
 
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "build_plan"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == "build_plan"
     assert result["failure_stage"] == "build_plan"
     assert generator.calls == 0
     assert preflight.calls == 0
@@ -282,6 +293,9 @@ def test_grafo_chama_generator_apos_build_plan_processing() -> None:
         preflight,
         repairer,
         executor,
+        FakeRunRepository(),
+        FakeAuditSink(),
+        FakeObservabilitySink(),
     )
 
     result = graph.invoke(
@@ -292,7 +306,8 @@ def test_grafo_chama_generator_apos_build_plan_processing() -> None:
     )
 
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "serialize_result"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == "serialize_result"
     assert result["generated_sql"] == (
         "SELECT id FROM schema_test.table_test"
     )

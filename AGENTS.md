@@ -23,6 +23,8 @@ SqlRepairer injetado e reenviar a SQL reparada para Security Gate, Contract
 Gate e Engine Preflight.
 O planner usa somente o snapshot versionado ja validado; geracao e gates
 consomem somente o `QueryPlan` e a SQL corrente.
+Toda saida terminal do grafo passa por finalizacao local: `RunRecord`,
+persistencia obrigatoria, auditoria obrigatoria e observabilidade best-effort.
 
 ## Comandos principais
 
@@ -77,6 +79,11 @@ A suite local deve usar dados genericos. Scripts live ficam separados e so
 podem ser usados em leitura quando necessario. `scripts/check_all.py` e a
 regressao consolidada esperada antes de commit.
 Testes locais de preflight usam fake injetado e nao acessam motor real.
+Persistencia e auditoria devem ser idempotentes, falhar fechadas e nunca
+registrar SQL integral ou valores em auditoria/telemetria. Observabilidade pode
+degradar sem apagar resultado persistido, mas nao usa IDs de alta cardinalidade
+como labels. Fakes de persistencia, auditoria e observabilidade nunca sao
+defaults e nenhum adapter live entra no `check_all.py`.
 Testes locais de reparo usam fake injetado, sem rede, sem banco e sem
 execucao de SQL.
 Testes locais de execucao usam fake injetado e nao executam SQL real.

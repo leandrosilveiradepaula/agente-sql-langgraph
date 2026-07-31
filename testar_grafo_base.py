@@ -3,6 +3,9 @@ from pprint import pprint
 from typing import Callable
 
 from app.adapters.testing.fake_engine_preflight import FakeEnginePreflight
+from app.adapters.testing.fake_audit_sink import FakeAuditSink
+from app.adapters.testing.fake_observability_sink import FakeObservabilitySink
+from app.adapters.testing.fake_run_repository import FakeRunRepository
 from app.adapters.testing.fake_sql_executor import FakeSqlExecutor
 from app.adapters.testing.fake_sql_repairer import FakeSqlRepairer
 from app.domain.context import ContextSnapshot
@@ -10,13 +13,16 @@ from app.domain.context_normalizer import normalize_context_snapshot
 from app.graph.builder import create_graph
 from app.graph.routing import (
     route_after_build_plan,
+    route_after_build_run_record,
     route_after_classify_intent,
     route_after_contract_gate,
     route_after_engine_preflight,
     route_after_execute_sql,
     route_after_generate_sql,
     route_after_normalize_result,
+    route_after_persist_run,
     route_after_repair_sql,
+    route_after_record_audit,
     route_after_security_gate,
     route_after_serialize_result,
 )
@@ -310,6 +316,9 @@ def run_test(
     engine_preflight: FakeEnginePreflight | None = None,
     sql_repairer: FakeSqlRepairer | None = None,
     sql_executor: FakeSqlExecutor | None = None,
+    run_repository: FakeRunRepository | None = None,
+    audit_sink: FakeAuditSink | None = None,
+    observability_sink: FakeObservabilitySink | None = None,
 ) -> GraphState:
     print("=" * 70)
     print(title)
@@ -319,7 +328,19 @@ def run_test(
     preflight = engine_preflight or FakeEnginePreflight()
     repairer = sql_repairer or FakeSqlRepairer()
     executor = sql_executor or FakeSqlExecutor()
-    graph = create_graph(repository, generator, preflight, repairer, executor)
+    repository_sink = run_repository or FakeRunRepository()
+    audit = audit_sink or FakeAuditSink()
+    observability = observability_sink or FakeObservabilitySink()
+    graph = create_graph(
+        repository,
+        generator,
+        preflight,
+        repairer,
+        executor,
+        repository_sink,
+        audit,
+        observability,
+    )
 
     result = graph.invoke(
         initial_state,
@@ -344,7 +365,13 @@ def _assert_classified_intent(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "serialize_result"
+    assert result["current_stage"] == "emit_observability"
+    assert result["original_outcome"] == "success"
+    assert result["finalization_status"] == "observed"
+    assert result["run_record"]["previous_stage"] == "serialize_result"
+    assert result["persistence_result"]["status"] == "persisted"
+    assert result["audit_result"]["status"] == "written"
+    assert result["observability_result"]["status"] == "emitted"
     assert result["failure_stage"] == ""
     assert result["context_version"] == "context-test-v3"
     assert result["intent"] == "generic_test_intent"
@@ -400,7 +427,9 @@ def _assert_catalog_only_classification(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "serialize_result"
+    assert result["current_stage"] == "emit_observability"
+    assert result["original_outcome"] == "success"
+    assert result["run_record"]["previous_stage"] == "serialize_result"
     assert result["failure_stage"] == ""
     assert result["intent"] == "generic_test_intent"
     assert result["intent_confidence"] == 0.98
@@ -445,7 +474,9 @@ def _assert_unresolved_intent(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "classify_intent"
+    assert result["current_stage"] == "emit_observability"
+    assert result["original_outcome"] == "rejected"
+    assert result["run_record"]["previous_stage"] == "classify_intent"
     assert result["failure_stage"] == "classify_intent"
     assert result["intent"] is None
     assert result["intent_confidence"] is None
@@ -468,9 +499,10 @@ def _assert_unresolved_intent(
 
 def _assert_invalid_context(result: GraphState) -> None:
     assert result["final_status"] == "infrastructure_error"
-    assert (
-        result["current_stage"]
-        == "finalize_infrastructure_error"
+    assert result["current_stage"] == "emit_observability"
+    assert result["original_outcome"] == "infrastructure_error"
+    assert result["run_record"]["previous_stage"] == (
+        "finalize_infrastructure_error"
     )
     assert result["failure_stage"] == "load_context"
 
@@ -483,9 +515,10 @@ def _assert_invalid_context(result: GraphState) -> None:
 
 def _assert_repository_failure(result: GraphState) -> None:
     assert result["final_status"] == "infrastructure_error"
-    assert (
-        result["current_stage"]
-        == "finalize_infrastructure_error"
+    assert result["current_stage"] == "emit_observability"
+    assert result["original_outcome"] == "infrastructure_error"
+    assert result["run_record"]["previous_stage"] == (
+        "finalize_infrastructure_error"
     )
     assert result["failure_stage"] == "load_context"
 
@@ -498,9 +531,10 @@ def _assert_repository_failure(result: GraphState) -> None:
 
 def _assert_invalid_input(result: GraphState) -> None:
     assert result["final_status"] == "invalid_request"
-    assert (
-        result["current_stage"]
-        == "finalize_invalid_request"
+    assert result["current_stage"] == "emit_observability"
+    assert result["original_outcome"] == "rejected"
+    assert result["run_record"]["previous_stage"] == (
+        "finalize_invalid_request"
     )
     assert result["failure_stage"] == "receive_question"
 
@@ -513,7 +547,8 @@ def _assert_invalid_input(result: GraphState) -> None:
 
 def _assert_generate_sql_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "generate_sql"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == "generate_sql"
     assert result["failure_stage"] == "generate_sql"
     assert result["sql_generation_result"]["status"] == "rejected"
     assert result["security_result"]["status"] == "not_run"
@@ -523,7 +558,8 @@ def _assert_generate_sql_rejected(result: GraphState) -> None:
 
 def _assert_security_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "security_gate"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == "security_gate"
     assert result["failure_stage"] == "security_gate"
     assert result["security_result"]["status"] == "rejected"
     assert result["contract_result"]["status"] == "not_run"
@@ -532,7 +568,8 @@ def _assert_security_rejected(result: GraphState) -> None:
 
 def _assert_contract_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "contract_gate"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == "contract_gate"
     assert result["failure_stage"] == "contract_gate"
     assert result["security_result"]["status"] == "approved"
     assert result["contract_result"]["status"] == "rejected"
@@ -541,7 +578,8 @@ def _assert_contract_rejected(result: GraphState) -> None:
 
 def _assert_engine_preflight_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "engine_preflight"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == "engine_preflight"
     assert result["failure_stage"] == "engine_preflight"
     assert result["security_result"]["status"] == "approved"
     assert result["contract_result"]["status"] == "approved"
@@ -553,7 +591,8 @@ def _assert_engine_preflight_rejected(result: GraphState) -> None:
 
 def _assert_repair_loop_success(result: GraphState) -> None:
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "serialize_result"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == "serialize_result"
     assert result["failure_stage"] == ""
     assert result["generated_sql"] == (
         "SELECT id FROM schema_test.table_test"
@@ -577,7 +616,8 @@ def _assert_repair_loop_success(result: GraphState) -> None:
 
 def _assert_repair_limit_reached(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "repair_sql"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == "repair_sql"
     assert result["failure_stage"] == "repair_sql"
     assert result["errors"][-1]["code"] == "SQL_REPAIR_LIMIT_REACHED"
     assert result["repair_attempts"] == 1
@@ -586,7 +626,8 @@ def _assert_repair_limit_reached(result: GraphState) -> None:
 
 def _assert_repaired_sql_security_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "security_gate"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == "security_gate"
     assert result["failure_stage"] == "security_gate"
     assert result["generated_sql"] == (
         "SELECT id FROM schema_test.table_test"
@@ -601,7 +642,8 @@ def _assert_repaired_sql_security_rejected(result: GraphState) -> None:
 
 def _assert_repaired_sql_contract_rejected(result: GraphState) -> None:
     assert result["final_status"] == "rejected"
-    assert result["current_stage"] == "contract_gate"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == "contract_gate"
     assert result["failure_stage"] == "contract_gate"
     assert result["generated_sql"] == (
         "SELECT id FROM schema_test.table_test"
@@ -618,9 +660,41 @@ def _assert_repaired_sql_contract_rejected(result: GraphState) -> None:
 
 def _assert_engine_preflight_infra(result: GraphState) -> None:
     assert result["final_status"] == "infrastructure_error"
-    assert result["current_stage"] == "finalize_infrastructure_error"
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == (
+        "finalize_infrastructure_error"
+    )
     assert result["failure_stage"] == "engine_preflight"
     assert result["engine_preflight_result"]["status"] == "error"
+
+
+def _assert_persistence_failure(result: GraphState) -> None:
+    assert result["final_status"] == "infrastructure_error"
+    assert result["current_stage"] == "emit_observability"
+    assert result["failure_stage"] == "persist_run"
+    assert result["persistence_result"]["status"] == "error"
+    assert "audit_result" not in result or result["audit_result"] is None
+    assert result["observability_result"]["status"] == "emitted"
+
+
+def _assert_audit_failure(result: GraphState) -> None:
+    assert result["final_status"] == "infrastructure_error"
+    assert result["current_stage"] == "emit_observability"
+    assert result["failure_stage"] == "record_audit"
+    assert result["persistence_result"]["status"] == "persisted"
+    assert result["audit_result"]["status"] == "error"
+    assert result["observability_result"]["status"] == "emitted"
+
+
+def _assert_observability_failure(result: GraphState) -> None:
+    assert result["final_status"] == "approved"
+    assert result["current_stage"] == "emit_observability"
+    assert result["failure_stage"] == ""
+    assert result["observability_degraded"] is True
+    assert result["observability_result"]["status"] == "degraded"
+    assert result["serialized_result"]["status"] == "success"
+    assert result["persistence_result"]["status"] == "persisted"
+    assert result["audit_result"]["status"] == "written"
 
 
 def test_classify_routing() -> None:
@@ -871,6 +945,33 @@ def test_classify_routing() -> None:
             "final_status": "infrastructure_error",
         }
     ) == "infrastructure_error"
+
+    assert route_after_build_run_record(
+        {
+            "finalization_status": "record_built",
+            "run_record": {"fingerprint": "abc"},
+        }
+    ) == "persist_run"
+    assert route_after_build_run_record({}) == "complete"
+
+    assert route_after_persist_run(
+        {
+            "finalization_status": "persisted",
+            "persistence_result": {
+                "status": "persisted",
+                "record_id": "record-test",
+            },
+        }
+    ) == "record_audit"
+    assert route_after_persist_run(
+        {
+            "finalization_status": "persistence_failed",
+            "persistence_result": {
+                "status": "error",
+            },
+        }
+    ) == "emit_observability"
+    assert route_after_record_audit({}) == "emit_observability"
 
 
 def main() -> None:
@@ -1196,6 +1297,53 @@ def main() -> None:
     )
     assert infra_preflight.calls == 1
     assert should_not_execute_7.calls == 0
+
+    persistence_failure = FakeRunRepository(
+        exceptions=[RuntimeError("store unavailable")]
+    )
+    audit_should_not_run = FakeAuditSink()
+    observability_after_persistence_failure = (
+        FakeObservabilitySink()
+    )
+    run_test(
+        "TESTE 16 - FALHA DE PERSISTENCIA ENCERRA INFRA",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_persistence_failure,
+        run_repository=persistence_failure,
+        audit_sink=audit_should_not_run,
+        observability_sink=observability_after_persistence_failure,
+    )
+    assert persistence_failure.calls == 1
+    assert audit_should_not_run.calls == 0
+    assert observability_after_persistence_failure.calls == 1
+
+    audit_failure = FakeAuditSink(
+        exceptions=[RuntimeError("audit unavailable")]
+    )
+    observability_after_audit_failure = FakeObservabilitySink()
+    run_test(
+        "TESTE 17 - FALHA DE AUDITORIA ENCERRA INFRA",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_audit_failure,
+        audit_sink=audit_failure,
+        observability_sink=observability_after_audit_failure,
+    )
+    assert audit_failure.calls == 1
+    assert observability_after_audit_failure.calls == 1
+
+    observability_failure = FakeObservabilitySink(
+        exceptions=[RuntimeError("telemetry unavailable")]
+    )
+    run_test(
+        "TESTE 18 - FALHA DE OBSERVABILIDADE MARCA DEGRADED",
+        SuccessContextRepository(),
+        valid_initial_state,
+        _assert_observability_failure,
+        observability_sink=observability_failure,
+    )
+    assert observability_failure.calls == 1
 
     print("=" * 70)
     print("TESTE 10 — ROTEAMENTO APÓS CLASSIFICAÇÃO")
