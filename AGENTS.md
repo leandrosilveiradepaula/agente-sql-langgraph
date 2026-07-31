@@ -92,6 +92,11 @@ GraphState, prompts, headers, tokens, DSN, RunRecord integral ou eventos
 integrais.
 Application service tambem nao cria endpoint HTTP, nao loga pergunta, SQL ou
 payload, nao chama adapters/sinks diretamente e nao implementa retry automatico.
+HTTP entry adapter chama somente `SqlAgentApplicationService`; endpoints nunca
+invocam o grafo diretamente. O adapter nao loga body, question ou data, rejeita
+JSON com chaves duplicadas, nao abre CORS por padrao, nao interpreta
+Authorization nesta fase, nao inicia servidor em `check_all.py` e nenhum
+endpoint expoe `GraphState`.
 
 ## Testes
 
