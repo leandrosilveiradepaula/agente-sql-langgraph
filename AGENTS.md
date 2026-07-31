@@ -32,6 +32,10 @@ success finalizado com persistencia e auditoria aprovadas. Falha de
 persistencia/auditoria e fail-closed; observabilidade degradada preserva o
 outcome original. Nao duplicar payload, e JSON canonico deve ser produzido
 somente sob demanda.
+Toda execucao externa futura deve passar pelo application service. Endpoints
+nao invocam o grafo diretamente. O service sempre retorna `ApplicationResponse`,
+request invalida nao chama o grafo, exception de runtime e fail-closed, e
+`GraphState` nunca e retornado.
 
 ## Comandos principais
 
@@ -86,6 +90,8 @@ ApplicationResponse nao cria endpoint nesta fase, nao executa SQL, nao chama
 sinks, nao expoe SQL integral, pergunta integral, QueryPlan, ContextSnapshot,
 GraphState, prompts, headers, tokens, DSN, RunRecord integral ou eventos
 integrais.
+Application service tambem nao cria endpoint HTTP, nao loga pergunta, SQL ou
+payload, nao chama adapters/sinks diretamente e nao implementa retry automatico.
 
 ## Testes
 

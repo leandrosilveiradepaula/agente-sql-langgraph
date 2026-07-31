@@ -17,6 +17,11 @@ from app.config.postgres_context import (
     load_postgres_context_runtime_config,
 )
 from app.graph.builder import create_graph
+from app.application.sql_agent_service import (
+    IdGenerator,
+    SqlAgentApplicationService,
+)
+from app.ports.graph_runtime import GraphRuntime
 from app.ports.context_repository import ContextRepository
 from app.ports.engine_preflight import EnginePreflight
 from app.ports.audit_sink import AuditSink
@@ -49,6 +54,26 @@ GraphFactory = Callable[
     ],
     Any,
 ]
+
+
+class CompiledGraphRuntime:
+    """
+    Adapter minimo para expor um grafo compilado pela porta GraphRuntime.
+    """
+
+    def __init__(self, graph: Any) -> None:
+        if graph is None or not callable(getattr(graph, "invoke", None)):
+            raise RuntimeError("graph deve expor invoke.")
+        self._graph = graph
+
+    def invoke(
+        self,
+        initial_state: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        result = self._graph.invoke(dict(initial_state))
+        if not isinstance(result, Mapping):
+            raise RuntimeError("graph retornou estado invalido.")
+        return result
 
 
 def create_postgres_context_repository(
@@ -164,4 +189,80 @@ def create_postgres_context_graph(
         run_repository,
         audit_sink,
         observability_sink,
+    )
+
+
+def create_application_service(
+    *,
+    runtime: GraphRuntime | None = None,
+    graph: Any | None = None,
+    id_generator: IdGenerator | None = None,
+    limits: Mapping[str, Any] | None = None,
+) -> SqlAgentApplicationService:
+    """
+    Cria a fachada interna de aplicacao a partir de runtime explicito.
+
+    Nenhum fake, singleton, adapter live, rede ou banco e criado aqui.
+    """
+
+    if runtime is None:
+        if graph is None:
+            raise RuntimeError(
+                "runtime ou graph deve ser injetado explicitamente."
+            )
+        runtime = CompiledGraphRuntime(graph)
+    if id_generator is None:
+        raise RuntimeError(
+            "id_generator deve ser injetado explicitamente."
+        )
+    return SqlAgentApplicationService(
+        runtime=runtime,
+        id_generator=id_generator,
+        limits=limits,
+    )
+
+
+def create_postgres_context_application_service(
+    environ: RuntimeEnvironment | None = None,
+    *,
+    id_generator: IdGenerator | None = None,
+    sql_generator: SqlGenerator | None = None,
+    engine_preflight: EnginePreflight | None = None,
+    sql_repairer: SqlRepairer | None = None,
+    sql_executor: SqlExecutor | None = None,
+    run_repository: RunRepository | None = None,
+    audit_sink: AuditSink | None = None,
+    observability_sink: ObservabilitySink | None = None,
+    config_loader: ConfigLoader = (
+        load_postgres_context_runtime_config
+    ),
+    repository_factory: RepositoryFactory = (
+        create_postgres_context_repository
+    ),
+    graph_factory: GraphFactory = create_graph,
+    limits: Mapping[str, Any] | None = None,
+) -> SqlAgentApplicationService:
+    """
+    Composition root de alto nivel: constroi grafo e encapsula no service.
+
+    As dependencias do grafo continuam explicitamente obrigatorias.
+    """
+
+    graph = create_postgres_context_graph(
+        environ,
+        sql_generator=sql_generator,
+        engine_preflight=engine_preflight,
+        sql_repairer=sql_repairer,
+        sql_executor=sql_executor,
+        run_repository=run_repository,
+        audit_sink=audit_sink,
+        observability_sink=observability_sink,
+        config_loader=config_loader,
+        repository_factory=repository_factory,
+        graph_factory=graph_factory,
+    )
+    return create_application_service(
+        graph=graph,
+        id_generator=id_generator,
+        limits=limits,
     )
