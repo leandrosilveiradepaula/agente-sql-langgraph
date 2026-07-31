@@ -259,7 +259,7 @@ def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
     result = graph.invoke(
         _graph_state("Execute uma generic analysis de teste."),
         config={
-            "recursion_limit": 10,
+            "recursion_limit": 20,
         },
     )
 
@@ -287,18 +287,20 @@ def test_grafo_chama_generator_apos_build_plan_processing() -> None:
     result = graph.invoke(
         _graph_state("Execute uma generic analysis de teste."),
         config={
-            "recursion_limit": 10,
+            "recursion_limit": 20,
         },
     )
 
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "execute_sql"
+    assert result["current_stage"] == "serialize_result"
     assert result["generated_sql"] == (
         "SELECT id FROM schema_test.table_test"
     )
     assert result["security_result"]["status"] == "approved"
     assert result["contract_result"]["status"] == "approved"
     assert result["engine_preflight_result"]["status"] == "approved"
+    assert result["normalized_result"]["status"] == "success"
+    assert result["serialized_result"]["status"] == "success"
     assert generator.calls == 1
     assert preflight.calls == 1
     assert repairer.calls == 0

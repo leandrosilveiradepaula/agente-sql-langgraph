@@ -10,6 +10,10 @@ from app.domain.sql_contract import SqlContractResult
 from app.domain.sql_execution import SqlExecutionResult
 from app.domain.sql_generation import SqlGenerationResult
 from app.domain.sql_repair import SqlRepairResult
+from app.domain.result_normalization_types import (
+    NormalizedQueryResult,
+    SerializedQueryResult,
+)
 from app.domain.sql_security import SqlSecurityResult
 
 
@@ -35,6 +39,7 @@ class GenerateOptions(TypedDict, total=False):
     max_repair_attempts: int
     shadow_mode: bool
     sql_execution_limits: dict[str, int]
+    result_normalization_limits: dict[str, int]
     execution_attempt: int
 
 
@@ -141,6 +146,8 @@ class GraphState(TypedDict, total=False):
     contract_result: SqlContractResult
     engine_preflight_result: EnginePreflightResult
     sql_execution_result: SqlExecutionResult
+    normalized_result: NormalizedQueryResult
+    serialized_result: SerializedQueryResult
 
     # Resultado geral
     errors: list[AgentError]

@@ -189,7 +189,7 @@ def create_execute_sql_node(
             return {
                 "sql_execution_result": result,
                 "current_stage": "execute_sql",
-                "final_status": "approved",
+                "final_status": "processing",
                 "failure_stage": "",
             }
 

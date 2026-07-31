@@ -400,6 +400,12 @@ def normalize_sql_execution_result(
     )
     return {
         "status": "success",
+        "request_id": request["request_id"],
+        "run_id": request["run_id"],
+        "context_version": request["context_version"],
+        "intent_name": request["intent_name"],
+        "query_plan_fingerprint": request["query_plan_fingerprint"],
+        "preflight_fingerprint": request["preflight_fingerprint"],
         "columns": columns,
         "rows": rows,
         "row_count": row_count,
@@ -455,6 +461,12 @@ def create_sql_execution_error_result(
     )
     return {
         "status": status,
+        "request_id": safe_request["request_id"],
+        "run_id": safe_request["run_id"],
+        "context_version": safe_request["context_version"],
+        "intent_name": safe_request["intent_name"],
+        "query_plan_fingerprint": safe_request["query_plan_fingerprint"],
+        "preflight_fingerprint": safe_request["preflight_fingerprint"],
         "columns": [],
         "rows": [],
         "row_count": 0,

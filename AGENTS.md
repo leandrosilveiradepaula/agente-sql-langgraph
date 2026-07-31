@@ -11,6 +11,10 @@ executar a consulta de negocio.
 Quando aprovado, a execucao controlada usa somente `current_sql` e uma
 `SqlExecutionRequest` minima enviada a um `SqlExecutor` explicitamente
 injetado.
+Depois da execucao aprovada, o resultado e apenas normalizado e serializado:
+nao interpretar, arredondar, inferir moeda, percentual ou data. `Decimal` nao
+vira float; erros nao carregam celulas; serializacao deve ser JSON-safe,
+deterministica e sem logs do payload completo.
 Preflight live so pode ser habilitado com capability comprovada do motor real;
 execucao normal, `LIMIT 0` e `EXPLAIN ANALYZE` nunca podem ser usados como
 preflight.
