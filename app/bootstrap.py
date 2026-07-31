@@ -17,6 +17,10 @@ from app.config.postgres_context import (
     load_postgres_context_runtime_config,
 )
 from app.graph.builder import create_graph
+from app.asgi.asgi_limits import (
+    validate_asgi_http_limit_compatibility,
+)
+from app.asgi.sql_agent_asgi_app import AsgiSqlAgentApplication
 from app.application.sql_agent_service import (
     IdGenerator,
     SqlAgentApplicationService,
@@ -310,4 +314,32 @@ def create_http_entry_adapter(
         auth_limits=auth_limits,
         request_limits=request_limits,
         response_limits=response_limits,
+    )
+
+
+def create_asgi_application(
+    *,
+    http_handler: SqlAgentHttpHandler | None = None,
+    asgi_limits: Mapping[str, Any] | None = None,
+    http_request_limits: Mapping[str, Any] | None = None,
+    http_response_limits: Mapping[str, Any] | None = None,
+) -> AsgiSqlAgentApplication:
+    """
+    Cria a aplicacao ASGI framework-agnostic sobre um handler HTTP existente.
+
+    Nao cria grafo, service, auth providers, servidor, socket, rede ou banco.
+    """
+
+    if http_handler is None:
+        raise RuntimeError("http_handler deve ser injetado.")
+    if asgi_limits is None:
+        raise RuntimeError("asgi_limits deve ser injetado.")
+    validate_asgi_http_limit_compatibility(
+        asgi_limits=asgi_limits,
+        http_request_limits=http_request_limits,
+        http_response_limits=http_response_limits,
+    )
+    return AsgiSqlAgentApplication(
+        http_handler=http_handler,
+        asgi_limits=asgi_limits,
     )

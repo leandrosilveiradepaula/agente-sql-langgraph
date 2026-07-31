@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.bootstrap import (
+    create_asgi_application,
     create_http_entry_adapter,
     create_application_service,
     create_engine_preflight_from_runtime_config,
@@ -11,6 +12,7 @@ from app.bootstrap import (
 )
 from app.adapters.testing.fake_authenticator import FakeAuthenticator
 from app.adapters.testing.fake_authorizer import FakeAuthorizer
+from app.asgi.asgi_limits import default_asgi_adapter_limits
 from app.http.http_request import default_http_request_limits
 from app.http.http_response import default_http_response_limits
 from app.security.auth_types import (
@@ -623,6 +625,66 @@ def test_http_entry_adapter_criado_sem_servidor_ou_rede() -> None:
     assert service.calls == 0
 
 
+def test_asgi_application_exige_handler_e_limits() -> None:
+    try:
+        create_asgi_application(asgi_limits=default_asgi_adapter_limits())
+    except RuntimeError as error:
+        assert str(error) == "http_handler deve ser injetado."
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+    class FakeHandler:
+        def handle(self, request):
+            return request
+
+    try:
+        create_asgi_application(http_handler=FakeHandler())
+    except RuntimeError as error:
+        assert str(error) == "asgi_limits deve ser injetado."
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+
+def test_asgi_application_limites_incompativeis_falham() -> None:
+    class FakeHandler:
+        def handle(self, request):
+            return request
+
+    try:
+        create_asgi_application(
+            http_handler=FakeHandler(),
+            asgi_limits={
+                **default_asgi_adapter_limits(),
+                "max_request_body_bytes": 70_000,
+            },
+            http_request_limits=default_http_request_limits(),
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Era esperado ValueError.")
+
+
+def test_asgi_application_criada_sem_servidor_ou_rede() -> None:
+    class FakeHandler:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def handle(self, request):
+            self.calls += 1
+            return request
+
+    handler = FakeHandler()
+    app = create_asgi_application(
+        http_handler=handler,
+        asgi_limits=default_asgi_adapter_limits(),
+        http_request_limits=default_http_request_limits(),
+        http_response_limits=default_http_response_limits(),
+    )
+    assert app.__class__.__name__ == "AsgiSqlAgentApplication"
+    assert handler.calls == 0
+
+
 def main() -> None:
     tests = [
         (
@@ -696,6 +758,18 @@ def main() -> None:
         (
             "http entry adapter criado sem servidor ou rede",
             test_http_entry_adapter_criado_sem_servidor_ou_rede,
+        ),
+        (
+            "asgi application exige handler e limits",
+            test_asgi_application_exige_handler_e_limits,
+        ),
+        (
+            "asgi application limites incompativeis falham",
+            test_asgi_application_limites_incompativeis_falham,
+        ),
+        (
+            "asgi application criada sem servidor ou rede",
+            test_asgi_application_criada_sem_servidor_ou_rede,
         ),
     ]
 
