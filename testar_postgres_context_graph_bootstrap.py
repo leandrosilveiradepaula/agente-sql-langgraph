@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from app.bootstrap import (
+    create_engine_preflight_from_runtime_config,
     create_postgres_context_graph,
+)
+from app.config.engine_preflight_runtime import (
+    EnginePreflightRuntimeConfig,
 )
 from app.config.postgres_context import (
     PostgresContextRuntimeConfig,
@@ -213,6 +217,21 @@ def test_configuracao_invalida_interrompe_bootstrap() -> None:
         )
 
 
+def test_factory_preflight_live_falha_fechada_sem_rede() -> None:
+    provider = create_engine_preflight_from_runtime_config(
+        EnginePreflightRuntimeConfig(
+            provider_type="capability_diagnostic",
+            capability_mode="unavailable",
+            dialect="generic_sql",
+            timeout_seconds=5,
+        )
+    )
+
+    assert provider.__class__.__name__ == (
+        "CapabilityUnavailableEnginePreflight"
+    )
+
+
 def main() -> None:
     tests = [
         (
@@ -238,6 +257,10 @@ def main() -> None:
         (
             "configuracao invalida interrompe bootstrap",
             test_configuracao_invalida_interrompe_bootstrap,
+        ),
+        (
+            "factory preflight live falha fechada",
+            test_factory_preflight_live_falha_fechada_sem_rede,
         ),
     ]
 

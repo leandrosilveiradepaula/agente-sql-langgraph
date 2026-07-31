@@ -1,3 +1,15 @@
+from app.config.engine_preflight_runtime import (
+    ENGINE_PREFLIGHT_CAPABILITY_MODE_ENV,
+    ENGINE_PREFLIGHT_DIALECT_ENV,
+    ENGINE_PREFLIGHT_ENDPOINT_ENV,
+    ENGINE_PREFLIGHT_PROVIDER_TYPE_ENV,
+    ENGINE_PREFLIGHT_TIMEOUT_ENV,
+    EnginePreflightCapabilityDiagnostic,
+    EnginePreflightRuntimeConfig,
+    EnginePreflightRuntimeConfigError,
+    evaluate_engine_preflight_capabilities,
+    load_engine_preflight_runtime_config,
+)
 from app.config.postgres_context import (
     POSTGRES_CONNECT_TIMEOUT_ENV,
     POSTGRES_DSN_ENV,
@@ -8,6 +20,16 @@ from app.config.postgres_context import (
 )
 
 __all__ = [
+    "ENGINE_PREFLIGHT_CAPABILITY_MODE_ENV",
+    "ENGINE_PREFLIGHT_DIALECT_ENV",
+    "ENGINE_PREFLIGHT_ENDPOINT_ENV",
+    "ENGINE_PREFLIGHT_PROVIDER_TYPE_ENV",
+    "ENGINE_PREFLIGHT_TIMEOUT_ENV",
+    "EnginePreflightCapabilityDiagnostic",
+    "EnginePreflightRuntimeConfig",
+    "EnginePreflightRuntimeConfigError",
+    "evaluate_engine_preflight_capabilities",
+    "load_engine_preflight_runtime_config",
     "POSTGRES_CONNECT_TIMEOUT_ENV",
     "POSTGRES_DSN_ENV",
     "SEMANTIC_AGENT_VERSION_ENV",

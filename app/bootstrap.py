@@ -3,8 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from app.adapters.engine_preflight import (
+    CapabilityUnavailableEnginePreflight,
+)
 from app.adapters.postgres.context_repository import (
     PostgresContextRepository,
+)
+from app.config.engine_preflight_runtime import (
+    EnginePreflightRuntimeConfig,
 )
 from app.config.postgres_context import (
     PostgresContextRuntimeConfig,
@@ -47,6 +53,20 @@ def create_postgres_context_repository(
         semantic_agent_version=config.semantic_agent_version,
         connect_timeout_seconds=config.connect_timeout_seconds,
     )
+
+
+def create_engine_preflight_from_runtime_config(
+    config: EnginePreflightRuntimeConfig,
+) -> EnginePreflight:
+    """
+    Cria provider diagnostico quando nao ha capability live comprovada.
+
+    Esta factory nao cria adapter real, nao abre rede e nao executa SQL. Quando
+    um provider seguro for validado, uma factory especifica devera substitui-la
+    no composition root chamador.
+    """
+
+    return CapabilityUnavailableEnginePreflight(config=config)
 
 
 def create_postgres_context_graph(

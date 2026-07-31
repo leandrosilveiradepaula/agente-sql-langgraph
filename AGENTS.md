@@ -8,6 +8,9 @@ intencao, constroi um `QueryPlan` deterministico e gera SQL por um
 autorizacao estrutural, e o Contract Gate valida aderencia ao `QueryPlan`.
 O Engine Preflight valida planejamento do motor por porta injetada, sem
 executar a consulta de negocio.
+Preflight live so pode ser habilitado com capability comprovada do motor real;
+execucao normal, `LIMIT 0` e `EXPLAIN ANALYZE` nunca podem ser usados como
+preflight.
 Se o preflight rejeitar uma SQL com erro reparavel, o grafo pode chamar um
 SqlRepairer injetado e reenviar a SQL reparada para Security Gate, Contract
 Gate e Engine Preflight.
@@ -52,6 +55,9 @@ nao executa SQL, nao usa `EXPLAIN ANALYZE` e deve sanitizar erros. O loop de
 reparo so inicia depois de preflight reparavel, nao recarrega contexto, nao
 reexecuta geracao inicial, respeita limite obrigatorio e registra historico
 sem SQL integral. SQL reparada volta aos gates antes de novo preflight.
+Provider live e sempre explicitamente injetado; nao ha provider global, fake
+como fallback de producao ou credenciais versionadas. Na ausencia de capability
+segura comprovada, use apenas diagnostico fail-closed.
 
 ## Testes
 
@@ -61,3 +67,5 @@ regressao consolidada esperada antes de commit.
 Testes locais de preflight usam fake injetado e nao acessam motor real.
 Testes locais de reparo usam fake injetado, sem rede, sem banco e sem
 execucao de SQL.
+Script live de preflight fica fora de `scripts/check_all.py` e nao deve ser
+executado automaticamente.
