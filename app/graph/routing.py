@@ -184,6 +184,7 @@ def route_after_contract_gate(
 def route_after_engine_preflight(
     state: GraphState,
 ) -> Literal[
+    "execute_sql",
     "repair_sql",
     "complete",
     "infrastructure_error",
@@ -205,8 +206,11 @@ def route_after_engine_preflight(
         final_status == "processing"
         and isinstance(engine_preflight_result, dict)
         and engine_preflight_result.get("status") == "approved"
+        and engine_preflight_result.get("executed") is False
+        and engine_preflight_result.get("rows_returned") == 0
+        and engine_preflight_result.get("statement_planned") is True
     ):
-        return "complete"
+        return "execute_sql"
 
     if (
         final_status == "rejected"
@@ -217,6 +221,27 @@ def route_after_engine_preflight(
         return "repair_sql"
 
     if final_status == "rejected":
+        return "complete"
+
+    return "infrastructure_error"
+
+
+def route_after_execute_sql(
+    state: GraphState,
+) -> Literal[
+    "complete",
+    "infrastructure_error",
+]:
+    """
+    Decide o encerramento depois da execucao SQL controlada.
+    """
+
+    final_status = state.get(
+        "final_status",
+        "infrastructure_error",
+    )
+
+    if final_status in {"approved", "rejected"}:
         return "complete"
 
     return "infrastructure_error"

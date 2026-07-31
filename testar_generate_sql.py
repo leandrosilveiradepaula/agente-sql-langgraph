@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from app.adapters.testing.fake_engine_preflight import FakeEnginePreflight
+from app.adapters.testing.fake_sql_executor import FakeSqlExecutor
 from app.adapters.testing.fake_sql_repairer import FakeSqlRepairer
 from app.domain.context_normalizer import normalize_context_snapshot
 from app.domain.planner import build_query_plan
@@ -95,6 +96,12 @@ def _graph_state(question: str) -> GraphState:
             "use_cache": False,
             "max_repair_attempts": 2,
             "shadow_mode": False,
+            "sql_execution_limits": {
+                "timeout_seconds": 10,
+                "max_rows": 5,
+                "max_response_bytes": 4096,
+                "max_cell_bytes": 128,
+            },
         },
     }
 
@@ -207,11 +214,13 @@ def test_grafo_nao_chama_generator_quando_intencao_rejeitada() -> None:
     generator = FakeSqlGenerator()
     preflight = FakeEnginePreflight()
     repairer = FakeSqlRepairer()
+    executor = FakeSqlExecutor()
     graph = create_graph(
         SuccessContextRepository(),
         generator,
         preflight,
         repairer,
+        executor,
     )
 
     result = graph.invoke(
@@ -227,12 +236,14 @@ def test_grafo_nao_chama_generator_quando_intencao_rejeitada() -> None:
     assert result["current_stage"] == "classify_intent"
     assert generator.calls == 0
     assert preflight.calls == 0
+    assert executor.calls == 0
 
 
 def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
     generator = FakeSqlGenerator()
     preflight = FakeEnginePreflight()
     repairer = FakeSqlRepairer()
+    executor = FakeSqlExecutor()
     raw_context = _raw_context_snapshot()
     raw_context["padroes"][0]["required_rules"] = [
         "missing_rule",
@@ -242,6 +253,7 @@ def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
         generator,
         preflight,
         repairer,
+        executor,
     )
 
     result = graph.invoke(
@@ -256,17 +268,20 @@ def test_grafo_nao_chama_generator_quando_build_plan_rejeita() -> None:
     assert result["failure_stage"] == "build_plan"
     assert generator.calls == 0
     assert preflight.calls == 0
+    assert executor.calls == 0
 
 
 def test_grafo_chama_generator_apos_build_plan_processing() -> None:
     generator = FakeSqlGenerator()
     preflight = FakeEnginePreflight()
     repairer = FakeSqlRepairer()
+    executor = FakeSqlExecutor()
     graph = create_graph(
         SuccessContextRepository(),
         generator,
         preflight,
         repairer,
+        executor,
     )
 
     result = graph.invoke(
@@ -276,8 +291,8 @@ def test_grafo_chama_generator_apos_build_plan_processing() -> None:
         },
     )
 
-    assert result["final_status"] == "processing"
-    assert result["current_stage"] == "engine_preflight"
+    assert result["final_status"] == "approved"
+    assert result["current_stage"] == "execute_sql"
     assert result["generated_sql"] == (
         "SELECT id FROM schema_test.table_test"
     )
@@ -287,6 +302,7 @@ def test_grafo_chama_generator_apos_build_plan_processing() -> None:
     assert generator.calls == 1
     assert preflight.calls == 1
     assert repairer.calls == 0
+    assert executor.calls == 1
 
 
 def main() -> None:

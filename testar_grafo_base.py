@@ -3,6 +3,7 @@ from pprint import pprint
 from typing import Callable
 
 from app.adapters.testing.fake_engine_preflight import FakeEnginePreflight
+from app.adapters.testing.fake_sql_executor import FakeSqlExecutor
 from app.adapters.testing.fake_sql_repairer import FakeSqlRepairer
 from app.domain.context import ContextSnapshot
 from app.domain.context_normalizer import normalize_context_snapshot
@@ -12,6 +13,7 @@ from app.graph.routing import (
     route_after_classify_intent,
     route_after_contract_gate,
     route_after_engine_preflight,
+    route_after_execute_sql,
     route_after_generate_sql,
     route_after_repair_sql,
     route_after_security_gate,
@@ -305,6 +307,7 @@ def run_test(
     sql_generator: FakeSqlGenerator | None = None,
     engine_preflight: FakeEnginePreflight | None = None,
     sql_repairer: FakeSqlRepairer | None = None,
+    sql_executor: FakeSqlExecutor | None = None,
 ) -> GraphState:
     print("=" * 70)
     print(title)
@@ -313,7 +316,8 @@ def run_test(
     generator = sql_generator or FakeSqlGenerator()
     preflight = engine_preflight or FakeEnginePreflight()
     repairer = sql_repairer or FakeSqlRepairer()
-    graph = create_graph(repository, generator, preflight, repairer)
+    executor = sql_executor or FakeSqlExecutor()
+    graph = create_graph(repository, generator, preflight, repairer, executor)
 
     result = graph.invoke(
         initial_state,
@@ -337,8 +341,8 @@ def run_test(
 def _assert_classified_intent(
     result: GraphState,
 ) -> None:
-    assert result["final_status"] == "processing"
-    assert result["current_stage"] == "engine_preflight"
+    assert result["final_status"] == "approved"
+    assert result["current_stage"] == "execute_sql"
     assert result["failure_stage"] == ""
     assert result["context_version"] == "context-test-v3"
     assert result["intent"] == "generic_test_intent"
@@ -359,6 +363,8 @@ def _assert_classified_intent(
     assert result["contract_result"]["status"] == "approved"
     assert result["engine_preflight_result"]["status"] == "approved"
     assert result["engine_preflight_result"]["executed"] is False
+    assert result["sql_execution_result"]["status"] == "success"
+    assert result["sql_execution_result"]["executed"] is True
     assert result["sql_analysis"]["statement_type"] == "select"
     assert result["errors"] == []
     assert result["warnings"] == []
@@ -389,8 +395,8 @@ def _assert_classified_intent(
 def _assert_catalog_only_classification(
     result: GraphState,
 ) -> None:
-    assert result["final_status"] == "processing"
-    assert result["current_stage"] == "engine_preflight"
+    assert result["final_status"] == "approved"
+    assert result["current_stage"] == "execute_sql"
     assert result["failure_stage"] == ""
     assert result["intent"] == "generic_test_intent"
     assert result["intent_confidence"] == 0.98
@@ -402,6 +408,7 @@ def _assert_catalog_only_classification(
     assert result["security_result"]["status"] == "approved"
     assert result["contract_result"]["status"] == "approved"
     assert result["engine_preflight_result"]["status"] == "approved"
+    assert result["sql_execution_result"]["status"] == "success"
     assert result["errors"] == []
 
     context = result["context"]
@@ -539,8 +546,8 @@ def _assert_engine_preflight_rejected(result: GraphState) -> None:
 
 
 def _assert_repair_loop_success(result: GraphState) -> None:
-    assert result["final_status"] == "processing"
-    assert result["current_stage"] == "engine_preflight"
+    assert result["final_status"] == "approved"
+    assert result["current_stage"] == "execute_sql"
     assert result["failure_stage"] == ""
     assert result["generated_sql"] == (
         "SELECT id FROM schema_test.table_test"
@@ -557,6 +564,7 @@ def _assert_repair_loop_success(result: GraphState) -> None:
     assert result["security_result"]["status"] == "approved"
     assert result["contract_result"]["status"] == "approved"
     assert result["engine_preflight_result"]["status"] == "approved"
+    assert result["sql_execution_result"]["status"] == "success"
 
 
 def _assert_repair_limit_reached(result: GraphState) -> None:
@@ -717,9 +725,23 @@ def test_classify_routing() -> None:
             "final_status": "processing",
             "engine_preflight_result": {
                 "status": "approved",
+                "executed": False,
+                "rows_returned": 0,
+                "statement_planned": True,
             },
         }
-    ) == "complete"
+    ) == "execute_sql"
+    assert route_after_engine_preflight(
+        {
+            "final_status": "processing",
+            "engine_preflight_result": {
+                "status": "approved",
+                "executed": True,
+                "rows_returned": 0,
+                "statement_planned": True,
+            },
+        }
+    ) == "infrastructure_error"
     assert route_after_engine_preflight(
         {
             "final_status": "rejected",
@@ -764,6 +786,22 @@ def test_classify_routing() -> None:
         }
     ) == "infrastructure_error"
 
+    assert route_after_execute_sql(
+        {
+            "final_status": "approved",
+        }
+    ) == "complete"
+    assert route_after_execute_sql(
+        {
+            "final_status": "rejected",
+        }
+    ) == "complete"
+    assert route_after_execute_sql(
+        {
+            "final_status": "infrastructure_error",
+        }
+    ) == "infrastructure_error"
+
 
 def main() -> None:
     valid_initial_state: GraphState = {
@@ -777,6 +815,12 @@ def main() -> None:
             "use_cache": False,
             "max_repair_attempts": 2,
             "shadow_mode": False,
+            "sql_execution_limits": {
+                "timeout_seconds": 10,
+                "max_rows": 5,
+                "max_response_bytes": 4096,
+                "max_cell_bytes": 128,
+            },
         },
     }
 
@@ -794,6 +838,12 @@ def main() -> None:
             "use_cache": False,
             "max_repair_attempts": 2,
             "shadow_mode": False,
+            "sql_execution_limits": {
+                "timeout_seconds": 10,
+                "max_rows": 5,
+                "max_response_bytes": 4096,
+                "max_cell_bytes": 128,
+            },
         },
     }
 
@@ -848,6 +898,7 @@ def main() -> None:
         "UPDATE schema_test.table_test SET id = 1"
     )
     should_not_preflight_1 = FakeEnginePreflight()
+    should_not_execute_1 = FakeSqlExecutor()
     run_test(
         "TESTE 7 — GERAÇÃO SQL REJEITADA NÃO CHAMA SECURITY",
         SuccessContextRepository(),
@@ -855,14 +906,17 @@ def main() -> None:
         _assert_generate_sql_rejected,
         sql_generator=rejected_generator,
         engine_preflight=should_not_preflight_1,
+        sql_executor=should_not_execute_1,
     )
     assert rejected_generator.calls == 1
     assert should_not_preflight_1.calls == 0
+    assert should_not_execute_1.calls == 0
 
     security_generator = FakeSqlGenerator(
         "SELECT id FROM schema_test.table_other"
     )
     should_not_preflight_2 = FakeEnginePreflight()
+    should_not_execute_2 = FakeSqlExecutor()
     run_test(
         "TESTE 8 — SECURITY REJEITADO NÃO CHAMA CONTRACT",
         SuccessContextRepository(),
@@ -870,14 +924,17 @@ def main() -> None:
         _assert_security_rejected,
         sql_generator=security_generator,
         engine_preflight=should_not_preflight_2,
+        sql_executor=should_not_execute_2,
     )
     assert security_generator.calls == 1
     assert should_not_preflight_2.calls == 0
+    assert should_not_execute_2.calls == 0
 
     contract_generator = FakeSqlGenerator(
         "SELECT missing_column FROM schema_test.table_test"
     )
     should_not_preflight_3 = FakeEnginePreflight()
+    should_not_execute_3 = FakeSqlExecutor()
     run_test(
         "TESTE 9 — CONTRACT REJEITADO ENCERRA REJECTED",
         SuccessContextRepository(),
@@ -885,9 +942,11 @@ def main() -> None:
         _assert_contract_rejected,
         sql_generator=contract_generator,
         engine_preflight=should_not_preflight_3,
+        sql_executor=should_not_execute_3,
     )
     assert contract_generator.calls == 1
     assert should_not_preflight_3.calls == 0
+    assert should_not_execute_3.calls == 0
 
     rejected_preflight = FakeEnginePreflight(
         status="rejected",
@@ -895,14 +954,17 @@ def main() -> None:
         message="column not found",
         repairable=False,
     )
+    should_not_execute_4 = FakeSqlExecutor()
     run_test(
         "TESTE 10 - PREFLIGHT SQL INVALIDO ENCERRA REJECTED",
         SuccessContextRepository(),
         valid_initial_state,
         _assert_engine_preflight_rejected,
         engine_preflight=rejected_preflight,
+        sql_executor=should_not_execute_4,
     )
     assert rejected_preflight.calls == 1
+    assert should_not_execute_4.calls == 0
 
     repairable_then_approved = FakeEnginePreflight(
         responses=[
@@ -967,6 +1029,12 @@ def main() -> None:
         "use_cache": False,
         "max_repair_attempts": 1,
         "shadow_mode": False,
+        "sql_execution_limits": {
+            "timeout_seconds": 10,
+            "max_rows": 5,
+            "max_response_bytes": 4096,
+            "max_cell_bytes": 128,
+        },
     }
     limit_repairer = FakeSqlRepairer(
         responses=["SELECT value FROM schema_test.table_test"]
@@ -995,6 +1063,7 @@ def main() -> None:
             },
         ]
     )
+    should_not_execute_5 = FakeSqlExecutor()
     security_bad_repairer = FakeSqlRepairer(
         responses=["SELECT id FROM schema_test.table_other"]
     )
@@ -1005,9 +1074,11 @@ def main() -> None:
         _assert_repaired_sql_security_rejected,
         engine_preflight=security_after_repair_preflight,
         sql_repairer=security_bad_repairer,
+        sql_executor=should_not_execute_5,
     )
     assert security_after_repair_preflight.calls == 1
     assert security_bad_repairer.calls == 1
+    assert should_not_execute_5.calls == 0
 
     contract_after_repair_preflight = FakeEnginePreflight(
         responses=[
@@ -1022,6 +1093,7 @@ def main() -> None:
             },
         ]
     )
+    should_not_execute_6 = FakeSqlExecutor()
     contract_bad_repairer = FakeSqlRepairer(
         responses=["SELECT missing_column FROM schema_test.table_test"]
     )
@@ -1032,23 +1104,28 @@ def main() -> None:
         _assert_repaired_sql_contract_rejected,
         engine_preflight=contract_after_repair_preflight,
         sql_repairer=contract_bad_repairer,
+        sql_executor=should_not_execute_6,
     )
     assert contract_after_repair_preflight.calls == 1
     assert contract_bad_repairer.calls == 1
+    assert should_not_execute_6.calls == 0
 
     infra_preflight = FakeEnginePreflight(
         status="error",
         failure_category="provider_unavailable",
         message="provider unavailable",
     )
+    should_not_execute_7 = FakeSqlExecutor()
     run_test(
         "TESTE 15 - PREFLIGHT INFRA VAI AO FINALIZADOR",
         SuccessContextRepository(),
         valid_initial_state,
         _assert_engine_preflight_infra,
         engine_preflight=infra_preflight,
+        sql_executor=should_not_execute_7,
     )
     assert infra_preflight.calls == 1
+    assert should_not_execute_7.calls == 0
 
     print("=" * 70)
     print("TESTE 10 — ROTEAMENTO APÓS CLASSIFICAÇÃO")

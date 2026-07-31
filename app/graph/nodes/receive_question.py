@@ -57,6 +57,8 @@ def receive_question(state: GraphState) -> GraphState:
 
     use_cache = received_options.get("use_cache", False)
     shadow_mode = received_options.get("shadow_mode", False)
+    sql_execution_limits = received_options.get("sql_execution_limits")
+    execution_attempt = received_options.get("execution_attempt", 1)
     max_repair_attempts = received_options.get(
         "max_repair_attempts",
         2,
@@ -103,6 +105,17 @@ def receive_question(state: GraphState) -> GraphState:
             "use_cache": bool(use_cache),
             "max_repair_attempts": max_repair_attempts,
             "shadow_mode": bool(shadow_mode),
+            **(
+                {"sql_execution_limits": sql_execution_limits}
+                if isinstance(sql_execution_limits, dict)
+                else {}
+            ),
+            **(
+                {"execution_attempt": execution_attempt}
+                if isinstance(execution_attempt, int)
+                and not isinstance(execution_attempt, bool)
+                else {}
+            ),
         },
         "repair_attempts": 0,
         "max_repair_attempts": max_repair_attempts,

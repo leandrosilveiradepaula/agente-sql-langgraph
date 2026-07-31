@@ -7,6 +7,7 @@ from app.domain.engine_preflight import EnginePreflightResult
 from app.domain.planning import QueryPlan
 from app.domain.sql_analysis import SqlStatementAnalysis
 from app.domain.sql_contract import SqlContractResult
+from app.domain.sql_execution import SqlExecutionResult
 from app.domain.sql_generation import SqlGenerationResult
 from app.domain.sql_repair import SqlRepairResult
 from app.domain.sql_security import SqlSecurityResult
@@ -33,6 +34,8 @@ class GenerateOptions(TypedDict, total=False):
     use_cache: bool
     max_repair_attempts: int
     shadow_mode: bool
+    sql_execution_limits: dict[str, int]
+    execution_attempt: int
 
 
 class AgentError(TypedDict, total=False):
@@ -137,6 +140,7 @@ class GraphState(TypedDict, total=False):
     security_result: SqlSecurityResult
     contract_result: SqlContractResult
     engine_preflight_result: EnginePreflightResult
+    sql_execution_result: SqlExecutionResult
 
     # Resultado geral
     errors: list[AgentError]
