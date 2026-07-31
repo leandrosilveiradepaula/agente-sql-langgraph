@@ -84,6 +84,22 @@ STEPS = [
         [sys.executable, "testar_application_service_graph_integration.py"],
     ),
     (
+        "testar_http_request.py",
+        [sys.executable, "testar_http_request.py"],
+    ),
+    (
+        "testar_http_response.py",
+        [sys.executable, "testar_http_response.py"],
+    ),
+    (
+        "testar_sql_agent_http_handler.py",
+        [sys.executable, "testar_sql_agent_http_handler.py"],
+    ),
+    (
+        "testar_http_adapter_integration.py",
+        [sys.executable, "testar_http_adapter_integration.py"],
+    ),
+    (
         "testar_engine_preflight.py",
         [sys.executable, "testar_engine_preflight.py"],
     ),

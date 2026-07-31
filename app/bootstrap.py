@@ -21,6 +21,10 @@ from app.application.sql_agent_service import (
     IdGenerator,
     SqlAgentApplicationService,
 )
+from app.http.sql_agent_http_handler import (
+    SqlAgentHttpHandler,
+    create_sql_agent_http_handler,
+)
 from app.ports.graph_runtime import GraphRuntime
 from app.ports.context_repository import ContextRepository
 from app.ports.engine_preflight import EnginePreflight
@@ -265,4 +269,31 @@ def create_postgres_context_application_service(
         graph=graph,
         id_generator=id_generator,
         limits=limits,
+    )
+
+
+def create_http_entry_adapter(
+    *,
+    application_service: SqlAgentApplicationService | None = None,
+    request_limits: Mapping[str, Any] | None = None,
+    response_limits: Mapping[str, Any] | None = None,
+) -> SqlAgentHttpHandler:
+    """
+    Cria o handler HTTP framework-agnostic.
+
+    Nao cria grafo, adapters, fakes, servidor, rede ou banco.
+    """
+
+    if application_service is None:
+        raise RuntimeError(
+            "application_service deve ser injetado explicitamente."
+        )
+    if request_limits is None:
+        raise RuntimeError("request_limits deve ser injetado.")
+    if response_limits is None:
+        raise RuntimeError("response_limits deve ser injetado.")
+    return create_sql_agent_http_handler(
+        application_service=application_service,
+        request_limits=request_limits,
+        response_limits=response_limits,
     )

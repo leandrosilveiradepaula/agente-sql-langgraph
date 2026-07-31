@@ -3,11 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from app.bootstrap import (
+    create_http_entry_adapter,
     create_application_service,
     create_engine_preflight_from_runtime_config,
     create_postgres_context_application_service,
     create_postgres_context_graph,
 )
+from app.http.http_request import default_http_request_limits
+from app.http.http_response import default_http_response_limits
 from app.config.engine_preflight_runtime import (
     EnginePreflightRuntimeConfig,
 )
@@ -500,6 +503,62 @@ def test_postgres_context_application_service_factory() -> None:
     assert captured["sql_generator"].__class__.__name__ == "FakeSqlGenerator"
 
 
+def test_http_entry_adapter_exige_application_service() -> None:
+    try:
+        create_http_entry_adapter(
+            request_limits=default_http_request_limits(),
+            response_limits=default_http_response_limits(),
+        )
+    except RuntimeError as error:
+        assert str(error) == (
+            "application_service deve ser injetado explicitamente."
+        )
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+
+def test_http_entry_adapter_exige_limits() -> None:
+    class FakeService:
+        def execute(self, request):
+            return request
+
+    try:
+        create_http_entry_adapter(application_service=FakeService())
+    except RuntimeError as error:
+        assert str(error) == "request_limits deve ser injetado."
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+    try:
+        create_http_entry_adapter(
+            application_service=FakeService(),
+            request_limits=default_http_request_limits(),
+        )
+    except RuntimeError as error:
+        assert str(error) == "response_limits deve ser injetado."
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+
+def test_http_entry_adapter_criado_sem_servidor_ou_rede() -> None:
+    class FakeService:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, request):
+            self.calls += 1
+            return request
+
+    service = FakeService()
+    handler = create_http_entry_adapter(
+        application_service=service,
+        request_limits=default_http_request_limits(),
+        response_limits=default_http_response_limits(),
+    )
+    assert handler.__class__.__name__ == "SqlAgentHttpHandler"
+    assert service.calls == 0
+
+
 def main() -> None:
     tests = [
         (
@@ -561,6 +620,18 @@ def main() -> None:
         (
             "postgres context application service factory",
             test_postgres_context_application_service_factory,
+        ),
+        (
+            "http entry adapter exige application service",
+            test_http_entry_adapter_exige_application_service,
+        ),
+        (
+            "http entry adapter exige limits",
+            test_http_entry_adapter_exige_limits,
+        ),
+        (
+            "http entry adapter criado sem servidor ou rede",
+            test_http_entry_adapter_criado_sem_servidor_ou_rede,
         ),
     ]
 
