@@ -58,6 +58,9 @@ def receive_question(state: GraphState) -> GraphState:
     use_cache = received_options.get("use_cache", False)
     shadow_mode = received_options.get("shadow_mode", False)
     sql_execution_limits = received_options.get("sql_execution_limits")
+    result_normalization_limits = received_options.get(
+        "result_normalization_limits"
+    )
     execution_attempt = received_options.get("execution_attempt", 1)
     max_repair_attempts = received_options.get(
         "max_repair_attempts",
@@ -111,6 +114,11 @@ def receive_question(state: GraphState) -> GraphState:
                 else {}
             ),
             **(
+                {"result_normalization_limits": result_normalization_limits}
+                if isinstance(result_normalization_limits, dict)
+                else {}
+            ),
+            **(
                 {"execution_attempt": execution_attempt}
                 if isinstance(execution_attempt, int)
                 and not isinstance(execution_attempt, bool)
@@ -135,6 +143,9 @@ def receive_question(state: GraphState) -> GraphState:
             "errors": [],
             "warnings": [],
         },
+        "sql_execution_result": None,
+        "normalized_result": None,
+        "serialized_result": None,
         "errors": errors,
         "warnings": [],
         "current_stage": "receive_question",

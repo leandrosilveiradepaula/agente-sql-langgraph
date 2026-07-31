@@ -15,8 +15,10 @@ from app.graph.routing import (
     route_after_engine_preflight,
     route_after_execute_sql,
     route_after_generate_sql,
+    route_after_normalize_result,
     route_after_repair_sql,
     route_after_security_gate,
+    route_after_serialize_result,
 )
 from app.graph.state import GraphState
 from app.ports.context_repository import (
@@ -342,7 +344,7 @@ def _assert_classified_intent(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "execute_sql"
+    assert result["current_stage"] == "serialize_result"
     assert result["failure_stage"] == ""
     assert result["context_version"] == "context-test-v3"
     assert result["intent"] == "generic_test_intent"
@@ -365,6 +367,8 @@ def _assert_classified_intent(
     assert result["engine_preflight_result"]["executed"] is False
     assert result["sql_execution_result"]["status"] == "success"
     assert result["sql_execution_result"]["executed"] is True
+    assert result["normalized_result"]["status"] == "success"
+    assert result["serialized_result"]["status"] == "success"
     assert result["sql_analysis"]["statement_type"] == "select"
     assert result["errors"] == []
     assert result["warnings"] == []
@@ -396,7 +400,7 @@ def _assert_catalog_only_classification(
     result: GraphState,
 ) -> None:
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "execute_sql"
+    assert result["current_stage"] == "serialize_result"
     assert result["failure_stage"] == ""
     assert result["intent"] == "generic_test_intent"
     assert result["intent_confidence"] == 0.98
@@ -409,6 +413,8 @@ def _assert_catalog_only_classification(
     assert result["contract_result"]["status"] == "approved"
     assert result["engine_preflight_result"]["status"] == "approved"
     assert result["sql_execution_result"]["status"] == "success"
+    assert result["normalized_result"]["status"] == "success"
+    assert result["serialized_result"]["status"] == "success"
     assert result["errors"] == []
 
     context = result["context"]
@@ -547,7 +553,7 @@ def _assert_engine_preflight_rejected(result: GraphState) -> None:
 
 def _assert_repair_loop_success(result: GraphState) -> None:
     assert result["final_status"] == "approved"
-    assert result["current_stage"] == "execute_sql"
+    assert result["current_stage"] == "serialize_result"
     assert result["failure_stage"] == ""
     assert result["generated_sql"] == (
         "SELECT id FROM schema_test.table_test"
@@ -565,6 +571,8 @@ def _assert_repair_loop_success(result: GraphState) -> None:
     assert result["contract_result"]["status"] == "approved"
     assert result["engine_preflight_result"]["status"] == "approved"
     assert result["sql_execution_result"]["status"] == "success"
+    assert result["normalized_result"]["status"] == "success"
+    assert result["serialized_result"]["status"] == "success"
 
 
 def _assert_repair_limit_reached(result: GraphState) -> None:
@@ -811,15 +819,54 @@ def test_classify_routing() -> None:
 
     assert route_after_execute_sql(
         {
-            "final_status": "approved",
+            "final_status": "processing",
+            "sql_execution_result": {
+                "status": "success",
+                "executed": True,
+            },
         }
-    ) == "complete"
+    ) == "normalize_result"
     assert route_after_execute_sql(
         {
             "final_status": "rejected",
         }
     ) == "complete"
     assert route_after_execute_sql(
+        {
+            "final_status": "infrastructure_error",
+        }
+    ) == "infrastructure_error"
+
+    assert route_after_normalize_result(
+        {
+            "final_status": "processing",
+            "normalized_result": {
+                "status": "success",
+            },
+        }
+    ) == "serialize_result"
+    assert route_after_normalize_result(
+        {
+            "final_status": "rejected",
+        }
+    ) == "complete"
+    assert route_after_normalize_result(
+        {
+            "final_status": "infrastructure_error",
+        }
+    ) == "infrastructure_error"
+
+    assert route_after_serialize_result(
+        {
+            "final_status": "approved",
+        }
+    ) == "complete"
+    assert route_after_serialize_result(
+        {
+            "final_status": "rejected",
+        }
+    ) == "complete"
+    assert route_after_serialize_result(
         {
             "final_status": "infrastructure_error",
         }

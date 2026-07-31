@@ -7,6 +7,7 @@ from app.graph.state import GraphState
 def run_test(
     title: str,
     initial_state: GraphState,
+    assertion=None,
 ) -> None:
     print("=" * 70)
     print(title)
@@ -19,7 +20,17 @@ def run_test(
         sort_dicts=False,
     )
 
+    if assertion is not None:
+        assertion(result)
+        print("ASSERTIONS: OK")
+
     print()
+
+
+def _assert_resultados_anteriores_limpos(result: GraphState) -> None:
+    assert result["sql_execution_result"] is None
+    assert result["normalized_result"] is None
+    assert result["serialized_result"] is None
 
 
 def main() -> None:
@@ -65,4 +76,17 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    run_test(
+        "TESTE 0 - RESULTADOS ANTERIORES LIMPOS",
+        {
+            "question": "Teste de pergunta valida.",
+            "sql_execution_result": {"status": "success"},
+            "normalized_result": {"status": "success"},
+            "serialized_result": {"status": "success"},
+            "options": {
+                "max_repair_attempts": 2,
+            },
+        },
+        _assert_resultados_anteriores_limpos,
+    )
     main()

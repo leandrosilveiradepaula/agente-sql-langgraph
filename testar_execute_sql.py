@@ -26,7 +26,7 @@ def test_execucao_autorizada() -> None:
     original = deepcopy(state)
     result = node(state)
 
-    assert result["final_status"] == "approved"
+    assert result["final_status"] == "processing"
     assert result["current_stage"] == "execute_sql"
     assert result["failure_stage"] == ""
     assert result["sql_execution_result"]["status"] == "success"

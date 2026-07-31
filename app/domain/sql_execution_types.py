@@ -130,6 +130,12 @@ class SqlExecutionProviderResult(TypedDict, total=False):
 
 class SqlExecutionResult(TypedDict):
     status: SqlExecutionStatus
+    request_id: str
+    run_id: str
+    context_version: str
+    intent_name: str
+    query_plan_fingerprint: str
+    preflight_fingerprint: str
     columns: list[SqlExecutionColumn]
     rows: list[SqlExecutionRow]
     row_count: int

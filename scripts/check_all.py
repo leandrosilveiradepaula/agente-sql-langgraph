@@ -40,6 +40,14 @@ STEPS = [
         [sys.executable, "testar_sql_execution.py"],
     ),
     (
+        "testar_result_normalization.py",
+        [sys.executable, "testar_result_normalization.py"],
+    ),
+    (
+        "testar_result_serialization.py",
+        [sys.executable, "testar_result_serialization.py"],
+    ),
+    (
         "testar_engine_preflight.py",
         [sys.executable, "testar_engine_preflight.py"],
     ),
@@ -78,6 +86,14 @@ STEPS = [
     (
         "testar_execute_sql.py",
         [sys.executable, "testar_execute_sql.py"],
+    ),
+    (
+        "testar_normalize_result.py",
+        [sys.executable, "testar_normalize_result.py"],
+    ),
+    (
+        "testar_serialize_result.py",
+        [sys.executable, "testar_serialize_result.py"],
     ),
     (
         "testar_repair_sql.py",

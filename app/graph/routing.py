@@ -233,11 +233,72 @@ def route_after_engine_preflight(
 def route_after_execute_sql(
     state: GraphState,
 ) -> Literal[
+    "normalize_result",
     "complete",
     "infrastructure_error",
 ]:
     """
     Decide o encerramento depois da execucao SQL controlada.
+    """
+
+    final_status = state.get(
+        "final_status",
+        "infrastructure_error",
+    )
+
+    execution_result = state.get("sql_execution_result", {})
+    if (
+        final_status == "processing"
+        and isinstance(execution_result, dict)
+        and execution_result.get("status") == "success"
+        and execution_result.get("executed") is True
+    ):
+        return "normalize_result"
+
+    if final_status == "rejected":
+        return "complete"
+
+    return "infrastructure_error"
+
+
+def route_after_normalize_result(
+    state: GraphState,
+) -> Literal[
+    "serialize_result",
+    "complete",
+    "infrastructure_error",
+]:
+    """
+    Decide o caminho depois da normalizacao do resultado.
+    """
+
+    final_status = state.get(
+        "final_status",
+        "infrastructure_error",
+    )
+    normalized_result = state.get("normalized_result", {})
+
+    if (
+        final_status == "processing"
+        and isinstance(normalized_result, dict)
+        and normalized_result.get("status") == "success"
+    ):
+        return "serialize_result"
+
+    if final_status == "rejected":
+        return "complete"
+
+    return "infrastructure_error"
+
+
+def route_after_serialize_result(
+    state: GraphState,
+) -> Literal[
+    "complete",
+    "infrastructure_error",
+]:
+    """
+    Decide o encerramento depois da serializacao do resultado.
     """
 
     final_status = state.get(

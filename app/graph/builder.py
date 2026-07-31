@@ -22,6 +22,9 @@ from app.graph.nodes.finalize_invalid_request import (
 from app.graph.nodes.generate_sql import (
     create_generate_sql_node,
 )
+from app.graph.nodes.normalize_result import (
+    normalize_result,
+)
 from app.graph.nodes.load_context import (
     create_load_context_node,
 )
@@ -34,6 +37,9 @@ from app.graph.nodes.repair_sql import (
 from app.graph.nodes.security_gate import (
     security_gate,
 )
+from app.graph.nodes.serialize_result import (
+    serialize_result,
+)
 from app.graph.routing import (
     route_after_build_plan,
     route_after_classify_intent,
@@ -42,9 +48,11 @@ from app.graph.routing import (
     route_after_execute_sql,
     route_after_generate_sql,
     route_after_load_context,
+    route_after_normalize_result,
     route_after_receive_question,
     route_after_repair_sql,
     route_after_security_gate,
+    route_after_serialize_result,
 )
 from app.graph.state import GraphState
 from app.ports.context_repository import (
@@ -135,6 +143,16 @@ def create_graph(
     builder.add_node(
         "execute_sql",
         execute_sql_node,
+    )
+
+    builder.add_node(
+        "normalize_result",
+        normalize_result,
+    )
+
+    builder.add_node(
+        "serialize_result",
+        serialize_result,
     )
 
     builder.add_node(
@@ -250,6 +268,30 @@ def create_graph(
     builder.add_conditional_edges(
         "execute_sql",
         route_after_execute_sql,
+        {
+            "normalize_result": "normalize_result",
+            "complete": END,
+            "infrastructure_error": (
+                "finalize_infrastructure_error"
+            ),
+        },
+    )
+
+    builder.add_conditional_edges(
+        "normalize_result",
+        route_after_normalize_result,
+        {
+            "serialize_result": "serialize_result",
+            "complete": END,
+            "infrastructure_error": (
+                "finalize_infrastructure_error"
+            ),
+        },
+    )
+
+    builder.add_conditional_edges(
+        "serialize_result",
+        route_after_serialize_result,
         {
             "complete": END,
             "infrastructure_error": (
