@@ -220,7 +220,7 @@ def test_configuracao_invalida_interrompe_bootstrap() -> None:
 def test_factory_preflight_live_falha_fechada_sem_rede() -> None:
     provider = create_engine_preflight_from_runtime_config(
         EnginePreflightRuntimeConfig(
-            provider_type="generic_engine",
+            provider_type="capability_diagnostic",
             capability_mode="unavailable",
             dialect="generic_sql",
             timeout_seconds=5,

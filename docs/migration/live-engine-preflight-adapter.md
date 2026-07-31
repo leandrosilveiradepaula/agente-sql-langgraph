@@ -50,6 +50,11 @@ Variaveis suportadas para diagnostico:
 - `ENGINE_PREFLIGHT_TIMEOUT_SECONDS`
 - `ENGINE_PREFLIGHT_SSL_VERIFY`
 
+Nesta fase, o unico `provider_type` aceito e `capability_diagnostic`. Tipos
+desconhecidos falham na validacao de configuracao antes da construcao do grafo
+ou do provider. Isso evita declarar suporte implicito para DuckLake, Watson,
+PostgreSQL ou qualquer endpoint ainda nao comprovado.
+
 Credenciais nao sao versionadas. Quando um auth mode diferente de `none` for
 diagnosticado manualmente, o script live solicita segredo por entrada oculta e
 nao armazena nem imprime o valor.

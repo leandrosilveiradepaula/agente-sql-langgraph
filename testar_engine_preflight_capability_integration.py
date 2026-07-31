@@ -10,12 +10,15 @@ from app.config.engine_preflight_runtime import (
     load_engine_preflight_runtime_config,
 )
 from app.domain.engine_preflight import normalize_engine_preflight_result
+from app.graph.nodes.engine_preflight import create_engine_preflight_node
+from app.graph.routing import route_after_engine_preflight
 from testar_engine_preflight import _request
+from testar_engine_preflight_node import _state
 
 
 def _config(**overrides) -> EnginePreflightRuntimeConfig:
     values = {
-        "provider_type": "generic_engine",
+        "provider_type": "capability_diagnostic",
         "capability_mode": "unavailable",
         "dialect": "generic_sql",
         "timeout_seconds": 5,
@@ -31,7 +34,7 @@ def _config(**overrides) -> EnginePreflightRuntimeConfig:
 def test_configuracao_valida() -> None:
     config = _config()
 
-    assert config.provider_type == "generic_engine"
+    assert config.provider_type == "capability_diagnostic"
     assert config.capability_mode == "unavailable"
     assert config.timeout_seconds == 5
 
@@ -39,7 +42,7 @@ def test_configuracao_valida() -> None:
 def test_carrega_configuracao_do_mapping() -> None:
     config = load_engine_preflight_runtime_config(
         {
-            "ENGINE_PREFLIGHT_PROVIDER_TYPE": "generic_engine",
+            "ENGINE_PREFLIGHT_PROVIDER_TYPE": "capability_diagnostic",
             "ENGINE_PREFLIGHT_CAPABILITY_MODE": "unavailable",
             "ENGINE_PREFLIGHT_DIALECT": "generic_sql",
             "ENGINE_PREFLIGHT_TIMEOUT_SECONDS": "7",
@@ -59,6 +62,26 @@ def test_configuracao_ausente_rejeitada() -> None:
         assert "ENGINE_PREFLIGHT_PROVIDER_TYPE" in str(error)
     else:
         raise AssertionError("Era esperado erro de configuracao.")
+
+
+def test_provider_type_invalido_rejeitado() -> None:
+    try:
+        _config(provider_type="generic_engine")
+    except EnginePreflightRuntimeConfigError as error:
+        assert "provider_type" in str(error)
+    else:
+        raise AssertionError("Era esperado erro de provider_type.")
+
+
+def test_provider_type_sensivel_rejeitado_sem_expor_valor() -> None:
+    try:
+        _config(provider_type="provider token=abc")
+    except EnginePreflightRuntimeConfigError as error:
+        serialized = repr(error).casefold()
+        assert "token=abc" not in serialized
+        assert "provider_type" in serialized
+    else:
+        raise AssertionError("Era esperado erro de provider_type.")
 
 
 def test_endpoint_invalido_rejeitado() -> None:
@@ -221,6 +244,29 @@ def test_provider_chamado_uma_vez() -> None:
     assert provider.calls == 1
 
 
+def test_capability_unavailable_nao_entra_no_repair_loop() -> None:
+    provider = create_engine_preflight_from_runtime_config(_config())
+    node = create_engine_preflight_node(provider)
+    state = _state(
+        repair_attempts=0,
+        generated_sql="SELECT id FROM schema_test.table_test",
+    )
+
+    result = node(state)
+
+    assert result["final_status"] == "infrastructure_error"
+    assert result["failure_stage"] == "engine_preflight"
+    assert result["engine_preflight_result"]["failure_category"] == (
+        "capability_unavailable"
+    )
+    assert result["errors"][-1]["repairable"] is False
+    assert route_after_engine_preflight(result) == "infrastructure_error"
+    assert "repair_attempts" not in result
+    assert "current_sql" not in result
+    assert "generated_sql" not in result
+    assert provider.calls == 1
+
+
 def test_request_nao_mutada() -> None:
     request = _request()
     original = deepcopy(request)
@@ -253,32 +299,6 @@ def test_determinismo() -> None:
     assert first == second
 
 
-def test_sanitiza_provider_name_token() -> None:
-    request = _request()
-    provider = create_engine_preflight_from_runtime_config(
-        _config(provider_type="provider token=abc")
-    )
-    result = normalize_engine_preflight_result(
-        request=request,
-        provider_result=provider.preflight(request),
-    )
-
-    assert "token=abc" not in repr(result).casefold()
-
-
-def test_sanitiza_provider_name_dsn() -> None:
-    request = _request()
-    provider = create_engine_preflight_from_runtime_config(
-        _config(provider_type="dsn=postgresql://example.invalid/db")
-    )
-    result = normalize_engine_preflight_result(
-        request=request,
-        provider_result=provider.preflight(request),
-    )
-
-    assert "postgresql://" not in repr(result).casefold()
-
-
 def test_sanitiza_sql_integral() -> None:
     request = _request()
     provider = create_engine_preflight_from_runtime_config(_config())
@@ -303,7 +323,7 @@ def test_endpoint_nao_aparece_no_diagnostico() -> None:
 def test_ssl_verify_parse_false() -> None:
     config = load_engine_preflight_runtime_config(
         {
-            "ENGINE_PREFLIGHT_PROVIDER_TYPE": "generic_engine",
+            "ENGINE_PREFLIGHT_PROVIDER_TYPE": "capability_diagnostic",
             "ENGINE_PREFLIGHT_CAPABILITY_MODE": "unavailable",
             "ENGINE_PREFLIGHT_SSL_VERIFY": "false",
         }
@@ -316,7 +336,7 @@ def test_ssl_verify_invalido_rejeitado() -> None:
     try:
         load_engine_preflight_runtime_config(
             {
-                "ENGINE_PREFLIGHT_PROVIDER_TYPE": "generic_engine",
+                "ENGINE_PREFLIGHT_PROVIDER_TYPE": "capability_diagnostic",
                 "ENGINE_PREFLIGHT_CAPABILITY_MODE": "unavailable",
                 "ENGINE_PREFLIGHT_SSL_VERIFY": "maybe",
             }
@@ -366,6 +386,11 @@ def main() -> None:
         ("configuracao valida", test_configuracao_valida),
         ("carrega configuracao", test_carrega_configuracao_do_mapping),
         ("configuracao ausente", test_configuracao_ausente_rejeitada),
+        ("provider type invalido", test_provider_type_invalido_rejeitado),
+        (
+            "provider type sensivel",
+            test_provider_type_sensivel_rejeitado_sem_expor_valor,
+        ),
         ("endpoint invalido", test_endpoint_invalido_rejeitado),
         ("timeout invalido", test_timeout_invalido_rejeitado),
         ("auth mode invalido", test_auth_mode_invalido_rejeitado),
@@ -386,11 +411,13 @@ def main() -> None:
         ("normalizacao infra", test_resultado_normalizado_e_infraestrutura),
         ("prova sem execucao", test_provider_prova_sem_execucao),
         ("provider chamado uma vez", test_provider_chamado_uma_vez),
+        (
+            "capability sem repair loop",
+            test_capability_unavailable_nao_entra_no_repair_loop,
+        ),
         ("request imutavel", test_request_nao_mutada),
         ("somente request", test_provider_recebe_somente_request),
         ("determinismo", test_determinismo),
-        ("sanitiza token", test_sanitiza_provider_name_token),
-        ("sanitiza dsn", test_sanitiza_provider_name_dsn),
         ("sanitiza sql", test_sanitiza_sql_integral),
         ("endpoint oculto", test_endpoint_nao_aparece_no_diagnostico),
         ("ssl false", test_ssl_verify_parse_false),

@@ -56,6 +56,8 @@ AUTH_MODES: frozenset[str] = frozenset(
     {"none", "bearer", "api_key", "iam", "external"}
 )
 
+PROVIDER_TYPES: frozenset[str] = frozenset({"capability_diagnostic"})
+
 
 class EnginePreflightRuntimeConfigError(ValueError):
     """
@@ -96,10 +98,7 @@ class EnginePreflightRuntimeConfig:
     ssl_verify: bool = True
 
     def __post_init__(self) -> None:
-        provider_type = _required_text_value(
-            self.provider_type,
-            "provider_type",
-        )
+        provider_type = _provider_type(self.provider_type)
         capability_mode = _capability_mode(self.capability_mode)
         dialect = _optional_name(self.dialect)
         endpoint = _optional_endpoint(self.endpoint)
@@ -245,6 +244,15 @@ def _required_text_value(value: str, field_name: str) -> str:
     if not normalized:
         raise EnginePreflightRuntimeConfigError(
             f"{field_name} nao pode estar vazio."
+        )
+    return normalized
+
+
+def _provider_type(value: str) -> str:
+    normalized = _required_text_value(value, "provider_type").casefold()
+    if normalized not in PROVIDER_TYPES:
+        raise EnginePreflightRuntimeConfigError(
+            "provider_type nao suportado."
         )
     return normalized
 
