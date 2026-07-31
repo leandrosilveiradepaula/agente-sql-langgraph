@@ -110,6 +110,7 @@ class EnginePreflightRequest(TypedDict, total=False):
     sql_fingerprint: str
     context_version: str
     context_fingerprint: str
+    query_plan_fingerprint: str
     intent_name: str
     allowed_schemas: list[str]
     planned_tables: list[str]
@@ -158,6 +159,7 @@ class EnginePreflightDiagnostic(TypedDict):
     sql_fingerprint: str
     context_version: str
     context_fingerprint: str
+    query_plan_fingerprint: str
     provider_name: str
     provider_version: str | None
     duration_ms: int
@@ -207,6 +209,7 @@ class EnginePreflightResult(TypedDict):
     request_fingerprint: str
     context_version: str
     context_fingerprint: str
+    query_plan_fingerprint: str
     duration_ms: int
     attempt: int
     capabilities_used: EnginePreflightCapabilities

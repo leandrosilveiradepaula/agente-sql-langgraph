@@ -10,6 +10,9 @@ from app.graph.nodes.contract_gate import (
 from app.graph.nodes.engine_preflight import (
     create_engine_preflight_node,
 )
+from app.graph.nodes.execute_sql import (
+    create_execute_sql_node,
+)
 from app.graph.nodes.finalize_infrastructure_error import (
     finalize_infrastructure_error,
 )
@@ -36,6 +39,7 @@ from app.graph.routing import (
     route_after_classify_intent,
     route_after_contract_gate,
     route_after_engine_preflight,
+    route_after_execute_sql,
     route_after_generate_sql,
     route_after_load_context,
     route_after_receive_question,
@@ -48,6 +52,7 @@ from app.ports.context_repository import (
 )
 from app.ports.engine_preflight import EnginePreflight
 from app.ports.sql_generator import SqlGenerator
+from app.ports.sql_executor import SqlExecutor
 from app.ports.sql_repairer import SqlRepairer
 
 
@@ -56,6 +61,7 @@ def create_graph(
     sql_generator: SqlGenerator,
     engine_preflight: EnginePreflight,
     sql_repairer: SqlRepairer,
+    sql_executor: SqlExecutor,
 ):
     """
     Monta e compila o grafo-base do agente.
@@ -74,6 +80,9 @@ def create_graph(
     )
     repair_sql_node = create_repair_sql_node(
         sql_repairer,
+    )
+    execute_sql_node = create_execute_sql_node(
+        sql_executor,
     )
 
     builder = StateGraph(GraphState)
@@ -121,6 +130,11 @@ def create_graph(
     builder.add_node(
         "repair_sql",
         repair_sql_node,
+    )
+
+    builder.add_node(
+        "execute_sql",
+        execute_sql_node,
     )
 
     builder.add_node(
@@ -224,7 +238,19 @@ def create_graph(
         "engine_preflight",
         route_after_engine_preflight,
         {
+            "execute_sql": "execute_sql",
             "repair_sql": "repair_sql",
+            "complete": END,
+            "infrastructure_error": (
+                "finalize_infrastructure_error"
+            ),
+        },
+    )
+
+    builder.add_conditional_edges(
+        "execute_sql",
+        route_after_execute_sql,
+        {
             "complete": END,
             "infrastructure_error": (
                 "finalize_infrastructure_error"

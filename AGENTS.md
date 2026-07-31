@@ -8,6 +8,9 @@ intencao, constroi um `QueryPlan` deterministico e gera SQL por um
 autorizacao estrutural, e o Contract Gate valida aderencia ao `QueryPlan`.
 O Engine Preflight valida planejamento do motor por porta injetada, sem
 executar a consulta de negocio.
+Quando aprovado, a execucao controlada usa somente `current_sql` e uma
+`SqlExecutionRequest` minima enviada a um `SqlExecutor` explicitamente
+injetado.
 Preflight live so pode ser habilitado com capability comprovada do motor real;
 execucao normal, `LIMIT 0` e `EXPLAIN ANALYZE` nunca podem ser usados como
 preflight.
@@ -25,6 +28,7 @@ consomem somente o `QueryPlan` e a SQL corrente.
 - `python testar_planner.py`
 - `python testar_build_plan.py`
 - `python testar_sql_generation.py`
+- `python testar_sql_execution.py`
 - `python testar_engine_preflight.py`
 - `python testar_sql_repair.py`
 - `python testar_sql_analysis.py`
@@ -33,6 +37,7 @@ consomem somente o `QueryPlan` e a SQL corrente.
 - `python testar_sql_contract.py`
 - `python testar_contract_gate.py`
 - `python testar_engine_preflight_node.py`
+- `python testar_execute_sql.py`
 - `python testar_repair_sql.py`
 - `python testar_generate_sql.py`
 - `python testar_grafo_base.py`
@@ -58,6 +63,9 @@ sem SQL integral. SQL reparada volta aos gates antes de novo preflight.
 Provider live e sempre explicitamente injetado; nao ha provider global, fake
 como fallback de producao ou credenciais versionadas. Na ausencia de capability
 segura comprovada, use apenas diagnostico fail-closed.
+Execucao SQL controlada tambem exige executor explicitamente injetado, nao
+recebe GraphState nem ContextSnapshot, nao altera SQL e nao pode ser alcancada
+sem Security Gate, Contract Gate e Engine Preflight aprovados.
 
 ## Testes
 
@@ -67,5 +75,6 @@ regressao consolidada esperada antes de commit.
 Testes locais de preflight usam fake injetado e nao acessam motor real.
 Testes locais de reparo usam fake injetado, sem rede, sem banco e sem
 execucao de SQL.
+Testes locais de execucao usam fake injetado e nao executam SQL real.
 Script live de preflight fica fora de `scripts/check_all.py` e nao deve ser
 executado automaticamente.

@@ -36,6 +36,10 @@ STEPS = [
         [sys.executable, "testar_sql_generation.py"],
     ),
     (
+        "testar_sql_execution.py",
+        [sys.executable, "testar_sql_execution.py"],
+    ),
+    (
         "testar_engine_preflight.py",
         [sys.executable, "testar_engine_preflight.py"],
     ),
@@ -70,6 +74,10 @@ STEPS = [
     (
         "testar_engine_preflight_node.py",
         [sys.executable, "testar_engine_preflight_node.py"],
+    ),
+    (
+        "testar_execute_sql.py",
+        [sys.executable, "testar_execute_sql.py"],
     ),
     (
         "testar_repair_sql.py",

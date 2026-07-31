@@ -19,6 +19,7 @@ from app.config.postgres_context import (
 from app.graph.builder import create_graph
 from app.ports.context_repository import ContextRepository
 from app.ports.engine_preflight import EnginePreflight
+from app.ports.sql_executor import SqlExecutor
 from app.ports.sql_generator import SqlGenerator
 from app.ports.sql_repairer import SqlRepairer
 
@@ -33,7 +34,13 @@ RepositoryFactory = Callable[
     ContextRepository,
 ]
 GraphFactory = Callable[
-    [ContextRepository, SqlGenerator, EnginePreflight, SqlRepairer],
+    [
+        ContextRepository,
+        SqlGenerator,
+        EnginePreflight,
+        SqlRepairer,
+        SqlExecutor,
+    ],
     Any,
 ]
 
@@ -75,6 +82,7 @@ def create_postgres_context_graph(
     sql_generator: SqlGenerator | None = None,
     engine_preflight: EnginePreflight | None = None,
     sql_repairer: SqlRepairer | None = None,
+    sql_executor: SqlExecutor | None = None,
     config_loader: ConfigLoader = (
         load_postgres_context_runtime_config
     ),
@@ -91,7 +99,8 @@ def create_postgres_context_graph(
     -> configuracao validada
     -> PostgresContextRepository
     -> create_graph(
-       repository, sql_generator, engine_preflight, sql_repairer
+       repository, sql_generator, engine_preflight, sql_repairer,
+       sql_executor
     )
     -> grafo compilado
 
@@ -117,9 +126,15 @@ def create_postgres_context_graph(
             "sql_repairer deve ser injetado no composition root."
         )
 
+    if sql_executor is None:
+        raise RuntimeError(
+            "sql_executor deve ser injetado no composition root."
+        )
+
     return graph_factory(
         repository,
         sql_generator,
         engine_preflight,
         sql_repairer,
+        sql_executor,
     )
