@@ -217,6 +217,36 @@ def test_preflight_rows_returned() -> None:
         raise AssertionError("Era esperado erro.")
 
 
+def test_preflight_approved_com_failure_category() -> None:
+    inputs = _approved_inputs()
+    inputs["engine_preflight_result"] = {
+        **inputs["engine_preflight_result"],
+        "failure_category": "provider_unavailable",
+    }
+    try:
+        build_sql_execution_request(**inputs)
+    except Exception as error:
+        assert getattr(error, "code") == (
+            "SQL_EXECUTION_PREFLIGHT_NOT_APPROVED"
+        )
+    else:
+        raise AssertionError("Era esperado erro.")
+
+
+def test_fingerprint_plano_divergente() -> None:
+    inputs = _approved_inputs()
+    inputs["query_plan"] = {
+        **inputs["query_plan"],
+        "intent_confidence": 0.42,
+    }
+    try:
+        build_sql_execution_request(**inputs)
+    except Exception as error:
+        assert getattr(error, "code") == "SQL_EXECUTION_REQUEST_INVALID"
+    else:
+        raise AssertionError("Era esperado erro.")
+
+
 def test_limites_invalidos() -> None:
     inputs = _approved_inputs()
     inputs["options"] = {"sql_execution_limits": {"max_rows": 1}}
@@ -272,6 +302,158 @@ def test_resposta_inconsistente() -> None:
     )
     assert result["status"] == "rejected"
     assert result["error_code"] == "SQL_EXECUTION_RESPONSE_INVALID"
+
+
+def test_resposta_rejeitada_contendo_rows() -> None:
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result={
+            "status": "rejected",
+            "rows": [{"id": 1}],
+            "row_count": 1,
+            "message": "rejected",
+        },
+    )
+    assert result["error_code"] == "SQL_EXECUTION_RESPONSE_INVALID"
+
+
+def test_colunas_duplicadas() -> None:
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result=_provider_result(
+            columns=[{"name": "id"}, {"name": "id"}],
+        ),
+    )
+    assert result["error_code"] == "SQL_EXECUTION_RESPONSE_INVALID"
+
+
+def test_celulas_divergem_das_colunas() -> None:
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result=_provider_result(
+            columns=[{"name": "id"}, {"name": "value"}],
+            rows=[{"id": 1}],
+            row_count=1,
+        ),
+    )
+    assert result["error_code"] == "SQL_EXECUTION_RESPONSE_INVALID"
+
+
+def test_success_executed_false() -> None:
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result=_provider_result(executed=False),
+    )
+    assert result["error_code"] == "SQL_EXECUTION_RESPONSE_INVALID"
+
+
+def test_bytes_received_negativo() -> None:
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result=_provider_result(bytes_received=-1),
+    )
+    assert result["error_code"] == "SQL_EXECUTION_RESPONSE_INVALID"
+
+
+def test_bytes_received_divergente() -> None:
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result=_provider_result(bytes_received=1),
+    )
+    assert result["error_code"] == "SQL_EXECUTION_RESPONSE_INVALID"
+
+
+def test_duration_ms_negativo() -> None:
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result=_provider_result(duration_ms=-1),
+    )
+    assert result["error_code"] == "SQL_EXECUTION_RESPONSE_INVALID"
+
+
+def test_truncated_rejeitado() -> None:
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result=_provider_result(truncated=True),
+    )
+    assert result["error_code"] == "SQL_EXECUTION_RESPONSE_INVALID"
+
+
+def test_max_response_bytes_multibyte() -> None:
+    request = _request()
+    request["limits"]["max_response_bytes"] = 45
+    result = normalize_sql_execution_result(
+        request=request,
+        provider_result=_provider_result(
+            rows=[{"id": "acao ç"}],
+            row_count=1,
+        ),
+    )
+    assert result["error_code"] == "SQL_EXECUTION_BYTE_LIMIT_EXCEEDED"
+
+
+def test_max_cell_bytes_multibyte() -> None:
+    request = _request()
+    request["limits"]["max_cell_bytes"] = 7
+    result = normalize_sql_execution_result(
+        request=request,
+        provider_result=_provider_result(
+            rows=[{"id": "ação"}],
+            row_count=1,
+        ),
+    )
+    assert result["error_code"] == "SQL_EXECUTION_CELL_LIMIT_EXCEEDED"
+
+
+def test_provider_request_fingerprint_divergente() -> None:
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result=_provider_result(request_fingerprint="bad"),
+    )
+    assert result["error_code"] == "SQL_EXECUTION_RESPONSE_INVALID"
+
+
+def test_provider_sql_fingerprint_divergente() -> None:
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result=_provider_result(sql_fingerprint="bad"),
+    )
+    assert result["error_code"] == "SQL_EXECUTION_RESPONSE_INVALID"
+
+
+def test_limite_acima_do_maximo() -> None:
+    inputs = _approved_inputs()
+    inputs["options"]["sql_execution_limits"]["max_rows"] = 10001
+    try:
+        build_sql_execution_request(**inputs)
+    except Exception as error:
+        assert getattr(error, "code") == "SQL_EXECUTION_REQUEST_INVALID"
+    else:
+        raise AssertionError("Era esperado erro.")
+
+
+def test_mutacao_posterior_do_provider_nao_altera_resultado() -> None:
+    provider_result = _provider_result()
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result=provider_result,
+    )
+    provider_result["rows"][0]["id"] = 99
+    provider_result["columns"][0]["name"] = "changed"
+    assert result["rows"][0]["id"] == 1
+    assert result["columns"][0]["name"] == "id"
+
+
+def test_warning_sanitizado() -> None:
+    result = normalize_sql_execution_result(
+        request=_request(),
+        provider_result=_provider_result(
+            warnings=[f"warning {SQL} token=hidden"],
+        ),
+    )
+    serialized = repr(result).casefold()
+    assert SQL.casefold() not in serialized
+    assert "hidden" not in serialized
 
 
 def test_row_limit() -> None:
@@ -407,12 +589,41 @@ def main() -> None:
         ("capability unavailable", test_capability_unavailable),
         ("preflight executed true", test_preflight_executed_true),
         ("preflight rows_returned", test_preflight_rows_returned),
+        (
+            "preflight approved com failure category",
+            test_preflight_approved_com_failure_category,
+        ),
+        ("fingerprint plano divergente", test_fingerprint_plano_divergente),
         ("limites invalidos", test_limites_invalidos),
         ("SQL vazia", test_sql_vazia),
         ("SQL nao read-only", test_sql_nao_read_only),
         ("resposta valida", test_resposta_valida),
         ("resposta vazia valida", test_resposta_vazia_valida),
         ("resposta inconsistente", test_resposta_inconsistente),
+        ("rejected contendo rows", test_resposta_rejeitada_contendo_rows),
+        ("colunas duplicadas", test_colunas_duplicadas),
+        ("celulas divergem das colunas", test_celulas_divergem_das_colunas),
+        ("success executed false", test_success_executed_false),
+        ("bytes_received negativo", test_bytes_received_negativo),
+        ("bytes_received divergente", test_bytes_received_divergente),
+        ("duration_ms negativo", test_duration_ms_negativo),
+        ("truncated rejeitado", test_truncated_rejeitado),
+        ("max_response_bytes multibyte", test_max_response_bytes_multibyte),
+        ("max_cell_bytes multibyte", test_max_cell_bytes_multibyte),
+        (
+            "provider request fingerprint divergente",
+            test_provider_request_fingerprint_divergente,
+        ),
+        (
+            "provider sql fingerprint divergente",
+            test_provider_sql_fingerprint_divergente,
+        ),
+        ("limite acima do maximo", test_limite_acima_do_maximo),
+        (
+            "mutacao posterior provider",
+            test_mutacao_posterior_do_provider_nao_altera_resultado,
+        ),
+        ("warning sanitizado", test_warning_sanitizado),
         ("row limit", test_row_limit),
         ("byte limit", test_byte_limit),
         ("cell limit", test_cell_limit),

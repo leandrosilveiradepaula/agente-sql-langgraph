@@ -53,12 +53,24 @@ Os limites obrigatorios sao `timeout_seconds`, `max_rows`,
 fornecidos explicitamente por configuracao/opcoes tipadas. Nao ha default
 silencioso para execucao.
 
+Tetos defensivos locais:
+
+- `timeout_seconds <= 300`;
+- `max_rows <= 10000`;
+- `max_response_bytes <= 10485760`;
+- `max_cell_bytes <= 1048576`.
+
 ## Politica De Truncamento
 
 A politica desta fase e fail-closed: linhas acima de `max_rows`, payload acima
 de `max_response_bytes` ou celula acima de `max_cell_bytes` rejeitam o
 resultado. O contrato preserva `truncated` para providers futuros, mas esta
 fase nao trunca silenciosamente e nao adiciona `LIMIT` a SQL.
+
+Quando `bytes_received` e informado pelo provider, ele deve coincidir com o
+tamanho deterministico calculado localmente sobre colunas e linhas
+preservadas. Valores ausentes sao calculados localmente; valores negativos ou
+divergentes rejeitam a resposta.
 
 ## Fingerprints
 

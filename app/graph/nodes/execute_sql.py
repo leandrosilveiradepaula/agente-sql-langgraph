@@ -29,6 +29,21 @@ def create_execute_sql_node(
     """
 
     def execute_sql(state: GraphState) -> GraphState:
+        previous_result = state.get("sql_execution_result")
+        if isinstance(previous_result, Mapping):
+            result = create_sql_execution_error_result(
+                request=None,
+                code="SQL_EXECUTION_NOT_AUTHORIZED",
+                message="Execucao SQL anterior ja existe no estado.",
+                category="not_authorized",
+                status="rejected",
+            )
+            return _error_state(
+                state,
+                result,
+                final_status="rejected",
+            )
+
         current_sql = state.get("current_sql")
         query_plan = state.get("query_plan")
         security_result = state.get("security_result")

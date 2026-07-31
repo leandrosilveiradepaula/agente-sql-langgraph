@@ -206,6 +206,10 @@ def route_after_engine_preflight(
         final_status == "processing"
         and isinstance(engine_preflight_result, dict)
         and engine_preflight_result.get("status") == "approved"
+        and engine_preflight_result.get("approved") is True
+        and engine_preflight_result.get("failure_category") in {None, "none"}
+        and not engine_preflight_result.get("errors")
+        and not engine_preflight_result.get("findings")
         and engine_preflight_result.get("executed") is False
         and engine_preflight_result.get("rows_returned") == 0
         and engine_preflight_result.get("statement_planned") is True

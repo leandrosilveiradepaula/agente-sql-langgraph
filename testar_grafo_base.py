@@ -725,9 +725,13 @@ def test_classify_routing() -> None:
             "final_status": "processing",
             "engine_preflight_result": {
                 "status": "approved",
+                "approved": True,
+                "failure_category": "none",
                 "executed": False,
                 "rows_returned": 0,
                 "statement_planned": True,
+                "errors": [],
+                "findings": [],
             },
         }
     ) == "execute_sql"
@@ -736,9 +740,28 @@ def test_classify_routing() -> None:
             "final_status": "processing",
             "engine_preflight_result": {
                 "status": "approved",
+                "approved": True,
+                "failure_category": "none",
                 "executed": True,
                 "rows_returned": 0,
                 "statement_planned": True,
+                "errors": [],
+                "findings": [],
+            },
+        }
+    ) == "infrastructure_error"
+    assert route_after_engine_preflight(
+        {
+            "final_status": "processing",
+            "engine_preflight_result": {
+                "status": "approved",
+                "approved": False,
+                "failure_category": "none",
+                "executed": False,
+                "rows_returned": 0,
+                "statement_planned": True,
+                "errors": [],
+                "findings": [],
             },
         }
     ) == "infrastructure_error"

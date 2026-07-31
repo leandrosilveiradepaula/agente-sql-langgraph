@@ -98,7 +98,7 @@ def test_nao_chama_infrastructure_error() -> None:
 
 
 def test_current_sql_exata() -> None:
-    sql = "SELECT id\nFROM schema_test.table_test"
+    sql = "  SELECT id\nFROM schema_test.table_test  "
     executor = FakeSqlExecutor()
     create_execute_sql_node(executor)(_state(**_approved_inputs(sql)))
     assert executor.last_request is not None
@@ -178,6 +178,18 @@ def test_state_nao_mutado() -> None:
     assert state == original
 
 
+def test_resultado_anterior_nao_chama_executor() -> None:
+    executor = FakeSqlExecutor()
+    state = _state(
+        sql_execution_result={
+            "status": "success",
+        }
+    )
+    result = create_execute_sql_node(executor)(state)
+    assert result["final_status"] == "rejected"
+    assert executor.calls == 0
+
+
 def test_erros_sanitizados() -> None:
     executor = FakeSqlExecutor(
         responses=[
@@ -215,6 +227,10 @@ def main() -> None:
         ("limite linhas", test_limite_linhas),
         ("limite bytes", test_limite_bytes),
         ("state nao mutado", test_state_nao_mutado),
+        (
+            "resultado anterior nao chama executor",
+            test_resultado_anterior_nao_chama_executor,
+        ),
         ("erros sanitizados", test_erros_sanitizados),
     ]
     for index, (name, test_function) in enumerate(tests, start=1):

@@ -41,6 +41,11 @@ _INFRASTRUCTURE_CATEGORIES: set[SqlExecutionFailureCategory] = {
     "unexpected_error",
 }
 
+MAX_TIMEOUT_SECONDS = 300
+MAX_ROWS = 10000
+MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+MAX_CELL_BYTES = 1024 * 1024
+
 
 def build_sql_execution_request(
     *,
@@ -123,6 +128,13 @@ def build_sql_execution_request(
         "request_fingerprint": "",
     }
     request["request_fingerprint"] = request_fingerprint(request)
+    if engine_preflight_result.get("query_plan_fingerprint") != request[
+        "query_plan_fingerprint"
+    ]:
+        raise SqlExecutionInputError(
+            "SQL_EXECUTION_REQUEST_INVALID",
+            "Fingerprint do QueryPlan diverge do preflight aprovado.",
+        )
 
     if security_result.get("sql_fingerprint") not in {
         None,
@@ -201,10 +213,45 @@ def normalize_sql_execution_result(
         provider_result.get("provider_version"),
         forbidden_texts=(request["current_sql"],),
     )
+    fingerprint_error = _provider_fingerprint_error(
+        request=request,
+        provider_result=provider_result,
+    )
+    if fingerprint_error is not None:
+        return create_sql_execution_error_result(
+            request=request,
+            code="SQL_EXECUTION_RESPONSE_INVALID",
+            message=fingerprint_error,
+            category="response_invalid",
+            status="rejected",
+            provider_name=provider_name,
+            provider_version=provider_version,
+        )
     duration_ms = _optional_non_negative_int(
         provider_result.get("duration_ms")
     )
+    if "duration_ms" in provider_result and duration_ms is None:
+        return create_sql_execution_error_result(
+            request=request,
+            code="SQL_EXECUTION_RESPONSE_INVALID",
+            message="duration_ms do executor e invalido.",
+            category="response_invalid",
+            status="rejected",
+            provider_name=provider_name,
+            provider_version=provider_version,
+        )
     if status != "success":
+        if _has_success_payload(provider_result):
+            return create_sql_execution_error_result(
+                request=request,
+                code="SQL_EXECUTION_RESPONSE_INVALID",
+                message="Executor rejeitou com payload de sucesso.",
+                category="response_invalid",
+                status="rejected",
+                provider_name=provider_name,
+                provider_version=provider_version,
+                duration_ms=duration_ms,
+            )
         category = _failure_category(provider_result, status)
         code = _error_code(provider_result, category)
         return create_sql_execution_error_result(
@@ -240,6 +287,17 @@ def normalize_sql_execution_result(
             provider_version=provider_version,
             duration_ms=duration_ms,
         )
+    if provider_result.get("truncated") is True:
+        return create_sql_execution_error_result(
+            request=request,
+            code="SQL_EXECUTION_RESPONSE_INVALID",
+            message="Resposta truncada nao e aceita nesta politica.",
+            category="response_invalid",
+            status="rejected",
+            provider_name=provider_name,
+            provider_version=provider_version,
+            duration_ms=duration_ms,
+        )
 
     try:
         rows = _rows(provider_result.get("rows"))
@@ -256,11 +314,35 @@ def normalize_sql_execution_result(
             duration_ms=duration_ms,
         )
     row_count = _row_count(provider_result.get("row_count"), rows)
+    if row_count is None:
+        return create_sql_execution_error_result(
+            request=request,
+            code="SQL_EXECUTION_RESPONSE_INVALID",
+            message="row_count do executor e invalido.",
+            category="response_invalid",
+            status="rejected",
+            provider_name=provider_name,
+            provider_version=provider_version,
+            duration_ms=duration_ms,
+        )
     if row_count != len(rows):
         return create_sql_execution_error_result(
             request=request,
             code="SQL_EXECUTION_RESPONSE_INVALID",
             message="row_count diverge das linhas retornadas.",
+            category="response_invalid",
+            status="rejected",
+            provider_name=provider_name,
+            provider_version=provider_version,
+            duration_ms=duration_ms,
+        )
+
+    shape_error = _shape_error(columns, rows)
+    if shape_error is not None:
+        return create_sql_execution_error_result(
+            request=request,
+            code="SQL_EXECUTION_RESPONSE_INVALID",
+            message=shape_error,
             category="response_invalid",
             status="rejected",
             provider_name=provider_name,
@@ -287,6 +369,17 @@ def normalize_sql_execution_result(
         columns,
         rows,
     )
+    if bytes_received is None:
+        return create_sql_execution_error_result(
+            request=request,
+            code="SQL_EXECUTION_RESPONSE_INVALID",
+            message="bytes_received do executor e invalido.",
+            category="response_invalid",
+            status="rejected",
+            provider_name=provider_name,
+            provider_version=provider_version,
+            duration_ms=duration_ms,
+        )
     response_summary = {
         "columns": columns,
         "row_count": row_count,
@@ -406,6 +499,36 @@ def _validate_preflight(
             "Capability de preflight indisponivel nao autoriza execucao.",
             category="not_authorized",
         )
+    if engine_preflight_result.get("failure_category") not in {None, "none"}:
+        raise SqlExecutionInputError(
+            "SQL_EXECUTION_PREFLIGHT_NOT_APPROVED",
+            "Preflight aprovado com categoria de falha nao autoriza execucao.",
+            category="not_authorized",
+        )
+    if engine_preflight_result.get("error_code"):
+        raise SqlExecutionInputError(
+            "SQL_EXECUTION_PREFLIGHT_NOT_APPROVED",
+            "Preflight aprovado com codigo de erro nao autoriza execucao.",
+            category="not_authorized",
+        )
+    if engine_preflight_result.get("repairable") is True:
+        raise SqlExecutionInputError(
+            "SQL_EXECUTION_PREFLIGHT_NOT_APPROVED",
+            "Preflight aprovado reparavel nao autoriza execucao.",
+            category="not_authorized",
+        )
+    if engine_preflight_result.get("errors"):
+        raise SqlExecutionInputError(
+            "SQL_EXECUTION_PREFLIGHT_NOT_APPROVED",
+            "Preflight aprovado com erros nao autoriza execucao.",
+            category="not_authorized",
+        )
+    if engine_preflight_result.get("findings"):
+        raise SqlExecutionInputError(
+            "SQL_EXECUTION_PREFLIGHT_NOT_APPROVED",
+            "Preflight aprovado com findings nao autoriza execucao.",
+            category="not_authorized",
+        )
     if (
         engine_preflight_result.get("status") != "approved"
         or engine_preflight_result.get("approved") is not True
@@ -477,12 +600,19 @@ def _limits(options: Mapping[str, Any] | None) -> SqlExecutionLimits:
             "options.sql_execution_limits deve ser objeto.",
         )
     limits: SqlExecutionLimits = {
-        "timeout_seconds": _positive_int(raw.get("timeout_seconds")),
-        "max_rows": _positive_int(raw.get("max_rows")),
-        "max_response_bytes": _positive_int(
-            raw.get("max_response_bytes")
+        "timeout_seconds": _positive_int(
+            raw.get("timeout_seconds"),
+            maximum=MAX_TIMEOUT_SECONDS,
         ),
-        "max_cell_bytes": _positive_int(raw.get("max_cell_bytes")),
+        "max_rows": _positive_int(raw.get("max_rows"), maximum=MAX_ROWS),
+        "max_response_bytes": _positive_int(
+            raw.get("max_response_bytes"),
+            maximum=MAX_RESPONSE_BYTES,
+        ),
+        "max_cell_bytes": _positive_int(
+            raw.get("max_cell_bytes"),
+            maximum=MAX_CELL_BYTES,
+        ),
     }
     return limits
 
@@ -519,6 +649,20 @@ def _limit_error(
     return None
 
 
+def _shape_error(
+    columns: list[SqlExecutionColumn],
+    rows: list[SqlExecutionRow],
+) -> str | None:
+    column_names = [column["name"] for column in columns]
+    if rows and not column_names:
+        return "Linhas retornadas sem colunas declaradas."
+    expected = set(column_names)
+    for row in rows:
+        if set(row.keys()) != expected:
+            return "Linha retornada diverge das colunas declaradas."
+    return None
+
+
 def _rows(value: Any) -> list[SqlExecutionRow]:
     if not isinstance(value, list):
         return []
@@ -526,7 +670,12 @@ def _rows(value: Any) -> list[SqlExecutionRow]:
     for item in value:
         if not isinstance(item, Mapping):
             raise TypeError("row must be mapping")
-        rows.append({str(key): deepcopy(row_value) for key, row_value in item.items()})
+        rows.append(
+            {
+                str(key): deepcopy(row_value)
+                for key, row_value in item.items()
+            }
+        )
     return rows
 
 
@@ -534,24 +683,31 @@ def _columns(value: Any) -> list[SqlExecutionColumn]:
     if not isinstance(value, list):
         return []
     columns: list[SqlExecutionColumn] = []
+    seen: set[str] = set()
     for item in value:
         if not isinstance(item, Mapping):
-            continue
+            raise TypeError("column must be mapping")
         name = item.get("name")
         if not isinstance(name, str) or not name.strip():
-            continue
-        column: SqlExecutionColumn = {"name": name.strip()}
+            raise TypeError("column name must be non-empty text")
+        normalized_name = name.strip()
+        if normalized_name in seen:
+            raise TypeError("duplicate column name")
+        seen.add(normalized_name)
+        column: SqlExecutionColumn = {"name": normalized_name}
         if "type" in item:
             column["type"] = safe_optional_text(item.get("type"))
         columns.append(column)
     return columns
 
 
-def _row_count(value: Any, rows: list[SqlExecutionRow]) -> int:
+def _row_count(value: Any, rows: list[SqlExecutionRow]) -> int | None:
     if isinstance(value, bool):
-        return len(rows)
+        return None
     if isinstance(value, int) and value >= 0:
         return value
+    if value is not None:
+        return None
     return len(rows)
 
 
@@ -559,10 +715,15 @@ def _bytes_received(
     value: Any,
     columns: list[SqlExecutionColumn],
     rows: list[SqlExecutionRow],
-) -> int:
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-        return value
-    return _payload_size(columns, rows)
+) -> int | None:
+    actual_size = _payload_size(columns, rows)
+    if value is None:
+        return actual_size
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    if value != actual_size:
+        return None
+    return actual_size
 
 
 def _payload_size(
@@ -586,7 +747,10 @@ def _statement_type(
     if provider_value:
         return provider_value.casefold()
     try:
-        return cast(str | None, analyze_sql(request["current_sql"])["statement_type"])
+        return cast(
+            str | None,
+            analyze_sql(request["current_sql"])["statement_type"],
+        )
     except SqlAnalysisError:
         return None
 
@@ -611,6 +775,23 @@ def _failure_category(
     if isinstance(value, str) and value in valid:
         return cast(SqlExecutionFailureCategory, value)
     return "provider_failed" if status == "error" else "response_invalid"
+
+
+def _provider_fingerprint_error(
+    *,
+    request: SqlExecutionRequest,
+    provider_result: Mapping[str, Any],
+) -> str | None:
+    request_value = provider_result.get("request_fingerprint")
+    if (
+        request_value is not None
+        and request_value != request["request_fingerprint"]
+    ):
+        return "request_fingerprint do executor diverge da request."
+    sql_value = provider_result.get("sql_fingerprint")
+    if sql_value is not None and sql_value != request["sql_fingerprint"]:
+        return "sql_fingerprint do executor diverge da request."
+    return None
 
 
 def _error_code(
@@ -740,10 +921,20 @@ def _required_external_text(value: Any, field_name: str) -> str:
     return value.strip()
 
 
-def _positive_int(value: Any, *, default: int | None = None) -> int:
+def _positive_int(
+    value: Any,
+    *,
+    default: int | None = None,
+    maximum: int | None = None,
+) -> int:
     if isinstance(value, bool):
         value = None
     if isinstance(value, int) and value > 0:
+        if maximum is not None and value > maximum:
+            raise SqlExecutionInputError(
+                "SQL_EXECUTION_REQUEST_INVALID",
+                "Limite de execucao excede maximo permitido.",
+            )
         return value
     if default is not None:
         return default
@@ -759,6 +950,15 @@ def _optional_non_negative_int(value: Any) -> int | None:
     if isinstance(value, int) and value >= 0:
         return value
     return None
+
+
+def _has_success_payload(provider_result: Mapping[str, Any]) -> bool:
+    return (
+        bool(provider_result.get("rows"))
+        or bool(provider_result.get("columns"))
+        or provider_result.get("row_count") not in {None, 0}
+        or provider_result.get("executed") is True
+    )
 
 
 def _sql_fingerprint(sql: str) -> str:

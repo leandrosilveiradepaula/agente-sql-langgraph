@@ -112,6 +112,8 @@ class SqlExecutionProviderResult(TypedDict, total=False):
     status: Literal["success", "rejected", "error"]
     provider_name: str
     provider_version: str
+    request_fingerprint: str
+    sql_fingerprint: str
     columns: list[SqlExecutionColumn]
     rows: list[SqlExecutionRow]
     row_count: int
