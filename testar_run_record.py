@@ -262,6 +262,45 @@ def test_payload_limites_e_copia_independente() -> None:
         raise AssertionError("Era esperado RunRecordError.")
 
 
+def test_serializacao_rejeitada_nao_vira_payload_persistido() -> None:
+    rejected_serialization = _serialized_result()
+    rejected_serialization["status"] = "rejected"
+    rejected_serialization["rows"] = []
+    rejected_serialization["error_code"] = (
+        "RESULT_SERIALIZATION_LIMIT_EXCEEDED"
+    )
+    rejected_serialization["result_fingerprint"] = None
+    record = build_run_record(
+        _state(
+            final_status="rejected",
+            current_stage="serialize_result",
+            failure_stage="serialize_result",
+            serialized_result=rejected_serialization,
+        ),
+        limits=_limits(),
+    )
+    assert record["serialized_result"] is None
+    assert record["lineage"]["serialized_result_fingerprint"]
+
+
+def test_duracao_negativa_rejeitada() -> None:
+    state = _state(
+        sql_execution_result={
+            "status": "success",
+            "row_count": 1,
+            "bytes_received": 10,
+            "duration_ms": -1,
+            "truncated": False,
+        }
+    )
+    try:
+        build_run_record(state, limits=_limits())
+    except RunRecordError as error:
+        assert error.code == "RUN_RECORD_INPUT_INVALID"
+    else:
+        raise AssertionError("Era esperado RunRecordError.")
+
+
 def test_limites_de_estagios_erros_warnings() -> None:
     for limits in [
         _limits(max_stage_records=1),
@@ -295,6 +334,8 @@ def main() -> None:
         test_mudancas_relevantes_alteram_fingerprint,
         test_nao_inclui_sql_integral_nem_credenciais,
         test_payload_limites_e_copia_independente,
+        test_serializacao_rejeitada_nao_vira_payload_persistido,
+        test_duracao_negativa_rejeitada,
         test_limites_de_estagios_erros_warnings,
     ]
     for index, test in enumerate(tests, start=1):

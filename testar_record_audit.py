@@ -83,6 +83,72 @@ def test_sink_chamado_uma_vez_sem_payload_ou_sql() -> None:
     assert "select " not in serialized
 
 
+def test_resultado_anterior_inconsistente_nao_chama_sink() -> None:
+    sink = FakeAuditSink()
+    result = create_record_audit_node(sink)(
+        _state(
+            audit_result={
+                "status": "error",
+                "event_id": None,
+                "event_fingerprint": None,
+                "idempotency_key": "old",
+                "failure_category": "unexpected_error",
+                "diagnostic": {
+                    "code": "AUDIT_UNEXPECTED_ERROR",
+                    "message": "Auditoria indisponivel.",
+                    "failure_category": "unexpected_error",
+                },
+                "duration_ms": 1,
+            }
+        )
+    )
+    assert sink.calls == 0
+    assert result["final_status"] == "infrastructure_error"
+    assert result["finalization_status"] == "audit_failed"
+
+
+def test_success_com_failure_category_ou_failure_com_event_id_rejeita() -> None:
+    mismatch = create_record_audit_node(
+        FakeAuditSink(
+            responses=[
+                {
+                    "status": "written",
+                    "event_id": "event-test",
+                    "event_fingerprint": "ignored",
+                    "idempotency_key": "audit-key",
+                    "failure_category": "conflict",
+                    "diagnostic": None,
+                    "duration_ms": 1,
+                }
+            ]
+        )
+    )(_state())
+    assert mismatch["errors"][-1]["code"] == "AUDIT_REQUEST_INVALID"
+
+    failure_with_event = create_record_audit_node(
+        FakeAuditSink(
+            responses=[
+                {
+                    "status": "error",
+                    "event_id": "event-test",
+                    "event_fingerprint": None,
+                    "idempotency_key": "audit-key",
+                    "failure_category": "unexpected_error",
+                    "diagnostic": {
+                        "code": "AUDIT_UNEXPECTED_ERROR",
+                        "message": "Auditoria indisponivel.",
+                        "failure_category": "unexpected_error",
+                    },
+                    "duration_ms": 1,
+                }
+            ]
+        )
+    )(_state())
+    assert failure_with_event["errors"][-1]["code"] == (
+        "AUDIT_REQUEST_INVALID"
+    )
+
+
 def test_idempotencia_conflito_e_fingerprint() -> None:
     sink = FakeAuditSink()
     node = create_record_audit_node(sink)
@@ -134,6 +200,8 @@ def main() -> None:
         test_eventos_por_outcome,
         test_persistencia_ausente_bloqueia_auditoria,
         test_sink_chamado_uma_vez_sem_payload_ou_sql,
+        test_resultado_anterior_inconsistente_nao_chama_sink,
+        test_success_com_failure_category_ou_failure_com_event_id_rejeita,
         test_idempotencia_conflito_e_fingerprint,
         test_timeout_autenticacao_excecao_sanitizados,
     ]

@@ -409,7 +409,10 @@ def _metrics(
     if isinstance(serialized_result, Mapping) and serialized_result:
         bytes_value = _json_size(serialized_result)
     elif isinstance(execution_result, Mapping):
-        bytes_value = int(execution_result.get("bytes_received", 0) or 0)
+        bytes_value = _non_negative_int(
+            execution_result.get("bytes_received", 0),
+            "bytes_received",
+        )
     else:
         bytes_value = 0
     return {
@@ -417,10 +420,13 @@ def _metrics(
         "column_count": len(columns) if isinstance(columns, list) else 0,
         "bytes": bytes_value,
         "duration_ms": None,
-        "execution_duration_ms": (
-            execution_result.get("duration_ms")
-            if isinstance(execution_result, Mapping)
-            else None
+        "execution_duration_ms": _non_negative_optional_int(
+            (
+                execution_result.get("duration_ms")
+                if isinstance(execution_result, Mapping)
+                else None
+            ),
+            "execution_duration_ms",
         ),
         "truncated": bool(
             execution_result.get("truncated", False)
@@ -452,10 +458,9 @@ def _stage_records(
                 "stage_name": stage_name,
                 "status": str(value.get("status", "unknown")),
                 "attempt": int(state.get("repair_attempts", 0) or 0),
-                "duration_ms": (
-                    value.get("duration_ms")
-                    if isinstance(value.get("duration_ms"), int)
-                    else None
+                "duration_ms": _non_negative_optional_int(
+                    value.get("duration_ms"),
+                    "duration_ms",
                 ),
                 "output_fingerprint": _mapping_fingerprint(value),
                 "error_codes": _diagnostic_codes(value),
@@ -476,6 +481,8 @@ def _serialized_result_payload(
 ) -> Any:
     serialized_result = state.get("serialized_result")
     if not isinstance(serialized_result, Mapping):
+        return None
+    if serialized_result.get("status") != "success":
         return None
     payload = deepcopy(serialized_result)
     size = _json_size(payload)
@@ -599,8 +606,37 @@ def _row_count(state: Mapping[str, Any]) -> int:
             return len(rows)
     execution_result = state.get("sql_execution_result")
     if isinstance(execution_result, Mapping):
-        return int(execution_result.get("row_count", 0) or 0)
+        return _non_negative_int(
+            execution_result.get("row_count", 0),
+            "row_count",
+        )
     return 0
+
+
+def _non_negative_int(value: Any, name: str) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    if value < 0:
+        raise RunRecordError(
+            "RUN_RECORD_INPUT_INVALID",
+            f"{name} nao pode ser negativo.",
+        )
+    return value
+
+
+def _non_negative_optional_int(value: Any, name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if value < 0:
+        raise RunRecordError(
+            "RUN_RECORD_INPUT_INVALID",
+            f"{name} nao pode ser negativo.",
+        )
+    return value
 
 
 def _mapping_fingerprint(value: Any) -> str:

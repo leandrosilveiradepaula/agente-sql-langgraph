@@ -94,6 +94,76 @@ def test_fingerprint_divergente() -> None:
     )
 
 
+def test_resultado_anterior_inconsistente_nao_chama_repository() -> None:
+    repository = FakeRunRepository()
+    result = create_persist_run_node(repository)(
+        _state(
+            persistence_result={
+                "status": "error",
+                "record_id": None,
+                "persisted_fingerprint": None,
+                "idempotency_key": "old",
+                "failure_category": "unavailable",
+                "diagnostic": {
+                    "code": "PERSIST_RUN_UNAVAILABLE",
+                    "message": "Persistencia indisponivel.",
+                    "failure_category": "unavailable",
+                    "safe_details": {},
+                },
+                "duration_ms": 1,
+            }
+        )
+    )
+    assert repository.calls == 0
+    assert result["final_status"] == "infrastructure_error"
+    assert result["finalization_status"] == "persistence_failed"
+
+
+def test_success_com_failure_category_ou_failure_com_record_id_rejeita() -> None:
+    inconsistent_success = create_persist_run_node(
+        FakeRunRepository(
+            responses=[
+                {
+                    "status": "persisted",
+                    "record_id": "record-test",
+                    "persisted_fingerprint": _record()["fingerprint"],
+                    "idempotency_key": "key",
+                    "failure_category": "conflict",
+                    "diagnostic": None,
+                    "duration_ms": 1,
+                }
+            ]
+        )
+    )(_state())
+    assert inconsistent_success["errors"][-1]["code"] == (
+        "PERSIST_RUN_REQUEST_INVALID"
+    )
+
+    inconsistent_failure = create_persist_run_node(
+        FakeRunRepository(
+            responses=[
+                {
+                    "status": "error",
+                    "record_id": "record-test",
+                    "persisted_fingerprint": None,
+                    "idempotency_key": "key",
+                    "failure_category": "unavailable",
+                    "diagnostic": {
+                        "code": "PERSIST_RUN_UNAVAILABLE",
+                        "message": "Persistencia indisponivel.",
+                        "failure_category": "unavailable",
+                        "safe_details": {},
+                    },
+                    "duration_ms": 1,
+                }
+            ]
+        )
+    )(_state())
+    assert inconsistent_failure["errors"][-1]["code"] == (
+        "PERSIST_RUN_REQUEST_INVALID"
+    )
+
+
 def test_idempotencia_e_conflito() -> None:
     repository = FakeRunRepository()
     node = create_persist_run_node(repository)
@@ -177,6 +247,8 @@ def main() -> None:
         test_save_valido_repository_chamado_uma_vez,
         test_run_record_ausente,
         test_fingerprint_divergente,
+        test_resultado_anterior_inconsistente_nao_chama_repository,
+        test_success_com_failure_category_ou_failure_com_record_id_rejeita,
         test_idempotencia_e_conflito,
         test_timeout_autenticacao_indisponibilidade_excecao,
         test_erro_nao_contem_payload_nem_sql,

@@ -21,6 +21,17 @@ def create_persist_run_node(
                 "current_stage": "persist_run",
                 "finalization_status": "persisted",
             }
+        if isinstance(previous, Mapping):
+            return _error_state(
+                state,
+                code="PERSIST_RUN_REQUEST_INVALID",
+                message=(
+                    "Resultado de persistencia anterior bloqueia nova "
+                    "tentativa."
+                ),
+                category="request_invalid",
+                result=previous,
+            )
         record = state.get("run_record")
         if not isinstance(record, Mapping):
             return _error_state(
@@ -123,9 +134,16 @@ def _validate_result(
     if result.get("idempotency_key") is None:
         return "PERSIST_RUN_REQUEST_INVALID"
     if result.get("status") in {"persisted", "already_persisted"}:
+        if result.get("failure_category") != "none":
+            return "PERSIST_RUN_REQUEST_INVALID"
+        if result.get("diagnostic") is not None:
+            return "PERSIST_RUN_REQUEST_INVALID"
         if result.get("persisted_fingerprint") != record.get("fingerprint"):
             return "PERSIST_RUN_FINGERPRINT_MISMATCH"
         if not isinstance(result.get("record_id"), str):
+            return "PERSIST_RUN_REQUEST_INVALID"
+    if result.get("status") in {"rejected", "error"}:
+        if result.get("record_id") is not None:
             return "PERSIST_RUN_REQUEST_INVALID"
     return None
 

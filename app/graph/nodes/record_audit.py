@@ -23,6 +23,17 @@ def create_record_audit_node(
                 "current_stage": "record_audit",
                 "finalization_status": "audited",
             }
+        if isinstance(previous, Mapping):
+            return _error_state(
+                state,
+                code="AUDIT_REQUEST_INVALID",
+                message=(
+                    "Resultado de auditoria anterior bloqueia nova "
+                    "tentativa."
+                ),
+                category="request_invalid",
+                result=previous,
+            )
         record = state.get("run_record")
         persistence_result = state.get("persistence_result")
         if not isinstance(record, Mapping) or not _persistence_ok(
@@ -138,8 +149,15 @@ def _validate_result(result: object, event: Mapping[str, object]) -> str | None:
     }:
         return "AUDIT_REQUEST_INVALID"
     if result.get("status") in {"written", "already_written"}:
+        if result.get("failure_category") != "none":
+            return "AUDIT_REQUEST_INVALID"
+        if result.get("diagnostic") is not None:
+            return "AUDIT_REQUEST_INVALID"
         if result.get("event_fingerprint") != event.get("fingerprint"):
             return "AUDIT_FINGERPRINT_MISMATCH"
+    if result.get("status") in {"rejected", "error"}:
+        if result.get("event_id") is not None:
+            return "AUDIT_REQUEST_INVALID"
     return None
 
 
