@@ -72,6 +72,18 @@ STEPS = [
         [sys.executable, "testar_build_application_response.py"],
     ),
     (
+        "testar_application_request.py",
+        [sys.executable, "testar_application_request.py"],
+    ),
+    (
+        "testar_sql_agent_service.py",
+        [sys.executable, "testar_sql_agent_service.py"],
+    ),
+    (
+        "testar_application_service_graph_integration.py",
+        [sys.executable, "testar_application_service_graph_integration.py"],
+    ),
+    (
         "testar_engine_preflight.py",
         [sys.executable, "testar_engine_preflight.py"],
     ),
