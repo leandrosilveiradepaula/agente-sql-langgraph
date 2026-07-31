@@ -58,6 +58,7 @@ _INFRASTRUCTURE_CATEGORIES: set[EnginePreflightFailureCategory] = {
     "timeout",
     "connection_failed",
     "protocol_error",
+    "capability_unavailable",
     "adapter_error",
 }
 
@@ -86,10 +87,15 @@ _CATEGORY_TO_CODE: dict[
     "timeout": "ENGINE_PREFLIGHT_TIMEOUT",
     "connection_failed": "ENGINE_PREFLIGHT_CONNECTION_FAILED",
     "protocol_error": "ENGINE_PREFLIGHT_PROTOCOL_ERROR",
+    "capability_unavailable": "ENGINE_PREFLIGHT_CAPABILITY_UNAVAILABLE",
     "adapter_error": "ENGINE_PREFLIGHT_PROVIDER_FAILED",
 }
 
 _DEFAULT_CAPABILITIES: EnginePreflightCapabilities = {
+    "supports_parse": False,
+    "supports_plan": False,
+    "supports_explain": True,
+    "supports_explain_analyze": False,
     "syntax": True,
     "schema_resolution": True,
     "table_resolution": True,
@@ -106,6 +112,11 @@ _DEFAULT_CAPABILITIES: EnginePreflightCapabilities = {
     "dialect_validation": True,
     "explain_without_analyze": True,
     "executes_query": False,
+    "returns_rows": False,
+    "supports_sqlstate": False,
+    "supports_error_position": False,
+    "supports_related_object": False,
+    "supported_dialects": [],
 }
 
 
@@ -592,10 +603,26 @@ def _attempt(options: Mapping[str, Any] | None) -> int:
 def _capabilities(value: Any) -> EnginePreflightCapabilities:
     output = deepcopy(_DEFAULT_CAPABILITIES)
     if isinstance(value, Mapping):
-        for key in output:
-            if isinstance(value.get(key), bool):
-                output[key] = bool(value[key])
+        for key, default_value in output.items():
+            if isinstance(default_value, bool) and isinstance(
+                value.get(key),
+                bool,
+            ):
+                output[key] = bool(value[key])  # type: ignore[literal-required]
+            elif key == "supported_dialects" and isinstance(
+                value.get(key),
+                list,
+            ):
+                output[key] = sorted(
+                    {
+                        item.strip().casefold()
+                        for item in value[key]
+                        if isinstance(item, str) and item.strip()
+                    }
+                )  # type: ignore[literal-required]
     output["executes_query"] = False
+    output["returns_rows"] = False
+    output["supports_explain_analyze"] = False
     return output
 
 

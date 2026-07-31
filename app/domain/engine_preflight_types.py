@@ -38,6 +38,7 @@ EnginePreflightFailureCategory = Literal[
     "timeout",
     "connection_failed",
     "protocol_error",
+    "capability_unavailable",
     "adapter_error",
 ]
 
@@ -68,6 +69,7 @@ EnginePreflightErrorCode = Literal[
     "ENGINE_PREFLIGHT_AUTHENTICATION_FAILED",
     "ENGINE_PREFLIGHT_CONNECTION_FAILED",
     "ENGINE_PREFLIGHT_PROTOCOL_ERROR",
+    "ENGINE_PREFLIGHT_CAPABILITY_UNAVAILABLE",
     "ENGINE_PREFLIGHT_PROVIDER_FAILED",
     "ENGINE_PREFLIGHT_RESPONSE_INVALID",
     "ENGINE_PREFLIGHT_UNEXPECTED_ERROR",
@@ -75,6 +77,10 @@ EnginePreflightErrorCode = Literal[
 
 
 class EnginePreflightCapabilities(TypedDict):
+    supports_parse: bool
+    supports_plan: bool
+    supports_explain: bool
+    supports_explain_analyze: bool
     syntax: bool
     schema_resolution: bool
     table_resolution: bool
@@ -91,6 +97,11 @@ class EnginePreflightCapabilities(TypedDict):
     dialect_validation: bool
     explain_without_analyze: bool
     executes_query: bool
+    returns_rows: bool
+    supports_sqlstate: bool
+    supports_error_position: bool
+    supports_related_object: bool
+    supported_dialects: list[str]
 
 
 class EnginePreflightRequest(TypedDict, total=False):

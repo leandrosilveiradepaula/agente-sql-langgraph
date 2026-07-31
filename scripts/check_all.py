@@ -40,6 +40,10 @@ STEPS = [
         [sys.executable, "testar_engine_preflight.py"],
     ),
     (
+        "testar_engine_preflight_capability_integration.py",
+        [sys.executable, "testar_engine_preflight_capability_integration.py"],
+    ),
+    (
         "testar_sql_repair.py",
         [sys.executable, "testar_sql_repair.py"],
     ),

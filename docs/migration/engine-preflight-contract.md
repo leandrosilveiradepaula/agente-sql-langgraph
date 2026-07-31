@@ -70,6 +70,12 @@ para testes locais. Adapter real ficou pendente porque o repositorio possui
 somente adapter PostgreSQL de contexto e scripts live separados; nao ha porta
 segura existente para planejamento sem execucao.
 
+A fase posterior adicionou configuracao e diagnostico de capability em
+`docs/migration/live-engine-preflight-adapter.md`. Enquanto nao houver
+capacidade comprovada do motor final, o provider diagnostico falha fechado com
+`ENGINE_PREFLIGHT_CAPABILITY_UNAVAILABLE` e nao deve ser apresentado como
+adapter live real.
+
 Caso um adapter PostgreSQL de preflight seja criado no futuro, ele deve ficar
 fora de `scripts/check_all.py`, nao executar `EXPLAIN ANALYZE`, nao persistir
 nada, nao exigir credenciais na suite local e nao ser executado automaticamente.
