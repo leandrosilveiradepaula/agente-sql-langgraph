@@ -92,11 +92,15 @@ GraphState, prompts, headers, tokens, DSN, RunRecord integral ou eventos
 integrais.
 Application service tambem nao cria endpoint HTTP, nao loga pergunta, SQL ou
 payload, nao chama adapters/sinks diretamente e nao implementa retry automatico.
-HTTP entry adapter chama somente `SqlAgentApplicationService`; endpoints nunca
-invocam o grafo diretamente. O adapter nao loga body, question ou data, rejeita
-JSON com chaves duplicadas, nao abre CORS por padrao, nao interpreta
-Authorization nesta fase, nao inicia servidor em `check_all.py` e nenhum
-endpoint expoe `GraphState`.
+HTTP entry adapter chama `Authenticator` e `Authorizer` explicitamente
+injetados antes de `SqlAgentApplicationService`; endpoints nunca invocam o
+grafo diretamente. Identidade HTTP nunca vem do body: `user` em JSON publico
+e proibido, e `ApplicationRequest.user` deriva somente do principal
+autenticado. Authorization, credenciais, principal, roles e scopes nunca devem
+ser logados ou retornados. Auth falha fechada, deny por padrao, sem usuario
+anonimo, sem role de negocio hardcoded e sem provider real nos testes. O
+adapter nao inicia servidor em `check_all.py` e nenhum endpoint expoe
+`GraphState`.
 
 ## Testes
 
@@ -114,3 +118,5 @@ execucao de SQL.
 Testes locais de execucao usam fake injetado e nao executam SQL real.
 Script live de preflight fica fora de `scripts/check_all.py` e nao deve ser
 executado automaticamente.
+Testes de auth usam fakes injetados, sem token real, rede, servidor, socket ou
+provider live.

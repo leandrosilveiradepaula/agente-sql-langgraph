@@ -108,15 +108,27 @@ Fingerprints nao sao expostos em headers.
 ## CORS E Autenticacao
 
 CORS fica desabilitado por padrao; o adapter nao emite
-`Access-Control-Allow-Origin: *`. Authorization nao e interpretado, copiado,
-logado ou retornado. Autenticacao/autorizacao devem ocorrer antes do handler ou
-em middleware futuro.
+`Access-Control-Allow-Origin: *`. A rota agora exige
+`Authorization: Bearer <credential>`, processado por `Authenticator` e
+`Authorizer` explicitamente injetados no handler. Authorization nao e copiado,
+logado ou retornado. Nao ha provider real, sessao, cookie ou JWT live nesta
+fase.
+
+## Identidade HTTP
+
+O campo `user` no body publico e proibido e retorna
+`HTTP_IDENTITY_FIELD_FORBIDDEN`. A identidade usada em `ApplicationRequest`
+deriva somente do `AuthenticatedPrincipal`: `subject_id`, `email`, `profile` e
+`organization_id`. Roles, scopes, claims e token nao atravessam.
 
 ## Dependency Injection
 
 `SqlAgentHttpHandler` recebe explicitamente:
 
 - `SqlAgentApplicationService`;
+- `Authenticator`;
+- `Authorizer`;
+- `AuthSecurityLimits`;
 - `HttpRequestLimits`;
 - `HttpResponseLimits`.
 

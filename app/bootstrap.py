@@ -26,6 +26,8 @@ from app.http.sql_agent_http_handler import (
     create_sql_agent_http_handler,
 )
 from app.ports.graph_runtime import GraphRuntime
+from app.ports.authenticator import Authenticator
+from app.ports.authorizer import Authorizer
 from app.ports.context_repository import ContextRepository
 from app.ports.engine_preflight import EnginePreflight
 from app.ports.audit_sink import AuditSink
@@ -275,6 +277,9 @@ def create_postgres_context_application_service(
 def create_http_entry_adapter(
     *,
     application_service: SqlAgentApplicationService | None = None,
+    authenticator: Authenticator | None = None,
+    authorizer: Authorizer | None = None,
+    auth_limits: Mapping[str, Any] | None = None,
     request_limits: Mapping[str, Any] | None = None,
     response_limits: Mapping[str, Any] | None = None,
 ) -> SqlAgentHttpHandler:
@@ -288,12 +293,21 @@ def create_http_entry_adapter(
         raise RuntimeError(
             "application_service deve ser injetado explicitamente."
         )
+    if authenticator is None:
+        raise RuntimeError("authenticator deve ser injetado.")
+    if authorizer is None:
+        raise RuntimeError("authorizer deve ser injetado.")
+    if auth_limits is None:
+        raise RuntimeError("auth_limits deve ser injetado.")
     if request_limits is None:
         raise RuntimeError("request_limits deve ser injetado.")
     if response_limits is None:
         raise RuntimeError("response_limits deve ser injetado.")
     return create_sql_agent_http_handler(
         application_service=application_service,
+        authenticator=authenticator,
+        authorizer=authorizer,
+        auth_limits=auth_limits,
         request_limits=request_limits,
         response_limits=response_limits,
     )

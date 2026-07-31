@@ -9,8 +9,16 @@ from app.bootstrap import (
     create_postgres_context_application_service,
     create_postgres_context_graph,
 )
+from app.adapters.testing.fake_authenticator import FakeAuthenticator
+from app.adapters.testing.fake_authorizer import FakeAuthorizer
 from app.http.http_request import default_http_request_limits
 from app.http.http_response import default_http_response_limits
+from app.security.auth_types import (
+    authentication_result,
+    authorization_decision,
+    create_authenticated_principal,
+    default_auth_security_limits,
+)
 from app.config.engine_preflight_runtime import (
     EnginePreflightRuntimeConfig,
 )
@@ -106,6 +114,23 @@ class FakeObservabilitySink:
             "diagnostic": None,
             "duration_ms": 1,
         }
+
+
+def _authenticator():
+    principal = create_authenticated_principal(
+        {"subject_id": "principal-1"},
+        limits=default_auth_security_limits(),
+    )
+    return FakeAuthenticator(
+        result=authentication_result(
+            status="authenticated",
+            principal=principal,
+        )
+    )
+
+
+def _authorizer():
+    return FakeAuthorizer(decision=authorization_decision(status="allowed"))
 
 
 def test_bootstrap_padrao_compila_sem_abrir_conexao() -> None:
@@ -525,6 +550,39 @@ def test_http_entry_adapter_exige_limits() -> None:
     try:
         create_http_entry_adapter(application_service=FakeService())
     except RuntimeError as error:
+        assert str(error) == "authenticator deve ser injetado."
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+    try:
+        create_http_entry_adapter(
+            application_service=FakeService(),
+            authenticator=_authenticator(),
+        )
+    except RuntimeError as error:
+        assert str(error) == "authorizer deve ser injetado."
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+    try:
+        create_http_entry_adapter(
+            application_service=FakeService(),
+            authenticator=_authenticator(),
+            authorizer=_authorizer(),
+        )
+    except RuntimeError as error:
+        assert str(error) == "auth_limits deve ser injetado."
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+    try:
+        create_http_entry_adapter(
+            application_service=FakeService(),
+            authenticator=_authenticator(),
+            authorizer=_authorizer(),
+            auth_limits=default_auth_security_limits(),
+        )
+    except RuntimeError as error:
         assert str(error) == "request_limits deve ser injetado."
     else:
         raise AssertionError("Era esperado RuntimeError.")
@@ -532,6 +590,9 @@ def test_http_entry_adapter_exige_limits() -> None:
     try:
         create_http_entry_adapter(
             application_service=FakeService(),
+            authenticator=_authenticator(),
+            authorizer=_authorizer(),
+            auth_limits=default_auth_security_limits(),
             request_limits=default_http_request_limits(),
         )
     except RuntimeError as error:
@@ -552,6 +613,9 @@ def test_http_entry_adapter_criado_sem_servidor_ou_rede() -> None:
     service = FakeService()
     handler = create_http_entry_adapter(
         application_service=service,
+        authenticator=_authenticator(),
+        authorizer=_authorizer(),
+        auth_limits=default_auth_security_limits(),
         request_limits=default_http_request_limits(),
         response_limits=default_http_response_limits(),
     )
