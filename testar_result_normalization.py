@@ -133,6 +133,42 @@ def test_floats_especiais() -> None:
         assert result["rows"][0]["cells"][0]["special"] == special
 
 
+def test_decimal_zero_negativo_e_nao_finitos() -> None:
+    negative_zero = _normalize(Decimal("-0.00"))
+    assert negative_zero["status"] == "success"
+    assert negative_zero["rows"][0]["cells"][0]["value"] == "-0.00"
+    for value in [
+        Decimal("NaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+    ]:
+        result = _normalize(value)
+        assert result["status"] == "rejected"
+        assert "NaN" not in repr(result["diagnostics"])
+        assert "Infinity" not in repr(result["diagnostics"])
+
+
+def test_coluna_com_tipos_mistos_rejeita() -> None:
+    result = normalize_execution_result(
+        _result(rows=[{"value": 1}, {"value": "1"}]),
+        limits=LIMITS,
+    )
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "RESULT_NORMALIZATION_VALUE_INVALID"
+
+
+def test_objeto_compartilhado_sem_ciclo_e_ciclo_indireto() -> None:
+    shared = {"a": 1}
+    accepted = _normalize([shared, shared])
+    assert accepted["status"] == "success"
+
+    first = []
+    second = [first]
+    first.append(second)
+    rejected = _normalize(first)
+    assert rejected["status"] == "rejected"
+
+
 def test_tipo_desconhecido_rejeita_sem_valor() -> None:
     result = _normalize(object())
     assert result["status"] == "rejected"
@@ -220,6 +256,9 @@ def main() -> None:
         test_multiplas_colunas_linhas_ordem_preservada,
         test_null_bool_int_decimal_float_string_datas_binario_json_uuid,
         test_floats_especiais,
+        test_decimal_zero_negativo_e_nao_finitos,
+        test_coluna_com_tipos_mistos_rejeita,
+        test_objeto_compartilhado_sem_ciclo_e_ciclo_indireto,
         test_tipo_desconhecido_rejeita_sem_valor,
         test_estrutura_ciclica_profundidade_e_colecao_excessivas,
         test_coluna_duplicada_ordinal_e_shape_invalidos,

@@ -62,7 +62,11 @@ def serialize_normalized_result(
         lineage["serialized_result_fingerprint"] = serialized_fingerprint
         payload["lineage"] = lineage
         payload["result_fingerprint"] = serialized_fingerprint
-        canonical = canonical_json(payload)
+        serialized = {
+            **payload,
+            "canonical_json": None,
+        }
+        canonical = canonical_json(serialized)
         json.loads(canonical)
         json.dumps(json.loads(canonical), allow_nan=False)
         size = len(canonical.encode("utf-8"))
@@ -80,10 +84,7 @@ def serialize_normalized_result(
                     "fingerprint": serialized_fingerprint,
                 },
             )
-        return {
-            **payload,
-            "canonical_json": canonical,
-        }
+        return serialized
     except ResultSerializationError as error:
         diagnostic = error.diagnostic or {
             "code": error.code,
@@ -112,8 +113,6 @@ def serialize_normalized_result(
 
 
 def to_canonical_json(serialized_result: SerializedQueryResult) -> str:
-    if serialized_result.get("canonical_json"):
-        return str(serialized_result["canonical_json"])
     return canonical_json(serialized_result)
 
 

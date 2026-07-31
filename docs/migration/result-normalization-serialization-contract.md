@@ -19,8 +19,9 @@ Incluido:
 
 - `NormalizedQueryResult` com colunas, linhas, tipos, metricas, diagnosticos e
   lineage.
-- `SerializedQueryResult` com payload canonico JSON-safe e fingerprint
-  deterministico.
+- `SerializedQueryResult` com payload JSON-safe e fingerprint deterministico.
+  O JSON canonico e calculado por `to_canonical_json(...)`; ele nao e
+  armazenado como segunda copia integral das linhas dentro do resultado.
 - Nos puros `normalize_result` e `serialize_result`.
 
 Fora do escopo:
@@ -111,8 +112,10 @@ objetos arbitrarios sao rejeitados.
 ## Canonicalizacao
 
 Canonicalizacao usa JSON UTF-8, chaves ordenadas, separadores estaveis e
-`allow_nan=False`. Fingerprints nao dependem de endereco de memoria, `repr`,
-locale, timezone local, timestamp corrente ou ordem arbitraria de dict.
+`allow_nan=False`. O fingerprint serializado nao inclui a si proprio e
+`canonical_json` permanece `None` para evitar copia circular ou stale.
+Fingerprints nao dependem de endereco de memoria, `repr`, locale, timezone
+local, timestamp corrente ou ordem arbitraria de dict.
 
 ## Limites
 

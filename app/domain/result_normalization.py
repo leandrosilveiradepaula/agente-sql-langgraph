@@ -4,13 +4,14 @@ import base64
 import hashlib
 import json
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from copy import deepcopy
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+from app.domain.engine_preflight_sanitization import safe_optional_text
 from app.domain.result_normalization_types import (
     RESULT_NORMALIZATION_CONTRACT_VERSION,
     NormalizationDiagnostic,
@@ -226,16 +227,12 @@ def _normalized_columns(
                 },
             )
         seen.add(clean_name)
-        provider_type = raw.get("type")
+        provider_type = safe_optional_text(raw.get("type"))
         columns.append(
             {
                 "ordinal": ordinal,
                 "original_name": clean_name,
-                "provider_type_name": (
-                    provider_type.strip()
-                    if isinstance(provider_type, str) and provider_type.strip()
-                    else None
-                ),
+                "provider_type_name": provider_type,
                 "normalized_type": "null",
                 "nullable": None,
                 "precision": None,
@@ -302,8 +299,23 @@ def _normalized_rows(
     for column in columns:
         ordinal = column["ordinal"]
         types = sorted(observed_types[ordinal])
+        non_null_types = [item for item in types if item != "null"]
+        if len(non_null_types) > 1:
+            raise ResultNormalizationError(
+                "RESULT_NORMALIZATION_VALUE_INVALID",
+                "Coluna contem tipos mistos nao normalizaveis.",
+                diagnostic={
+                    "code": "RESULT_NORMALIZATION_VALUE_INVALID",
+                    "message": "Coluna contem tipos mistos nao normalizaveis.",
+                    "row_ordinal": None,
+                    "column_ordinal": ordinal,
+                    "normalized_type": "mixed",
+                    "size": None,
+                    "fingerprint": None,
+                },
+            )
         column["normalized_type"] = (
-            types[0] if len(types) == 1 else "json"
+            non_null_types[0] if non_null_types else "null"
         )
         column["nullable"] = nullable[ordinal]
         if "datetime" in types:
@@ -344,6 +356,13 @@ def _normalize_value(
     if isinstance(value, int) and not isinstance(value, bool):
         return {"type": "integer", "value": value}
     if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise _value_error(
+                "Decimal nao finito nao pode ser normalizado.",
+                row_ordinal,
+                column_ordinal,
+                "decimal",
+            )
         return {"type": "decimal", "value": format(value, "f")}
     if isinstance(value, float):
         if math.isnan(value):

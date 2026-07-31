@@ -5,7 +5,11 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app.domain.result_serialization import serialize_normalized_result
+from app.domain.result_normalization import canonical_json
+from app.domain.result_serialization import (
+    serialize_normalized_result,
+    to_canonical_json,
+)
 from testar_result_normalization import LIMITS, _result
 from app.domain.result_normalization import normalize_execution_result
 
@@ -67,6 +71,9 @@ def test_contract_version_lineage_fingerprint_deterministico() -> None:
     assert first["lineage"]["execution_request_fingerprint"]
     assert first["lineage"]["serialized_result_fingerprint"]
     assert first["result_fingerprint"] == second["result_fingerprint"]
+    assert first["canonical_json"] is None
+    assert "canonical_json" in to_canonical_json(first)
+    assert first["result_fingerprint"] in to_canonical_json(first)
 
 
 def test_max_serialized_bytes_sem_mutacao_e_sem_sql_credenciais() -> None:
@@ -86,6 +93,37 @@ def test_max_serialized_bytes_sem_mutacao_e_sem_sql_credenciais() -> None:
     assert "postgresql://" not in serialized
 
 
+def test_max_serialized_bytes_contabiliza_payload_retornado() -> None:
+    normalized = normalize_execution_result(
+        _result(rows=[{"value": "x" * 20}]),
+        limits={**LIMITS, "max_serialized_bytes": 40000},
+    )
+    accepted = serialize_normalized_result(
+        normalized,
+        max_serialized_bytes=40000,
+    )
+    stored_size = len(canonical_json(accepted).encode("utf-8"))
+    rejected = serialize_normalized_result(
+        normalized,
+        max_serialized_bytes=stored_size - 1,
+    )
+    assert accepted["status"] == "success"
+    assert rejected["status"] == "rejected"
+
+
+def test_mutacao_posterior_normalizacao_nao_altera_serializado() -> None:
+    normalized = normalize_execution_result(
+        _result(rows=[{"value": "before"}]),
+        limits=LIMITS,
+    )
+    serialized = serialize_normalized_result(
+        normalized,
+        max_serialized_bytes=40000,
+    )
+    normalized["rows"][0]["cells"][0]["value"] = "after"
+    assert serialized["rows"][0]["cells"][0]["value"] == "before"
+
+
 def test_provider_metadata_sanitizada() -> None:
     result = _serialized("x")
     assert result["columns"][0]["metadata"] == {}
@@ -100,6 +138,8 @@ def main() -> None:
         test_null_bool_int_separados_float_especial,
         test_contract_version_lineage_fingerprint_deterministico,
         test_max_serialized_bytes_sem_mutacao_e_sem_sql_credenciais,
+        test_max_serialized_bytes_contabiliza_payload_retornado,
+        test_mutacao_posterior_normalizacao_nao_altera_serializado,
         test_provider_metadata_sanitizada,
     ]
     for index, test_function in enumerate(tests, start=1):
