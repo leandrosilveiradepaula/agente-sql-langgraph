@@ -1,6 +1,9 @@
 from langgraph.graph import END, START, StateGraph
 
 from app.graph.nodes.build_plan import build_plan
+from app.graph.nodes.build_application_response import (
+    create_build_application_response_node,
+)
 from app.graph.nodes.build_run_record import build_run_record_node
 from app.graph.nodes.classify_intent import (
     classify_intent,
@@ -112,6 +115,9 @@ def create_graph(
     emit_observability_node = create_emit_observability_node(
         observability_sink
     )
+    build_application_response_node = (
+        create_build_application_response_node()
+    )
 
     builder = StateGraph(GraphState)
 
@@ -193,6 +199,11 @@ def create_graph(
     builder.add_node(
         "emit_observability",
         emit_observability_node,
+    )
+
+    builder.add_node(
+        "build_application_response",
+        build_application_response_node,
     )
 
     builder.add_node(
@@ -367,7 +378,7 @@ def create_graph(
         route_after_build_run_record,
         {
             "persist_run": "persist_run",
-            "complete": END,
+            "complete": "build_application_response",
         },
     )
 
@@ -390,6 +401,11 @@ def create_graph(
 
     builder.add_edge(
         "emit_observability",
+        "build_application_response",
+    )
+
+    builder.add_edge(
+        "build_application_response",
         END,
     )
 

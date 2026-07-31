@@ -64,6 +64,14 @@ STEPS = [
         [sys.executable, "testar_emit_observability.py"],
     ),
     (
+        "testar_application_response.py",
+        [sys.executable, "testar_application_response.py"],
+    ),
+    (
+        "testar_build_application_response.py",
+        [sys.executable, "testar_build_application_response.py"],
+    ),
+    (
         "testar_engine_preflight.py",
         [sys.executable, "testar_engine_preflight.py"],
     ),

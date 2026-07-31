@@ -25,6 +25,13 @@ O planner usa somente o snapshot versionado ja validado; geracao e gates
 consomem somente o `QueryPlan` e a SQL corrente.
 Toda saida terminal do grafo passa por finalizacao local: `RunRecord`,
 persistencia obrigatoria, auditoria obrigatoria e observabilidade best-effort.
+Depois da finalizacao, toda execucao terminal deve produzir uma
+`ApplicationResponse` publica, deterministica e segura. Mensagens publicas sao
+canonicas; erros brutos de provider nao atravessam. `data` so existe em
+success finalizado com persistencia e auditoria aprovadas. Falha de
+persistencia/auditoria e fail-closed; observabilidade degradada preserva o
+outcome original. Nao duplicar payload, e JSON canonico deve ser produzido
+somente sob demanda.
 
 ## Comandos principais
 
@@ -46,6 +53,9 @@ persistencia obrigatoria, auditoria obrigatoria e observabilidade best-effort.
 - `python testar_execute_sql.py`
 - `python testar_repair_sql.py`
 - `python testar_generate_sql.py`
+- `python testar_run_record.py`
+- `python testar_application_response.py`
+- `python testar_build_application_response.py`
 - `python testar_grafo_base.py`
 - `python scripts/check_all.py`
 
@@ -72,6 +82,10 @@ segura comprovada, use apenas diagnostico fail-closed.
 Execucao SQL controlada tambem exige executor explicitamente injetado, nao
 recebe GraphState nem ContextSnapshot, nao altera SQL e nao pode ser alcancada
 sem Security Gate, Contract Gate e Engine Preflight aprovados.
+ApplicationResponse nao cria endpoint nesta fase, nao executa SQL, nao chama
+sinks, nao expoe SQL integral, pergunta integral, QueryPlan, ContextSnapshot,
+GraphState, prompts, headers, tokens, DSN, RunRecord integral ou eventos
+integrais.
 
 ## Testes
 
