@@ -312,6 +312,37 @@ def route_after_serialize_result(
     return "infrastructure_error"
 
 
+def route_after_build_run_record(
+    state: GraphState,
+) -> Literal["persist_run", "complete"]:
+    if (
+        state.get("finalization_status") == "record_built"
+        and isinstance(state.get("run_record"), dict)
+    ):
+        return "persist_run"
+    return "complete"
+
+
+def route_after_persist_run(
+    state: GraphState,
+) -> Literal["record_audit", "emit_observability"]:
+    persistence_result = state.get("persistence_result", {})
+    if (
+        isinstance(persistence_result, dict)
+        and persistence_result.get("status")
+        in {"persisted", "already_persisted"}
+        and state.get("finalization_status") == "persisted"
+    ):
+        return "record_audit"
+    return "emit_observability"
+
+
+def route_after_record_audit(
+    state: GraphState,
+) -> Literal["emit_observability"]:
+    return "emit_observability"
+
+
 def route_after_repair_sql(
     state: GraphState,
 ) -> Literal[

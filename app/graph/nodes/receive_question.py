@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+from app.domain.run_record import default_finalization_limits
 from app.graph.state import AgentError, GraphState
 
 
@@ -61,6 +62,9 @@ def receive_question(state: GraphState) -> GraphState:
     result_normalization_limits = received_options.get(
         "result_normalization_limits"
     )
+    run_finalization_limits = received_options.get("run_finalization_limits")
+    if not isinstance(run_finalization_limits, dict):
+        run_finalization_limits = default_finalization_limits()
     execution_attempt = received_options.get("execution_attempt", 1)
     max_repair_attempts = received_options.get(
         "max_repair_attempts",
@@ -119,6 +123,9 @@ def receive_question(state: GraphState) -> GraphState:
                 else {}
             ),
             **(
+                {"run_finalization_limits": run_finalization_limits}
+            ),
+            **(
                 {"execution_attempt": execution_attempt}
                 if isinstance(execution_attempt, int)
                 and not isinstance(execution_attempt, bool)
@@ -146,6 +153,13 @@ def receive_question(state: GraphState) -> GraphState:
         "sql_execution_result": None,
         "normalized_result": None,
         "serialized_result": None,
+        "original_outcome": None,
+        "run_record": None,
+        "persistence_result": None,
+        "audit_result": None,
+        "observability_result": None,
+        "finalization_status": "not_started",
+        "observability_degraded": False,
         "errors": errors,
         "warnings": [],
         "current_stage": "receive_question",

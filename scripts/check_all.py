@@ -48,6 +48,22 @@ STEPS = [
         [sys.executable, "testar_result_serialization.py"],
     ),
     (
+        "testar_run_record.py",
+        [sys.executable, "testar_run_record.py"],
+    ),
+    (
+        "testar_persist_run.py",
+        [sys.executable, "testar_persist_run.py"],
+    ),
+    (
+        "testar_record_audit.py",
+        [sys.executable, "testar_record_audit.py"],
+    ),
+    (
+        "testar_emit_observability.py",
+        [sys.executable, "testar_emit_observability.py"],
+    ),
+    (
         "testar_engine_preflight.py",
         [sys.executable, "testar_engine_preflight.py"],
     ),

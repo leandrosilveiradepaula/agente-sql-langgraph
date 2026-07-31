@@ -19,6 +19,9 @@ from app.config.postgres_context import (
 from app.graph.builder import create_graph
 from app.ports.context_repository import ContextRepository
 from app.ports.engine_preflight import EnginePreflight
+from app.ports.audit_sink import AuditSink
+from app.ports.observability_sink import ObservabilitySink
+from app.ports.run_repository import RunRepository
 from app.ports.sql_executor import SqlExecutor
 from app.ports.sql_generator import SqlGenerator
 from app.ports.sql_repairer import SqlRepairer
@@ -40,6 +43,9 @@ GraphFactory = Callable[
         EnginePreflight,
         SqlRepairer,
         SqlExecutor,
+        RunRepository,
+        AuditSink,
+        ObservabilitySink,
     ],
     Any,
 ]
@@ -83,6 +89,9 @@ def create_postgres_context_graph(
     engine_preflight: EnginePreflight | None = None,
     sql_repairer: SqlRepairer | None = None,
     sql_executor: SqlExecutor | None = None,
+    run_repository: RunRepository | None = None,
+    audit_sink: AuditSink | None = None,
+    observability_sink: ObservabilitySink | None = None,
     config_loader: ConfigLoader = (
         load_postgres_context_runtime_config
     ),
@@ -100,7 +109,7 @@ def create_postgres_context_graph(
     -> PostgresContextRepository
     -> create_graph(
        repository, sql_generator, engine_preflight, sql_repairer,
-       sql_executor
+       sql_executor, run_repository, audit_sink, observability_sink
     )
     -> grafo compilado
 
@@ -131,10 +140,28 @@ def create_postgres_context_graph(
             "sql_executor deve ser injetado no composition root."
         )
 
+    if run_repository is None:
+        raise RuntimeError(
+            "run_repository deve ser injetado no composition root."
+        )
+
+    if audit_sink is None:
+        raise RuntimeError(
+            "audit_sink deve ser injetado no composition root."
+        )
+
+    if observability_sink is None:
+        raise RuntimeError(
+            "observability_sink deve ser injetado no composition root."
+        )
+
     return graph_factory(
         repository,
         sql_generator,
         engine_preflight,
         sql_repairer,
         sql_executor,
+        run_repository,
+        audit_sink,
+        observability_sink,
     )

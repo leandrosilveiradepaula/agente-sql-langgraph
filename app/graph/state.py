@@ -14,6 +14,15 @@ from app.domain.result_normalization_types import (
     NormalizedQueryResult,
     SerializedQueryResult,
 )
+from app.domain.run_audit_types import AuditResult
+from app.domain.run_observability_types import ObservabilityResult
+from app.domain.run_persistence_types import PersistRunResult
+from app.domain.run_record_types import (
+    FinalizationStatus,
+    RunFinalizationLimits,
+    RunOutcome,
+    RunRecord,
+)
 from app.domain.sql_security import SqlSecurityResult
 
 
@@ -40,6 +49,7 @@ class GenerateOptions(TypedDict, total=False):
     shadow_mode: bool
     sql_execution_limits: dict[str, int]
     result_normalization_limits: dict[str, int]
+    run_finalization_limits: RunFinalizationLimits
     execution_attempt: int
 
 
@@ -148,6 +158,15 @@ class GraphState(TypedDict, total=False):
     sql_execution_result: SqlExecutionResult
     normalized_result: NormalizedQueryResult
     serialized_result: SerializedQueryResult
+
+    # Finalizacao
+    original_outcome: RunOutcome
+    run_record: RunRecord
+    persistence_result: PersistRunResult
+    audit_result: AuditResult
+    observability_result: ObservabilityResult
+    finalization_status: FinalizationStatus
+    observability_degraded: bool
 
     # Resultado geral
     errors: list[AgentError]

@@ -67,6 +67,42 @@ class FakeSqlExecutor:
         }
 
 
+class FakeRunRepository:
+    def save(self, request):
+        return {
+            "status": "persisted",
+            "record_id": "record-test",
+            "persisted_fingerprint": request["run_record_fingerprint"],
+            "idempotency_key": request["idempotency_key"],
+            "failure_category": "none",
+            "diagnostic": None,
+            "duration_ms": 1,
+        }
+
+
+class FakeAuditSink:
+    def write(self, event):
+        return {
+            "status": "written",
+            "event_id": event["event_id"],
+            "event_fingerprint": event["fingerprint"],
+            "idempotency_key": event["idempotency_key"],
+            "failure_category": "none",
+            "diagnostic": None,
+            "duration_ms": 1,
+        }
+
+
+class FakeObservabilitySink:
+    def emit(self, event):
+        return {
+            "status": "emitted",
+            "event_fingerprint": event["fingerprint"],
+            "diagnostic": None,
+            "duration_ms": 1,
+        }
+
+
 def test_bootstrap_padrao_compila_sem_abrir_conexao() -> None:
     graph = create_postgres_context_graph(
         FAKE_ENVIRONMENT,
@@ -74,6 +110,9 @@ def test_bootstrap_padrao_compila_sem_abrir_conexao() -> None:
         engine_preflight=FakeEnginePreflight(),
         sql_repairer=FakeSqlRepairer(),
         sql_executor=FakeSqlExecutor(),
+        run_repository=FakeRunRepository(),
+        audit_sink=FakeAuditSink(),
+        observability_sink=FakeObservabilitySink(),
     )
 
     assert callable(getattr(graph, "invoke", None))
@@ -86,6 +125,9 @@ def test_entrada_invalida_nao_acessa_postgres() -> None:
         engine_preflight=FakeEnginePreflight(),
         sql_repairer=FakeSqlRepairer(),
         sql_executor=FakeSqlExecutor(),
+        run_repository=FakeRunRepository(),
+        audit_sink=FakeAuditSink(),
+        observability_sink=FakeObservabilitySink(),
     )
 
     result = graph.invoke(
@@ -106,7 +148,8 @@ def test_entrada_invalida_nao_acessa_postgres() -> None:
 
     assert result["final_status"] == "invalid_request"
     assert result["failure_stage"] == "receive_question"
-    assert result["current_stage"] == (
+    assert result["current_stage"] == "emit_observability"
+    assert result["run_record"]["previous_stage"] == (
         "finalize_invalid_request"
     )
     assert result["errors"][0]["code"] == "EMPTY_QUESTION"
@@ -127,6 +170,9 @@ def test_factories_recebem_dependencias_corretas() -> None:
     expected_engine_preflight = FakeEnginePreflight()
     expected_sql_repairer = FakeSqlRepairer()
     expected_sql_executor = FakeSqlExecutor()
+    expected_run_repository = FakeRunRepository()
+    expected_audit_sink = FakeAuditSink()
+    expected_observability_sink = FakeObservabilitySink()
 
     class FakeRepository:
         def load_active_context(
@@ -162,12 +208,18 @@ def test_factories_recebem_dependencias_corretas() -> None:
         engine_preflight,
         sql_repairer,
         sql_executor,
+        run_repository,
+        audit_sink,
+        observability_sink,
     ) -> Any:
         captured["repository"] = repository
         captured["sql_generator"] = sql_generator
         captured["engine_preflight"] = engine_preflight
         captured["sql_repairer"] = sql_repairer
         captured["sql_executor"] = sql_executor
+        captured["run_repository"] = run_repository
+        captured["audit_sink"] = audit_sink
+        captured["observability_sink"] = observability_sink
         return expected_graph
 
     graph = create_postgres_context_graph(
@@ -176,6 +228,9 @@ def test_factories_recebem_dependencias_corretas() -> None:
         engine_preflight=expected_engine_preflight,
         sql_repairer=expected_sql_repairer,
         sql_executor=expected_sql_executor,
+        run_repository=expected_run_repository,
+        audit_sink=expected_audit_sink,
+        observability_sink=expected_observability_sink,
         config_loader=fake_config_loader,
         repository_factory=fake_repository_factory,
         graph_factory=fake_graph_factory,
@@ -193,6 +248,9 @@ def test_factories_recebem_dependencias_corretas() -> None:
     assert captured["engine_preflight"] is expected_engine_preflight
     assert captured["sql_repairer"] is expected_sql_repairer
     assert captured["sql_executor"] is expected_sql_executor
+    assert captured["run_repository"] is expected_run_repository
+    assert captured["audit_sink"] is expected_audit_sink
+    assert captured["observability_sink"] is expected_observability_sink
 
 
 def test_bootstrap_exige_preflight_explicito() -> None:
@@ -202,6 +260,9 @@ def test_bootstrap_exige_preflight_explicito() -> None:
             sql_generator=FakeSqlGenerator(),
             sql_repairer=FakeSqlRepairer(),
             sql_executor=FakeSqlExecutor(),
+            run_repository=FakeRunRepository(),
+            audit_sink=FakeAuditSink(),
+            observability_sink=FakeObservabilitySink(),
         )
     except RuntimeError as error:
         assert str(error) == (
@@ -218,6 +279,9 @@ def test_bootstrap_exige_repairer_explicito() -> None:
             sql_generator=FakeSqlGenerator(),
             engine_preflight=FakeEnginePreflight(),
             sql_executor=FakeSqlExecutor(),
+            run_repository=FakeRunRepository(),
+            audit_sink=FakeAuditSink(),
+            observability_sink=FakeObservabilitySink(),
         )
     except RuntimeError as error:
         assert str(error) == (
@@ -234,10 +298,70 @@ def test_bootstrap_exige_executor_explicito() -> None:
             sql_generator=FakeSqlGenerator(),
             engine_preflight=FakeEnginePreflight(),
             sql_repairer=FakeSqlRepairer(),
+            run_repository=FakeRunRepository(),
+            audit_sink=FakeAuditSink(),
+            observability_sink=FakeObservabilitySink(),
         )
     except RuntimeError as error:
         assert str(error) == (
             "sql_executor deve ser injetado no composition root."
+        )
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+
+def test_bootstrap_exige_run_repository_explicito() -> None:
+    try:
+        create_postgres_context_graph(
+            FAKE_ENVIRONMENT,
+            sql_generator=FakeSqlGenerator(),
+            engine_preflight=FakeEnginePreflight(),
+            sql_repairer=FakeSqlRepairer(),
+            sql_executor=FakeSqlExecutor(),
+            audit_sink=FakeAuditSink(),
+            observability_sink=FakeObservabilitySink(),
+        )
+    except RuntimeError as error:
+        assert str(error) == (
+            "run_repository deve ser injetado no composition root."
+        )
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+
+def test_bootstrap_exige_audit_sink_explicito() -> None:
+    try:
+        create_postgres_context_graph(
+            FAKE_ENVIRONMENT,
+            sql_generator=FakeSqlGenerator(),
+            engine_preflight=FakeEnginePreflight(),
+            sql_repairer=FakeSqlRepairer(),
+            sql_executor=FakeSqlExecutor(),
+            run_repository=FakeRunRepository(),
+            observability_sink=FakeObservabilitySink(),
+        )
+    except RuntimeError as error:
+        assert str(error) == (
+            "audit_sink deve ser injetado no composition root."
+        )
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+
+def test_bootstrap_exige_observability_sink_explicito() -> None:
+    try:
+        create_postgres_context_graph(
+            FAKE_ENVIRONMENT,
+            sql_generator=FakeSqlGenerator(),
+            engine_preflight=FakeEnginePreflight(),
+            sql_repairer=FakeSqlRepairer(),
+            sql_executor=FakeSqlExecutor(),
+            run_repository=FakeRunRepository(),
+            audit_sink=FakeAuditSink(),
+        )
+    except RuntimeError as error:
+        assert str(error) == (
+            "observability_sink deve ser injetado no composition root."
         )
     else:
         raise AssertionError("Era esperado RuntimeError.")
@@ -295,6 +419,18 @@ def main() -> None:
         (
             "bootstrap exige executor explicito",
             test_bootstrap_exige_executor_explicito,
+        ),
+        (
+            "bootstrap exige run repository explicito",
+            test_bootstrap_exige_run_repository_explicito,
+        ),
+        (
+            "bootstrap exige audit sink explicito",
+            test_bootstrap_exige_audit_sink_explicito,
+        ),
+        (
+            "bootstrap exige observability sink explicito",
+            test_bootstrap_exige_observability_sink_explicito,
         ),
         (
             "configuracao invalida interrompe bootstrap",
