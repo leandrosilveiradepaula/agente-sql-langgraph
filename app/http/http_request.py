@@ -13,6 +13,7 @@ from app.http.http_request_types import (
 
 _ALLOWED_REQUEST_HEADERS = {
     "accept",
+    "authorization",
     "content-length",
     "content-type",
     "x-correlation-id",
@@ -103,6 +104,23 @@ def parse_http_request_json(
     return deepcopy(parsed)
 
 
+def validate_http_body_transport(
+    request: HttpRequestEnvelope,
+    *,
+    limits: HttpRequestLimits,
+) -> None:
+    envelope = deepcopy(request)
+    _validate_headers(envelope.get("headers", {}), limits)
+    body = envelope.get("body", b"")
+    if not isinstance(body, bytes):
+        raise HttpRequestError("HTTP_BODY_REQUIRED")
+    _validate_content_length(envelope.get("headers", {}), len(body), limits)
+    if len(body) == 0:
+        raise HttpRequestError("HTTP_BODY_REQUIRED")
+    if len(body) > limits["max_request_body_bytes"]:
+        raise HttpRequestError("HTTP_BODY_TOO_LARGE")
+
+
 def validate_method_route_and_headers(
     request: HttpRequestEnvelope,
     *,
@@ -135,9 +153,13 @@ def _validate_headers(
             raise HttpRequestError("HTTP_JSON_INVALID")
         if len(name.encode("utf-8")) > limits["max_header_name_length"]:
             raise HttpRequestError("HTTP_JSON_TOO_COMPLEX")
+        if _has_control(name):
+            raise HttpRequestError("HTTP_JSON_INVALID")
+        if name.casefold() == "authorization":
+            continue
         if len(value.encode("utf-8")) > limits["max_header_value_length"]:
             raise HttpRequestError("HTTP_JSON_TOO_COMPLEX")
-        if _has_control(name) or _has_control(value):
+        if _has_control(value):
             raise HttpRequestError("HTTP_JSON_INVALID")
 
 

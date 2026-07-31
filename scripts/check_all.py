@@ -84,6 +84,14 @@ STEPS = [
         [sys.executable, "testar_application_service_graph_integration.py"],
     ),
     (
+        "testar_auth_types.py",
+        [sys.executable, "testar_auth_types.py"],
+    ),
+    (
+        "testar_auth_header.py",
+        [sys.executable, "testar_auth_header.py"],
+    ),
+    (
         "testar_http_request.py",
         [sys.executable, "testar_http_request.py"],
     ),
@@ -98,6 +106,14 @@ STEPS = [
     (
         "testar_http_adapter_integration.py",
         [sys.executable, "testar_http_adapter_integration.py"],
+    ),
+    (
+        "testar_http_auth_boundary.py",
+        [sys.executable, "testar_http_auth_boundary.py"],
+    ),
+    (
+        "testar_http_auth_integration.py",
+        [sys.executable, "testar_http_auth_integration.py"],
     ),
     (
         "testar_engine_preflight.py",

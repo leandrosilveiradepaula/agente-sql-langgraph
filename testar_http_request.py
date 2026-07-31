@@ -62,7 +62,8 @@ def test_metodo_rota_content_type_e_accept_invalidos() -> None:
     _raises("HTTP_CHARSET_UNSUPPORTED", _validate, _request(headers={"Content-Type": "application/json; charset=latin1"}))
     _raises("HTTP_NOT_ACCEPTABLE", _validate, _request(headers={"Content-Type": "application/json", "Accept": "text/html"}))
     _raises("HTTP_NOT_ACCEPTABLE", _validate, _request(headers={"Content-Type": "application/json", "Accept": "application/json;q=0"}))
-    _raises("HTTP_JSON_INVALID", _validate, _request(headers={"Content-Type": "application/json", "Authorization": "Bearer secret"}))
+    _validate(_request(headers={"Content-Type": "application/json", "Authorization": "Bearer opaque"}))
+    _raises("HTTP_JSON_INVALID", _validate, _request(headers={"Content-Type": "application/json", "Cookie": "secret"}))
 
 
 def test_body_vazio_limite_utf8_e_json_invalido() -> None:

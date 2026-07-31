@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 
 from app.adapters.testing.fake_graph_runtime import FakeGraphRuntime
+from app.adapters.testing.fake_authenticator import FakeAuthenticator
+from app.adapters.testing.fake_authorizer import FakeAuthorizer
 from app.application.sql_agent_service import SqlAgentApplicationService
 from app.domain.application_response_types import (
     APPLICATION_RESPONSE_CONTRACT_VERSION,
@@ -11,6 +13,12 @@ from app.domain.result_normalization import stable_fingerprint
 from app.http.http_request import default_http_request_limits
 from app.http.http_response import default_http_response_limits
 from app.http.sql_agent_http_handler import SqlAgentHttpHandler
+from app.security.auth_types import (
+    authentication_result,
+    authorization_decision,
+    create_authenticated_principal,
+    default_auth_security_limits,
+)
 
 
 class Ids:
@@ -67,8 +75,22 @@ def _response(status="success", *, request_id="req-1", run_id="run-1"):
 def _handler(final_state):
     runtime = FakeGraphRuntime(final_state=final_state)
     service = SqlAgentApplicationService(runtime=runtime, id_generator=Ids())
+    principal = create_authenticated_principal(
+        {"subject_id": "principal-1", "profile": "generic-profile"},
+        limits=default_auth_security_limits(),
+    )
     handler = SqlAgentHttpHandler(
         application_service=service,
+        authenticator=FakeAuthenticator(
+            result=authentication_result(
+                status="authenticated",
+                principal=principal,
+            )
+        ),
+        authorizer=FakeAuthorizer(
+            decision=authorization_decision(status="allowed")
+        ),
+        auth_limits=default_auth_security_limits(),
         request_limits=default_http_request_limits(),
         response_limits=default_http_response_limits(),
     )
@@ -79,7 +101,7 @@ def _request(body=b'{"question":"ok","request_id":"req-1","run_id":"run-1"}'):
     return {
         "method": "POST",
         "path": "/v1/sql-agent/query",
-        "headers": {"Content-Type": "application/json"},
+        "headers": {"Content-Type": "application/json", "Authorization": "Bearer test-opaque-token"},
         "body": body,
     }
 
@@ -123,6 +145,10 @@ def test_ids_gerados_service_e_runtime_uma_vez() -> None:
     assert http["status_code"] == 200
     assert runtime.calls == 1
     assert runtime.last_initial_state["request_id"] == "req-generated"
+    assert runtime.last_initial_state["user"] == {
+        "id": "principal-1",
+        "profile": "generic-profile",
+    }
     assert http["headers"]["X-Request-ID"] == "req-generated"
     assert http["headers"]["X-Run-ID"] == "run-generated"
 

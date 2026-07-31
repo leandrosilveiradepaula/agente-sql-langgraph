@@ -7,9 +7,17 @@ from app.domain.application_response_types import (
     APPLICATION_RESPONSE_CONTRACT_VERSION,
 )
 from app.domain.result_normalization import stable_fingerprint
+from app.adapters.testing.fake_authenticator import FakeAuthenticator
+from app.adapters.testing.fake_authorizer import FakeAuthorizer
 from app.http.http_request import default_http_request_limits
 from app.http.http_response import default_http_response_limits
 from app.http.sql_agent_http_handler import SqlAgentHttpHandler
+from app.security.auth_types import (
+    authentication_result,
+    authorization_decision,
+    create_authenticated_principal,
+    default_auth_security_limits,
+)
 
 
 class FakeApplicationService:
@@ -65,9 +73,39 @@ def _response(status="success", *, request_id="req-1", run_id="run-1", data=None
     return response
 
 
+def _principal():
+    return create_authenticated_principal(
+        {
+            "subject_id": "principal-1",
+            "email": "principal@example.invalid",
+            "profile": "generic-profile",
+            "organization_id": "org-1",
+            "roles": ["role.local"],
+            "scopes": ["scope.local"],
+        },
+        limits=default_auth_security_limits(),
+    )
+
+
+def _authenticator():
+    return FakeAuthenticator(
+        result=authentication_result(
+            status="authenticated",
+            principal=_principal(),
+        )
+    )
+
+
+def _authorizer():
+    return FakeAuthorizer(decision=authorization_decision(status="allowed"))
+
+
 def _handler(service=None, response_limits=None):
     return SqlAgentHttpHandler(
         application_service=service or FakeApplicationService(),
+        authenticator=_authenticator(),
+        authorizer=_authorizer(),
+        auth_limits=default_auth_security_limits(),
         request_limits=default_http_request_limits(),
         response_limits=response_limits or default_http_response_limits(),
     )
@@ -77,7 +115,7 @@ def _request(body=b'{"question":"ok","request_id":"req-1","run_id":"run-1"}', **
     request = {
         "method": "POST",
         "path": "/v1/sql-agent/query",
-        "headers": {"Content-Type": "application/json"},
+        "headers": {"Content-Type": "application/json", "Authorization": "Bearer test-opaque-token"},
         "body": body,
     }
     request.update(overrides)
@@ -93,7 +131,17 @@ def test_request_valida_chama_service_uma_vez_e_delega_payload() -> None:
     handler = _handler(service)
     http = handler.handle(_request())
     assert service.calls == 1
-    assert service.requests[0] == {"question": "ok", "request_id": "req-1", "run_id": "run-1"}
+    assert service.requests[0] == {
+        "question": "ok",
+        "request_id": "req-1",
+        "run_id": "run-1",
+        "user": {
+            "id": "principal-1",
+            "email": "principal@example.invalid",
+            "profile": "generic-profile",
+            "organization_id": "org-1",
+        },
+    }
     assert http["status_code"] == 200
     assert _body(http)["status"] == "success"
 
@@ -121,13 +169,16 @@ def test_status_mapping() -> None:
 def test_erros_de_transporte_status_e_allow() -> None:
     handler = _handler()
     cases = [
-        (_request(body=b"x" * 100, headers={"Content-Type": "application/json"}), 413),
-        (_request(headers={"Content-Type": "text/plain"}), 415),
-        (_request(headers={"Content-Type": "application/json", "Accept": "text/html"}), 406),
+        (_request(body=b"x" * 100, headers={"Content-Type": "application/json", "Authorization": "Bearer test-opaque-token"}), 413),
+        (_request(headers={"Content-Type": "text/plain", "Authorization": "Bearer test-opaque-token"}), 415),
+        (_request(headers={"Content-Type": "application/json", "Accept": "text/html", "Authorization": "Bearer test-opaque-token"}), 406),
         (_request(path="/missing"), 404),
     ]
     small_handler = SqlAgentHttpHandler(
         application_service=FakeApplicationService(),
+        authenticator=_authenticator(),
+        authorizer=_authorizer(),
+        auth_limits=default_auth_security_limits(),
         request_limits={**default_http_request_limits(), "max_request_body_bytes": 8},
         response_limits=default_http_response_limits(),
     )
@@ -193,7 +244,7 @@ def test_exception_tipo_invalido_sem_vazamento_e_sem_retry() -> None:
 def test_accept_q_zero_nao_chama_service() -> None:
     service = FakeApplicationService()
     http = _handler(service).handle(
-        _request(headers={"Content-Type": "application/json", "Accept": "application/json;q=0"})
+        _request(headers={"Content-Type": "application/json", "Accept": "application/json;q=0", "Authorization": "Bearer test-opaque-token"})
     )
     assert service.calls == 0
     assert http["status_code"] == 406
