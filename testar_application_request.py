@@ -127,6 +127,49 @@ def test_options_validas_tipo_invalido_faixa_invalida() -> None:
     assert "APPLICATION_REQUEST_OPTIONS_INVALID" in _codes(
         {"question": "Pergunta", "options": {"max_repair_attempts": 3}}
     )
+    assert "APPLICATION_REQUEST_OPTIONS_INVALID" in _codes(
+        {
+            "question": "Pergunta",
+            "options": {
+                "sql_execution_limits": {
+                    "timeout_seconds": 10,
+                    "max_rows": 0,
+                    "max_response_bytes": 4096,
+                    "max_cell_bytes": 128,
+                }
+            },
+        }
+    )
+    assert "APPLICATION_REQUEST_OPTIONS_INVALID" in _codes(
+        {
+            "question": "Pergunta",
+            "options": {
+                "sql_execution_limits": {
+                    "timeout_seconds": 10,
+                    "max_rows": 5,
+                    "max_response_bytes": 4096,
+                    "max_cell_bytes": 128,
+                    "extra": 1,
+                }
+            },
+        }
+    )
+    assert "APPLICATION_REQUEST_OPTIONS_INVALID" in _codes(
+        {
+            "question": "Pergunta",
+            "options": {
+                "result_normalization_limits": {
+                    "max_rows": 1,
+                    "max_columns": 1,
+                    "max_total_cells": 1,
+                    "max_nesting_depth": 1,
+                    "max_collection_items": 1,
+                    "max_serialized_bytes": 1,
+                    "max_diagnostic_entries": False,
+                }
+            },
+        }
+    )
 
 
 def test_campo_desconhecido() -> None:
@@ -150,6 +193,21 @@ def test_metadata_valida_excessiva_e_objeto_arbitrario() -> None:
     assert "APPLICATION_REQUEST_INVALID" in _codes(
         {"question": "Pergunta", "metadata": {"obj": object()}}
     )
+    limits = {
+        **default_application_service_limits(),
+        "max_metadata_value_length": 4,
+    }
+    assert validate_application_request(
+        {"question": "Pergunta", "metadata": {"safe_key": "áá"}},
+        limits=limits,
+    ) == []
+    assert "APPLICATION_REQUEST_INVALID" in [
+        item["code"]
+        for item in validate_application_request(
+            {"question": "Pergunta", "metadata": {"safe_key": "ááa"}},
+            limits=limits,
+        )
+    ]
 
 
 def test_nao_mutacao_copia_independente_e_determinismo() -> None:

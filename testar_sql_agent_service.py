@@ -10,6 +10,9 @@ from app.domain.application_response_types import (
 from app.domain.result_normalization import stable_fingerprint
 
 
+_DEFAULT_DATA = object()
+
+
 class SequentialIds:
     def __init__(self) -> None:
         self.values = ["request-generated", "run-generated"]
@@ -25,8 +28,26 @@ def _response(
     request_id: str = "request-1",
     run_id: str = "run-1",
     status: str = "success",
-    data=None,
+    data=_DEFAULT_DATA,
 ):
+    if data is _DEFAULT_DATA:
+        data = {
+            "result": {
+                "contract_version": (
+                    "v1.0.0-deterministic-result-serialization"
+                ),
+                "columns": [],
+                "rows": [],
+                "result_fingerprint": "result-fingerprint",
+            },
+            "pagination": {
+                "mode": "none",
+                "has_more": False,
+                "next_cursor": None,
+                "total_rows": 0,
+                "returned_rows": 0,
+            },
+        }
     response = {
         "contract_version": APPLICATION_RESPONSE_CONTRACT_VERSION,
         "response_id": stable_fingerprint(
@@ -70,6 +91,13 @@ def _response(
         },
         "response_fingerprint": "",
     }
+    payload = deepcopy(response)
+    payload.pop("response_fingerprint", None)
+    response["response_fingerprint"] = stable_fingerprint(payload)
+    return response
+
+
+def _refingerprint(response):
     payload = deepcopy(response)
     payload.pop("response_fingerprint", None)
     response["response_fingerprint"] = stable_fingerprint(payload)
@@ -164,6 +192,15 @@ def test_runtime_chamado_uma_vez_estado_inicial_minimo() -> None:
     assert state["question"] == "  Pergunta original preservada?  "
 
 
+def test_timeout_nao_atravessa_para_options_do_grafo() -> None:
+    service, runtime, _ = _service()
+    response = service.execute(
+        _request(options={"timeout_seconds": 1, "max_repair_attempts": 0})
+    )
+    assert response["status"] == "success"
+    assert "timeout_seconds" not in runtime.last_initial_state["options"]
+
+
 def test_options_e_ids_preservados_e_ids_gerados() -> None:
     service, runtime, ids = _service()
     response = service.execute(_request())
@@ -185,6 +222,24 @@ def test_options_e_ids_preservados_e_ids_gerados() -> None:
     assert response["run_id"] == "run-generated"
     assert ids.calls == 2
 
+    service, runtime, ids = _service(
+        {"application_response": _response(request_id="request-generated", run_id="run-1")},
+        ids=SequentialIds(),
+    )
+    response = service.execute(_request(request_id=None))
+    assert response["request_id"] == "request-generated"
+    assert response["run_id"] == "run-1"
+    assert ids.calls == 1
+
+    service, runtime, ids = _service(
+        {"application_response": _response(request_id="request-1", run_id="request-generated")},
+        ids=SequentialIds(),
+    )
+    response = service.execute(_request(run_id=None))
+    assert response["request_id"] == "request-1"
+    assert response["run_id"] == "request-generated"
+    assert ids.calls == 1
+
 
 def test_runtime_exception_sem_retry_e_sem_dados_brutos() -> None:
     service, runtime, _ = _service(exception=RuntimeError("token SELECT secret"))
@@ -197,6 +252,11 @@ def test_runtime_exception_sem_retry_e_sem_dados_brutos() -> None:
     assert "graphstate" not in serialized
     assert "  pergunta original preservada?  " not in serialized
     assert response["errors"][0]["code"] == "APPLICATION_SERVICE_RUNTIME_FAILED"
+
+    service, runtime, _ = _service()
+    response = service.execute(["nao", "mapping"])
+    assert response["status"] == "rejected"
+    assert runtime.calls == 0
 
 
 def test_resultados_invalidos_do_runtime() -> None:
@@ -229,6 +289,33 @@ def test_resultados_invalidos_do_runtime() -> None:
                 **_response(),
                 "response_fingerprint": "",
             }
+        },
+        {
+            "application_response": _response(
+                status="success",
+                data=None,
+            )
+        },
+        {
+            "application_response": _refingerprint({
+                **_response(),
+                "original_outcome": "unknown",
+            })
+        },
+        {
+            "application_response": _refingerprint({
+                **_response(),
+                "finalization": {"status": "unknown"},
+            })
+        },
+        {
+            "application_response": _refingerprint({
+                **_response(),
+                "finalization": {
+                    **_response()["finalization"],
+                    "persisted": False,
+                },
+            })
         },
     ]
     for final_state in cases:
@@ -280,12 +367,19 @@ def test_service_nao_chama_adapters_sinks_timeout_e_unexpected() -> None:
     assert response["status"] == "infrastructure_error"
     assert response["errors"][0]["code"] == "APPLICATION_SERVICE_RUNTIME_FAILED"
 
+    service, runtime, _ = _service(ids=lambda: "same-id")
+    response = service.execute({"question": "Pergunta"})
+    assert response["status"] == "rejected"
+    assert response["errors"][0]["code"] == "APPLICATION_REQUEST_ID_INVALID"
+    assert runtime.calls == 0
+
 
 def main() -> None:
     tests = [
         test_success_rejected_e_infrastructure_error_do_grafo,
         test_request_invalida_nao_chama_runtime,
         test_runtime_chamado_uma_vez_estado_inicial_minimo,
+        test_timeout_nao_atravessa_para_options_do_grafo,
         test_options_e_ids_preservados_e_ids_gerados,
         test_runtime_exception_sem_retry_e_sem_dados_brutos,
         test_resultados_invalidos_do_runtime,

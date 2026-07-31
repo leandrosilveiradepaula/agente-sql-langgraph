@@ -14,6 +14,7 @@ from app.application.application_request_types import (
 )
 from app.domain.application_response import (
     default_application_response_limits,
+    validate_application_response_limits,
 )
 from app.domain.application_response_types import (
     APPLICATION_RESPONSE_CONTRACT_VERSION,
@@ -22,7 +23,16 @@ from app.domain.application_response_types import (
     ApplicationResponseStatus,
 )
 from app.domain.result_normalization import stable_fingerprint
-from app.domain.run_record import default_finalization_limits
+from app.domain.run_record import (
+    default_finalization_limits,
+    validate_finalization_limits,
+)
+from app.domain.sql_execution import (
+    MAX_CELL_BYTES,
+    MAX_RESPONSE_BYTES,
+    MAX_ROWS,
+    MAX_TIMEOUT_SECONDS,
+)
 from app.ports.graph_runtime import GraphRuntime
 
 
@@ -50,6 +60,51 @@ _OPTIONS_KEYS = {
     "application_response_limits",
     "execution_attempt",
     "timeout_seconds",
+}
+_SQL_EXECUTION_LIMIT_KEYS = {
+    "timeout_seconds",
+    "max_rows",
+    "max_response_bytes",
+    "max_cell_bytes",
+}
+_RESULT_NORMALIZATION_LIMIT_KEYS = {
+    "max_rows",
+    "max_columns",
+    "max_total_cells",
+    "max_nesting_depth",
+    "max_collection_items",
+    "max_serialized_bytes",
+    "max_diagnostic_entries",
+}
+_RUN_FINALIZATION_LIMIT_KEYS = {
+    "max_persisted_payload_bytes",
+    "max_stage_records",
+    "max_error_records",
+    "max_warning_records",
+    "max_audit_error_codes",
+    "max_observability_attributes",
+    "max_attribute_length",
+    "max_provider_name_length",
+}
+_APPLICATION_RESPONSE_LIMIT_KEYS = {
+    "max_response_bytes",
+    "max_errors",
+    "max_warnings",
+    "max_message_length",
+    "max_error_message_length",
+    "max_warning_message_length",
+    "max_lineage_fields",
+    "max_data_rows",
+    "max_data_columns",
+    "max_metadata_fields",
+}
+_FINALIZATION_STATUSES = {
+    "completed",
+    "persistence_failed",
+    "audit_failed",
+    "observability_degraded",
+    "record_failed",
+    "incomplete",
 }
 _SAFE_TEXT_CHARS = set(
     "abcdefghijklmnopqrstuvwxyz"
@@ -178,6 +233,16 @@ class SqlAgentApplicationService:
         try:
             copied_request = deepcopy(request)
             validation = _validate_request(copied_request, self._limits)
+            if not isinstance(copied_request, Mapping):
+                return _minimal_response(
+                    request_id="",
+                    run_id="",
+                    status="rejected",
+                    code=validation[0]["code"]
+                    if validation
+                    else "APPLICATION_REQUEST_INVALID",
+                    field="request",
+                )
             request_id = _resolve_id_for_response(
                 copied_request.get("request_id"),
                 self._id_generator,
@@ -407,7 +472,8 @@ def _validated_options(options: object) -> ApplicationRequestOptions:
         value = options["timeout_seconds"]
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError("timeout_seconds invalido.")
-        output["timeout_seconds"] = value
+        if value > MAX_TIMEOUT_SECONDS:
+            raise ValueError("timeout_seconds fora da faixa.")
     for key in [
         "sql_execution_limits",
         "result_normalization_limits",
@@ -416,9 +482,10 @@ def _validated_options(options: object) -> ApplicationRequestOptions:
     ]:
         if key in options:
             value = options[key]
-            if not _int_mapping(value):
-                raise ValueError("Limites invalidos.")
-            output[key] = deepcopy(value)  # type: ignore[literal-required]
+            output[key] = _validated_limit_mapping(  # type: ignore[literal-required]
+                key,
+                value,
+            )
     return output
 
 
@@ -496,6 +563,12 @@ def _validate_application_response(
         "infrastructure_error",
     }:
         raise ApplicationServiceGraphResultError("Status invalido.")
+    if response.get("original_outcome") not in {
+        "success",
+        "rejected",
+        "infrastructure_error",
+    }:
+        raise ApplicationServiceGraphResultError("Outcome invalido.")
     if not _valid_identifier(response.get("response_id"), 128):
         raise ApplicationServiceGraphResultError("response_id invalido.")
     fingerprint = response.get("response_fingerprint")
@@ -505,10 +578,33 @@ def _validate_application_response(
     payload.pop("response_fingerprint", None)
     if stable_fingerprint(payload) != fingerprint:
         raise ApplicationServiceGraphResultError("Fingerprint divergente.")
+    finalization = response.get("finalization")
+    if not isinstance(finalization, Mapping):
+        raise ApplicationServiceGraphResultError("Finalizacao ausente.")
+    if finalization.get("status") not in _FINALIZATION_STATUSES:
+        raise ApplicationServiceGraphResultError("Finalizacao invalida.")
+    if response.get("status") == "success":
+        if response.get("data") is None:
+            raise ApplicationServiceGraphResultError("Data ausente.")
+        if response.get("original_outcome") != "success":
+            raise ApplicationServiceGraphResultError("Outcome inconsistente.")
+        if finalization.get("status") not in {
+            "completed",
+            "observability_degraded",
+        }:
+            raise ApplicationServiceGraphResultError(
+                "Finalizacao inconsistente."
+            )
+        if (
+            finalization.get("run_record_built") is not True
+            or finalization.get("persisted") is not True
+            or finalization.get("audited") is not True
+        ):
+            raise ApplicationServiceGraphResultError(
+                "Finalizacao incompleta."
+            )
     if response.get("status") != "success" and response.get("data") is not None:
         raise ApplicationServiceGraphResultError("Data inconsistente.")
-    if not isinstance(response.get("finalization"), Mapping):
-        raise ApplicationServiceGraphResultError("Finalizacao ausente.")
 
 
 def _minimal_response(
@@ -602,17 +698,25 @@ def _has_control_character(value: str) -> bool:
 
 
 def _valid_identifier(value: object, max_length: int) -> bool:
-    if not isinstance(value, str) or not value or len(value) > max_length:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > max_length
+    ):
         return False
     return all(char in _SAFE_ID_CHARS for char in value)
 
 
 def _valid_safe_text(value: object, max_length: int) -> bool:
-    if not isinstance(value, str) or not value or len(value) > max_length:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > max_length
+    ):
         return False
     if _has_control_character(value):
         return False
-    return all(char in _SAFE_TEXT_CHARS for char in value)
+    return all(char.isalnum() or char in _SAFE_TEXT_CHARS for char in value)
 
 
 def _valid_email(value: object, max_length: int) -> bool:
@@ -622,20 +726,81 @@ def _valid_email(value: object, max_length: int) -> bool:
     return text.count("@") == 1 and "." in text.split("@", 1)[1]
 
 
-def _int_mapping(value: object) -> bool:
+def _validated_limit_mapping(
+    name: str,
+    value: object,
+) -> dict[str, int]:
     if not isinstance(value, Mapping):
-        return False
-    for item in value.values():
-        if isinstance(item, bool):
-            return False
-        if isinstance(item, int):
-            continue
-        if isinstance(item, Mapping):
-            if not _int_mapping(item):
-                return False
-            continue
-        return False
-    return True
+        raise ValueError("Limites invalidos.")
+    if name == "sql_execution_limits":
+        _require_exact_keys(value, _SQL_EXECUTION_LIMIT_KEYS)
+        return {
+            "timeout_seconds": _bounded_int(
+                value.get("timeout_seconds"),
+                maximum=MAX_TIMEOUT_SECONDS,
+            ),
+            "max_rows": _bounded_int(value.get("max_rows"), maximum=MAX_ROWS),
+            "max_response_bytes": _bounded_int(
+                value.get("max_response_bytes"),
+                maximum=MAX_RESPONSE_BYTES,
+            ),
+            "max_cell_bytes": _bounded_int(
+                value.get("max_cell_bytes"),
+                maximum=MAX_CELL_BYTES,
+            ),
+        }
+    if name == "result_normalization_limits":
+        _require_exact_keys(value, _RESULT_NORMALIZATION_LIMIT_KEYS)
+        return {
+            "max_rows": _bounded_int(value.get("max_rows"), maximum=100_000),
+            "max_columns": _bounded_int(
+                value.get("max_columns"),
+                maximum=10_000,
+            ),
+            "max_total_cells": _bounded_int(
+                value.get("max_total_cells"),
+                maximum=1_000_000,
+            ),
+            "max_nesting_depth": _bounded_int(
+                value.get("max_nesting_depth"),
+                maximum=100,
+            ),
+            "max_collection_items": _bounded_int(
+                value.get("max_collection_items"),
+                maximum=100_000,
+            ),
+            "max_serialized_bytes": _bounded_int(
+                value.get("max_serialized_bytes"),
+                maximum=10_000_000,
+            ),
+            "max_diagnostic_entries": _bounded_int(
+                value.get("max_diagnostic_entries"),
+                maximum=1_000,
+            ),
+        }
+    if name == "run_finalization_limits":
+        _require_exact_keys(value, _RUN_FINALIZATION_LIMIT_KEYS)
+        return dict(validate_finalization_limits(value))
+    if name == "application_response_limits":
+        _require_exact_keys(value, _APPLICATION_RESPONSE_LIMIT_KEYS)
+        return dict(validate_application_response_limits(value))
+    raise ValueError("Limites invalidos.")
+
+
+def _require_exact_keys(
+    value: Mapping[str, object],
+    expected: set[str],
+) -> None:
+    if set(value) != expected:
+        raise ValueError("Campos de limites invalidos.")
+
+
+def _bounded_int(value: object, *, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("Limite deve ser inteiro.")
+    if value <= 0 or value > maximum:
+        raise ValueError("Limite fora da faixa.")
+    return value
 
 
 def _safe_code(value: object) -> str:
