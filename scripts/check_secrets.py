@@ -34,6 +34,17 @@ SECRET_PATTERNS = [
     ),
     re.compile(r"\bIBM[-_A-Za-z0-9]{30,}\b"),
     re.compile(
+        r"\b(?:IBM_CLOUD_API_KEY|apikey)\s*[:=]\s*['\"]"
+        r"(?!\s*(?:<secret externo>|example|dummy|test|placeholder|xxx))"
+        r"[^'\"]{8,}['\"]",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bgrant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey"
+        r"&apikey=(?!<secret|example|dummy|test|placeholder)[^\\s'\"&]{8,}",
+        re.IGNORECASE,
+    ),
+    re.compile(
         r"\bBearer\s+(?!<access_token>|example|dummy|test)[A-Za-z0-9._-]{12,}",
         re.IGNORECASE,
     ),

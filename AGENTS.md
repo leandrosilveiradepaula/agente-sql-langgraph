@@ -141,3 +141,11 @@ sem servidor e sem framework externo.
 Testes Watson Flow usam FakeIamTokenProvider e FakeWatsonFlowClient injetados,
 sem token real, sem API key, sem rede, sem servidor, sem SQL e sem provider
 live.
+Adapters Watson live nunca sao defaults. Nenhum import ou factory pode acessar
+secret, IAM, Watson, rede, socket, servidor ou PostgreSQL. API key vem somente
+de `SecretValueProvider` e nunca entra em request de dominio; `Authorization`
+sempre e header sensivel materializado apenas no transporte. `check_all.py`
+permanece offline. O script manual Watson exige confirmacao explicita para
+rede, nao imprime body IAM/Flow, token, API key ou Authorization, nao segue
+redirect, nao aceita TLS inseguro, nao usa proxy env e nao implementa retry
+interno.
