@@ -101,6 +101,12 @@ ser logados ou retornados. Auth falha fechada, deny por padrao, sem usuario
 anonimo, sem role de negocio hardcoded e sem provider real nos testes. O
 adapter nao inicia servidor em `check_all.py` e nenhum endpoint expoe
 `GraphState`.
+ASGI adapter traduz somente protocolo para o `SqlAgentHttpHandler`: nao chama
+grafo, application service, authenticator ou authorizer diretamente. Nao
+armazenar scope, body, headers, eventos ou tokens em estado global; nao logar
+eventos, headers ou body; nao iniciar servidor em `check_all.py`; nao adicionar
+Uvicorn/Hypercorn nesta fase. `http.disconnect` nao chama o handler. Depois de
+`http.response.start`, nao enviar segunda resposta.
 
 ## Testes
 
@@ -120,3 +126,5 @@ Script live de preflight fica fora de `scripts/check_all.py` e nao deve ser
 executado automaticamente.
 Testes de auth usam fakes injetados, sem token real, rede, servidor, socket ou
 provider live.
+Testes ASGI usam harness em memoria, sem TestClient que abra socket, sem rede,
+sem servidor e sem framework externo.

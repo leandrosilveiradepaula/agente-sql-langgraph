@@ -116,6 +116,26 @@ STEPS = [
         [sys.executable, "testar_http_auth_integration.py"],
     ),
     (
+        "testar_asgi_types.py",
+        [sys.executable, "testar_asgi_types.py"],
+    ),
+    (
+        "testar_asgi_request_adapter.py",
+        [sys.executable, "testar_asgi_request_adapter.py"],
+    ),
+    (
+        "testar_asgi_response_adapter.py",
+        [sys.executable, "testar_asgi_response_adapter.py"],
+    ),
+    (
+        "testar_asgi_application.py",
+        [sys.executable, "testar_asgi_application.py"],
+    ),
+    (
+        "testar_asgi_http_integration.py",
+        [sys.executable, "testar_asgi_http_integration.py"],
+    ),
+    (
         "testar_engine_preflight.py",
         [sys.executable, "testar_engine_preflight.py"],
     ),

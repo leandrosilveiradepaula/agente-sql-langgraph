@@ -134,6 +134,16 @@ deriva somente do `AuthenticatedPrincipal`: `subject_id`, `email`, `profile` e
 
 Nao cria grafo, adapters, fakes, singleton, servidor, rede ou banco.
 
+## Adapter ASGI
+
+Existe agora uma fronteira ASGI 3 minima sobre este handler. Ela traduz
+`scope/receive/send` para `HttpRequestEnvelope`, chama
+`SqlAgentHttpHandler.handle` exatamente uma vez por request valida e converte
+`HttpResponseEnvelope` para eventos ASGI.
+
+O nucleo HTTP continua framework-agnostic. Servidor ASGI, framework, socket,
+rede, deploy e provider real nao fazem parte desta fase.
+
 ## Separacao
 
 - HTTP: metodo, rota, headers, body, JSON, status e serializacao.
@@ -149,5 +159,5 @@ payload ou credenciais.
 
 ## Proximos Passos
 
-Uma camada FastAPI/ASGI pode ser adicionada depois como adaptador fino sobre o
-handler, sem mudar este contrato e sem iniciar servidor em testes locais.
+Uma camada de servidor ASGI pode ser adicionada depois como composition root
+externo, sem mudar este contrato e sem iniciar servidor em testes locais.
