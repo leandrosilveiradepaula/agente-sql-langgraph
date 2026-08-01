@@ -124,9 +124,11 @@ def main() -> None:
     assert _send(FakeResponse(chunks=[b"abcd"])).status == "response_too_large"
     assert _send(FakeResponse(headers=[("Content-Type", "application/json"), ("Content-Length", "4")])).status == "response_too_large"
     assert _send(FakeResponse(headers=[("Content-Type", "application/json"), ("Content-Length", "x")])).status == "invalid_response"
+    assert _send(FakeResponse(headers=[("Content-Type", "application/json"), ("Content-Length", "1"), ("Content-Length", "2")])).status == "invalid_response"
     assert _send(FakeResponse(headers=[("Content-Type", "application/json"), ("Content-Length", "3")], chunks=[b"ab"])).status == "invalid_response"
     assert _send(FakeResponse(headers=[("Content-Type", "application/json"), ("Content-Encoding", "identity")])).status == "success"
     assert _send(FakeResponse(headers=[("Content-Type", "application/json"), ("Content-Encoding", "gzip")])).status == "invalid_response"
+    assert _send(FakeResponse(headers=[("Content-Type", "application/json"), ("Content-Encoding", "identity"), ("Content-Encoding", "gzip")])).status == "invalid_response"
     assert _send(exc=socket.timeout()).status == "timeout"
     assert _send(exc=socket.gaierror()).status == "dns_failure"
     assert _send(exc=ssl.SSLError()).status == "tls_failure"
@@ -140,7 +142,7 @@ def main() -> None:
     _send()
     assert len(FakeConnection.instances) == 1
     assert _send().status == "success"
-    print("testar_stdlib_http_transport.py: 30/30 OK")
+    print("testar_stdlib_http_transport.py: 32/32 OK")
 
 
 if __name__ == "__main__":

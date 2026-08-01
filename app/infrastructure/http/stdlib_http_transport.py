@@ -56,7 +56,12 @@ class StdlibHttpTransport:
             if getattr(connection, "sock", None) is not None:
                 connection.sock.settimeout(request.read_timeout_seconds)
             response = connection.getresponse()
-            response_headers = sanitize_response_headers(dict(response.getheaders()))
+            raw_headers = response.getheaders()
+            if _has_duplicate_header(raw_headers, "Content-Length"):
+                return http_transport_failure("invalid_response")
+            if _has_duplicate_header(raw_headers, "Content-Encoding"):
+                return http_transport_failure("invalid_response")
+            response_headers = sanitize_response_headers(dict(raw_headers))
             content_encoding = response_headers.get("content-encoding", "identity")
             if content_encoding.casefold() not in {"", "identity"}:
                 return http_transport_failure("invalid_response")
@@ -117,3 +122,15 @@ class StdlibHttpTransport:
                     connection.close()
                 except Exception:
                     pass
+
+
+def _has_duplicate_header(headers: object, name: str) -> bool:
+    if not isinstance(headers, list):
+        return False
+    count = 0
+    for key, _value in headers:
+        if isinstance(key, str) and key.casefold() == name.casefold():
+            count += 1
+            if count > 1:
+                return True
+    return False

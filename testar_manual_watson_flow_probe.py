@@ -26,6 +26,9 @@ def main() -> None:
         huge = Path(tmp) / "huge.sql"
         huge.write_bytes(b"x" * 200_001)
         assert _run(["--sql-file", str(huge)])[0] == probe.EXIT_USAGE
+        empty = Path(tmp) / "empty.sql"
+        empty.write_bytes(b"")
+        assert _run(["--execute-live", "--confirm-test-environment", "--sql-file", str(empty)], env={"WATSON_API_BASE_URL": "https://example.invalid", "WATSON_FLOW_ID": "00e0284a-d785-448b-aed3-95672dd4d189", "IBM_CLOUD_API_KEY": "test-secret"})[0] == probe.EXIT_USAGE
         sql = Path(tmp) / "query.sql"
         sql.write_text("SELECT 1", encoding="utf-8")
         assert _run(["--execute-live", "--confirm-test-environment", "--sql-file", str(sql)])[0] == probe.EXIT_CONFIG
@@ -43,6 +46,8 @@ def main() -> None:
         assert "sql_sha256=" in output and "sql_bytes=8" in output
         assert "preview" not in output
         assert _run(["--show-rows"])[0] == probe.EXIT_USAGE
+        assert _run(["--max-preview-rows", "0"])[0] == probe.EXIT_USAGE
+        assert _run(["--max-preview-rows", "51"])[0] == probe.EXIT_USAGE
         code, output = _run(["--show-rows", "--confirm-show-rows"], env)
         assert code == probe.EXIT_OK
         assert "dry-run" in output
@@ -53,7 +58,7 @@ def main() -> None:
     assert "testar_manual_watson_flow_probe.py" in check_all
     assert "scripts/manual_watson_flow_probe.py" not in check_all
     assert _run(["--execute-live", "--confirm-test-environment", "--sql-file", __file__], env={})[0] == probe.EXIT_CONFIG
-    print("testar_manual_watson_flow_probe.py: 20/20 OK")
+    print("testar_manual_watson_flow_probe.py: 23/23 OK")
 
 
 if __name__ == "__main__":

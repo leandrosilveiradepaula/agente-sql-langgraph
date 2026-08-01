@@ -49,6 +49,9 @@ def main(argv: list[str] | None = None, *, environ: dict[str, str] | None = None
     if args.show_rows and not args.confirm_show_rows:
         print("show-rows exige --confirm-show-rows.")
         return EXIT_USAGE
+    if args.max_preview_rows <= 0 or args.max_preview_rows > 50:
+        print("max-preview-rows fora do intervalo.")
+        return EXIT_USAGE
     if args.execute_live and not args.confirm_test_environment:
         print("execucao live exige --confirm-test-environment.")
         return EXIT_USAGE
@@ -63,6 +66,9 @@ def main(argv: list[str] | None = None, *, environ: dict[str, str] | None = None
             print("arquivo SQL ausente.")
             return EXIT_USAGE
         raw = path.read_bytes()
+        if len(raw) == 0:
+            print("arquivo SQL vazio.")
+            return EXIT_USAGE
         if len(raw) > 200_000:
             print("arquivo SQL excede limite.")
             return EXIT_USAGE
@@ -127,7 +133,7 @@ def main(argv: list[str] | None = None, *, environ: dict[str, str] | None = None
         )
         print(f"flow_status={flow_result.get('status')}")
         if args.show_rows:
-            print(f"preview_rows_limit={max(0, min(args.max_preview_rows, 50))}")
+            print(f"preview_rows_limit={args.max_preview_rows}")
         return EXIT_OK if flow_result.get("status") == "success" else EXIT_LIVE_FAILED
     except Exception:
         print("probe live falhou de forma sanitizada.")
