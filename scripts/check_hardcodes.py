@@ -23,6 +23,16 @@ PLANNER_FORBIDDEN_EXTERNALS = {
     "supabase",
 }
 
+LIVE_INTEGRATION_ALLOWED = {
+    "app/integrations/watson/configuration.py",
+    "app/integrations/watson/live_configuration.py",
+    "app/integrations/watson/live_iam_token_provider.py",
+    "app/integrations/watson/live_watson_flow_client.py",
+    "app/infrastructure/http/http_contracts.py",
+    "app/infrastructure/http/stdlib_http_transport.py",
+    "app/infrastructure/secrets/environment_secret_provider.py",
+}
+
 PLANNER_FILES = {
     "app/domain/planner.py",
     "app/domain/planning.py",

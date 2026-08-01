@@ -136,6 +136,42 @@ STEPS = [
         [sys.executable, "testar_asgi_http_integration.py"],
     ),
     (
+        "testar_sensitive_secret.py",
+        [sys.executable, "testar_sensitive_secret.py"],
+    ),
+    (
+        "testar_secret_value_provider.py",
+        [sys.executable, "testar_secret_value_provider.py"],
+    ),
+    (
+        "testar_http_transport_contract.py",
+        [sys.executable, "testar_http_transport_contract.py"],
+    ),
+    (
+        "testar_stdlib_http_transport.py",
+        [sys.executable, "testar_stdlib_http_transport.py"],
+    ),
+    (
+        "testar_live_iam_token_provider.py",
+        [sys.executable, "testar_live_iam_token_provider.py"],
+    ),
+    (
+        "testar_live_watson_flow_client.py",
+        [sys.executable, "testar_live_watson_flow_client.py"],
+    ),
+    (
+        "testar_watson_live_bootstrap.py",
+        [sys.executable, "testar_watson_live_bootstrap.py"],
+    ),
+    (
+        "testar_manual_watson_flow_probe.py",
+        [sys.executable, "testar_manual_watson_flow_probe.py"],
+    ),
+    (
+        "testar_watson_live_offline_integration.py",
+        [sys.executable, "testar_watson_live_offline_integration.py"],
+    ),
+    (
         "testar_watson_flow_configuration.py",
         [sys.executable, "testar_watson_flow_configuration.py"],
     ),

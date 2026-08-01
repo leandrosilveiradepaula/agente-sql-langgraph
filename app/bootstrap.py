@@ -48,7 +48,19 @@ from app.integrations.watson.flow_preflight_adapter import (
 from app.integrations.watson.flow_sql_executor import (
     WatsonFlowSqlExecutorAdapter,
 )
+from app.integrations.watson.live_configuration import (
+    LiveWatsonFlowConfiguration,
+)
+from app.integrations.watson.live_iam_token_provider import (
+    LiveIamTokenProvider,
+)
+from app.integrations.watson.live_watson_flow_client import (
+    LiveWatsonFlowClient,
+)
+from app.infrastructure.http.stdlib_http_transport import StdlibHttpTransport
 from app.ports.iam_token_provider import IamTokenProvider
+from app.ports.http_transport import HttpTransport
+from app.ports.secret_value_provider import SecretValueProvider
 from app.ports.watson_flow_client import WatsonFlowClient
 
 
@@ -74,6 +86,21 @@ GraphFactory = Callable[
     ],
     Any,
 ]
+
+
+class LiveWatsonFlowDependencies:
+    def __init__(
+        self,
+        *,
+        iam_token_provider: IamTokenProvider,
+        flow_client: WatsonFlowClient,
+        engine_preflight: WatsonFlowEnginePreflightAdapter,
+        sql_executor: WatsonFlowSqlExecutorAdapter,
+    ) -> None:
+        self.iam_token_provider = iam_token_provider
+        self.flow_client = flow_client
+        self.engine_preflight = engine_preflight
+        self.sql_executor = sql_executor
 
 
 class CompiledGraphRuntime:
@@ -178,6 +205,81 @@ def create_watson_flow_sql_executor(
         limits=limits,
         iam_token_provider=iam_token_provider,
         flow_client=flow_client,
+    )
+
+
+def create_live_watson_flow_dependencies(
+    *,
+    live_configuration: LiveWatsonFlowConfiguration | None = None,
+    limits: WatsonFlowLimits | None = None,
+    secret_provider: SecretValueProvider | None = None,
+    http_transport: HttpTransport | None = None,
+) -> LiveWatsonFlowDependencies:
+    """
+    Compoe dependencias live Watson somente quando explicitamente habilitadas.
+
+    Nao acessa secret, rede, token, banco, servidor ou SQL durante a factory.
+    """
+
+    if live_configuration is None:
+        raise RuntimeError("live_configuration deve ser injetada.")
+    if not isinstance(live_configuration.enabled, bool):
+        raise RuntimeError("enabled deve ser bool.")
+    if live_configuration.enabled is not True:
+        raise RuntimeError("watson live desabilitado.")
+    if limits is None:
+        raise RuntimeError("limits deve ser injetado.")
+    if secret_provider is None:
+        raise RuntimeError("secret_provider deve ser injetado.")
+    if http_transport is None:
+        raise RuntimeError("http_transport deve ser injetado.")
+
+    iam = LiveIamTokenProvider(
+        configuration=live_configuration.watson_configuration,
+        api_key_secret_name=live_configuration.api_key_secret_name,
+        secret_provider=secret_provider,
+        http_transport=http_transport,
+    )
+    flow = LiveWatsonFlowClient(
+        configuration=live_configuration.watson_configuration,
+        http_transport=http_transport,
+        limits=limits,
+    )
+    return LiveWatsonFlowDependencies(
+        iam_token_provider=iam,
+        flow_client=flow,
+        engine_preflight=WatsonFlowEnginePreflightAdapter(
+            configuration=live_configuration.watson_configuration,
+            limits=limits,
+            iam_token_provider=iam,
+            flow_client=flow,
+        ),
+        sql_executor=WatsonFlowSqlExecutorAdapter(
+            configuration=live_configuration.watson_configuration,
+            limits=limits,
+            iam_token_provider=iam,
+            flow_client=flow,
+        ),
+    )
+
+
+def create_stdlib_live_watson_flow_dependencies(
+    *,
+    live_configuration: LiveWatsonFlowConfiguration | None = None,
+    limits: WatsonFlowLimits | None = None,
+    secret_provider: SecretValueProvider | None = None,
+) -> LiveWatsonFlowDependencies:
+    """
+    Compoe a variante stdlib. Construir o transporte nao abre rede.
+    """
+
+    if secret_provider is None:
+        raise RuntimeError("secret_provider deve ser injetado.")
+    return create_live_watson_flow_dependencies(
+        live_configuration=live_configuration,
+        limits=limits,
+        secret_provider=secret_provider,
+        http_transport=StdlibHttpTransport(),
     )
 
 
