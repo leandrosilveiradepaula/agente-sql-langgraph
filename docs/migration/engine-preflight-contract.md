@@ -98,3 +98,15 @@ A fase prepara `repairable`, categoria, posicao, objeto relacionado, hint
 sanitizado e tentativa para um futuro repair loop. O loop de reparo,
 persistencia de historico, execucao da consulta e retorno de dados permanecem
 fora deste contrato.
+
+## Adapter Watson Flow offline
+
+`WatsonFlowEnginePreflightAdapter` implementa a porta existente sem alterar o
+dominio nem o grafo. Ele recebe somente `EnginePreflightRequest`, compacta uma
+copia de transporte, monta payload `{"sql_query": ...}`, chama uma vez
+`IamTokenProvider` e uma vez `WatsonFlowClient`, normaliza a resposta com
+purpose `preflight` e descarta token, raw output e `sql_transport`.
+
+O adapter nao executa SQL, nao usa `EXPLAIN ANALYZE`, nao faz retry interno,
+nao decide politica de reparo e nao marca falhas de IAM/provider/timeout/rate
+limit/resposta invalida como reparaveis.

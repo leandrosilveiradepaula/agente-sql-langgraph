@@ -40,6 +40,16 @@ from app.ports.run_repository import RunRepository
 from app.ports.sql_executor import SqlExecutor
 from app.ports.sql_generator import SqlGenerator
 from app.ports.sql_repairer import SqlRepairer
+from app.integrations.watson.configuration import WatsonFlowConfiguration
+from app.integrations.watson.flow_limits import WatsonFlowLimits
+from app.integrations.watson.flow_preflight_adapter import (
+    WatsonFlowEnginePreflightAdapter,
+)
+from app.integrations.watson.flow_sql_executor import (
+    WatsonFlowSqlExecutorAdapter,
+)
+from app.ports.iam_token_provider import IamTokenProvider
+from app.ports.watson_flow_client import WatsonFlowClient
 
 
 RuntimeEnvironment = Mapping[str, str]
@@ -115,6 +125,60 @@ def create_engine_preflight_from_runtime_config(
     """
 
     return CapabilityUnavailableEnginePreflight(config=config)
+
+
+def create_watson_flow_preflight_adapter(
+    *,
+    configuration: WatsonFlowConfiguration | None = None,
+    limits: WatsonFlowLimits | None = None,
+    iam_token_provider: IamTokenProvider | None = None,
+    flow_client: WatsonFlowClient | None = None,
+) -> WatsonFlowEnginePreflightAdapter:
+    """
+    Cria adapter Watson Flow de preflight somente com dependencias explicitas.
+    """
+
+    if configuration is None:
+        raise RuntimeError("configuration deve ser injetada.")
+    if limits is None:
+        raise RuntimeError("limits deve ser injetado.")
+    if iam_token_provider is None:
+        raise RuntimeError("iam_token_provider deve ser injetado.")
+    if flow_client is None:
+        raise RuntimeError("flow_client deve ser injetado.")
+    return WatsonFlowEnginePreflightAdapter(
+        configuration=configuration,
+        limits=limits,
+        iam_token_provider=iam_token_provider,
+        flow_client=flow_client,
+    )
+
+
+def create_watson_flow_sql_executor(
+    *,
+    configuration: WatsonFlowConfiguration | None = None,
+    limits: WatsonFlowLimits | None = None,
+    iam_token_provider: IamTokenProvider | None = None,
+    flow_client: WatsonFlowClient | None = None,
+) -> WatsonFlowSqlExecutorAdapter:
+    """
+    Cria executor Watson Flow somente com dependencias explicitas.
+    """
+
+    if configuration is None:
+        raise RuntimeError("configuration deve ser injetada.")
+    if limits is None:
+        raise RuntimeError("limits deve ser injetado.")
+    if iam_token_provider is None:
+        raise RuntimeError("iam_token_provider deve ser injetado.")
+    if flow_client is None:
+        raise RuntimeError("flow_client deve ser injetado.")
+    return WatsonFlowSqlExecutorAdapter(
+        configuration=configuration,
+        limits=limits,
+        iam_token_provider=iam_token_provider,
+        flow_client=flow_client,
+    )
 
 
 def create_postgres_context_graph(

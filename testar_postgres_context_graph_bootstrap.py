@@ -9,7 +9,11 @@ from app.bootstrap import (
     create_engine_preflight_from_runtime_config,
     create_postgres_context_application_service,
     create_postgres_context_graph,
+    create_watson_flow_preflight_adapter,
+    create_watson_flow_sql_executor,
 )
+from app.adapters.testing.fake_iam_token_provider import FakeIamTokenProvider
+from app.adapters.testing.fake_watson_flow_client import FakeWatsonFlowClient
 from app.adapters.testing.fake_authenticator import FakeAuthenticator
 from app.adapters.testing.fake_authorizer import FakeAuthorizer
 from app.asgi.asgi_limits import default_asgi_adapter_limits
@@ -23,6 +27,17 @@ from app.security.auth_types import (
 )
 from app.config.engine_preflight_runtime import (
     EnginePreflightRuntimeConfig,
+)
+from app.integrations.watson.configuration import (
+    IBM_IAM_TOKEN_URL,
+    WATSON_FLOW_CONTRACT_VERSION,
+    WatsonFlowConfiguration,
+)
+from app.integrations.watson.flow_contracts import watson_flow_success
+from app.integrations.watson.flow_limits import default_watson_flow_limits
+from app.integrations.watson.iam_contracts import (
+    SensitiveBearerToken,
+    iam_token_success,
 )
 from app.config.postgres_context import (
     PostgresContextRuntimeConfig,
@@ -38,6 +53,8 @@ FAKE_ENVIRONMENT = {
     "SEMANTIC_AGENT_VERSION": "semantic-test-v1",
     "POSTGRES_CONNECT_TIMEOUT_SECONDS": "3",
 }
+
+WATSON_FLOW_ID = "00e0284a-d785-448b-aed3-95672dd4d189"
 
 
 class FakeSqlGenerator:
@@ -428,6 +445,62 @@ def test_factory_preflight_live_falha_fechada_sem_rede() -> None:
     )
 
 
+def test_watson_flow_factories_exigem_dependencias_explicitas() -> None:
+    try:
+        create_watson_flow_preflight_adapter()
+    except RuntimeError as error:
+        assert str(error) == "configuration deve ser injetada."
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+    try:
+        create_watson_flow_sql_executor()
+    except RuntimeError as error:
+        assert str(error) == "configuration deve ser injetada."
+    else:
+        raise AssertionError("Era esperado RuntimeError.")
+
+
+def test_watson_flow_factories_nao_criam_rede_ou_fake_default() -> None:
+    configuration = WatsonFlowConfiguration(
+        api_base_url="https://example.invalid",
+        flow_id=WATSON_FLOW_ID,
+        iam_token_url=IBM_IAM_TOKEN_URL,
+        contract_version=WATSON_FLOW_CONTRACT_VERSION,
+        connect_timeout_seconds=3,
+        request_timeout_seconds=5,
+        max_response_bytes=1000,
+    )
+    limits = default_watson_flow_limits()
+    iam = FakeIamTokenProvider(
+        result=iam_token_success(SensitiveBearerToken("tok-test"))
+    )
+    flow = FakeWatsonFlowClient(
+        result=watson_flow_success(
+            {"success": True, "data": [], "columns": [], "row_count": 0},
+            invocation_id="inv",
+        )
+    )
+
+    preflight = create_watson_flow_preflight_adapter(
+        configuration=configuration,
+        limits=limits,
+        iam_token_provider=iam,
+        flow_client=flow,
+    )
+    executor = create_watson_flow_sql_executor(
+        configuration=configuration,
+        limits=limits,
+        iam_token_provider=iam,
+        flow_client=flow,
+    )
+
+    assert preflight.__class__.__name__ == "WatsonFlowEnginePreflightAdapter"
+    assert executor.__class__.__name__ == "WatsonFlowSqlExecutorAdapter"
+    assert iam.calls == 0
+    assert flow.calls == 0
+
+
 def test_application_service_exige_runtime_ou_graph() -> None:
     try:
         create_application_service(id_generator=lambda: "id-1")
@@ -730,6 +803,14 @@ def main() -> None:
         (
             "factory preflight live falha fechada",
             test_factory_preflight_live_falha_fechada_sem_rede,
+        ),
+        (
+            "watson flow factories exigem dependencias explicitas",
+            test_watson_flow_factories_exigem_dependencias_explicitas,
+        ),
+        (
+            "watson flow factories nao criam rede ou fake default",
+            test_watson_flow_factories_nao_criam_rede_ou_fake_default,
         ),
         (
             "application service exige runtime ou graph",

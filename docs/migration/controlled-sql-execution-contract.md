@@ -128,3 +128,14 @@ preflight seguro antes de permitir execucao real.
 - Tipos de coluna sao metadados livres do provider e devem ser validados no
   adapter real.
 - Timeout e cancelamento real dependem da capacidade do provider futuro.
+
+## Adapter Watson Flow offline
+
+`WatsonFlowSqlExecutorAdapter` implementa a porta existente `SqlExecutor` e
+consome apenas `SqlExecutionRequest.current_sql`. Ele prepara uma copia
+`sql_transport`, envia payload `{"sql_query": ...}` ao `WatsonFlowClient` com
+purpose `execution`, normaliza o retorno para `SqlExecutionProviderResult` e
+descarta token, raw output e SQL de transporte.
+
+Nao adiciona `limit`, nao chama tool direta, nao chama `validate_sql_query`, nao
+executa SQL localmente, nao faz retry e nao cria client live nesta fase.
