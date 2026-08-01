@@ -107,6 +107,16 @@ armazenar scope, body, headers, eventos ou tokens em estado global; nao logar
 eventos, headers ou body; nao iniciar servidor em `check_all.py`; nao adicionar
 Uvicorn/Hypercorn nesta fase. `http.disconnect` nao chama o handler. Depois de
 `http.response.start`, nao enviar segunda resposta.
+Watson Flow nesta fase existe apenas como contratos offline e adapters
+explicitamente injetados. O payload Watson contem somente `sql_query`; nunca
+enviar `limit` sem mudanca formal de contrato. `approved_sql` e
+`sql_transport` sao conceitos diferentes: compactar apenas uma copia de
+transporte, sem truncar, sem persistir e sem substituir a SQL original. Token
+IAM e value object sensivel e nao pode ser serializado, logado ou retornado.
+Raw output do Flow nao atravessa a fronteira do adapter. Cada adapter faz uma
+tentativa; retry deve ser decorator ou orquestracao explicita. Falhas de IAM,
+provider, timeout, rate limit, autenticacao, resposta invalida ou ambigua nunca
+acionam repair. `check_all.py` nunca acessa rede, socket, Watson ou IBM Cloud.
 
 ## Testes
 
@@ -128,3 +138,6 @@ Testes de auth usam fakes injetados, sem token real, rede, servidor, socket ou
 provider live.
 Testes ASGI usam harness em memoria, sem TestClient que abra socket, sem rede,
 sem servidor e sem framework externo.
+Testes Watson Flow usam FakeIamTokenProvider e FakeWatsonFlowClient injetados,
+sem token real, sem API key, sem rede, sem servidor, sem SQL e sem provider
+live.

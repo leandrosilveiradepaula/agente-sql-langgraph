@@ -32,6 +32,33 @@ SECRET_PATTERNS = [
         r"[^'\"]{12,}['\"]",
         re.IGNORECASE,
     ),
+    re.compile(r"\bIBM[-_A-Za-z0-9]{30,}\b"),
+    re.compile(
+        r"\bBearer\s+(?!<access_token>|example|dummy|test)[A-Za-z0-9._-]{12,}",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\baccess_token\s*[:=]\s*['\"]"
+        r"(?!<access_token>|example|dummy|test|placeholder)"
+        r"[^'\"]{8,}['\"]",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bAuthorization\s*[:=]\s*['\"]Bearer\s+"
+        r"(?!<access_token>|example|dummy|test|placeholder)"
+        r"[^'\"]{8,}['\"]",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bapikey\s*[:=]\s*['\"]"
+        r"(?!<configuracao segura>|example|dummy|test|placeholder)"
+        r"[^'\"]{8,}['\"]",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:supabase_api|huggingface_api|rivatti_lakehouse_api)\b",
+        re.IGNORECASE,
+    ),
 ]
 
 
@@ -68,6 +95,8 @@ def main() -> int:
     findings: list[str] = []
 
     for relative_path in _candidate_files():
+        if relative_path == "scripts/check_secrets.py":
+            continue
         if not _is_text_candidate(relative_path):
             continue
 

@@ -136,6 +136,38 @@ STEPS = [
         [sys.executable, "testar_asgi_http_integration.py"],
     ),
     (
+        "testar_watson_flow_configuration.py",
+        [sys.executable, "testar_watson_flow_configuration.py"],
+    ),
+    (
+        "testar_watson_sql_transport.py",
+        [sys.executable, "testar_watson_sql_transport.py"],
+    ),
+    (
+        "testar_iam_token_contract.py",
+        [sys.executable, "testar_iam_token_contract.py"],
+    ),
+    (
+        "testar_watson_flow_client_contract.py",
+        [sys.executable, "testar_watson_flow_client_contract.py"],
+    ),
+    (
+        "testar_watson_flow_response_normalizer.py",
+        [sys.executable, "testar_watson_flow_response_normalizer.py"],
+    ),
+    (
+        "testar_watson_flow_preflight_adapter.py",
+        [sys.executable, "testar_watson_flow_preflight_adapter.py"],
+    ),
+    (
+        "testar_watson_flow_sql_executor.py",
+        [sys.executable, "testar_watson_flow_sql_executor.py"],
+    ),
+    (
+        "testar_watson_flow_graph_integration.py",
+        [sys.executable, "testar_watson_flow_graph_integration.py"],
+    ),
+    (
         "testar_engine_preflight.py",
         [sys.executable, "testar_engine_preflight.py"],
     ),
