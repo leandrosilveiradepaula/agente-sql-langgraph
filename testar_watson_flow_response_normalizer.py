@@ -52,10 +52,13 @@ def main() -> None:
     assert _norm({"success": True, "data": [], "columns": []}).columns == []
     assert _norm({"success": True, "data": [{"a": 1}]}).columns == [{"name": "a"}]
     _bad({"success": True, "data": [{"a": 1, "b": 2}], "columns": ["a"]})
+    _bad({"success": True, "data": [{"a\n": 1}], "columns": ["a\n"]})
+    _bad({"success": True, "data": [{"a": 1}], "columns": ["a\x7f"]})
     assert _norm(SUCCESS).row_count == 1
     _bad({**SUCCESS, "row_count": 2})
     _bad({**SUCCESS, "row_count": True})
     assert _norm(SUCCESS).query_id == "fixture-query"
+    _bad({**SUCCESS, "query_id": "bad\nid"})
     _bad({**SUCCESS, "query_id": "x" * 200}, "WATSON_FLOW_RESPONSE_TOO_LARGE")
     assert _norm(SUCCESS).duration_ms == 12
     _bad({**SUCCESS, "execution_time_ms": -1})
@@ -96,7 +99,7 @@ def main() -> None:
     assert "raw_output" not in repr(result)
     assert _norm(raw).rows == _norm(raw).rows
     assert normalize_watson_flow_response(raw, "preflight", LIMITS).purpose == "preflight"
-    print("testar_watson_flow_response_normalizer.py: 42/42 OK")
+    print("testar_watson_flow_response_normalizer.py: 45/45 OK")
 
 
 if __name__ == "__main__":

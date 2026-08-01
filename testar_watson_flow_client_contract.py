@@ -57,13 +57,19 @@ def main() -> None:
     assert watson_flow_failure("rate_limited", invocation_id="inv", retry_after_seconds=1)["retry_after_seconds"] == 1
     _raises(lambda: watson_flow_failure("rate_limited", invocation_id="inv", retry_after_seconds=-1))
     assert "raw_output" in watson_flow_success({"success": True}, invocation_id="inv")
+    assert "secret-provider-body" not in repr(
+        watson_flow_success(
+            {"success": True, "data": "secret-provider-body"},
+            invocation_id="inv",
+        )
+    )
     assert "tok-test" not in repr(_request())
     req = _request()
     original = {"sql_query": "SELECT 1"}
     req2 = _request(payload=original)
     original["sql_query"] = "changed"
     assert req2["payload"]["sql_query"] == "SELECT 1"
-    print("testar_watson_flow_client_contract.py: 20/20 OK")
+    print("testar_watson_flow_client_contract.py: 21/21 OK")
 
 
 if __name__ == "__main__":

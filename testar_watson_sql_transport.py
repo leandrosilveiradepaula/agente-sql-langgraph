@@ -41,6 +41,10 @@ def main() -> None:
     assert _ok("SELECT a,b FROM t") == "SELECT a,b FROM t"
     assert _ok("SELECT (a) FROM t") == "SELECT(a) FROM t"
     assert _ok("SELECT a>=1 AND b<>2 FROM t") == "SELECT a>=1 AND b<>2 FROM t"
+    assert _ok("SELECT a - - b FROM t") == "SELECT a- -b FROM t"
+    assert _ok("SELECT a / * b FROM t") == "SELECT a/ *b FROM t"
+    assert _ok("SELECT a < > b FROM t") == "SELECT a< >b FROM t"
+    assert _ok("SELECT a < = b FROM t") == "SELECT a< =b FROM t"
     assert _ok("SELECT 10.5 FROM t") == "SELECT 10.5 FROM t"
     assert _ok("SELECT aFROM FROM t") == "SELECT aFROM FROM t"
     assert _ok("SELECT ab cd FROM t") == "SELECT ab cd FROM t"
@@ -66,7 +70,7 @@ def main() -> None:
     assert "limit" not in payload
     payload["sql_query"] = "changed"
     assert build_watson_flow_payload("SELECT 1")["sql_query"] == "SELECT 1"
-    print("testar_watson_sql_transport.py: 37/37 OK")
+    print("testar_watson_sql_transport.py: 41/41 OK")
 
 
 if __name__ == "__main__":

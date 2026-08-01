@@ -225,6 +225,8 @@ def _rows(value: object, limits: WatsonFlowLimits) -> list[dict[str, Any]]:
         for key, raw in item.items():
             if not isinstance(key, str) or not key.strip():
                 raise ValueError("WATSON_FLOW_INVALID_RESPONSE")
+            if _has_control(key):
+                raise ValueError("WATSON_FLOW_INVALID_RESPONSE")
             if len(key.encode("utf-8")) > limits.max_column_name_bytes:
                 raise ValueError("WATSON_FLOW_RESPONSE_TOO_LARGE")
             clean[key] = _cell(raw, limits)
@@ -244,7 +246,10 @@ def _columns(value: object, rows: list[dict[str, Any]], limits: WatsonFlowLimits
                 raw = item
             if not isinstance(raw, str) or not raw.strip():
                 raise ValueError("WATSON_FLOW_INVALID_RESPONSE")
-            names.append(raw.strip())
+            name = raw.strip()
+            if _has_control(name):
+                raise ValueError("WATSON_FLOW_INVALID_RESPONSE")
+            names.append(name)
     else:
         raise ValueError("WATSON_FLOW_INVALID_RESPONSE")
     if len(names) > limits.max_columns or len(names) * max(len(rows), 1) > limits.max_cells:
@@ -361,6 +366,8 @@ def _optional_text(value: object, max_bytes: int) -> str | None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("WATSON_FLOW_INVALID_RESPONSE")
     text = value.strip()
+    if _has_control(text):
+        raise ValueError("WATSON_FLOW_INVALID_RESPONSE")
     if len(text.encode("utf-8")) > max_bytes:
         raise ValueError("WATSON_FLOW_RESPONSE_TOO_LARGE")
     return text
@@ -418,3 +425,7 @@ def _invalid(
         repairable=False,
         diagnostics=(_diagnostic(code, message),),
     )
+
+
+def _has_control(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)

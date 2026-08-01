@@ -48,6 +48,17 @@ class WatsonFlowRunResult(TypedDict, total=False):
     diagnostics: dict[str, Any]
 
 
+class RedactedWatsonFlowRunResult(dict):
+    def __repr__(self) -> str:
+        safe = dict(self)
+        if "raw_output" in safe:
+            safe["raw_output"] = "<redacted>"
+        return dict.__repr__(safe)
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
+
 def watson_flow_run_request(
     *,
     flow_id: str,
@@ -99,13 +110,13 @@ def watson_flow_success(
 ) -> WatsonFlowRunResult:
     _validate_text(invocation_id, "invocation_id", 256)
     _validate_optional_non_negative(duration_ms, "duration_ms")
-    return {
+    return RedactedWatsonFlowRunResult({
         "status": "success",
         "raw_output": deepcopy(raw_output),
         "invocation_id": invocation_id,
         "duration_ms": duration_ms,
         "diagnostics": {},
-    }
+    })
 
 
 def watson_flow_failure(
@@ -146,7 +157,7 @@ def watson_flow_failure(
         "rate_limited": "WATSON_FLOW_RATE_LIMITED",
         "unexpected_error": "WATSON_FLOW_UNEXPECTED_ERROR",
     }[status]
-    return {
+    return RedactedWatsonFlowRunResult({
         "status": status,
         "http_status": http_status,
         "retry_after_seconds": retry_after_seconds,
@@ -155,7 +166,7 @@ def watson_flow_failure(
         "public_error_code": code,
         "public_error_message": "Watson Flow falhou de forma estruturada.",
         "diagnostics": _sanitized_diagnostics(diagnostics),
-    }
+    })
 
 
 def _validate_text(value: object, name: str, maximum_bytes: int) -> None:

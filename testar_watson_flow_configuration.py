@@ -57,6 +57,7 @@ def main() -> None:
     assert _config(iam_token_url=IBM_IAM_TOKEN_URL).iam_token_url.endswith(
         "/identity/token"
     )
+    _raises(lambda: _config(api_base_url="https://"))
     _raises(lambda: _config(iam_token_url="https://iam.invalid/token?a=1"))
     assert _config(flow_id=FLOW_ID).flow_id == FLOW_ID
     _raises(lambda: _config(flow_id=""))
@@ -75,7 +76,7 @@ def main() -> None:
     )
     _raises(lambda: setattr(cfg, "flow_id", FLOW_ID))
     assert "api_key" not in repr(cfg).casefold()
-    print("testar_watson_flow_configuration.py: 21/21 OK")
+    print("testar_watson_flow_configuration.py: 22/22 OK")
 
 
 if __name__ == "__main__":

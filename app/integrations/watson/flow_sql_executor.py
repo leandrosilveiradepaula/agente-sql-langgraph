@@ -6,7 +6,10 @@ from app.domain.sql_execution import (
     SqlExecutionProviderResult,
     SqlExecutionRequest,
 )
-from app.integrations.watson.configuration import WatsonFlowConfiguration
+from app.integrations.watson.configuration import (
+    WATSON_FLOW_CONTRACT_VERSION,
+    WatsonFlowConfiguration,
+)
 from app.integrations.watson.flow_contracts import watson_flow_run_request
 from app.integrations.watson.flow_limits import WatsonFlowLimits
 from app.integrations.watson.flow_response_normalizer import (
@@ -156,7 +159,7 @@ def _execution_error(
     return {
         "status": status,  # type: ignore[typeddict-item]
         "provider_name": "watson_flow_sql_executor",
-        "provider_version": "watson-flow-n8n-v2.2.31-2026-08-01",
+        "provider_version": WATSON_FLOW_CONTRACT_VERSION,
         "failure_category": category,  # type: ignore[typeddict-item]
         "error_code": code,  # type: ignore[typeddict-item]
         "message": message,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from urllib.parse import urlparse
 from uuid import UUID
 
 from app.integrations.watson.flow_limits import (
@@ -96,14 +95,14 @@ def _validated_url(
     lowered = text.casefold()
     if any(marker in lowered for marker in ("apikey=", "access_token", "bearer ")):
         raise WatsonFlowContractError(f"{field_name} contem segredo.")
-    parsed = urlparse(text)
-    if parsed.scheme != "https" or not parsed.hostname:
+    parsed = _split_https_url(text)
+    if parsed is None:
         raise WatsonFlowContractError(f"{field_name} deve usar HTTPS com host.")
-    if parsed.username or parsed.password:
+    authority, path = parsed
+    if "@" in authority:
         raise WatsonFlowContractError(f"{field_name} nao permite userinfo.")
-    if parsed.query or parsed.fragment:
+    if "?" in text or "#" in text:
         raise WatsonFlowContractError(f"{field_name} nao permite query/fragment.")
-    path = parsed.path or ""
     if not allow_path and path not in {"", "/"}:
         raise WatsonFlowContractError(f"{field_name} nao permite path.")
     if not allow_path and text.endswith("/"):
@@ -140,3 +139,21 @@ def _optional_public_text(value: str | None, field_name: str) -> None:
 
 def _has_control(value: str) -> bool:
     return any((ord(char) < 32 and char not in "\t\r\n") or ord(char) == 127 for char in value)
+
+
+def _split_https_url(value: str) -> tuple[str, str] | None:
+    prefix = "https://"
+    if not value.startswith(prefix):
+        return None
+    rest = value[len(prefix) :]
+    if not rest:
+        return None
+    slash_index = rest.find("/")
+    authority = rest if slash_index < 0 else rest[:slash_index]
+    path = "" if slash_index < 0 else rest[slash_index:]
+    if not authority or authority.startswith(".") or authority.endswith("."):
+        return None
+    host = authority.rsplit(":", 1)[0] if ":" in authority else authority
+    if not host or any(char.isspace() for char in authority):
+        return None
+    return authority, path

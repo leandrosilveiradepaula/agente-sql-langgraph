@@ -19,6 +19,16 @@ class WatsonSqlTransportResult:
 
 _NO_SPACE_BEFORE = {",", ")", ".", "::", ";", "+", "-", "*", "/", "%", "=", "<", ">", "<=", ">=", "<>", "!=", "||"}
 _NO_SPACE_AFTER = {"(", ".", "::", "+", "-", "*", "/", "%", "=", "<", ">", "<=", ">=", "<>", "!=", "||"}
+_MERGE_SENSITIVE_OPERATOR_PAIRS = {
+    ("-", "-"),
+    ("/", "*"),
+    ("<", ">"),
+    ("<", "="),
+    (">", "="),
+    ("!", "="),
+    ("|", "|"),
+    (":", ":"),
+}
 
 
 def build_watson_flow_payload(sql_transport: str) -> dict[str, object]:
@@ -173,6 +183,8 @@ def _join_tokens(tokens: list[str]) -> str:
 def _needs_space(previous: str, current: str) -> bool:
     if not previous or previous == " ":
         return False
+    if (previous, current) in _MERGE_SENSITIVE_OPERATOR_PAIRS:
+        return True
     if current in _NO_SPACE_BEFORE or previous in _NO_SPACE_AFTER:
         return False
     return _token_can_merge(previous[-1], current[0])
