@@ -48,11 +48,18 @@ def validate_asgi_adapter_limits(
         "max_response_header_value_bytes": 8_192,
     }
     output: dict[str, int] = {}
+    minimums = {
+        "max_response_headers": 6,
+        "max_response_header_name_bytes": 22,
+        "max_response_header_value_bytes": 31,
+    }
     for key, maximum in maximums.items():
         value = limits.get(key, defaults[key])
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError("Limite ASGI invalido.")
         if value <= 0 or value > maximum:
+            raise ValueError("Limite ASGI fora da faixa.")
+        if value < minimums.get(key, 1):
             raise ValueError("Limite ASGI fora da faixa.")
         output[key] = value
     return output  # type: ignore[return-value]

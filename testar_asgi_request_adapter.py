@@ -72,6 +72,7 @@ def test_scope_invalidos() -> None:
 def test_method_invalidos() -> None:
     _raises(scope=_scope(method=None))
     _raises(scope=_scope(method=""))
+    _raises(scope=_scope(method="   "))
     _raises(scope=_scope(method="PO\nST"))
 
 

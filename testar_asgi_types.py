@@ -31,6 +31,10 @@ def test_zero_negativo_excessivo() -> None:
             validate_asgi_adapter_limits,
             {**default_asgi_adapter_limits(), "max_request_chunks": value},
         )
+    _raises(
+        validate_asgi_adapter_limits,
+        {**default_asgi_adapter_limits(), "max_response_headers": 1},
+    )
 
 
 def test_compatibilidade_body_headers() -> None:

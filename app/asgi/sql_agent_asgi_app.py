@@ -146,7 +146,15 @@ async def send_asgi_response(
     limits: AsgiAdapterLimits,
 ) -> None:
     prepared = prepare_asgi_response_events(response, limits=limits)
-    await send(prepared[0])
+    try:
+        await send(prepared[0])
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        del error
+        failure = AsgiError("ASGI_SEND_FAILED", status_code=500)
+        failure.response_started = True  # type: ignore[attr-defined]
+        raise failure
     try:
         await send(prepared[1])
     except asyncio.CancelledError:
@@ -319,8 +327,12 @@ def _response_header_pairs(
     for name, value in headers.items():
         if not isinstance(name, str) or not isinstance(value, str):
             raise AsgiError("ASGI_HANDLER_RESULT_INVALID", status_code=500)
-        name_bytes = name.lower().encode("ascii")
-        value_bytes = value.encode("latin-1")
+        try:
+            name_bytes = name.lower().encode("ascii")
+            value_bytes = value.encode("latin-1")
+        except UnicodeEncodeError as error:
+            del error
+            raise AsgiError("ASGI_HANDLER_RESULT_INVALID", status_code=500)
         if (
             not name
             or name.startswith(":")
@@ -350,7 +362,7 @@ def _response_header_pairs(
 
 
 def _safe_text(value: object, max_bytes: int) -> bool:
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or not value.strip():
         return False
     if len(value.encode("utf-8")) > max_bytes:
         return False

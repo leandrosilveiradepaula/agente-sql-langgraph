@@ -63,9 +63,11 @@ def test_um_start_e_um_body() -> None:
 
 def test_response_invalidas() -> None:
     _raises(_response(status=99))
+    _raises(_response(status=True))
     _raises({"status_code": 200, "headers": {}, "body": "bad"})
     _raises(_response(headers={"Bad\nName": "x"}))
     _raises(_response(headers={"X-Test": "bad\r"}))
+    _raises(_response(headers={"X-Test": "valor-€"}))
     _raises(
         _response(headers={f"X-{index}": "v" for index in range(40)}),
         limits={**default_asgi_adapter_limits(), "max_response_headers": 10},

@@ -41,6 +41,7 @@ class Send:
 
     async def __call__(self, event):
         if event["type"] == self.fail_on:
+            self.events.append(deepcopy(event))
             raise RuntimeError("send failed with sensitive value")
         self.events.append(deepcopy(event))
 
@@ -124,15 +125,15 @@ def test_sem_retry_e_um_start() -> None:
 
 
 def test_send_failures() -> None:
-    try:
-        _run(send=Send(fail_on="http.response.start"))
-    except RuntimeError:
-        pass
-    else:
-        raise AssertionError("Falha no response.start deveria propagar.")
-    send = Send(fail_on="http.response.body")
+    send = Send(fail_on="http.response.start")
     _run(send=send)
     assert [event["type"] for event in send.events] == ["http.response.start"]
+    body_send = Send(fail_on="http.response.body")
+    _run(send=body_send)
+    assert [event["type"] for event in body_send.events] == [
+        "http.response.start",
+        "http.response.body",
+    ]
 
 
 def test_cancelled_error_preservado() -> None:
