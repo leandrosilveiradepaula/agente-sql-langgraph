@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -37,6 +38,15 @@ def main() -> None:
     env["IBM_CLOUD_API_KEY"] = "fake-api-key-for-test"
     denied = _run("live-execution", env=env, input_text="NAO\n")
     assert denied.returncode == 5
+    no_temp = dict(os.environ)
+    no_temp.pop("TEMP", None)
+    no_temp.pop("TMP", None)
+    assert _run("dry-run", env=no_temp).returncode == 2
+    with tempfile.NamedTemporaryFile() as temp_file:
+        invalid_temp = dict(os.environ)
+        invalid_temp["TEMP"] = temp_file.name
+        invalid_temp["TMP"] = temp_file.name
+        assert _run("dry-run", env=invalid_temp).returncode == 2
     assert "manual_watson_flow_probe.py" in text
     assert "--purpose execution" in text
     assert "--purpose %~1" in text
@@ -52,7 +62,7 @@ def main() -> None:
     assert "setlocal" in text.casefold()
     assert "sessao CMD pai" in text
     assert "EXECUTAR TEST" in text
-    print("testar_watson_test_probe_cmd.py: 20/20 OK")
+    print("testar_watson_test_probe_cmd.py: 22/22 OK")
 
 
 if __name__ == "__main__":

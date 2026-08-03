@@ -51,13 +51,22 @@ class Scenario:
     name: str
     kind: str
     result: object
+    evidence: str = ""
 
 
-def _json(body: bytes, *, status: int = 200, content_type: str = "application/json"):
+def _json(
+    body: bytes,
+    *,
+    status: int = 200,
+    content_type: str = "application/json",
+    headers: dict[str, str] | None = None,
+):
+    response_headers = {"Content-Type": content_type}
+    response_headers.update(headers or {})
     return http_transport_success(
         HttpTransportResponse(
             status_code=status,
-            headers={"Content-Type": content_type},
+            headers=response_headers,
             body=body,
             duration_ms=1,
         )
@@ -171,8 +180,18 @@ def scenarios() -> list[Scenario]:
         Scenario("IAM TLS failure", "preflight_error", _preflight([http_transport_failure("tls_failure")])),
         Scenario("Flow 401", "preflight_error", _preflight([_json(IAM_OK), _json(b"{}", status=401)])),
         Scenario("Flow 403", "preflight_error", _preflight([_json(IAM_OK), _json(b"{}", status=403)])),
-        Scenario("Flow 429 Retry-After valid", "preflight_error", _preflight([_json(IAM_OK), _json(b"{}", status=429, content_type="application/json")])),
-        Scenario("Flow 429 Retry-After invalid", "preflight_error", _preflight([_json(IAM_OK), _json(b"{}", status=429, content_type="application/json")])),
+        Scenario(
+            "Flow 429 Retry-After valid",
+            "preflight_error",
+            _preflight([_json(IAM_OK), _json(b"{}", status=429, headers={"Retry-After": "1"})]),
+            "retry_after_valid",
+        ),
+        Scenario(
+            "Flow 429 Retry-After invalid",
+            "preflight_error",
+            _preflight([_json(IAM_OK), _json(b"{}", status=429, headers={"Retry-After": "invalid"})]),
+            "retry_after_invalid",
+        ),
         Scenario("Flow 500", "preflight_error", _preflight([_json(IAM_OK), _json(b"{}", status=500)])),
         Scenario("Flow timeout", "preflight_error", _preflight([_json(IAM_OK), http_transport_failure("timeout")])),
         Scenario("Flow DNS failure", "preflight_error", _preflight([_json(IAM_OK), http_transport_failure("dns_failure")])),
@@ -202,6 +221,10 @@ def scenarios() -> list[Scenario]:
 
 def _passed(scenario: Scenario) -> bool:
     result = scenario.result
+    if scenario.name == "Flow 429 Retry-After valid" and scenario.evidence != "retry_after_valid":
+        return False
+    if scenario.name == "Flow 429 Retry-After invalid" and scenario.evidence != "retry_after_invalid":
+        return False
     if scenario.kind == "preflight_error":
         return isinstance(result, dict) and result.get("status") != "approved"
     if scenario.kind == "execution_error":

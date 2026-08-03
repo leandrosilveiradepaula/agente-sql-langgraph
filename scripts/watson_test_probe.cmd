@@ -33,8 +33,25 @@ if not exist "%PROBE_SCRIPT%" (
 )
 exit /b 0
 
+:check_temp
+if not defined TEMP (
+  echo TEMP ausente.
+  exit /b 2
+)
+if not exist "%TEMP%\" (
+  echo TEMP invalido.
+  exit /b 2
+)
+exit /b 0
+
 :prepare_sql
+call :check_temp
+if errorlevel 1 exit /b %errorlevel%
 if not exist "%WORK_DIR%" mkdir "%WORK_DIR%" >nul 2>nul
+if errorlevel 1 (
+  echo TEMP invalido.
+  exit /b 2
+)
 "%PYTHON_EXE%" -c "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('SELECT 1 AS adapter_contract_probe', encoding='utf-8')" "%SQL_FILE%"
 if errorlevel 1 (
   echo Falha ao criar SQL temporaria.
@@ -118,6 +135,8 @@ echo Se ela existir no CMD pai, execute: set "IBM_CLOUD_API_KEY="
 exit /b %PROBE_CODE%
 
 :clean
+call :check_temp
+if errorlevel 1 exit /b %errorlevel%
 if exist "%WORK_DIR%" rmdir /s /q "%WORK_DIR%" >nul 2>nul
 set "IBM_CLOUD_API_KEY="
 echo Limpeza local concluida. Para limpar o CMD pai, execute: set "IBM_CLOUD_API_KEY="

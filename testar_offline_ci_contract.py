@@ -14,6 +14,7 @@ def main() -> None:
     assert "workflow_dispatch:" in text
     assert "windows-latest" in text
     assert "actions/setup-python" in text
+    assert "fetch-depth: 0" in text
     assert "permissions:" in text and "contents: read" in text
     assert ("${{ " + "secrets" + ".") not in lowered
     assert "--execute-live" not in text
@@ -27,12 +28,12 @@ def main() -> None:
         "scripts/check_hardcodes.py",
         "scripts/check_secrets.py",
         "scripts/check_clean_room.py",
-        "git diff --check",
+        "git diff --check origin/master...HEAD",
     ]:
         assert checker in text
     assert "upload-artifact" not in lowered
     assert "IBM_CLOUD_API_KEY" not in text
-    print("testar_offline_ci_contract.py: 15/15 OK")
+    print("testar_offline_ci_contract.py: 17/17 OK")
 
 
 if __name__ == "__main__":

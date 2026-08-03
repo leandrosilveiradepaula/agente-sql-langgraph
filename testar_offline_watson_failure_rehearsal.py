@@ -17,6 +17,10 @@ def main() -> None:
     assert "rate limit no retry" in names
     assert "timeout no retry" in names
     assert "no compact transport crosses" in names
+    valid = next(item for item in items if item.name == "Flow 429 Retry-After valid")
+    invalid = next(item for item in items if item.name == "Flow 429 Retry-After invalid")
+    assert valid.evidence == "retry_after_valid"
+    assert invalid.evidence == "retry_after_invalid"
     assert all(rehearsal._passed(item) for item in items)
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
@@ -25,7 +29,7 @@ def main() -> None:
     assert "FAILURE_REHEARSAL_OK" in output
     for marker in rehearsal.FORBIDDEN_OUTPUT:
         assert marker not in output
-    print("testar_offline_watson_failure_rehearsal.py: 11/11 OK")
+    print("testar_offline_watson_failure_rehearsal.py: 13/13 OK")
 
 
 if __name__ == "__main__":

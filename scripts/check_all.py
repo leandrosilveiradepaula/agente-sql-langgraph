@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 STEPS = [
-    ("compileall app", [sys.executable, "-m", "compileall", "app"]),
+    ("check_compile.py", [sys.executable, "scripts/check_compile.py"]),
     ("check_imports.py", [sys.executable, "scripts/check_imports.py"]),
     ("check_no_network.py", [sys.executable, "scripts/check_no_network.py"]),
     (
@@ -326,10 +326,14 @@ if os.environ.get("SQL_AGENT_CLEAN_ROOM") != "1":
 def main() -> int:
     for name, command in STEPS:
         print(f"==> {name}")
+        env = dict(os.environ)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env["PYTHONUTF8"] = "1"
         completed = subprocess.run(
             command,
             cwd=ROOT,
             text=True,
+            env=env,
         )
         if completed.returncode != 0:
             print(f"FALHOU: {name}", file=sys.stderr)

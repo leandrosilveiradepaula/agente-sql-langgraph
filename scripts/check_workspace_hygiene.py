@@ -17,6 +17,9 @@ SUSPICIOUS_NAME_MARKERS = {
 }
 FORBIDDEN_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".log", ".dump"}
 FORBIDDEN_NAMES = {".env"}
+CACHE_DIR_NAMES = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+PROJECT_TEMP_DIR_NAMES = {"tmp", "temp"}
+EXCLUDED_DIR_NAMES = {".git", ".venv", "venv", "env", "node_modules"}
 
 
 def _git_files() -> list[str]:
@@ -32,11 +35,17 @@ def _git_files() -> list[str]:
 
 def inspect_workspace(root: Path = ROOT) -> list[tuple[str, str, str]]:
     findings: list[tuple[str, str, str]] = []
-    for relative in _git_files() if root == ROOT else _walk_temp(root):
-        path = root / relative
+    paths = _repo_paths(root) if root == ROOT else _walk_temp(root)
+    for relative, path in paths:
+        lowered = path.name.casefold()
+        if path.is_dir():
+            if lowered in CACHE_DIR_NAMES:
+                findings.append((relative, "python_cache", "remover cache gerado"))
+            elif lowered in PROJECT_TEMP_DIR_NAMES:
+                findings.append((relative, "temporary_directory", "remover diretorio temporario"))
+            continue
         if not path.exists() or path.is_dir() or path.is_symlink():
             continue
-        lowered = path.name.casefold()
         suffix = path.suffix.casefold()
         if path.name == ".env.example":
             pass
@@ -55,11 +64,30 @@ def inspect_workspace(root: Path = ROOT) -> list[tuple[str, str, str]]:
     return findings
 
 
-def _walk_temp(root: Path) -> list[str]:
-    paths: list[str] = []
+def _repo_paths(root: Path) -> list[tuple[str, Path]]:
+    git_seen = set(_git_files())
+    paths: dict[str, Path] = {}
+    for relative in git_seen:
+        paths[relative] = root / relative
+    for relative, path in _walk_temp(root):
+        paths.setdefault(relative, path)
+    return sorted(paths.items())
+
+
+def _walk_temp(root: Path) -> list[tuple[str, Path]]:
+    paths: list[tuple[str, Path]] = []
     for path in root.rglob("*"):
-        if path.is_file() and not path.is_symlink():
-            paths.append(path.relative_to(root).as_posix())
+        relative = path.relative_to(root).as_posix()
+        parts = {part.casefold() for part in path.relative_to(root).parts}
+        if parts & EXCLUDED_DIR_NAMES:
+            continue
+        if path.is_symlink():
+            continue
+        if path.is_dir() and path.name.casefold() in CACHE_DIR_NAMES | PROJECT_TEMP_DIR_NAMES:
+            paths.append((relative, path))
+            continue
+        if path.is_file():
+            paths.append((relative, path))
     return paths
 
 
