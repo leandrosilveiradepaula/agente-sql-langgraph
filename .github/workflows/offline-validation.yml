@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - master
+      - main
   workflow_dispatch:
 
 permissions:
@@ -51,8 +51,26 @@ jobs:
       - name: Whitespace check
         shell: pwsh
         run: |
-          if (git rev-parse --verify origin/master) {
-            git diff --check origin/master...HEAD
+          if ("${{ github.event_name }}" -eq "pull_request") {
+            $base = "origin/${{ github.base_ref }}"
+            git rev-parse --verify $base
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            git diff --check "$base...HEAD"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } elseif ("${{ github.event_name }}" -eq "push") {
+            git rev-parse --verify "HEAD^" *> $null
+            if ($LASTEXITCODE -eq 0) {
+              git diff --check "HEAD^"
+            } else {
+              git diff --check --root HEAD
+            }
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            git diff --check
+            git rev-parse --verify "HEAD^" *> $null
+            if ($LASTEXITCODE -eq 0) {
+              git diff --check "HEAD^"
+            } else {
+              git diff --check --root HEAD
+            }
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
