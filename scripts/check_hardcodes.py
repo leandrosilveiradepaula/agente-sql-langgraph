@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -65,6 +66,30 @@ PLANNER_FILES = {
     "app/ports/sql_repairer.py",
 }
 
+WATSON_URL_PATTERN = re.compile(
+    r"https://[A-Za-z0-9_.-]*watson[A-Za-z0-9_./:-]*",
+    re.IGNORECASE,
+)
+UUID_PATTERN = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
+SANITIZED_FILES = {
+    "scripts/watson_test_probe.cmd",
+    "docs/baselines/pre-live-readiness-baseline.md",
+}
+SQL_ALLOWED_FILES = {
+    "scripts/watson_test_probe.cmd",
+    "docs/runbooks/watson-test-first-live-probe.md",
+    "docs/runbooks/watson-test-pre-live-checklist.md",
+    "testar_manual_watson_flow_probe.py",
+    "testar_watson_test_probe_cmd.py",
+    "testar_check_no_network.py",
+    "scripts/offline_watson_failure_rehearsal.py",
+    "testar_offline_watson_failure_rehearsal.py",
+    "scripts/check_hardcodes.py",
+}
+
 
 def _versioned_python_files() -> list[str]:
     completed = subprocess.run(
@@ -85,6 +110,29 @@ def _versioned_python_files() -> list[str]:
         line.strip().replace("\\", "/")
         for line in completed.stdout.splitlines()
         if line.strip() and line.strip().endswith(".py")
+    ]
+
+
+def _versioned_text_files() -> list[str]:
+    completed = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return [
+        line.strip().replace("\\", "/")
+        for line in completed.stdout.splitlines()
+        if line.strip()
+        and Path(line.strip()).suffix.casefold()
+        in {".py", ".md", ".cmd", ".yml", ".yaml"}
     ]
 
 
@@ -118,6 +166,18 @@ def main() -> int:
                     findings.append(
                         f"{relative_path}: referencia externa bloqueada {term}"
                     )
+
+    for relative_path in _versioned_text_files():
+        text = (ROOT / relative_path).read_text(encoding="utf-8").casefold()
+        if relative_path in SANITIZED_FILES:
+            if WATSON_URL_PATTERN.search(text):
+                findings.append(f"{relative_path}: URL Watson fixa bloqueada")
+            if UUID_PATTERN.search(text):
+                findings.append(f"{relative_path}: flow ID completo bloqueado")
+        if "select 1 as adapter_contract_probe" in text and relative_path not in SQL_ALLOWED_FILES:
+            findings.append(
+                f"{relative_path}: SQL sintetica fora de arquivo autorizado"
+            )
 
     if findings:
         print("Hardcodes bloqueados encontrados:")

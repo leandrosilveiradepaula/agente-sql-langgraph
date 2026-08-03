@@ -162,3 +162,13 @@ FakeHttpTransport. A composition root pode construir objetos live, mas isso
 nao pode consultar secret, IAM, Watson, env, rede, socket, servidor,
 PostgreSQL ou executar SQL. O runner offline pode simular IAM e Flow com fakes
 e pode entrar no `check_all.py`; probe live nunca entra no `check_all.py`.
+CI e `check_all.py` sao offline. `scripts/check_clean_room.py` e executado
+separadamente para evitar recursao; quando ele chama `check_all.py`, o ambiente
+clean-room desabilita `pip check`. O network guard e obrigatorio para testes
+criticos e deve bloquear rede real apenas no subprocesso protegido. O launcher
+CMD nao armazena secrets, nao usa `setx`, nao faz retry, nao limpa variaveis da
+sessao CMD pai quando usa `setlocal` e deve recomendar a limpeza manual
+`set "IBM_CLOUD_API_KEY="`. Probe live e sempre uma tentativa unica, fora do CI,
+sem cache, retry, backoff ou probe automatico. Failure rehearsal usa somente
+fakes. Workspace hygiene e dependency checker sao obrigatorios e operam offline,
+sem apagar arquivos e sem consultar PyPI.
