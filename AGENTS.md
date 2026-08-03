@@ -117,6 +117,14 @@ Raw output do Flow nao atravessa a fronteira do adapter. Cada adapter faz uma
 tentativa; retry deve ser decorator ou orquestracao explicita. Falhas de IAM,
 provider, timeout, rate limit, autenticacao, resposta invalida ou ambigua nunca
 acionam repair. `check_all.py` nunca acessa rede, socket, Watson ou IBM Cloud.
+O dry-run do probe Watson nao exige secret, nao acessa `SecretValueProvider`,
+nao cria adapters live e nao acessa rede. Somente live mode pode consultar API
+key, sempre depois de validar arquivo SQL, compactacao, payload, configuracao
+nao sensivel e confirmacao TEST. A composition root Watson TEST aceita somente
+`DeploymentEnvironment.TEST`, rejeita PROD/production/prd/live, nao infere TEST
+pela URL e nao altera o bootstrap padrao offline. Operacao Windows deve
+documentar comandos CMD quando o usuario pedir fluxo operacional; nunca usar
+`setx` para secrets. Probe live continua manual, sem retry automatico.
 
 ## Testes
 
@@ -149,3 +157,8 @@ permanece offline. O script manual Watson exige confirmacao explicita para
 rede, nao imprime body IAM/Flow, token, API key ou Authorization, nao segue
 redirect, nao aceita TLS inseguro, nao usa proxy env e nao implementa retry
 interno.
+Testes de composition root Watson TEST usam FakeSecretValueProvider e
+FakeHttpTransport. A composition root pode construir objetos live, mas isso
+nao pode consultar secret, IAM, Watson, env, rede, socket, servidor,
+PostgreSQL ou executar SQL. O runner offline pode simular IAM e Flow com fakes
+e pode entrar no `check_all.py`; probe live nunca entra no `check_all.py`.

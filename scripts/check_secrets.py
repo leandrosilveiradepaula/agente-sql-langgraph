@@ -36,7 +36,7 @@ SECRET_PATTERNS = [
     re.compile(
         r"\b(?:IBM_CLOUD_API_KEY|apikey)\s*[:=]\s*['\"]"
         r"(?!\s*(?:<secret externo>|example|dummy|test|placeholder|xxx))"
-        r"[^'\"]{8,}['\"]",
+        r"[^'\"\r\n]{8,}['\"]",
         re.IGNORECASE,
     ),
     re.compile(
@@ -65,6 +65,16 @@ SECRET_PATTERNS = [
         r"(?!<configuracao segura>|example|dummy|test|placeholder)"
         r"[^'\"]{8,}['\"]",
         re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*setx\s+IBM_CLOUD_API_KEY\b",
+        re.IGNORECASE | re.MULTILINE,
+    ),
+    re.compile(
+        r"^\s*set\s+\"?IBM_CLOUD_API_KEY\s*=\s*"
+        r"(?!\"?\s*$)(?!\"?%)(?!\"?<)(?!\"?example)(?!\"?dummy)(?!\"?test)"
+        r"[^\"\r\n]{8,}",
+        re.IGNORECASE | re.MULTILINE,
     ),
     re.compile(
         r"\b(?:supabase_api|huggingface_api|rivatti_lakehouse_api)\b",
