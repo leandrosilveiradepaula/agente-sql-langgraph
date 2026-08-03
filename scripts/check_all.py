@@ -12,6 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 STEPS = [
     ("check_compile.py", [sys.executable, "scripts/check_compile.py"]),
     ("check_imports.py", [sys.executable, "scripts/check_imports.py"]),
+    (
+        "check_tracked_runtime_files.py",
+        [sys.executable, "scripts/check_tracked_runtime_files.py"],
+    ),
     ("check_no_network.py", [sys.executable, "scripts/check_no_network.py"]),
     (
         "check_workspace_hygiene.py",
@@ -28,6 +32,10 @@ STEPS = [
         [sys.executable, "testar_check_no_network.py"],
     ),
     ("testar_check_imports.py", [sys.executable, "testar_check_imports.py"]),
+    (
+        "testar_tracked_runtime_files.py",
+        [sys.executable, "testar_tracked_runtime_files.py"],
+    ),
     (
         "testar_watson_test_probe_cmd.py",
         [sys.executable, "testar_watson_test_probe_cmd.py"],

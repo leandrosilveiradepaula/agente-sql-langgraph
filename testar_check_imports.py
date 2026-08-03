@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+
 import scripts.check_imports as check
 
 

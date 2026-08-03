@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import sys
 import tempfile
 from pathlib import Path
+
+sys.dont_write_bytecode = True
 
 import scripts.check_workspace_hygiene as hygiene
 
@@ -33,7 +36,10 @@ def main() -> None:
     assert ".pfx" in hygiene.FORBIDDEN_SUFFIXES
     assert "api_key" in hygiene.SUSPICIOUS_NAME_MARKERS
     assert hygiene.inspect_workspace(Path(tempfile.mkdtemp())) == []
-    print("testar_workspace_hygiene.py: 11/11 OK")
+    assert "runtime_tracking_unavailable" in {
+        item[1] for item in hygiene._runtime_tracking_findings(Path(tempfile.mkdtemp()))
+    }
+    print("testar_workspace_hygiene.py: 12/12 OK")
 
 
 if __name__ == "__main__":

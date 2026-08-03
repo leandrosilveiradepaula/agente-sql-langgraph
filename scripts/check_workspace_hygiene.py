@@ -5,7 +5,12 @@ import sys
 from pathlib import Path
 
 
+sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import scripts.check_tracked_runtime_files as tracked_runtime
 MAX_EXPECTED_FILE_BYTES = 5_000_000
 
 SUSPICIOUS_NAME_MARKERS = {
@@ -61,7 +66,24 @@ def inspect_workspace(root: Path = ROOT) -> list[tuple[str, str, str]]:
             findings.append((relative, "temporary_sql", "remover SQL temporaria"))
         if path.stat().st_size > MAX_EXPECTED_FILE_BYTES:
             findings.append((relative, "large_file", "validar necessidade antes de versionar"))
+    if root == ROOT:
+        findings.extend(_runtime_tracking_findings(root))
     return findings
+
+
+def _runtime_tracking_findings(root: Path) -> list[tuple[str, str, str]]:
+    try:
+        findings = tracked_runtime.inspect_runtime_files(root)
+    except RuntimeError:
+        return [(".", "runtime_tracking_unavailable", "executar dentro de um repositorio Git")]
+    return [
+        (
+            finding.path,
+            finding.category,
+            "rastrear arquivo Python necessario em runtime",
+        )
+        for finding in findings
+    ]
 
 
 def _repo_paths(root: Path) -> list[tuple[str, Path]]:
