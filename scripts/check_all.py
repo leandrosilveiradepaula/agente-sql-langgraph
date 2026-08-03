@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import os
 from pathlib import Path
 
 
@@ -10,6 +11,40 @@ ROOT = Path(__file__).resolve().parents[1]
 
 STEPS = [
     ("compileall app", [sys.executable, "-m", "compileall", "app"]),
+    ("check_imports.py", [sys.executable, "scripts/check_imports.py"]),
+    ("check_no_network.py", [sys.executable, "scripts/check_no_network.py"]),
+    (
+        "check_workspace_hygiene.py",
+        [sys.executable, "scripts/check_workspace_hygiene.py"],
+    ),
+    ("check_dependencies.py", [sys.executable, "scripts/check_dependencies.py"]),
+    (
+        "offline_watson_failure_rehearsal.py",
+        [sys.executable, "scripts/offline_watson_failure_rehearsal.py"],
+    ),
+    ("testar_clean_room.py", [sys.executable, "testar_clean_room.py"]),
+    (
+        "testar_check_no_network.py",
+        [sys.executable, "testar_check_no_network.py"],
+    ),
+    ("testar_check_imports.py", [sys.executable, "testar_check_imports.py"]),
+    (
+        "testar_watson_test_probe_cmd.py",
+        [sys.executable, "testar_watson_test_probe_cmd.py"],
+    ),
+    (
+        "testar_offline_watson_failure_rehearsal.py",
+        [sys.executable, "testar_offline_watson_failure_rehearsal.py"],
+    ),
+    (
+        "testar_workspace_hygiene.py",
+        [sys.executable, "testar_workspace_hygiene.py"],
+    ),
+    ("testar_dependencies.py", [sys.executable, "testar_dependencies.py"]),
+    (
+        "testar_offline_ci_contract.py",
+        [sys.executable, "testar_offline_ci_contract.py"],
+    ),
     (
         "testar_intent_resolver.py",
         [sys.executable, "testar_intent_resolver.py"],
@@ -282,8 +317,10 @@ STEPS = [
     ),
     ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
     ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),
-    ("pip check", [sys.executable, "-m", "pip", "check"]),
 ]
+
+if os.environ.get("SQL_AGENT_CLEAN_ROOM") != "1":
+    STEPS.append(("pip check", [sys.executable, "-m", "pip", "check"]))
 
 
 def main() -> int:

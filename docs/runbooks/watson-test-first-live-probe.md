@@ -2,6 +2,12 @@
 
 Runbook operacional para CMD no Windows. Nao use PowerShell nesta pagina.
 
+Launcher CMD seguro disponivel: `scripts\watson_test_probe.cmd help`.
+Ele nao substitui as instrucoes manuais abaixo; apenas reduz erro operacional
+no dry-run e na tentativa controlada. Como o launcher usa `setlocal`, limpe a
+sessao CMD pai apos qualquer preparacao live com:
+`set "IBM_CLOUD_API_KEY="`.
+
 ## Pre-condicoes
 
 - Branch esperada: `master` apos merge dos contratos Watson Flow.

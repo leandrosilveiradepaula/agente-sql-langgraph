@@ -16,6 +16,7 @@ TEXT_SUFFIXES = {
     ".toml",
     ".yaml",
     ".yml",
+    ".cmd",
     ".env",
     ".example",
 }
@@ -70,6 +71,7 @@ SECRET_PATTERNS = [
         r"^\s*setx\s+IBM_CLOUD_API_KEY\b",
         re.IGNORECASE | re.MULTILINE,
     ),
+    re.compile(r"\$\{\{\s*secrets\.", re.IGNORECASE),
     re.compile(
         r"^\s*set\s+\"?IBM_CLOUD_API_KEY\s*=\s*"
         r"(?!\"?\s*$)(?!\"?%)(?!\"?<)(?!\"?example)(?!\"?dummy)(?!\"?test)"
