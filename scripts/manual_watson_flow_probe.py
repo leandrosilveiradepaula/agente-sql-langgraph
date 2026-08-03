@@ -8,17 +8,27 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from app.bootstrap import create_stdlib_live_watson_flow_dependencies
+from app.composition.watson_test import (
+    DeploymentEnvironment,
+    build_watson_test_dependencies,
+)
+from app.domain.engine_preflight_types import (
+    ENGINE_PREFLIGHT_CONTRACT_VERSION,
+    EnginePreflightRequest,
+)
+from app.domain.sql_execution_types import (
+    SQL_EXECUTION_CONTRACT_VERSION,
+    SqlExecutionRequest,
+)
+from app.infrastructure.http.stdlib_http_transport import StdlibHttpTransport
 from app.infrastructure.secrets.environment_secret_provider import (
     EnvironmentSecretProvider,
 )
 from app.integrations.watson.configuration import IBM_IAM_TOKEN_URL
-from app.integrations.watson.flow_contracts import watson_flow_run_request
 from app.integrations.watson.flow_limits import (
     WatsonFlowContractError,
     default_watson_flow_limits,
 )
-from app.integrations.watson.iam_contracts import iam_token_request
 from app.integrations.watson.live_configuration import (
     create_live_watson_flow_configuration,
 )
@@ -26,6 +36,7 @@ from app.integrations.watson.sql_transport import (
     build_watson_flow_payload,
     compact_sql_for_watson_transport,
 )
+from app.ports.secret_value_provider import SecretLookupResult, SecretName, SecretValueProvider
 
 
 EXIT_OK = 0
@@ -109,7 +120,6 @@ def main(argv: list[str] | None = None, *, environ: dict[str, str] | None = None
         _print_plan(args, sql_result, config, live=args.execute_live)
         return EXIT_CONFIG_INVALID
 
-    plan = _build_plan(args, sql_result, config, live=args.execute_live)
     if not args.execute_live:
         _print_plan(args, sql_result, config, live=False)
         return EXIT_OK
@@ -120,9 +130,6 @@ def main(argv: list[str] | None = None, *, environ: dict[str, str] | None = None
     if not config.api_base_url or not config.flow_id:
         _print_plan(args, sql_result, config, live=True)
         return EXIT_CONFIG_INVALID
-    if not env.get(_SECRET_ENV_NAME):
-        print("secret live ausente.")
-        return EXIT_SECRET_INVALID
 
     try:
         return _execute_live(args, env, sql_result, config)
@@ -341,7 +348,7 @@ def _print_plan(
 ) -> None:
     plan = _build_plan(args, sql, config, live=live)
     if args.print_plan_json:
-        print(json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        print(json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False))
         return
     print("Watson Flow manual probe")
     print(f"mode={plan['mode']}")
@@ -375,47 +382,145 @@ def _execute_live(
         flow_id=config.flow_id or "",
         api_key_secret_name=_SECRET_ENV_NAME,
         enabled=True,
-        iam_token_url=env.get("WATSON_IAM_TOKEN_URL", args.iam_token_url or IBM_IAM_TOKEN_URL),
+        iam_token_url=args.iam_token_url or env.get("WATSON_IAM_TOKEN_URL") or IBM_IAM_TOKEN_URL,
         connect_timeout_seconds=int(env.get("WATSON_CONNECT_TIMEOUT_SECONDS", "5")),
         read_timeout_seconds=int(env.get("WATSON_READ_TIMEOUT_SECONDS", "30")),
         limits=limits,
     )
-    deps = create_stdlib_live_watson_flow_dependencies(
+    secret_provider = _TrackingSecretValueProvider(
+        EnvironmentSecretProvider(environ=env),
+    )
+    composition = build_watson_test_dependencies(
+        environment=DeploymentEnvironment.TEST,
         live_configuration=live_config,
         limits=limits,
-        secret_provider=EnvironmentSecretProvider(environ=env),
+        secret_provider=secret_provider,
+        http_transport=StdlibHttpTransport(),
     )
-    token_result = deps.iam_token_provider.get_token(
-        iam_token_request(
-            request_id="manual-probe",
-            run_id="manual-probe",
-            timeout_seconds=live_config.watson_configuration.request_timeout_seconds,
-            force_refresh=True,
-            audience=f"watson-flow-manual-probe-{args.purpose}",
-        )
-    )
-    if token_result.get("status") != "success":
-        print("iam_status=" + str(token_result.get("status", "failure")))
-        return EXIT_IAM_FAILURE
-    request = watson_flow_run_request(
-        flow_id=live_config.watson_configuration.flow_id,
-        bearer_token=token_result["token"],
-        payload=build_watson_flow_payload(sql.sql_transport),
-        request_id="manual-probe",
-        run_id="manual-probe",
-        invocation_id=f"manual-probe-{args.purpose}",
-        timeout_seconds=live_config.watson_configuration.request_timeout_seconds,
-        purpose=args.purpose,
-        limits=limits,
-    )
-    flow_result = deps.flow_client.run_flow(request)
-    print("iam_status=success")
-    print("flow_status=" + str(flow_result.get("status", "failure")))
-    if flow_result.get("http_status") is not None:
-        print("flow_http_status=" + str(flow_result.get("http_status")))
+    if composition.status != "success" or composition.dependencies is None:
+        print("composition_status=" + composition.status)
+        return EXIT_CONFIG_INVALID
+    deps = composition.dependencies
+    if args.purpose == "preflight":
+        result = deps.engine_preflight.preflight(_build_preflight_request(sql, live_config))
+        print("preflight_status=" + str(result.get("status", "error")))
+        print("statement_planned=" + str(result.get("statement_planned", False)).lower())
+        print("executed=" + str(result.get("executed", False)).lower())
+        print("rows_returned=" + str(result.get("rows_returned", 0)))
+        return _preflight_exit_code(result, secret_provider)
+    result = deps.sql_executor.execute(_build_execution_request(sql, live_config))
+    print("execution_status=" + str(result.get("status", "error")))
+    print("executed=" + str(result.get("executed", False)).lower())
+    print("row_count=" + str(result.get("row_count", 0)))
     if args.show_rows:
         print(f"preview_rows_limit={args.max_preview_rows}")
-    return EXIT_OK if flow_result.get("status") == "success" else EXIT_WATSON_FLOW_FAILURE
+    return _execution_exit_code(result, secret_provider)
+
+
+def _build_preflight_request(
+    sql: SqlProbeInput,
+    live_config,
+) -> EnginePreflightRequest:
+    sql_fingerprint = _fingerprint("sql", sql.sha256)
+    plan_fingerprint = _fingerprint("query-plan", sql.sha256)
+    request_fingerprint = _fingerprint("manual-preflight", sql.sha256)
+    return {
+        "contract_version": ENGINE_PREFLIGHT_CONTRACT_VERSION,
+        "sql": sql.sql_transport,
+        "sql_fingerprint": sql_fingerprint,
+        "context_version": "manual-watson-test-probe",
+        "context_fingerprint": _fingerprint("context", sql.sha256),
+        "query_plan_fingerprint": plan_fingerprint,
+        "intent_name": "manual_probe",
+        "allowed_schemas": [],
+        "planned_tables": [],
+        "dialect": None,
+        "engine_hint": "watson_flow_test",
+        "timeout_ms": live_config.watson_configuration.request_timeout_seconds * 1000,
+        "attempt": 1,
+        "request_fingerprint": request_fingerprint,
+    }
+
+
+def _build_execution_request(
+    sql: SqlProbeInput,
+    live_config,
+) -> SqlExecutionRequest:
+    sql_fingerprint = _fingerprint("sql", sql.sha256)
+    query_plan_fingerprint = _fingerprint("query-plan", sql.sha256)
+    return {
+        "contract_version": SQL_EXECUTION_CONTRACT_VERSION,
+        "current_sql": sql.sql_transport,
+        "sql_fingerprint": sql_fingerprint,
+        "request_id": "manual-probe-request",
+        "run_id": "manual-probe-run",
+        "context_version": "manual-watson-test-probe",
+        "intent_name": "manual_probe",
+        "query_plan_fingerprint": query_plan_fingerprint,
+        "preflight_fingerprint": _fingerprint("preflight", sql.sha256),
+        "limits": {
+            "timeout_seconds": live_config.watson_configuration.request_timeout_seconds,
+            "max_rows": 50,
+            "max_response_bytes": 262_144,
+            "max_cell_bytes": 8192,
+        },
+        "attempt": 1,
+        "execution_id": "manual-probe-execution",
+        "dialect": None,
+        "engine_hint": "watson_flow_test",
+        "request_fingerprint": _fingerprint("manual-execution", sql.sha256),
+    }
+
+
+def _preflight_exit_code(
+    result: dict[str, object],
+    secret_provider: "_TrackingSecretValueProvider",
+) -> int:
+    if result.get("status") == "approved":
+        return EXIT_OK
+    if _secret_lookup_failed(secret_provider):
+        return EXIT_SECRET_INVALID
+    if result.get("failure_category") == "authentication_failed":
+        return EXIT_IAM_FAILURE
+    return EXIT_WATSON_FLOW_FAILURE
+
+
+def _execution_exit_code(
+    result: dict[str, object],
+    secret_provider: "_TrackingSecretValueProvider",
+) -> int:
+    if result.get("status") == "success":
+        return EXIT_OK
+    if _secret_lookup_failed(secret_provider):
+        return EXIT_SECRET_INVALID
+    if result.get("failure_category") == "authentication_failed":
+        return EXIT_IAM_FAILURE
+    return EXIT_WATSON_FLOW_FAILURE
+
+
+def _secret_lookup_failed(secret_provider: "_TrackingSecretValueProvider") -> bool:
+    return secret_provider.last_status in {"missing", "invalid", "unavailable", "unexpected_error"}
+
+
+def _fingerprint(*parts: str) -> str:
+    material = "|".join(parts).encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
+class _TrackingSecretValueProvider:
+    def __init__(self, delegate: SecretValueProvider) -> None:
+        self._delegate = delegate
+        self.calls = 0
+        self.last_status: str | None = None
+
+    def __repr__(self) -> str:
+        return "_TrackingSecretValueProvider(<safe>)"
+
+    def get_secret(self, secret_name: SecretName) -> SecretLookupResult:
+        self.calls += 1
+        result = self._delegate.get_secret(secret_name)
+        self.last_status = result.get("status")
+        return result
 
 
 def _clean(value: object) -> str | None:

@@ -8,6 +8,7 @@ from app.adapters.testing.fake_secret_value_provider import FakeSecretValueProvi
 from app.adapters.testing.fake_sql_repairer import FakeSqlRepairer
 from app.composition.watson_test import (
     DeploymentEnvironment,
+    build_watson_test_application_service,
     build_watson_test_dependencies,
 )
 from app.graph.builder import create_graph
@@ -62,6 +63,17 @@ def _state(max_repair_attempts: int = 1):
     }
 
 
+class DeterministicIds:
+    def __init__(self) -> None:
+        self.values = ["request-service-1", "run-service-1"]
+        self.calls = 0
+
+    def __call__(self) -> str:
+        value = self.values[self.calls]
+        self.calls += 1
+        return value
+
+
 def _invoke(sequence, *, repairer=None):
     limits = default_watson_flow_limits()
     secret = FakeSecretValueProvider(secret=SensitiveSecret("test-api-key"))
@@ -94,6 +106,59 @@ def _invoke(sequence, *, repairer=None):
     )
     result = graph.invoke(_state(), config={"recursion_limit": 30})
     return result, secret, transport, repairer
+
+
+def _invoke_service(sequence):
+    limits = default_watson_flow_limits()
+    secret = FakeSecretValueProvider(secret=SensitiveSecret("test-api-key"))
+    transport = FakeHttpTransport(sequence=list(sequence))
+    composition = build_watson_test_dependencies(
+        environment=DeploymentEnvironment.TEST,
+        live_configuration=create_live_watson_flow_configuration(
+            api_base_url="https://example.invalid",
+            flow_id=FLOW_ID,
+            api_key_secret_name="IBM_CLOUD_API_KEY",
+            enabled=True,
+            limits=limits,
+        ),
+        limits=limits,
+        secret_provider=secret,
+        http_transport=transport,
+    )
+    assert composition.status == "success"
+    assert composition.dependencies is not None
+    ids = DeterministicIds()
+    service = build_watson_test_application_service(
+        base_dependencies={
+            "sql_generator": FakeSqlGenerator(),
+            "sql_repairer": FakeSqlRepairer(responses=["SELECT value FROM schema_test.table_test"]),
+            "run_repository": FakeRunRepository(),
+            "audit_sink": FakeAuditSink(),
+            "observability_sink": FakeObservabilitySink(),
+            "runtime_config": object(),
+            "context_repository": SuccessContextRepository(),
+        },
+        watson_dependencies=composition.dependencies,
+        id_generator=ids,
+    )
+    response = service.execute(
+        {
+            "question": "Execute uma generic analysis de teste.",
+            "user": {"id": "usuario-1", "email": "admin@local.com", "profile": "admin"},
+            "options": {
+                "use_cache": False,
+                "max_repair_attempts": 1,
+                "shadow_mode": False,
+                "sql_execution_limits": {
+                    "timeout_seconds": 10,
+                    "max_rows": 5,
+                    "max_response_bytes": 4096,
+                    "max_cell_bytes": 128,
+                },
+            },
+        }
+    )
+    return response, secret, transport, ids
 
 
 def main() -> None:
@@ -133,6 +198,25 @@ def main() -> None:
     assert result["persistence_result"]["status"] == "persisted"
     assert result["audit_result"]["status"] == "written"
     assert result["observability_result"]["status"] == "emitted"
+
+    service_response, service_secret, service_transport, ids = _invoke_service([
+        _json(IAM),
+        _json(PREFLIGHT_OK),
+        _json(IAM),
+        _json(EXECUTION_OK),
+    ])
+    assert service_response["status"] == "success"
+    assert service_response["request_id"] == "request-service-1"
+    assert service_response["run_id"] == "run-service-1"
+    assert service_response["data"] is not None
+    assert ids.calls == 2
+    assert service_secret.calls == 2
+    assert [request.operation_name for request in service_transport.requests] == [
+        "watson_iam_token",
+        "watson_flow_preflight",
+        "watson_iam_token",
+        "watson_flow_execution",
+    ]
 
     preflight_failure, pre_secret, pre_transport, pre_repair = _invoke([
         _json(IAM),
@@ -176,7 +260,7 @@ def main() -> None:
     assert invalid_result["final_status"] == "infrastructure_error"
     assert invalid_transport.calls == 2
     assert invalid_repair.calls == 0
-    print("testar_watson_test_composition_graph.py: 27/27 OK")
+    print("testar_watson_test_composition_graph.py: 33/33 OK")
 
 
 if __name__ == "__main__":

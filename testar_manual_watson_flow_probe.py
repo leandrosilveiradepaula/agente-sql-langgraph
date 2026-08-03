@@ -5,6 +5,7 @@ import io
 import json
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import scripts.manual_watson_flow_probe as probe
 
@@ -34,14 +35,105 @@ class BombSecretProvider:
         raise AssertionError("secret provider nao deve ser construido")
 
 
-class BombTransport:
+class BombStdlibHttpTransport:
     def __init__(self, *args, **kwargs) -> None:
-        raise AssertionError("transport nao deve ser construido")
+        pass
+
+
+class SecretTrapEnv(dict):
+    def get(self, key, default=None):
+        if key == "IBM_CLOUD_API_KEY":
+            raise AssertionError("secret nao pode ser lido diretamente do env")
+        return super().get(key, default)
+
+
+class FakePreflightAdapter:
+    def __init__(self, result=None) -> None:
+        self.calls = 0
+        self.requests = []
+        self.result = result or {
+            "status": "approved",
+            "statement_planned": True,
+            "executed": False,
+            "rows_returned": 0,
+        }
+
+    def preflight(self, request):
+        self.calls += 1
+        self.requests.append(request)
+        return dict(self.result)
+
+
+class FakeExecutorAdapter:
+    def __init__(self, result=None) -> None:
+        self.calls = 0
+        self.requests = []
+        self.result = result or {
+            "status": "success",
+            "executed": True,
+            "row_count": 1,
+        }
+
+    def execute(self, request):
+        self.calls += 1
+        self.requests.append(request)
+        return dict(self.result)
+
+
+class SecretReadingPreflightAdapter:
+    def __init__(self, secret_provider) -> None:
+        self.secret_provider = secret_provider
+        self.calls = 0
+
+    def preflight(self, request):
+        self.calls += 1
+        self.secret_provider.get_secret(probe.SecretName("IBM_CLOUD_API_KEY"))
+        return {
+            "status": "error",
+            "failure_category": "authentication_failed",
+            "statement_planned": False,
+            "executed": False,
+            "rows_returned": 0,
+        }
+
+
+class CompositionFactory:
+    def __init__(self, preflight=None, executor=None, read_secret=False) -> None:
+        self.preflight = preflight
+        self.executor = executor or FakeExecutorAdapter()
+        self.read_secret = read_secret
+        self.calls = 0
+        self.kwargs = None
+
+    def __call__(self, **kwargs):
+        self.calls += 1
+        self.kwargs = kwargs
+        assert kwargs["environment"] is probe.DeploymentEnvironment.TEST
+        assert "live_configuration" in kwargs
+        assert "limits" in kwargs
+        assert "secret_provider" in kwargs
+        assert "http_transport" in kwargs
+        preflight = self.preflight
+        if preflight is None:
+            preflight = (
+                SecretReadingPreflightAdapter(kwargs["secret_provider"])
+                if self.read_secret
+                else FakePreflightAdapter()
+            )
+            self.preflight = preflight
+        return SimpleNamespace(
+            status="success",
+            dependencies=SimpleNamespace(
+                engine_preflight=preflight,
+                sql_executor=self.executor,
+            ),
+        )
 
 
 def main() -> None:
     original_secret = probe.EnvironmentSecretProvider
-    original_deps = probe.create_stdlib_live_watson_flow_dependencies
+    original_build = probe.build_watson_test_dependencies
+    original_transport = probe.StdlibHttpTransport
     try:
         with tempfile.TemporaryDirectory() as tmp:
             sql = _sql(tmp)
@@ -115,10 +207,90 @@ def main() -> None:
             code, output = _run(["--sql-file", sql], env={})
             assert code == probe.EXIT_OK
             assert "secret_accessed=false" in output
-            probe.create_stdlib_live_watson_flow_dependencies = (  # type: ignore[assignment]
+            probe.build_watson_test_dependencies = (  # type: ignore[assignment]
                 lambda **_kwargs: (_ for _ in ()).throw(AssertionError("live deps"))
             )
             assert _run(["--sql-file", sql], env={})[0] == probe.EXIT_OK
+            probe.EnvironmentSecretProvider = original_secret  # type: ignore[assignment]
+            probe.build_watson_test_dependencies = original_build  # type: ignore[assignment]
+
+            probe.StdlibHttpTransport = BombStdlibHttpTransport  # type: ignore[assignment]
+            preflight = FakePreflightAdapter()
+            executor = FakeExecutorAdapter()
+            factory = CompositionFactory(preflight=preflight, executor=executor)
+            probe.build_watson_test_dependencies = factory  # type: ignore[assignment]
+            code, output = _run(
+                [
+                    "--execute-live",
+                    "--confirm-test-environment",
+                    "--sql-file",
+                    sql,
+                    "--purpose",
+                    "preflight",
+                    "--api-base-url",
+                    "https://example.invalid",
+                    "--flow-id",
+                    FLOW_ID,
+                ],
+                env=SecretTrapEnv(),
+            )
+            assert code == probe.EXIT_OK
+            assert factory.calls == 1
+            assert preflight.calls == 1
+            assert executor.calls == 0
+            assert preflight.requests[0]["sql"] == "SELECT 1 AS adapter_contract_probe"
+            assert preflight.requests[0]["request_fingerprint"]
+            assert "preflight_status=approved" in output
+            assert "executed=false" in output
+
+            preflight = FakePreflightAdapter()
+            executor = FakeExecutorAdapter()
+            factory = CompositionFactory(preflight=preflight, executor=executor)
+            probe.build_watson_test_dependencies = factory  # type: ignore[assignment]
+            code, output = _run(
+                [
+                    "--execute-live",
+                    "--confirm-test-environment",
+                    "--sql-file",
+                    sql,
+                    "--purpose",
+                    "execution",
+                    "--api-base-url",
+                    "https://example.invalid",
+                    "--flow-id",
+                    FLOW_ID,
+                    "--show-rows",
+                    "--confirm-show-rows",
+                ],
+                env=SecretTrapEnv(),
+            )
+            assert code == probe.EXIT_OK
+            assert preflight.calls == 0
+            assert executor.calls == 1
+            assert executor.requests[0]["current_sql"] == "SELECT 1 AS adapter_contract_probe"
+            assert executor.requests[0]["request_fingerprint"]
+            assert "execution_status=success" in output
+            assert "preview_rows_limit=5" in output
+
+            factory = CompositionFactory(read_secret=True)
+            probe.build_watson_test_dependencies = factory  # type: ignore[assignment]
+            code, output = _run(
+                [
+                    "--execute-live",
+                    "--confirm-test-environment",
+                    "--sql-file",
+                    sql,
+                    "--purpose",
+                    "preflight",
+                    "--api-base-url",
+                    "https://example.invalid",
+                    "--flow-id",
+                    FLOW_ID,
+                ],
+                env=SecretTrapEnv(),
+            )
+            assert code == probe.EXIT_SECRET_INVALID
+            assert "IBM_CLOUD_API_KEY" not in output
 
             empty = Path(tmp) / "empty.sql"
             empty.write_bytes(b"")
@@ -133,7 +305,8 @@ def main() -> None:
             assert _run(["--max-preview-rows", "51", "--sql-file", sql])[0] == probe.EXIT_USAGE
     finally:
         probe.EnvironmentSecretProvider = original_secret  # type: ignore[assignment]
-        probe.create_stdlib_live_watson_flow_dependencies = original_deps  # type: ignore[assignment]
+        probe.build_watson_test_dependencies = original_build  # type: ignore[assignment]
+        probe.StdlibHttpTransport = original_transport  # type: ignore[assignment]
 
     assert probe.EXIT_OK == 0
     assert probe.EXIT_USAGE == 2
@@ -150,7 +323,11 @@ def main() -> None:
     check_all = Path("scripts/check_all.py").read_text(encoding="utf-8")
     assert "testar_manual_watson_flow_probe.py" in check_all
     assert "scripts/manual_watson_flow_probe.py" not in check_all
-    print("testar_manual_watson_flow_probe.py: 35/35 OK")
+    source = Path("scripts/manual_watson_flow_probe.py").read_text(encoding="utf-8")
+    assert "allow_nan=False" in source
+    assert "env.get(_SECRET_ENV_NAME)" not in source
+    assert "flow_client.run_flow" not in source
+    print("testar_manual_watson_flow_probe.py: 44/44 OK")
 
 
 if __name__ == "__main__":
