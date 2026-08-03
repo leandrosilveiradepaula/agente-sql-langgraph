@@ -77,12 +77,44 @@ configuracao, limits, secret provider e transporte. A factory nao acessa
 secret, token, rede, banco ou SQL. `create_stdlib_live_watson_flow_dependencies`
 apenas construi o transporte stdlib e tambem permanece sem rede.
 
+## Composition Root TEST
+
+`app/composition/watson_test.py` adiciona uma composition root explicita para
+o ambiente TEST. Ela aceita somente `DeploymentEnvironment.TEST`, rejeita
+strings livres e aliases de producao como `prod`, `production`, `prd` e
+`live`, exige `enabled=True`, limits, `SecretValueProvider` e `HttpTransport`
+injetados.
+
+A composition root constroi `LiveIamTokenProvider`, `LiveWatsonFlowClient`,
+`WatsonFlowEnginePreflightAdapter` e `WatsonFlowSqlExecutorAdapter` sem
+consultar env, secret, rede, socket, banco, servidor ou SQL. O container
+`WatsonTestDependencies` guarda apenas objetos de dependencia e possui `repr`
+sanitizado; nao armazena API key, token, Authorization, SQL, `sql_transport`,
+raw output ou `GraphState`.
+
+Factories auxiliares permitem compor `GraphRuntime` e
+`SqlAgentApplicationService` substituindo somente as portas de preflight e
+executor pelos adapters Watson, preservando os demais componentes genericos.
+
 ## Script Manual
 
-`scripts/manual_watson_flow_probe.py` e dry-run por padrao. Live exige
-`--execute-live` e `--confirm-test-environment`; SQL vem de arquivo. O script
-mostra hash/tamanho da SQL, nao imprime SQL completa, token, API key,
-Authorization, body IAM ou rows por default.
+`scripts/manual_watson_flow_probe.py` e dry-run por padrao. O dry-run valida
+SQL, compactacao, payload e configuracao nao sensivel quando fornecida, mas nao
+exige `IBM_CLOUD_API_KEY`, nao cria `EnvironmentSecretProvider`, nao cria
+transporte live, nao consulta secret e nao acessa rede. Sem URL/flow ID, o
+dry-run SQL-only continua aprovado e apenas sinaliza que a configuracao live
+esta incompleta.
+
+Live exige `--execute-live`, `--confirm-test-environment`, SQL valida, URL e
+flow ID validos e secret disponivel via `SecretValueProvider`. A ordem e:
+argumentos, flags, arquivo regular, tamanho, UTF-8, SQL nao vazia,
+compactacao, payload, configuracao nao sensivel, confirmacao TEST, composicao
+live, lookup do secret, IAM e Flow.
+
+O script mostra hash/tamanho da SQL, plano sanitizado opcional com
+`--print-plan-json`, nao imprime SQL completa, token, API key, Authorization,
+body IAM, body Flow bruto ou rows por default. `--purpose preflight` executa
+somente preflight; `--purpose execution` executa somente execution.
 
 Variaveis lidas apenas em `main()`:
 

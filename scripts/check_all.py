@@ -168,6 +168,18 @@ STEPS = [
         [sys.executable, "testar_manual_watson_flow_probe.py"],
     ),
     (
+        "testar_watson_test_composition.py",
+        [sys.executable, "testar_watson_test_composition.py"],
+    ),
+    (
+        "testar_watson_test_composition_graph.py",
+        [sys.executable, "testar_watson_test_composition_graph.py"],
+    ),
+    (
+        "testar_offline_watson_test_composition_check.py",
+        [sys.executable, "testar_offline_watson_test_composition_check.py"],
+    ),
+    (
         "testar_watson_live_offline_integration.py",
         [sys.executable, "testar_watson_live_offline_integration.py"],
     ),
