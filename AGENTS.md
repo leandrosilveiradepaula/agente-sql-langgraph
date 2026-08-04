@@ -168,7 +168,12 @@ clean-room desabilita `pip check`. O network guard e obrigatorio para testes
 criticos e deve bloquear rede real apenas no subprocesso protegido. O launcher
 CMD nao armazena secrets, nao usa `setx`, nao faz retry, nao limpa variaveis da
 sessao CMD pai quando usa `setlocal` e deve recomendar a limpeza manual
-`set "IBM_CLOUD_API_KEY="`. Probe live e sempre uma tentativa unica, fora do CI,
-sem cache, retry, backoff ou probe automatico. Failure rehearsal usa somente
-fakes. Workspace hygiene e dependency checker sao obrigatorios e operam offline,
-sem apagar arquivos e sem consultar PyPI.
+`set "IBM_CLOUD_API_KEY="`. O launcher prefere
+`.venv\Scripts\python.exe`; se a venv nao existir, pode usar um `python.exe`
+valido no PATH, como no CI com `actions/setup-python`. Ele nunca cria venv,
+nunca instala dependencias, nunca chama pip e falha antes de qualquer operacao
+quando nao ha Python valido. Em maquina operacional, recomenda-se usar a
+`.venv`; usar PATH nao implica isolamento de dependencias. Probe live e sempre
+uma tentativa unica, fora do CI, sem cache, retry, backoff ou probe automatico.
+Failure rehearsal usa somente fakes. Workspace hygiene e dependency checker sao
+obrigatorios e operam offline, sem apagar arquivos e sem consultar PyPI.

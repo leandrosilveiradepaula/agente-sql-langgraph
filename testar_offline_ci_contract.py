@@ -16,8 +16,11 @@ def main() -> None:
     assert "workflow_dispatch:" in text
     assert "windows-latest" in text
     assert "actions/setup-python" in text
+    assert 'python-version: "3.11"' in text
     assert "fetch-depth: 0" in text
     assert "permissions:" in text and "contents: read" in text
+    assert ".venv" not in text
+    assert "python scripts/check_all.py" in text
     assert ("${{ " + "secrets" + ".") not in lowered
     assert "--execute-live" not in text
     assert "manual_watson_flow_probe.py" not in text
@@ -41,7 +44,7 @@ def main() -> None:
         assert checker in text
     assert "upload-artifact" not in lowered
     assert "IBM_CLOUD_API_KEY" not in text
-    print("testar_offline_ci_contract.py: 25/25 OK")
+    print("testar_offline_ci_contract.py: 28/28 OK")
 
 
 if __name__ == "__main__":

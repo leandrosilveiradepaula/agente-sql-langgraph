@@ -7,11 +7,19 @@ Ele nao substitui as instrucoes manuais abaixo; apenas reduz erro operacional
 no dry-run e na tentativa controlada. Como o launcher usa `setlocal`, limpe a
 sessao CMD pai apos qualquer preparacao live com:
 `set "IBM_CLOUD_API_KEY="`.
+O launcher prefere `.venv\Scripts\python.exe`. Se a venv nao existir, ele pode
+usar um `python.exe` valido no PATH, como no CI provisionado por
+`actions/setup-python`. O launcher nunca cria venv, nunca instala dependencias,
+nunca chama pip e falha antes de criar SQL temporaria quando nao ha Python
+valido. Em maquina operacional, use a `.venv`; usar PATH nao garante isolamento
+de dependencias.
 
 ## Pre-condicoes
 
 - Branch esperada: `master` apos merge dos contratos Watson Flow.
 - Probe manual disponivel em `scripts/manual_watson_flow_probe.py`.
+- Python operacional recomendado: `.venv\Scripts\python.exe`.
+- Fallback permitido: `python.exe` valido no PATH, sem instalar dependencias.
 - Live adapters desativados por padrao.
 - A primeira consulta sintetica deve ser exatamente `SELECT 1 AS adapter_contract_probe`.
 - Nao executar contra PROD, n8n, ASGI, servidor ou PostgreSQL.
@@ -37,6 +45,13 @@ Executar dry-run SQL-only, sem API key:
 .venv\Scripts\python.exe scripts\manual_watson_flow_probe.py ^
   --sql-file "%TEMP%\watson-flow-probe\watson-adapter-contract-probe.sql" ^
   --purpose execution
+```
+
+Em CI ou checkout limpo sem `.venv`, o launcher pode ser usado com o Python do
+PATH:
+
+```cmd
+scripts\watson_test_probe.cmd dry-run
 ```
 
 Configurar somente valores nao sensiveis do TEST:

@@ -19,6 +19,14 @@
 ## C. Antes Do Dry-Run
 
 - Usar `scripts\watson_test_probe.cmd dry-run`.
+- O launcher prefere `.venv\Scripts\python.exe`.
+- Se a venv nao existir, o launcher pode usar `python.exe` valido no PATH.
+- No CI, o Python vem de `actions/setup-python`.
+- O launcher nunca cria venv, nunca instala dependencias e nunca chama pip.
+- Ausencia de `.venv` e de Python valido no PATH falha antes de criar SQL
+  temporaria.
+- Em maquina operacional, recomenda-se usar a `.venv`; PATH nao garante
+  isolamento de dependencias.
 - O dry-run nao exige API key.
 - O dry-run nao acessa rede.
 - O plano nao deve conter SQL integral, URL completa, flow ID completo, token ou
