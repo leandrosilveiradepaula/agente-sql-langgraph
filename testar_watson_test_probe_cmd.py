@@ -38,16 +38,21 @@ def main() -> None:
     _assert_code(denied, 5, "live-confirmacao-negada")
 
     with _sandbox() as sandbox:
+        assert not (sandbox.root / ".venv" / "Scripts" / "python.cmd").exists()
+        assert (sandbox.path_python_dir / "python.cmd").exists()
         result = _run(sandbox.cmd, "dry-run", env=sandbox.env_without_venv, cwd=sandbox.outside_cwd)
         _assert_success(result, "dry-run-python-path")
         assert "PYTHON:" in result.stdout
+        assert f"LAUNCHER:{sandbox.path_python_dir / 'python.cmd'}" in result.stdout
         assert "PURPOSE:execution" in result.stdout
 
     with _sandbox(venv=True) as sandbox:
-        result = _run(sandbox.cmd, "dry-run", env=sandbox.env_without_path_python)
+        assert (sandbox.root / ".venv" / "Scripts" / "python.cmd").exists()
+        assert (sandbox.path_python_dir / "python.cmd").exists()
+        result = _run(sandbox.cmd, "dry-run", env=sandbox.env_without_venv)
         _assert_success(result, "dry-run-prefere-venv")
         assert "PYTHON:" in result.stdout
-        assert str(sandbox.root / ".venv" / "Scripts" / "python.exe") in result.stdout
+        assert f"LAUNCHER:{sandbox.root / '.venv' / 'Scripts' / 'python.cmd'}" in result.stdout
 
     with _sandbox() as sandbox:
         result = _run(sandbox.cmd, "dry-run", env=sandbox.env_without_any_python)
@@ -163,19 +168,20 @@ class _Sandbox:
         scripts = root / "scripts"
         scripts.mkdir()
         shutil.copy2(CMD, self.cmd)
+        _adapt_sandbox_cmd(self.cmd)
         _write_fake_probe(scripts / "manual_watson_flow_probe.py")
         self.temp = root / "temp"
         self.temp.mkdir()
         self.path_python_dir = root / ("python path with spaces" if path_with_spaces else "python-path")
         self.path_python_dir.mkdir()
         if invalid_path_python:
-            (self.path_python_dir / "python.exe").write_text("not an executable", encoding="utf-8")
+            (self.path_python_dir / "python.cmd").write_text("not an executable", encoding="utf-8")
         else:
-            _copy_python_runtime(self.path_python_dir)
+            _write_python_launcher(self.path_python_dir)
         if venv:
             venv_dir = root / ".venv" / "Scripts"
             venv_dir.mkdir(parents=True)
-            _copy_python_runtime(venv_dir)
+            _write_python_launcher(venv_dir)
         self.env_without_venv = _env_with_path(self.path_python_dir, self.temp)
         self.env_without_path_python = _env_with_path(root / "empty-path", self.temp)
         self.env_without_any_python = _env_with_path(root / "empty-path", self.temp)
@@ -272,19 +278,52 @@ def _base_env() -> dict[str, str]:
 
 def _env_with_path(path_dir: Path, temp: Path) -> dict[str, str]:
     env = _base_env()
-    env["PATH"] = str(path_dir)
+    for key in list(env):
+        if key.casefold() == "path":
+            env.pop(key)
+    env["Path"] = str(path_dir)
     env["TEMP"] = str(temp)
     env["TMP"] = str(temp)
     return env
 
 
-def _copy_python_runtime(target: Path) -> None:
-    source = Path(getattr(sys, "_base_executable", sys.executable))
-    shutil.copy2(source, target / "python.exe")
-    for dll in source.parent.glob("python*.dll"):
-        shutil.copy2(dll, target / dll.name)
-    for dll in source.parent.glob("vcruntime*.dll"):
-        shutil.copy2(dll, target / dll.name)
+def _write_python_launcher(target: Path) -> None:
+    launcher = target / "python.cmd"
+    launcher.write_text(
+        "\n".join(
+            [
+                "@echo off",
+                "setlocal EnableExtensions DisableDelayedExpansion",
+                f'set "SYNTHETIC_PYTHON_EXE={launcher}"',
+                f'"{REAL_PYTHON}" %*',
+                "exit /b %errorlevel%",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def _adapt_sandbox_cmd(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    text = text.replace(r".venv\Scripts\python.exe", r".venv\Scripts\python.cmd")
+    text = text.replace(
+        r"""for /f "delims=" %%P in ('"%SystemRoot%\System32\where.exe" python.exe 2^>nul') do (""",
+        r"""for %%P in ("%PATH%\python.cmd") do if exist "%%~fP" (""",
+    )
+    text = text.replace(
+        r'''"%~1" -c "import sys; print(sys.executable)" >nul 2>nul''',
+        r'''call "%~1" -c "import sys; print(sys.executable)" >nul 2>nul''',
+    )
+    text = text.replace(
+        r'''"%PYTHON_EXE%" -c "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('SELECT 1 AS adapter_contract_probe', encoding='utf-8')" "%SQL_FILE%"''',
+        r'''call "%PYTHON_EXE%" -c "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('SELECT 1 AS adapter_contract_probe', encoding='utf-8')" "%SQL_FILE%"''',
+    )
+    text = text.replace(
+        r'''"%PYTHON_EXE%" "%PROBE_SCRIPT%"''',
+        r'''call "%PYTHON_EXE%" "%PROBE_SCRIPT%"''',
+    )
+    path.write_text(text, encoding="utf-8")
 
 
 def _write_fake_probe(path: Path) -> None:
@@ -293,6 +332,7 @@ def _write_fake_probe(path: Path) -> None:
             [
                 "from __future__ import annotations",
                 "import argparse",
+                "import os",
                 "import sys",
                 "parser = argparse.ArgumentParser()",
                 "parser.add_argument('--execute-live', action='store_true')",
@@ -302,6 +342,7 @@ def _write_fake_probe(path: Path) -> None:
                 "parser.add_argument('--print-plan-json', action='store_true')",
                 "args = parser.parse_args()",
                 "print('PYTHON:' + sys.executable)",
+                "print('LAUNCHER:' + os.environ.get('SYNTHETIC_PYTHON_EXE', ''))",
                 "print('PURPOSE:' + args.purpose)",
                 "print('EXECUTE_LIVE:' + str(args.execute_live).lower())",
             ]

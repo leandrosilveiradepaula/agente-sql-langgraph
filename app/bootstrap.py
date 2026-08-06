@@ -48,6 +48,14 @@ from app.integrations.watson.flow_preflight_adapter import (
 from app.integrations.watson.flow_sql_executor import (
     WatsonFlowSqlExecutorAdapter,
 )
+from app.integrations.google_gemini.configuration import (
+    GoogleGeminiConfiguration,
+    load_google_gemini_configuration,
+)
+from app.integrations.google_gemini.client import GoogleGeminiClient
+from app.integrations.google_gemini.sql_generator_adapter import (
+    GoogleGeminiSqlGeneratorAdapter,
+)
 from app.integrations.watson.live_configuration import (
     LiveWatsonFlowConfiguration,
 )
@@ -58,6 +66,9 @@ from app.integrations.watson.live_watson_flow_client import (
     LiveWatsonFlowClient,
 )
 from app.infrastructure.http.stdlib_http_transport import StdlibHttpTransport
+from app.infrastructure.secrets.environment_secret_provider import (
+    EnvironmentSecretProvider,
+)
 from app.ports.iam_token_provider import IamTokenProvider
 from app.ports.http_transport import HttpTransport
 from app.ports.secret_value_provider import SecretValueProvider
@@ -281,6 +292,31 @@ def create_stdlib_live_watson_flow_dependencies(
         secret_provider=secret_provider,
         http_transport=StdlibHttpTransport(),
     )
+
+
+def create_google_gemini_sql_generator(
+    environ: RuntimeEnvironment | None = None,
+    *,
+    configuration: GoogleGeminiConfiguration | None = None,
+    secret_provider: SecretValueProvider | None = None,
+    http_transport: HttpTransport | None = None,
+) -> GoogleGeminiSqlGeneratorAdapter:
+    """
+    Cria o provider Gemini explicitamente, sem rede ou leitura de secret.
+    """
+
+    if configuration is None:
+        configuration = load_google_gemini_configuration(environ)
+    if secret_provider is None:
+        secret_provider = EnvironmentSecretProvider()
+    if http_transport is None:
+        http_transport = StdlibHttpTransport()
+    client = GoogleGeminiClient(
+        configuration=configuration,
+        secret_provider=secret_provider,
+        http_transport=http_transport,
+    )
+    return GoogleGeminiSqlGeneratorAdapter(client=client)
 
 
 def create_postgres_context_graph(

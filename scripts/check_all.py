@@ -79,6 +79,10 @@ STEPS = [
         [sys.executable, "testar_sql_generation.py"],
     ),
     (
+        "testar_google_gemini_sql_generator.py",
+        [sys.executable, "testar_google_gemini_sql_generator.py"],
+    ),
+    (
         "testar_sql_execution.py",
         [sys.executable, "testar_sql_execution.py"],
     ),

@@ -21,6 +21,7 @@ GUARDED_TESTS = [
     "testar_application_service_graph_integration.py",
     "testar_grafo_base.py",
     "testar_postgres_context_graph_bootstrap.py",
+    "testar_google_gemini_sql_generator.py",
 ]
 
 SITECUSTOMIZE = r'''
