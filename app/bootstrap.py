@@ -25,6 +25,14 @@ from app.application.sql_agent_service import (
     IdGenerator,
     SqlAgentApplicationService,
 )
+from app.application.internal_sql_agent_v1 import (
+    ExecuteApprovedSqlShadowUseCase,
+    GenerateSqlUseCase,
+)
+from app.http.internal_sql_agent_v1_handler import (
+    InternalSqlAgentV1HttpHandler,
+    create_internal_sql_agent_v1_http_handler,
+)
 from app.http.sql_agent_http_handler import (
     SqlAgentHttpHandler,
     create_sql_agent_http_handler,
@@ -543,6 +551,35 @@ def create_http_entry_adapter(
         authenticator=authenticator,
         authorizer=authorizer,
         auth_limits=auth_limits,
+        request_limits=request_limits,
+        response_limits=response_limits,
+    )
+
+
+def create_internal_sql_agent_v1_entry_adapter(
+    *,
+    generate_use_case: GenerateSqlUseCase | None = None,
+    execute_approved_shadow_use_case: (
+        ExecuteApprovedSqlShadowUseCase | None
+    ) = None,
+    request_limits: Mapping[str, Any] | None = None,
+    response_limits: Mapping[str, Any] | None = None,
+) -> InternalSqlAgentV1HttpHandler:
+    """
+    Cria o handler HTTP interno v1 para shadow em duas etapas.
+
+    Nao cria grafo, provider live, servidor, rede, banco, Watson ou Gemini.
+    """
+
+    if generate_use_case is None:
+        raise RuntimeError("generate_use_case deve ser injetado.")
+    if execute_approved_shadow_use_case is None:
+        raise RuntimeError(
+            "execute_approved_shadow_use_case deve ser injetado."
+        )
+    return create_internal_sql_agent_v1_http_handler(
+        generate_use_case=generate_use_case,
+        execute_approved_shadow_use_case=execute_approved_shadow_use_case,
         request_limits=request_limits,
         response_limits=response_limits,
     )

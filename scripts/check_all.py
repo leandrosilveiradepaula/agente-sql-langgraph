@@ -135,6 +135,14 @@ STEPS = [
         [sys.executable, "testar_application_service_graph_integration.py"],
     ),
     (
+        "testar_internal_sql_agent_v1_use_cases.py",
+        [sys.executable, "testar_internal_sql_agent_v1_use_cases.py"],
+    ),
+    (
+        "testar_internal_sql_agent_v1_http_handler.py",
+        [sys.executable, "testar_internal_sql_agent_v1_http_handler.py"],
+    ),
+    (
         "testar_auth_types.py",
         [sys.executable, "testar_auth_types.py"],
     ),
