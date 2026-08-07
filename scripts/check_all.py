@@ -83,6 +83,10 @@ STEPS = [
         [sys.executable, "testar_google_gemini_sql_generator.py"],
     ),
     (
+        "testar_google_gemini_sql_repairer.py",
+        [sys.executable, "testar_google_gemini_sql_repairer.py"],
+    ),
+    (
         "testar_sql_execution.py",
         [sys.executable, "testar_sql_execution.py"],
     ),

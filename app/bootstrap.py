@@ -51,10 +51,14 @@ from app.integrations.watson.flow_sql_executor import (
 from app.integrations.google_gemini.configuration import (
     GoogleGeminiConfiguration,
     load_google_gemini_configuration,
+    load_google_gemini_repairer_configuration,
 )
 from app.integrations.google_gemini.client import GoogleGeminiClient
 from app.integrations.google_gemini.sql_generator_adapter import (
     GoogleGeminiSqlGeneratorAdapter,
+)
+from app.integrations.google_gemini.sql_repairer_adapter import (
+    GoogleGeminiSqlRepairerAdapter,
 )
 from app.integrations.watson.live_configuration import (
     LiveWatsonFlowConfiguration,
@@ -317,6 +321,31 @@ def create_google_gemini_sql_generator(
         http_transport=http_transport,
     )
     return GoogleGeminiSqlGeneratorAdapter(client=client)
+
+
+def create_google_gemini_sql_repairer(
+    environ: RuntimeEnvironment | None = None,
+    *,
+    configuration: GoogleGeminiConfiguration | None = None,
+    secret_provider: SecretValueProvider | None = None,
+    http_transport: HttpTransport | None = None,
+) -> GoogleGeminiSqlRepairerAdapter:
+    """
+    Cria o repairer Gemini explicitamente, sem rede ou leitura de secret.
+    """
+
+    if configuration is None:
+        configuration = load_google_gemini_repairer_configuration(environ)
+    if secret_provider is None:
+        secret_provider = EnvironmentSecretProvider()
+    if http_transport is None:
+        http_transport = StdlibHttpTransport()
+    client = GoogleGeminiClient(
+        configuration=configuration,
+        secret_provider=secret_provider,
+        http_transport=http_transport,
+    )
+    return GoogleGeminiSqlRepairerAdapter(client=client)
 
 
 def create_postgres_context_graph(

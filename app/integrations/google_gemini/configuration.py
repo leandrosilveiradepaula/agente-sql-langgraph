@@ -10,11 +10,13 @@ GOOGLE_GEMINI_PROVIDER_NAME = "google_gemini"
 GEMINI_API_KEY_SECRET_NAME = "GEMINI_API_KEY"
 GEMINI_API_BASE_URL_ENV = "GEMINI_API_BASE_URL"
 GEMINI_SQL_GENERATOR_MODEL_ENV = "GEMINI_SQL_GENERATOR_MODEL"
+GEMINI_SQL_REPAIRER_MODEL_ENV = "GEMINI_SQL_REPAIRER_MODEL"
 GEMINI_CONNECT_TIMEOUT_ENV = "GEMINI_CONNECT_TIMEOUT_SECONDS"
 GEMINI_READ_TIMEOUT_ENV = "GEMINI_READ_TIMEOUT_SECONDS"
 GEMINI_MAX_OUTPUT_TOKENS_ENV = "GEMINI_MAX_OUTPUT_TOKENS"
 DEFAULT_GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com"
 DEFAULT_GEMINI_MODEL_ID = "gemini-2.5-flash"
+DEFAULT_GEMINI_REPAIRER_MODEL_ID = "gemini-2.5-flash"
 DEFAULT_GEMINI_CONNECT_TIMEOUT_SECONDS = 5
 DEFAULT_GEMINI_READ_TIMEOUT_SECONDS = 30
 DEFAULT_GEMINI_TEMPERATURE = 0.0
@@ -109,6 +111,39 @@ def load_google_gemini_configuration(
             source,
             GEMINI_SQL_GENERATOR_MODEL_ENV,
             DEFAULT_GEMINI_MODEL_ID,
+        ),
+        connect_timeout_seconds=_optional_int(
+            source,
+            GEMINI_CONNECT_TIMEOUT_ENV,
+            DEFAULT_GEMINI_CONNECT_TIMEOUT_SECONDS,
+        ),
+        read_timeout_seconds=_optional_int(
+            source,
+            GEMINI_READ_TIMEOUT_ENV,
+            DEFAULT_GEMINI_READ_TIMEOUT_SECONDS,
+        ),
+        max_output_tokens=_optional_int(
+            source,
+            GEMINI_MAX_OUTPUT_TOKENS_ENV,
+            DEFAULT_GEMINI_MAX_OUTPUT_TOKENS,
+        ),
+    )
+
+
+def load_google_gemini_repairer_configuration(
+    environ: Mapping[str, str] | None = None,
+) -> GoogleGeminiConfiguration:
+    source = os.environ if environ is None else environ
+    return GoogleGeminiConfiguration(
+        api_base_url=_optional_text(
+            source,
+            GEMINI_API_BASE_URL_ENV,
+            DEFAULT_GEMINI_API_BASE_URL,
+        ),
+        model_id=_optional_text(
+            source,
+            GEMINI_SQL_REPAIRER_MODEL_ENV,
+            DEFAULT_GEMINI_REPAIRER_MODEL_ID,
         ),
         connect_timeout_seconds=_optional_int(
             source,

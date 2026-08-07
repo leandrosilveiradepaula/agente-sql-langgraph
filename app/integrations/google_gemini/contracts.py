@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
+from app.domain.sql_repair import SqlRepairRequest
 from app.domain.sql_generation import SqlGenerationRequest
 from app.integrations.google_gemini.configuration import (
     GoogleGeminiConfiguration,
@@ -74,6 +75,61 @@ def build_gemini_payload(
                 "parts": [
                     {
                         "text": build_gemini_prompt(request),
+                    }
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": configuration.temperature,
+            "topP": configuration.top_p,
+            "topK": configuration.top_k,
+            "maxOutputTokens": configuration.max_output_tokens,
+            "responseMimeType": configuration.response_mime_type,
+            "thinkingConfig": {
+                "thinkingBudget": configuration.thinking_budget,
+            },
+        },
+    }
+    return _stable_json(payload).encode("utf-8")
+
+
+def build_gemini_repair_prompt(request: SqlRepairRequest) -> str:
+    request_json = _stable_json(request)
+    return "\n".join(
+        (
+            "Tarefa: corrigir a SQL existente.",
+            "Preserve a intencao original da consulta.",
+            "Preserve filtros, metricas, agrupamentos e escopo semantico.",
+            "Corrija somente o necessario para resolver a falha estruturada informada.",
+            "Respeite integralmente repair_context.",
+            "Respeite integralmente instructions e output_constraints.",
+            "Considere previous_attempts para evitar repeticao.",
+            "Retorne exatamente uma instrucao SQL.",
+            "Retorne somente SQL em texto puro.",
+            "A resposta deve comecar com SELECT ou WITH.",
+            "Nao use Markdown, JSON, comentarios ou explicacoes.",
+            "Nao invente schemas, tabelas, colunas ou joins fora do contexto autorizado.",
+            "Nao tente executar a consulta.",
+            "Use somente os dados contidos em SqlRepairRequest.",
+            "Nao inclua estado interno do grafo.",
+            "SqlRepairRequest:",
+            request_json,
+        )
+    )
+
+
+def build_gemini_repair_payload(
+    *,
+    request: SqlRepairRequest,
+    configuration: GoogleGeminiConfiguration,
+) -> bytes:
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": build_gemini_repair_prompt(request),
                     }
                 ],
             }

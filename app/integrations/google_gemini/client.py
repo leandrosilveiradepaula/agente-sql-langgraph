@@ -46,7 +46,12 @@ class GoogleGeminiClient:
     def __repr__(self) -> str:
         return "GoogleGeminiClient(<safe>)"
 
-    def generate_content(self, request) -> GeminiClientResult:
+    def generate_content(
+        self,
+        request,
+        *,
+        payload_builder=build_gemini_payload,
+    ) -> GeminiClientResult:
         started = time.monotonic()
         try:
             if not isinstance(request, Mapping):
@@ -60,7 +65,7 @@ class GoogleGeminiClient:
             secret = secret_result.get("secret")
             if not isinstance(secret, SensitiveSecret):
                 return gemini_failure("secret_invalid")
-            body = build_gemini_payload(
+            body = payload_builder(
                 request=request,
                 configuration=self._configuration,
             )

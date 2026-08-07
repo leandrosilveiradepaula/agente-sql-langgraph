@@ -18,6 +18,7 @@ CRITICAL_ENTRYPOINTS = (
     "app.infrastructure.secrets.environment_secret_provider",
     "app.infrastructure.secrets.sensitive_secret",
     "app.integrations.google_gemini",
+    "app.integrations.google_gemini.sql_repairer_adapter",
     "app.integrations.watson.live_configuration",
     "app.integrations.watson.live_iam_token_provider",
     "app.integrations.watson.live_watson_flow_client",
