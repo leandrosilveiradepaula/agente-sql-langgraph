@@ -1,3 +1,5 @@
+> Status note (2026-08-07): Historical baseline. This document records a point-in-time pre-live readiness state from 2026-08-03 and predates the current canonical n8n + LangGraph coexistence strategy and Gemini Generator/Repairer posture. It remains useful as historical evidence, but current precedence is `ORCHESTRATION-STRATEGY.md`, `PROJECT-STATUS.md`, and `DOCUMENTATION-MAP.md`.
+
 # Pre-Live Readiness Baseline
 
 Date: 2026-08-03

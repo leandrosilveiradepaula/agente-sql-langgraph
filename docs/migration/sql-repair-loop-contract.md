@@ -1,3 +1,5 @@
+> Status note (2026-08-07): This document is a historical phase contract. The statement below that no real repair provider existed was true for that phase, but is now superseded by the Gemini SQL Repairer adapter documented in `docs/migration/google-gemini-sql-repairer-contract.md`. The repair loop flow, safety limits, and gate reset behavior remain relevant technical contract guidance. Current orchestration precedence is defined by `ORCHESTRATION-STRATEGY.md` and `DOCUMENTATION-MAP.md`.
+
 # SQL Repair Loop Contract
 
 ## Objetivo
