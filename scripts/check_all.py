@@ -139,6 +139,10 @@ STEPS = [
         [sys.executable, "testar_internal_sql_agent_v1_use_cases.py"],
     ),
     (
+        "testar_shadow_evidence_persistence.py",
+        [sys.executable, "testar_shadow_evidence_persistence.py"],
+    ),
+    (
         "testar_internal_sql_agent_v1_http_handler.py",
         [sys.executable, "testar_internal_sql_agent_v1_http_handler.py"],
     ),

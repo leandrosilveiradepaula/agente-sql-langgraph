@@ -9,9 +9,12 @@ from app.application.internal_sql_agent_v1_shared import (
     error,
     metadata,
     new_run_id,
+    now_utc_iso,
+    persist_shadow_record,
     preflight_approved,
     preflight_repairable,
     principal_to_user,
+    shadow_record_id,
     state_errors,
     status_from_final_status,
     string_field,
@@ -27,6 +30,7 @@ from app.application.internal_sql_agent_v1_types import (
     GenerateSqlV1Response,
     InternalSqlAgentError,
 )
+from app.domain.shadow_evidence_types import build_generate_shadow_record
 from app.graph.nodes.build_plan import build_plan
 from app.graph.nodes.classify_intent import classify_intent
 from app.graph.nodes.contract_gate import contract_gate
@@ -39,8 +43,10 @@ from app.graph.nodes.security_gate import security_gate
 from app.graph.state import GraphState
 from app.ports.context_repository import ContextRepository
 from app.ports.engine_preflight import EnginePreflight
+from app.ports.shadow_evidence_repository import ShadowEvidenceRepository
 from app.ports.sql_generator import SqlGenerator
 from app.ports.sql_repairer import SqlRepairer
+
 
 class GenerateSqlUseCase:
     def __init__(
@@ -51,6 +57,9 @@ class GenerateSqlUseCase:
         engine_preflight: EnginePreflight,
         sql_repairer: SqlRepairer,
         id_generator: IdGenerator,
+        shadow_repository: ShadowEvidenceRepository | None = None,
+        langgraph_version: str | None = None,
+        langgraph_commit: str | None = None,
     ) -> None:
         if context_repository is None:
             raise RuntimeError("context_repository deve ser injetado.")
@@ -63,6 +72,9 @@ class GenerateSqlUseCase:
         if id_generator is None or not callable(id_generator):
             raise RuntimeError("id_generator deve ser injetado.")
         self._id_generator = id_generator
+        self._shadow_repository = shadow_repository
+        self._langgraph_version = langgraph_version
+        self._langgraph_commit = langgraph_commit
         self._receive_question = receive_question
         self._load_context = create_load_context_node(context_repository)
         self._classify_intent = classify_intent
@@ -77,8 +89,9 @@ class GenerateSqlUseCase:
         validation = validate_generate_request(request)
         agent_run_id = string_field(request, "agent_run_id")
         run_id = new_run_id(self._id_generator)
+        created_at = now_utc_iso()
         if validation:
-            return generate_response(
+            response = generate_response(
                 agent_run_id=agent_run_id,
                 run_id=run_id,
                 status="rejected",
@@ -86,6 +99,13 @@ class GenerateSqlUseCase:
                 state={},
                 errors=validation,
             )
+            self._persist_shadow(
+                request if isinstance(request, Mapping) else {},
+                {},
+                response,
+                created_at,
+            )
+            return response
 
         state: GraphState = {
             "question": str(request["question"]),
@@ -101,7 +121,13 @@ class GenerateSqlUseCase:
         try:
             state = self._apply(state, self._receive_question)
             if state.get("final_status") != "processing":
-                return self._generate_terminal(agent_run_id, run_id, state)
+                return self._generate_terminal(
+                    agent_run_id,
+                    run_id,
+                    state,
+                    request,
+                    created_at,
+                )
             for node in (
                 self._load_context,
                 self._classify_intent,
@@ -110,11 +136,23 @@ class GenerateSqlUseCase:
             ):
                 state = self._apply(state, node)
                 if state.get("final_status") != "processing":
-                    return self._generate_terminal(agent_run_id, run_id, state)
+                    return self._generate_terminal(
+                        agent_run_id,
+                        run_id,
+                        state,
+                        request,
+                        created_at,
+                    )
             state = self._run_gate_preflight_repair_loop(state)
-            return self._generate_terminal(agent_run_id, run_id, state)
+            return self._generate_terminal(
+                agent_run_id,
+                run_id,
+                state,
+                request,
+                created_at,
+            )
         except Exception:
-            return generate_response(
+            response = generate_response(
                 agent_run_id=agent_run_id,
                 run_id=run_id,
                 status="infrastructure_error",
@@ -129,6 +167,8 @@ class GenerateSqlUseCase:
                     )
                 ],
             )
+            self._persist_shadow(request, state, response, created_at)
+            return response
 
     def _run_gate_preflight_repair_loop(
         self,
@@ -162,6 +202,8 @@ class GenerateSqlUseCase:
         agent_run_id: str,
         run_id: str,
         state: GraphState,
+        request: Mapping[str, Any],
+        created_at: str,
     ) -> GenerateSqlV1Response:
         final_status = state.get("final_status")
         status = status_from_final_status(final_status)
@@ -174,7 +216,7 @@ class GenerateSqlUseCase:
                 else "Generate SQL could not be completed."
             )
         )
-        return generate_response(
+        response = generate_response(
             agent_run_id=agent_run_id,
             run_id=run_id,
             status=status,
@@ -182,6 +224,34 @@ class GenerateSqlUseCase:
             state=state,
             errors=state_errors(state),
         )
+        self._persist_shadow(request, state, response, created_at)
+        return response
+
+    def _persist_shadow(
+        self,
+        request: Mapping[str, Any],
+        state: Mapping[str, Any],
+        response: Mapping[str, Any],
+        created_at: str,
+    ) -> None:
+        record = build_generate_shadow_record(
+            shadow_record_id=shadow_record_id(
+                agent_run_id=str(response.get("agent_run_id", "")),
+                run_id=str(response.get("run_id", "")),
+                event_type="generate",
+            ),
+            agent_run_id=str(response.get("agent_run_id", "")),
+            run_id=str(response.get("run_id", "")),
+            created_at=created_at,
+            completed_at=now_utc_iso(),
+            status=str(response.get("status", "infrastructure_error")),
+            request=request,
+            state=state,
+            response=response,
+            langgraph_version=self._langgraph_version,
+            langgraph_commit=self._langgraph_commit,
+        )
+        persist_shadow_record(self._shadow_repository, record)
 
     @staticmethod
     def _apply(state: GraphState, node: Callable[[GraphState], GraphState]) -> GraphState:
@@ -189,6 +259,7 @@ class GenerateSqlUseCase:
         merged = deepcopy(state)
         merged.update(deepcopy(patch))
         return merged
+
 
 def validate_generate_request(request: object) -> list[InternalSqlAgentError]:
     errors = validate_common_request(request)
@@ -218,6 +289,7 @@ def validate_generate_request(request: object) -> list[InternalSqlAgentError]:
                 )
             )
     return errors
+
 
 def generate_response(
     *,

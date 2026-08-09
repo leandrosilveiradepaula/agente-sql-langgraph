@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 
 from app.application.internal_sql_agent_v1_types import (
@@ -10,6 +11,11 @@ from app.application.internal_sql_agent_v1_types import (
     InternalSqlAgentPrincipal,
 )
 from app.domain.result_normalization import stable_fingerprint
+from app.domain.shadow_evidence_types import (
+    FinalizeShadowRunRequest,
+    ShadowRunRecord,
+)
+from app.ports.shadow_evidence_repository import ShadowEvidenceRepository
 
 
 IdGenerator = Callable[[], str]
@@ -43,6 +49,48 @@ _BLOCKED_PAYLOAD_KEYS = {
     "token",
     "tokens",
 }
+
+
+def now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def shadow_record_id(
+    *,
+    agent_run_id: str,
+    run_id: str,
+    event_type: str,
+) -> str:
+    fingerprint = stable_fingerprint(
+        {
+            "agent_run_id": agent_run_id,
+            "run_id": run_id,
+            "event_type": event_type,
+        }
+    )
+    return f"shadow-{fingerprint[:32]}"
+
+
+def persist_shadow_record(
+    repository: ShadowEvidenceRepository | None,
+    record: ShadowRunRecord,
+) -> None:
+    if repository is None:
+        return
+    try:
+        repository.create(record)
+        repository.update_evidence(record)
+        repository.finalize(
+            FinalizeShadowRunRequest(
+                shadow_record_id=record["shadow_record_id"],
+                status=record["status"],
+                completed_at=record.get("completed_at") or now_utc_iso(),
+                evidence_fingerprint=record["evidence_fingerprint"],
+            )
+        )
+    except Exception:
+        return
+
 
 def validate_common_request(request: object) -> list[InternalSqlAgentError]:
     if not isinstance(request, Mapping):

@@ -10,9 +10,12 @@ from app.application.internal_sql_agent_v1_shared import (
     metadata,
     new_run_id,
     not_run_result,
+    now_utc_iso,
+    persist_shadow_record,
     preflight_approved,
     preflight_repairable,
     principal_to_user,
+    shadow_record_id,
     state_errors,
     status_from_final_status,
     string_field,
@@ -28,6 +31,7 @@ from app.application.internal_sql_agent_v1_types import (
     InternalSqlAgentError,
 )
 from app.domain.result_normalization import stable_fingerprint
+from app.domain.shadow_evidence_types import build_execute_shadow_record
 from app.domain.sql_analysis import SqlAnalysisError, analyze_sql
 from app.graph.nodes.contract_gate import contract_gate
 from app.graph.nodes.engine_preflight import create_engine_preflight_node
@@ -35,7 +39,9 @@ from app.graph.nodes.repair_sql import create_repair_sql_node
 from app.graph.nodes.security_gate import security_gate
 from app.graph.state import GraphState
 from app.ports.engine_preflight import EnginePreflight
+from app.ports.shadow_evidence_repository import ShadowEvidenceRepository
 from app.ports.sql_repairer import SqlRepairer
+
 
 class ExecuteApprovedSqlShadowUseCase:
     def __init__(
@@ -44,6 +50,9 @@ class ExecuteApprovedSqlShadowUseCase:
         engine_preflight: EnginePreflight,
         sql_repairer: SqlRepairer,
         id_generator: IdGenerator,
+        shadow_repository: ShadowEvidenceRepository | None = None,
+        langgraph_version: str | None = None,
+        langgraph_commit: str | None = None,
     ) -> None:
         if engine_preflight is None:
             raise RuntimeError("engine_preflight deve ser injetado.")
@@ -52,6 +61,9 @@ class ExecuteApprovedSqlShadowUseCase:
         if id_generator is None or not callable(id_generator):
             raise RuntimeError("id_generator deve ser injetado.")
         self._id_generator = id_generator
+        self._shadow_repository = shadow_repository
+        self._langgraph_version = langgraph_version
+        self._langgraph_commit = langgraph_commit
         self._security_gate = security_gate
         self._contract_gate = contract_gate
         self._engine_preflight = create_engine_preflight_node(engine_preflight)
@@ -64,13 +76,14 @@ class ExecuteApprovedSqlShadowUseCase:
         validation = validate_execute_shadow_request(request)
         agent_run_id = string_field(request, "agent_run_id")
         run_id = new_run_id(self._id_generator)
+        created_at = now_utc_iso()
         approved_sql = (
             str(request.get("approved_sql", ""))
             if isinstance(request, Mapping)
             else ""
         )
         if validation:
-            return execute_response(
+            response = execute_response(
                 agent_run_id=agent_run_id,
                 run_id=run_id,
                 status="rejected",
@@ -81,6 +94,13 @@ class ExecuteApprovedSqlShadowUseCase:
                 requires_reapproval=False,
                 errors=validation,
             )
+            self._persist_shadow(
+                request if isinstance(request, Mapping) else {},
+                {},
+                response,
+                created_at,
+            )
+            return response
         try:
             query_plan = _build_synthetic_query_plan_from_approved_sql(approved_sql)
             state: GraphState = {
@@ -116,7 +136,7 @@ class ExecuteApprovedSqlShadowUseCase:
                 state = self._apply(state, self._engine_preflight)
             if preflight_approved(state):
                 state["final_status"] = "approved"
-                return execute_response(
+                response = execute_response(
                     agent_run_id=agent_run_id,
                     run_id=run_id,
                     status="success",
@@ -127,6 +147,8 @@ class ExecuteApprovedSqlShadowUseCase:
                     requires_reapproval=False,
                     errors=[],
                 )
+                self._persist_shadow(request, state, response, created_at)
+                return response
             if preflight_repairable(state):
                 repaired = self._apply(state, self._repair_sql)
                 proposal = (
@@ -139,7 +161,7 @@ class ExecuteApprovedSqlShadowUseCase:
                     if proposal and proposal.strip() != approved_sql.strip()
                     else None
                 )
-                return execute_response(
+                response = execute_response(
                     agent_run_id=agent_run_id,
                     run_id=run_id,
                     status="rejected",
@@ -154,7 +176,9 @@ class ExecuteApprovedSqlShadowUseCase:
                     requires_reapproval=proposal is not None,
                     errors=state_errors(repaired),
                 )
-            return execute_response(
+                self._persist_shadow(request, repaired, response, created_at)
+                return response
+            response = execute_response(
                 agent_run_id=agent_run_id,
                 run_id=run_id,
                 status=status_from_final_status(state.get("final_status")),
@@ -169,8 +193,10 @@ class ExecuteApprovedSqlShadowUseCase:
                 requires_reapproval=False,
                 errors=state_errors(state),
             )
+            self._persist_shadow(request, state, response, created_at)
+            return response
         except Exception:
-            return execute_response(
+            response = execute_response(
                 agent_run_id=agent_run_id,
                 run_id=run_id,
                 status="infrastructure_error",
@@ -188,6 +214,39 @@ class ExecuteApprovedSqlShadowUseCase:
                     )
                 ],
             )
+            self._persist_shadow(
+                request if isinstance(request, Mapping) else {},
+                {},
+                response,
+                created_at,
+            )
+            return response
+
+    def _persist_shadow(
+        self,
+        request: Mapping[str, Any],
+        state: Mapping[str, Any],
+        response: Mapping[str, Any],
+        created_at: str,
+    ) -> None:
+        record = build_execute_shadow_record(
+            shadow_record_id=shadow_record_id(
+                agent_run_id=str(response.get("agent_run_id", "")),
+                run_id=str(response.get("run_id", "")),
+                event_type="execute_approved_shadow",
+            ),
+            agent_run_id=str(response.get("agent_run_id", "")),
+            run_id=str(response.get("run_id", "")),
+            created_at=created_at,
+            completed_at=now_utc_iso(),
+            status=str(response.get("status", "infrastructure_error")),
+            request=request,
+            state=state,
+            response=response,
+            langgraph_version=self._langgraph_version,
+            langgraph_commit=self._langgraph_commit,
+        )
+        persist_shadow_record(self._shadow_repository, record)
 
     @staticmethod
     def _apply(state: GraphState, node: Callable[[GraphState], GraphState]) -> GraphState:
@@ -195,6 +254,7 @@ class ExecuteApprovedSqlShadowUseCase:
         merged = deepcopy(state)
         merged.update(deepcopy(patch))
         return merged
+
 
 def validate_execute_shadow_request(
     request: object,
@@ -226,6 +286,7 @@ def validate_execute_shadow_request(
                 )
             )
     return errors
+
 
 def _build_synthetic_query_plan_from_approved_sql(sql: str) -> dict[str, Any]:
     """
@@ -360,6 +421,7 @@ def _columns_from_analysis(
         if column:
             columns.add(column)
     return sorted(columns)
+
 
 def execute_response(
     *,
