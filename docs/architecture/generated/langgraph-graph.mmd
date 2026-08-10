@@ -1,0 +1,74 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	receive_question(receive_question)
+	load_context(load_context)
+	classify_intent(classify_intent)
+	build_plan(build_plan)
+	generate_sql(generate_sql)
+	security_gate(security_gate)
+	contract_gate(contract_gate)
+	engine_preflight(engine_preflight)
+	repair_sql(repair_sql)
+	execute_sql(execute_sql)
+	normalize_result(normalize_result)
+	serialize_result(serialize_result)
+	build_run_record(build_run_record)
+	persist_run(persist_run)
+	record_audit(record_audit)
+	emit_observability(emit_observability)
+	build_application_response(build_application_response)
+	finalize_invalid_request(finalize_invalid_request)
+	finalize_infrastructure_error(finalize_infrastructure_error)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> receive_question;
+	build_plan -. &nbsp;complete&nbsp; .-> build_run_record;
+	build_plan -. &nbsp;infrastructure_error&nbsp; .-> finalize_infrastructure_error;
+	build_plan -.-> generate_sql;
+	build_run_record -. &nbsp;complete&nbsp; .-> build_application_response;
+	build_run_record -.-> persist_run;
+	classify_intent -.-> build_plan;
+	classify_intent -. &nbsp;complete&nbsp; .-> build_run_record;
+	classify_intent -. &nbsp;infrastructure_error&nbsp; .-> finalize_infrastructure_error;
+	contract_gate -. &nbsp;complete&nbsp; .-> build_run_record;
+	contract_gate -.-> engine_preflight;
+	contract_gate -. &nbsp;infrastructure_error&nbsp; .-> finalize_infrastructure_error;
+	emit_observability --> build_application_response;
+	engine_preflight -. &nbsp;complete&nbsp; .-> build_run_record;
+	engine_preflight -.-> execute_sql;
+	engine_preflight -. &nbsp;infrastructure_error&nbsp; .-> finalize_infrastructure_error;
+	engine_preflight -.-> repair_sql;
+	execute_sql -. &nbsp;complete&nbsp; .-> build_run_record;
+	execute_sql -. &nbsp;infrastructure_error&nbsp; .-> finalize_infrastructure_error;
+	execute_sql -.-> normalize_result;
+	finalize_infrastructure_error --> build_run_record;
+	finalize_invalid_request --> build_run_record;
+	generate_sql -. &nbsp;complete&nbsp; .-> build_run_record;
+	generate_sql -. &nbsp;infrastructure_error&nbsp; .-> finalize_infrastructure_error;
+	generate_sql -.-> security_gate;
+	load_context -. &nbsp;continue&nbsp; .-> classify_intent;
+	load_context -. &nbsp;infrastructure_error&nbsp; .-> finalize_infrastructure_error;
+	normalize_result -. &nbsp;complete&nbsp; .-> build_run_record;
+	normalize_result -. &nbsp;infrastructure_error&nbsp; .-> finalize_infrastructure_error;
+	normalize_result -.-> serialize_result;
+	persist_run -.-> emit_observability;
+	persist_run -.-> record_audit;
+	receive_question -. &nbsp;invalid_request&nbsp; .-> finalize_invalid_request;
+	receive_question -. &nbsp;continue&nbsp; .-> load_context;
+	record_audit -.-> emit_observability;
+	repair_sql -. &nbsp;complete&nbsp; .-> build_run_record;
+	repair_sql -. &nbsp;infrastructure_error&nbsp; .-> finalize_infrastructure_error;
+	repair_sql -.-> security_gate;
+	security_gate -. &nbsp;complete&nbsp; .-> build_run_record;
+	security_gate -.-> contract_gate;
+	security_gate -. &nbsp;infrastructure_error&nbsp; .-> finalize_infrastructure_error;
+	serialize_result -. &nbsp;complete&nbsp; .-> build_run_record;
+	serialize_result -. &nbsp;infrastructure_error&nbsp; .-> finalize_infrastructure_error;
+	build_application_response --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

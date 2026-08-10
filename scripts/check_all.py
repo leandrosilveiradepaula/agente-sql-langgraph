@@ -155,6 +155,10 @@ STEPS = [
         [sys.executable, "testar_shadow_test_uvicorn_smoke.py"],
     ),
     (
+        "testar_langgraph_graph_visualization.py",
+        [sys.executable, "testar_langgraph_graph_visualization.py"],
+    ),
+    (
         "testar_auth_types.py",
         [sys.executable, "testar_auth_types.py"],
     ),
