@@ -147,6 +147,14 @@ STEPS = [
         [sys.executable, "testar_internal_sql_agent_v1_http_handler.py"],
     ),
     (
+        "testar_shadow_test_runtime.py",
+        [sys.executable, "testar_shadow_test_runtime.py"],
+    ),
+    (
+        "testar_shadow_test_uvicorn_smoke.py",
+        [sys.executable, "testar_shadow_test_uvicorn_smoke.py"],
+    ),
+    (
         "testar_auth_types.py",
         [sys.executable, "testar_auth_types.py"],
     ),

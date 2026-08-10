@@ -21,6 +21,16 @@ from app.http.http_response_types import HttpResponseEnvelope
 from app.http.sql_agent_http_handler import SqlAgentHttpHandler
 
 
+_FORWARDED_REQUEST_HEADERS = {
+    "accept",
+    "authorization",
+    "content-length",
+    "content-type",
+    "x-correlation-id",
+    "x-request-id",
+}
+
+
 class AsgiSqlAgentApplication:
     def __init__(
         self,
@@ -257,7 +267,9 @@ def _validate_http_scope(
         raise AsgiError("ASGI_SCOPE_INVALID", status_code=400)
     _validate_endpoint(scope.get("client"), limits["max_client_host_bytes"])
     _validate_endpoint(scope.get("server"), limits["max_server_host_bytes"])
-    headers = _header_pairs(scope.get("headers", ()), limits=limits)
+    headers = _forwarded_header_pairs(
+        _header_pairs(scope.get("headers", ()), limits=limits)
+    )
     return {
         "method": str(method),
         "path": str(path),
@@ -314,6 +326,16 @@ def _header_pairs(
     if len(set(content_lengths)) > 1:
         raise AsgiError("ASGI_HEADERS_INVALID", status_code=400)
     return HeaderPairs(tuple(output))
+
+
+def _forwarded_header_pairs(headers: HeaderPairs) -> HeaderPairs:
+    return HeaderPairs(
+        tuple(
+            (name, value)
+            for name, value in headers.items()
+            if name.casefold() in _FORWARDED_REQUEST_HEADERS
+        )
+    )
 
 
 def _response_header_pairs(

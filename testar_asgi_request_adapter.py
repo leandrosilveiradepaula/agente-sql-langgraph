@@ -104,6 +104,24 @@ def test_headers_validos_e_duplicados() -> None:
     assert values == ["Bearer one", "Bearer two"]
 
 
+def test_headers_de_transporte_nao_sao_encaminhados() -> None:
+    envelope, _receive = _build(
+        scope=_scope(
+            headers=[
+                (b"host", b"127.0.0.1:8000"),
+                (b"user-agent", b"python-urllib/3.12"),
+                (b"connection", b"close"),
+                (b"content-type", b"application/json"),
+                (b"accept", b"application/json"),
+            ]
+        )
+    )
+    assert list(envelope["headers"].items()) == [
+        ("content-type", "application/json"),
+        ("accept", "application/json"),
+    ]
+
+
 def test_headers_invalidos() -> None:
     _raises(scope=_scope(headers=[(b"Content-Type", b"application/json")]))
     _raises(scope=_scope(headers=[(b"bad\n", b"x")]))
@@ -180,6 +198,7 @@ def main() -> None:
         test_path_invalidos,
         test_query_string,
         test_headers_validos_e_duplicados,
+        test_headers_de_transporte_nao_sao_encaminhados,
         test_headers_invalidos,
         test_body_chunks,
         test_body_limites,
