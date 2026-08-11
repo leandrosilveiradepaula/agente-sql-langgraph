@@ -16,6 +16,7 @@ from typing import Any
 from app.adapters.testing.fake_shadow_evidence_repository import (
     FakeShadowEvidenceRepository,
 )
+from app.application.internal_sql_agent_v1_shared import shadow_record_id
 from app.test_runtime.composition import create_shadow_test_asgi_app
 
 
@@ -197,15 +198,35 @@ def test_uvicorn_local_smoke() -> bool:
                 f"{base_url}/v1/internal/sql-agent/generate",
                 _generate_payload(),
             )
+            generate_shadow_record_id = shadow_record_id(
+                agent_run_id=generate["agent_run_id"],
+                run_id=generate["run_id"],
+                event_type="generate",
+            )
+            shadow_run = _get_json(
+                f"{base_url}/v1/internal/shadow-runs/{generate_shadow_record_id}"
+            )
+            visualization = _get_json(
+                f"{base_url}/v1/internal/shadow-runs/{generate_shadow_record_id}/visualization"
+            )
             execute = _post_json(
                 f"{base_url}/v1/internal/sql-agent/execute-approved-shadow",
                 _execute_payload(),
+            )
+            listed = _get_json(
+                f"{base_url}/v1/internal/agent-runs/{AGENT_RUN_ID}/shadow-runs?limit=10"
             )
             assert health["status"] == "ok"
             assert health["runtime_mode"] == "shadow_test"
             assert health["real_sql_execution"] is False
             assert generate["status"] == "success"
+            assert shadow_run["shadow_record_id"] == generate_shadow_record_id
+            assert visualization["run"]["shadow_record_id"] == generate_shadow_record_id
             assert execute["status"] == "success"
+            assert len(listed["items"]) == 2
+            safe_outputs = repr(shadow_run) + repr(visualization) + repr(listed)
+            assert "Execute uma generic analysis de teste." not in safe_outputs
+            assert "SELECT id FROM schema_test.table_test" not in safe_outputs
             return True
         finally:
             process.terminate()

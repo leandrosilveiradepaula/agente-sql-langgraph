@@ -90,7 +90,12 @@ class ObservedInternalHttpHandler:
         duration_ms = int((time.perf_counter() - started) * 1000)
         body = _safe_payload(response.get("body", b""))
         run_id = body.get("run_id")
-        agent_run_id = body.get("agent_run_id") or payload.get("agent_run_id")
+        request_ids = _read_request_ids(endpoint)
+        agent_run_id = (
+            body.get("agent_run_id")
+            or payload.get("agent_run_id")
+            or request_ids.get("agent_run_id")
+        )
         record_id = (
             shadow_record_id(
                 agent_run_id=str(agent_run_id),
@@ -98,7 +103,7 @@ class ObservedInternalHttpHandler:
                 event_type=str(event_type),
             )
             if agent_run_id and run_id and event_type
-            else None
+            else request_ids.get("shadow_record_id")
         )
         self._emit(
             {
@@ -146,3 +151,41 @@ def _event_type(endpoint: str) -> str | None:
     if endpoint == "/v1/internal/sql-agent/execute-approved-shadow":
         return "execute_approved_shadow"
     return None
+
+
+def _read_request_ids(endpoint: str) -> dict[str, str]:
+    parts = [part for part in endpoint.split("/") if part]
+    if len(parts) == 4 and parts[:3] == ["v1", "internal", "shadow-runs"]:
+        return {"shadow_record_id": _safe_id(parts[3])}
+    if (
+        len(parts) == 5
+        and parts[:3] == ["v1", "internal", "shadow-runs"]
+        and parts[4] == "visualization"
+    ):
+        return {"shadow_record_id": _safe_id(parts[3])}
+    if (
+        len(parts) == 5
+        and parts[:3] == ["v1", "internal", "agent-runs"]
+        and parts[4] == "shadow-runs"
+    ):
+        return {"agent_run_id": _safe_id(parts[3])}
+    return {}
+
+
+def _safe_id(value: str) -> str:
+    return "".join(
+        char if _is_ascii_id_char(char) else "_"
+        for char in value
+    )[:160]
+
+
+def _is_ascii_id_char(char: str) -> bool:
+    return (
+        len(char) == 1
+        and (
+            "A" <= char <= "Z"
+            or "a" <= char <= "z"
+            or "0" <= char <= "9"
+            or char in "-_"
+        )
+    )

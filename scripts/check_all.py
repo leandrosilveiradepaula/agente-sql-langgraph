@@ -163,6 +163,14 @@ STEPS = [
         [sys.executable, "testar_shadow_run_visualization.py"],
     ),
     (
+        "testar_internal_shadow_read_v1_use_cases.py",
+        [sys.executable, "testar_internal_shadow_read_v1_use_cases.py"],
+    ),
+    (
+        "testar_internal_shadow_read_v1_http_handler.py",
+        [sys.executable, "testar_internal_shadow_read_v1_http_handler.py"],
+    ),
+    (
         "testar_auth_types.py",
         [sys.executable, "testar_auth_types.py"],
     ),

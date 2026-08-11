@@ -4,6 +4,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+import psycopg
+
 from app.adapters.testing.fake_engine_preflight import FakeEnginePreflight
 from app.adapters.testing.fake_shadow_evidence_repository import (
     FakeShadowEvidenceRepository,
@@ -62,9 +64,11 @@ class FakePostgresCursor:
         *,
         rowcount: int = 1,
         rows: list[dict[str, Any]] | None = None,
+        exception: psycopg.Error | None = None,
     ) -> None:
         self.rowcount = rowcount
         self.rows = list(rows or [])
+        self.exception = exception
         self.query: str | None = None
         self.parameters: dict[str, Any] | None = None
 
@@ -77,6 +81,8 @@ class FakePostgresCursor:
     def execute(self, query: str, parameters: dict[str, Any]) -> None:
         self.query = query
         self.parameters = deepcopy(parameters)
+        if self.exception is not None:
+            raise self.exception
 
     def fetchone(self) -> dict[str, Any] | None:
         return deepcopy(self.rows[0]) if self.rows else None
@@ -321,8 +327,9 @@ def test_repository_allows_many_shadow_records_per_agent_run() -> None:
     repository.create(_generate_record(agent_run_id="agent-run-1", run_id="lg-run-2"))
 
     records = repository.list_by_agent_run_id("agent-run-1")
-    assert len(records) == 2
-    assert {record["run_id"] for record in records} == {"lg-run-1", "lg-run-2"}
+    assert records["status"] == "ok"
+    assert len(records["records"]) == 2
+    assert {record["run_id"] for record in records["records"]} == {"lg-run-1", "lg-run-2"}
 
 
 def test_strict_json_is_canonical_and_deterministic() -> None:
@@ -362,8 +369,9 @@ def test_repository_fetch_by_shadow_record_id() -> None:
     repository.create(record)
 
     fetched = repository.fetch_by_shadow_record_id(record["shadow_record_id"])
-    assert fetched is not None
-    assert fetched["shadow_record_id"] == record["shadow_record_id"]
+    assert fetched["status"] == "ok"
+    assert fetched["record"] is not None
+    assert fetched["record"]["shadow_record_id"] == record["shadow_record_id"]
 
 
 def test_repository_list_by_agent_run_id() -> None:
@@ -372,7 +380,9 @@ def test_repository_list_by_agent_run_id() -> None:
     repository.create(_generate_record(agent_run_id="agent-b", run_id="lg-run-2"))
     repository.create(_generate_record(agent_run_id="agent-a", run_id="lg-run-3"))
 
-    assert [record["agent_run_id"] for record in repository.list_by_agent_run_id("agent-a")] == [
+    result = repository.list_by_agent_run_id("agent-a")
+    assert result["status"] == "ok"
+    assert [record["agent_run_id"] for record in result["records"]] == [
         "agent-a",
         "agent-a",
     ]
@@ -684,11 +694,55 @@ def test_postgres_fetch_and_list_normalize_timestamps_for_fingerprint() -> None:
     fetched = repository.fetch_by_shadow_record_id(record["shadow_record_id"])
     listed = repository.list_by_agent_run_id(record["agent_run_id"])
 
-    assert fetched is not None
-    assert fetched["evidence_fingerprint"] == record["evidence_fingerprint"]
-    assert fetched["created_at"] == record["created_at"]
-    assert fetched["completed_at"] == record["completed_at"]
-    assert listed[0]["evidence_fingerprint"] == record["evidence_fingerprint"]
+    assert fetched["status"] == "ok"
+    assert fetched["record"] is not None
+    assert fetched["record"]["evidence_fingerprint"] == record["evidence_fingerprint"]
+    assert fetched["record"]["created_at"] == record["created_at"]
+    assert fetched["record"]["completed_at"] == record["completed_at"]
+    assert listed["status"] == "ok"
+    assert listed["records"][0]["evidence_fingerprint"] == record["evidence_fingerprint"]
+
+
+def test_postgres_fetch_failure_returns_unavailable_result() -> None:
+    cursor = FakePostgresCursor(exception=psycopg.Error("raw DSN password traceback"))
+    repository = PostgresShadowEvidenceRepository(
+        dsn="postgresql://shadow-test",
+        connect=FakePostgresConnect(cursor),
+    )
+
+    result = repository.fetch_by_shadow_record_id("shadow-any")
+    serialized = repr(result).casefold()
+
+    assert result["status"] == "unavailable"
+    assert result["record"] is None
+    assert result["diagnostic"] is not None
+    assert result["diagnostic"]["code"] == "SHADOW_REPOSITORY_UNAVAILABLE"
+    assert "postgresql://" not in serialized
+    assert "password" not in serialized
+    assert "traceback" not in serialized
+    assert "raw dsn" not in serialized
+    assert FETCH_SHADOW_RUN_SQL.casefold() not in serialized
+
+
+def test_postgres_list_failure_returns_unavailable_result() -> None:
+    cursor = FakePostgresCursor(exception=psycopg.Error("raw SQL secret traceback"))
+    repository = PostgresShadowEvidenceRepository(
+        dsn="postgresql://shadow-test",
+        connect=FakePostgresConnect(cursor),
+    )
+
+    result = repository.list_by_agent_run_id("agent-run-any")
+    serialized = repr(result).casefold()
+
+    assert result["status"] == "unavailable"
+    assert result["records"] == []
+    assert result["diagnostic"] is not None
+    assert result["diagnostic"]["code"] == "SHADOW_REPOSITORY_UNAVAILABLE"
+    assert "postgresql://" not in serialized
+    assert "secret" not in serialized
+    assert "traceback" not in serialized
+    assert "raw sql" not in serialized
+    assert LIST_SHADOW_RUNS_BY_AGENT_SQL.casefold() not in serialized
 
 
 def test_generate_shadow_repository_failure_does_not_change_response() -> None:
@@ -778,6 +832,8 @@ def main() -> None:
         test_postgres_create_returns_already_exists_when_rowcount_zero,
         test_postgres_finalize_returns_not_found_when_rowcount_zero,
         test_postgres_fetch_and_list_normalize_timestamps_for_fingerprint,
+        test_postgres_fetch_failure_returns_unavailable_result,
+        test_postgres_list_failure_returns_unavailable_result,
         test_generate_shadow_repository_failure_does_not_change_response,
         test_execute_shadow_repository_failure_does_not_change_response,
     ]

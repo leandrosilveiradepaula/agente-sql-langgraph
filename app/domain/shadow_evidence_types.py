@@ -21,6 +21,7 @@ ShadowRepositoryStatus = Literal[
     "rejected",
     "error",
 ]
+ShadowRepositoryReadStatus = Literal["ok", "not_found", "unavailable"]
 
 
 class ShadowRepositoryDiagnostic(TypedDict, total=False):
@@ -96,6 +97,18 @@ class ShadowRepositoryResult(TypedDict):
     evidence_fingerprint: str | None
     diagnostic: ShadowRepositoryDiagnostic | None
     duration_ms: int | None
+
+
+class ShadowRepositoryFetchResult(TypedDict):
+    status: ShadowRepositoryReadStatus
+    record: ShadowRunRecord | None
+    diagnostic: ShadowRepositoryDiagnostic | None
+
+
+class ShadowRepositoryListResult(TypedDict):
+    status: Literal["ok", "unavailable"]
+    records: list[ShadowRunRecord]
+    diagnostic: ShadowRepositoryDiagnostic | None
 
 
 class FinalizeShadowRunRequest(TypedDict):

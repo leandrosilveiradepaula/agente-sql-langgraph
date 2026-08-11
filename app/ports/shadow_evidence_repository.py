@@ -4,6 +4,8 @@ from typing import Protocol
 
 from app.domain.shadow_evidence_types import (
     FinalizeShadowRunRequest,
+    ShadowRepositoryFetchResult,
+    ShadowRepositoryListResult,
     ShadowRepositoryResult,
     ShadowRunRecord,
 )
@@ -37,7 +39,7 @@ class ShadowEvidenceRepository(Protocol):
     def fetch_by_shadow_record_id(
         self,
         shadow_record_id: str,
-    ) -> ShadowRunRecord | None:
+    ) -> ShadowRepositoryFetchResult:
         """
         Loads one shadow record by its dedicated identifier.
         """
@@ -45,7 +47,7 @@ class ShadowEvidenceRepository(Protocol):
     def list_by_agent_run_id(
         self,
         agent_run_id: str,
-    ) -> list[ShadowRunRecord]:
+    ) -> ShadowRepositoryListResult:
         """
         Lists all shadow records correlated to one product run id.
         """

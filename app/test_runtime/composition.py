@@ -8,6 +8,11 @@ from app.application.internal_sql_agent_v1 import (
     ExecuteApprovedSqlShadowUseCase,
     GenerateSqlUseCase,
 )
+from app.application.internal_shadow_read_v1 import (
+    GetShadowRunSafeViewUseCase,
+    GetShadowRunVisualizationUseCase,
+    ListAgentShadowRunsUseCase,
+)
 from app.asgi.asgi_limits import (
     default_asgi_adapter_limits,
     validate_asgi_http_limit_compatibility,
@@ -18,6 +23,10 @@ from app.http.http_response import default_http_response_limits
 from app.http.internal_sql_agent_v1_handler import (
     create_internal_sql_agent_v1_http_handler,
 )
+from app.http.internal_shadow_read_v1_handler import (
+    create_internal_shadow_read_v1_http_handler,
+)
+from app.http.internal_v1_router import create_internal_v1_http_router
 from app.infrastructure.persistence.postgres_shadow_evidence_repository import (
     PostgresShadowEvidenceRepository,
 )
@@ -69,7 +78,7 @@ def create_shadow_test_runtime(
     ids = ShadowTestIds()
     request_limits = default_http_request_limits()
     response_limits = default_http_response_limits()
-    handler = create_internal_sql_agent_v1_http_handler(
+    sql_handler = create_internal_sql_agent_v1_http_handler(
         generate_use_case=GenerateSqlUseCase(
             context_repository=ShadowTestContextRepository(),
             sql_generator=sql_generator,
@@ -90,6 +99,22 @@ def create_shadow_test_runtime(
         ),
         request_limits=request_limits,
         response_limits=response_limits,
+    )
+    shadow_read_handler = create_internal_shadow_read_v1_http_handler(
+        get_shadow_run_use_case=GetShadowRunSafeViewUseCase(
+            repository=observed_repository,
+        ),
+        list_agent_shadow_runs_use_case=ListAgentShadowRunsUseCase(
+            repository=observed_repository,
+        ),
+        get_shadow_run_visualization_use_case=GetShadowRunVisualizationUseCase(
+            repository=observed_repository,
+        ),
+        response_limits=response_limits,
+    )
+    handler = create_internal_v1_http_router(
+        sql_handler=sql_handler,
+        shadow_read_handler=shadow_read_handler,
     )
     observed_handler = ObservedInternalHttpHandler(
         inner=handler,

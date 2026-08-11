@@ -11,6 +11,9 @@ from psycopg.rows import dict_row
 
 from app.domain.shadow_evidence_types import (
     FinalizeShadowRunRequest,
+    ShadowRepositoryDiagnostic,
+    ShadowRepositoryFetchResult,
+    ShadowRepositoryListResult,
     ShadowRepositoryResult,
     ShadowRunRecord,
     strict_json_dumps,
@@ -265,7 +268,7 @@ class PostgresShadowEvidenceRepository:
     def fetch_by_shadow_record_id(
         self,
         shadow_record_id: str,
-    ) -> ShadowRunRecord | None:
+    ) -> ShadowRepositoryFetchResult:
         try:
             with self._connect(
                 self._dsn,
@@ -279,10 +282,24 @@ class PostgresShadowEvidenceRepository:
                     )
                     row = cursor.fetchone()
         except psycopg.Error:
-            return None
-        return _record_from_row(row) if row is not None else None
+            return {
+                "status": "unavailable",
+                "record": None,
+                "diagnostic": _repository_unavailable_diagnostic(),
+            }
+        if row is None:
+            return {
+                "status": "not_found",
+                "record": None,
+                "diagnostic": _record_not_found_diagnostic(),
+            }
+        return {
+            "status": "ok",
+            "record": _record_from_row(row),
+            "diagnostic": None,
+        }
 
-    def list_by_agent_run_id(self, agent_run_id: str) -> list[ShadowRunRecord]:
+    def list_by_agent_run_id(self, agent_run_id: str) -> ShadowRepositoryListResult:
         try:
             with self._connect(
                 self._dsn,
@@ -296,8 +313,16 @@ class PostgresShadowEvidenceRepository:
                     )
                     rows = cursor.fetchall()
         except psycopg.Error:
-            return []
-        return [_record_from_row(row) for row in rows]
+            return {
+                "status": "unavailable",
+                "records": [],
+                "diagnostic": _repository_unavailable_diagnostic(),
+            }
+        return {
+            "status": "ok",
+            "records": [_record_from_row(row) for row in rows],
+            "diagnostic": None,
+        }
 
     def _execute_write(
         self,
@@ -442,12 +467,7 @@ def _not_found_result(
         "agent_run_id": agent_run_id,
         "run_id": run_id,
         "evidence_fingerprint": evidence_fingerprint,
-        "diagnostic": {
-            "code": "SHADOW_RECORD_NOT_FOUND",
-            "message": "Shadow record was not found.",
-            "failure_category": "not_found",
-            "safe_details": {},
-        },
+        "diagnostic": _record_not_found_diagnostic(),
         "duration_ms": None,
     }
 
@@ -463,11 +483,24 @@ def _error_result(
         "agent_run_id": agent_run_id,
         "run_id": run_id,
         "evidence_fingerprint": evidence_fingerprint,
-        "diagnostic": {
-            "code": "SHADOW_REPOSITORY_UNAVAILABLE",
-            "message": "Shadow evidence repository unavailable.",
-            "failure_category": "unavailable",
-            "safe_details": {},
-        },
+        "diagnostic": _repository_unavailable_diagnostic(),
         "duration_ms": None,
+    }
+
+
+def _record_not_found_diagnostic() -> ShadowRepositoryDiagnostic:
+    return {
+        "code": "SHADOW_RECORD_NOT_FOUND",
+        "message": "Shadow record was not found.",
+        "failure_category": "not_found",
+        "safe_details": {},
+    }
+
+
+def _repository_unavailable_diagnostic() -> ShadowRepositoryDiagnostic:
+    return {
+        "code": "SHADOW_REPOSITORY_UNAVAILABLE",
+        "message": "Shadow evidence repository unavailable.",
+        "failure_category": "unavailable",
+        "safe_details": {},
     }

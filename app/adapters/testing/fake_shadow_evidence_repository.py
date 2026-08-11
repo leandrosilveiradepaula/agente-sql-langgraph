@@ -4,6 +4,8 @@ from copy import deepcopy
 
 from app.domain.shadow_evidence_types import (
     FinalizeShadowRunRequest,
+    ShadowRepositoryFetchResult,
+    ShadowRepositoryListResult,
     ShadowRepositoryResult,
     ShadowRunRecord,
     validate_shadow_run_record,
@@ -89,16 +91,31 @@ class FakeShadowEvidenceRepository:
     def fetch_by_shadow_record_id(
         self,
         shadow_record_id: str,
-    ) -> ShadowRunRecord | None:
+    ) -> ShadowRepositoryFetchResult:
         record = self.records.get(shadow_record_id)
-        return deepcopy(record) if record is not None else None
+        if record is None:
+            return {
+                "status": "not_found",
+                "record": None,
+                "diagnostic": {
+                    "code": "SHADOW_RECORD_NOT_FOUND",
+                    "message": "Shadow record was not found.",
+                    "failure_category": "not_found",
+                    "safe_details": {},
+                },
+            }
+        return {"status": "ok", "record": deepcopy(record), "diagnostic": None}
 
-    def list_by_agent_run_id(self, agent_run_id: str) -> list[ShadowRunRecord]:
-        return [
-            deepcopy(record)
-            for record in self.records.values()
-            if record["agent_run_id"] == agent_run_id
-        ]
+    def list_by_agent_run_id(self, agent_run_id: str) -> ShadowRepositoryListResult:
+        return {
+            "status": "ok",
+            "records": [
+                deepcopy(record)
+                for record in self.records.values()
+                if record["agent_run_id"] == agent_run_id
+            ],
+            "diagnostic": None,
+        }
 
 
 def _result(status: str, record: ShadowRunRecord) -> ShadowRepositoryResult:
