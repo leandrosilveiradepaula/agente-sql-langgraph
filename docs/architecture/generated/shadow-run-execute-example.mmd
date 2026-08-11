@@ -1,0 +1,25 @@
+flowchart TD
+  approved_sql_received["01 ok approved_sql_received &#124; approved_sql_fingerprint=0dbf2461e2d6ab83d75dbe8440a8d639298a27c824a67794f4da6a134c244d45"]
+  security_gate["02 ok security_gate &#124; duration_ms=1 executed=False security_sql_fingerprint=fp-security-synthetic status=approved"]
+  contract_gate["03 ok contract_gate &#124; contract_sql_fingerprint=fp-contract-synthetic duration_ms=1 executed=False status=approved"]
+  engine_preflight["04 warning engine_preflight &#124; duration_ms=3 error_code=ENGINE_PREFLIGHT_COLUMN_NOT_FOUND executed=False repairable=True status=rejected"]
+  repair_sql_proposal["05 warning repair_sql_proposal &#124; repaired_sql_proposal_fingerprint=85b5e63a8e8a0ddcb8c4323e0f8d8b7a23023d6aa1258e41c8463bc71835abe8"]
+  requires_reapproval["06 warning requires_reapproval &#124; requires_reapproval=True"]
+  final["07 error final &#124; evidence_fingerprint=1f8baba76f895251d3434294351d4710c15e37b92a1af37d1315347b5078deac status=rejected"]
+  approved_sql_received -.-> security_gate
+  security_gate -.-> contract_gate
+  contract_gate -.-> engine_preflight
+  engine_preflight -.-> repair_sql_proposal
+  repair_sql_proposal -.-> requires_reapproval
+  requires_reapproval --> final
+  classDef ok fill:#e9f7ef,stroke:#2e7d32,color:#1b1b1b
+  classDef warning fill:#fff8e1,stroke:#f9a825,color:#1b1b1b
+  classDef error fill:#ffebee,stroke:#c62828,color:#1b1b1b
+  classDef unknown fill:#eceff1,stroke:#607d8b,color:#1b1b1b
+  class approved_sql_received ok
+  class security_gate ok
+  class contract_gate ok
+  class engine_preflight warning
+  class repair_sql_proposal warning
+  class requires_reapproval warning
+  class final error

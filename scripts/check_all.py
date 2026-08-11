@@ -159,6 +159,10 @@ STEPS = [
         [sys.executable, "testar_langgraph_graph_visualization.py"],
     ),
     (
+        "testar_shadow_run_visualization.py",
+        [sys.executable, "testar_shadow_run_visualization.py"],
+    ),
+    (
         "testar_auth_types.py",
         [sys.executable, "testar_auth_types.py"],
     ),
