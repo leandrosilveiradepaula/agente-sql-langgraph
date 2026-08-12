@@ -219,7 +219,7 @@ def _reject_sensitive_headers(headers: object) -> None:
     if not isinstance(headers, Mapping):
         return
     for key in headers:
-        if isinstance(key, str) and key.casefold() in {"authorization", "cookie"}:
+        if isinstance(key, str) and key.casefold() == "cookie":
             raise ShadowReadError("HTTP_IDENTITY_FIELD_FORBIDDEN", 400)
 
 

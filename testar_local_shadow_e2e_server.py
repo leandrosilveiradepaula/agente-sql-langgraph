@@ -12,6 +12,7 @@ from contextlib import closing, contextmanager
 from typing import Any
 
 from app.local_testing.internal_sql_agent_v1_local_server import (
+    LOCAL_TEST_S2S_TOKEN,
     LocalShadowRuntime,
     create_local_shadow_test_server,
 )
@@ -52,7 +53,10 @@ def _post_json(server, path: str, payload: dict) -> dict:
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LOCAL_TEST_S2S_TOKEN}",
+        },
         method="POST",
     )
     try:
@@ -67,6 +71,22 @@ def _get_json(server, path: str) -> dict:
     _assert_localhost(url)
     with urllib.request.urlopen(url, timeout=2) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _post_json_without_auth(server, path: str, payload: dict) -> tuple[int, dict]:
+    url = _url(server, path)
+    _assert_localhost(url)
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read().decode("utf-8"))
 
 
 def _assert_localhost(url: str) -> None:
@@ -253,6 +273,33 @@ def test_payload_sanitizado_recebido_no_adapter_local() -> None:
             thread.join(timeout=2)
 
 
+def test_sem_s2s_nao_chama_pipeline_local() -> None:
+    runtime = LocalShadowRuntime()
+    with _guard_external_network() as blocked_hosts:
+        server, thread = _server(runtime)
+        try:
+            status, body = _post_json_without_auth(
+                server,
+                "/v1/internal/sql-agent/generate",
+                _generate_payload(),
+            )
+            records = _get_json(
+                server,
+                f"/__local-test/records?agent_run_id={AGENT_RUN_ID}",
+            )["records"]
+
+            assert status == 401
+            assert body["error"]["code"] == "UNAUTHORIZED_SERVICE"
+            assert records == []
+            assert runtime.sql_generator.calls == 0
+            assert runtime.sql_repairer.calls == 0
+            assert blocked_hosts == []
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+
 def test_execute_repair_vira_proposta_com_reapproval_sem_executar_sql() -> None:
     runtime = LocalShadowRuntime(preflight_mode="repairable_once")
     with _guard_external_network() as blocked_hosts:
@@ -360,6 +407,7 @@ def main() -> None:
     tests = [
         test_generate_e_execute_persistem_1_n_sem_rede_externa_ou_banco,
         test_payload_sanitizado_recebido_no_adapter_local,
+        test_sem_s2s_nao_chama_pipeline_local,
         test_execute_repair_vira_proposta_com_reapproval_sem_executar_sql,
         test_trava_local_exige_flag_explicita_e_preserva_bind_local,
         test_network_guard_global_bloqueia_host_nao_local,

@@ -22,6 +22,7 @@ from app.test_runtime.composition import create_shadow_test_asgi_app
 
 HOST = "127.0.0.1"
 AGENT_RUN_ID = "agent-run-uvicorn-smoke"
+S2S_TOKEN = "test-s2s-token"
 LOCALHOSTS = {HOST, "localhost", "::1"}
 NETWORK_GUARD_SITE = r'''
 from __future__ import annotations
@@ -88,25 +89,37 @@ def _install_network_guard(site_dir: Path) -> None:
     )
 
 
-def _get_json(url: str) -> dict[str, Any]:
+def _get_json(url: str, *, token: str | None = None) -> dict[str, Any]:
     _assert_localhost(url)
-    with urllib.request.urlopen(url, timeout=2) as response:
+    request = urllib.request.Request(url, method="GET")
+    if token is not None:
+        request.add_header("Authorization", f"Bearer {token}")
+        request.add_header("Accept", "application/json")
+    with urllib.request.urlopen(request, timeout=2) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
-def _post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    token: str | None = S2S_TOKEN,
+) -> tuple[int, dict[str, Any]]:
     _assert_localhost(url)
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=2) as response:
-            return json.loads(response.read().decode("utf-8"))
+            return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
-        return json.loads(error.read().decode("utf-8"))
+        return error.code, json.loads(error.read().decode("utf-8"))
 
 
 def _generate_payload() -> dict[str, Any]:
@@ -145,6 +158,7 @@ def test_uvicorn_local_smoke() -> bool:
             "LANGGRAPH_HTTP_PORT": str(port),
             "LANGGRAPH_SHADOW_PERSISTENCE": "postgres",
             "LANGGRAPH_SHADOW_DATABASE_DSN": "postgresql://shadow-test-placeholder",
+            "LANGGRAPH_S2S_TOKEN": S2S_TOKEN,
             "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION": "false",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONUTF8": "1",
@@ -194,7 +208,17 @@ def test_uvicorn_local_smoke() -> bool:
             else:
                 raise AssertionError("uvicorn did not become ready")
 
-            generate = _post_json(
+            unauth_status, unauth_generate = _post_json(
+                f"{base_url}/v1/internal/sql-agent/generate",
+                _generate_payload(),
+                token=None,
+            )
+            wrong_status, wrong_generate = _post_json(
+                f"{base_url}/v1/internal/sql-agent/generate",
+                _generate_payload(),
+                token="wrong-token",
+            )
+            generate_status, generate = _post_json(
                 f"{base_url}/v1/internal/sql-agent/generate",
                 _generate_payload(),
             )
@@ -204,24 +228,33 @@ def test_uvicorn_local_smoke() -> bool:
                 event_type="generate",
             )
             shadow_run = _get_json(
-                f"{base_url}/v1/internal/shadow-runs/{generate_shadow_record_id}"
+                f"{base_url}/v1/internal/shadow-runs/{generate_shadow_record_id}",
+                token=S2S_TOKEN,
             )
             visualization = _get_json(
-                f"{base_url}/v1/internal/shadow-runs/{generate_shadow_record_id}/visualization"
+                f"{base_url}/v1/internal/shadow-runs/{generate_shadow_record_id}/visualization",
+                token=S2S_TOKEN,
             )
-            execute = _post_json(
+            execute_status, execute = _post_json(
                 f"{base_url}/v1/internal/sql-agent/execute-approved-shadow",
                 _execute_payload(),
             )
             listed = _get_json(
-                f"{base_url}/v1/internal/agent-runs/{AGENT_RUN_ID}/shadow-runs?limit=10"
+                f"{base_url}/v1/internal/agent-runs/{AGENT_RUN_ID}/shadow-runs?limit=10",
+                token=S2S_TOKEN,
             )
             assert health["status"] == "ok"
             assert health["runtime_mode"] == "shadow_test"
             assert health["real_sql_execution"] is False
+            assert unauth_status == 401
+            assert unauth_generate["error"]["code"] == "UNAUTHORIZED_SERVICE"
+            assert wrong_status == 401
+            assert wrong_generate["error"]["code"] == "UNAUTHORIZED_SERVICE"
+            assert generate_status == 200
             assert generate["status"] == "success"
             assert shadow_run["shadow_record_id"] == generate_shadow_record_id
             assert visualization["run"]["shadow_record_id"] == generate_shadow_record_id
+            assert execute_status == 200
             assert execute["status"] == "success"
             assert len(listed["items"]) == 2
             safe_outputs = repr(shadow_run) + repr(visualization) + repr(listed)

@@ -25,9 +25,14 @@ from app.http.http_response import default_http_response_limits
 from app.http.internal_sql_agent_v1_handler import (
     create_internal_sql_agent_v1_http_handler,
 )
+from app.http.internal_service_auth_handler import (
+    protect_internal_service_http_handler,
+)
+from app.security.internal_service_auth import InternalServiceAuthConfig
 
 _FORWARDED_HEADER_NAMES = {
     "accept",
+    "authorization",
     "content-length",
     "content-type",
     "x-correlation-id",
@@ -35,6 +40,7 @@ _FORWARDED_HEADER_NAMES = {
 }
 _LOCAL_TEST_ONLY_ENV = "LANGGRAPH_LOCAL_TEST_ONLY"
 _LOCAL_TEST_ONLY_VALUE = "1"
+LOCAL_TEST_S2S_TOKEN = "test-local-s2s-token"
 
 
 class LocalShadowIds:
@@ -53,6 +59,7 @@ class LocalShadowRuntime:
         sql: str = "SELECT id FROM schema_test.table_test",
         repair_sql: str = "SELECT id FROM schema_test.table_test",
         preflight_mode: str = "approved",
+        s2s_token: str = LOCAL_TEST_S2S_TOKEN,
     ) -> None:
         self.repository = FakeShadowEvidenceRepository()
         self.sql_generator = FakeSqlGenerator(sql)
@@ -60,7 +67,7 @@ class LocalShadowRuntime:
         self.engine_preflight = _preflight_for_mode(preflight_mode)
         self.id_generator = LocalShadowIds()
         self.received_requests: list[dict[str, Any]] = []
-        self.handler = create_internal_sql_agent_v1_http_handler(
+        internal_handler = create_internal_sql_agent_v1_http_handler(
             generate_use_case=GenerateSqlUseCase(
                 context_repository=FakeContextRepository(),
                 sql_generator=self.sql_generator,
@@ -82,6 +89,10 @@ class LocalShadowRuntime:
             request_limits=default_http_request_limits(),
             response_limits=default_http_response_limits(),
         )
+        self.handler = protect_internal_service_http_handler(
+            inner=internal_handler,
+            auth_config=InternalServiceAuthConfig(expected_token=s2s_token),
+        )
 
     def capture_request(
         self,
@@ -94,7 +105,11 @@ class LocalShadowRuntime:
         self.received_requests.append(
             {
                 "path": path,
-                "header_names": sorted(key.casefold() for key in headers),
+                "header_names": sorted(
+                    key.casefold()
+                    for key in headers
+                    if key.casefold() not in {"authorization", "cookie"}
+                ),
                 "body_keys": sorted(str(key) for key in body),
                 "principal_keys": sorted(
                     str(key)
@@ -193,12 +208,6 @@ class _LocalShadowRequestHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         headers = _internal_headers({key: value for key, value in self.headers.items()})
         path = urlsplit(self.path).path
-        payload = _decode_json(body)
-        self.server.runtime.capture_request(  # type: ignore[attr-defined]
-            path=path,
-            headers=headers,
-            payload=payload,
-        )
         response = self.server.runtime.handler.handle(  # type: ignore[attr-defined]
             {
                 "method": "POST",
@@ -207,6 +216,13 @@ class _LocalShadowRequestHandler(BaseHTTPRequestHandler):
                 "body": body,
             }
         )
+        if response["status_code"] != 401:
+            payload = _decode_json(body)
+            self.server.runtime.capture_request(  # type: ignore[attr-defined]
+                path=path,
+                headers=headers,
+                payload=payload,
+            )
         self.send_response(response["status_code"])
         for key, value in response["headers"].items():
             self.send_header(key, value)

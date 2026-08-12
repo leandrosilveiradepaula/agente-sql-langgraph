@@ -26,10 +26,14 @@ from app.http.internal_sql_agent_v1_handler import (
 from app.http.internal_shadow_read_v1_handler import (
     create_internal_shadow_read_v1_http_handler,
 )
+from app.http.internal_service_auth_handler import (
+    protect_internal_service_http_handler,
+)
 from app.http.internal_v1_router import create_internal_v1_http_router
 from app.infrastructure.persistence.postgres_shadow_evidence_repository import (
     PostgresShadowEvidenceRepository,
 )
+from app.security.internal_service_auth import InternalServiceAuthConfig
 from app.test_runtime.asgi_app import ShadowTestAsgiApplication
 from app.test_runtime.config import (
     ShadowTestRuntimeConfig,
@@ -121,6 +125,10 @@ def create_shadow_test_runtime(
         repository=observed_repository,
         logger=logger,
     )
+    protected_handler = protect_internal_service_http_handler(
+        inner=observed_handler,
+        auth_config=InternalServiceAuthConfig(expected_token=config.s2s_token),
+    )
     asgi_limits = default_asgi_adapter_limits()
     validate_asgi_http_limit_compatibility(
         asgi_limits=asgi_limits,
@@ -128,7 +136,7 @@ def create_shadow_test_runtime(
         http_response_limits=response_limits,
     )
     internal_app = AsgiSqlAgentApplication(
-        http_handler=observed_handler,  # type: ignore[arg-type]
+        http_handler=protected_handler,  # type: ignore[arg-type]
         asgi_limits=asgi_limits,
     )
     return ShadowTestRuntime(

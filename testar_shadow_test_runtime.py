@@ -21,6 +21,7 @@ from app.test_runtime.offline_adapters import OFFLINE_SQL
 
 DSN_PLACEHOLDER = "postgresql://shadow-test-placeholder"
 AGENT_RUN_ID = "agent-run-shadow-test"
+S2S_TOKEN = "test-s2s-token"
 
 
 class TestLogger:
@@ -107,6 +108,7 @@ def _env(**overrides: str) -> dict[str, str]:
         "LANGGRAPH_HTTP_PORT": "8000",
         "LANGGRAPH_SHADOW_PERSISTENCE": "postgres",
         "LANGGRAPH_SHADOW_DATABASE_DSN": DSN_PLACEHOLDER,
+        "LANGGRAPH_S2S_TOKEN": S2S_TOKEN,
         "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION": "false",
     }
     values.update(overrides)
@@ -119,7 +121,11 @@ def _scope(method: str, path: str) -> dict[str, Any]:
         "method": method,
         "path": path,
         "query_string": b"",
-        "headers": [(b"content-type", b"application/json"), (b"accept", b"application/json")],
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"accept", b"application/json"),
+            (b"authorization", f"Bearer {S2S_TOKEN}".encode("ascii")),
+        ],
     }
 
 
@@ -172,17 +178,21 @@ def test_config_shadow_test_valida() -> None:
     config = load_shadow_test_runtime_config(_env())
     assert config.runtime_mode == "shadow_test"
     assert config.allow_real_sql_execution is False
+    assert config.s2s_token == S2S_TOKEN
 
 
 def test_config_repr_nao_expoe_dsn() -> None:
     dsn = "postgresql://example.invalid/test?marker=opaque-marker"
+    secret = "test-hidden-s2s-token"
     config = load_shadow_test_runtime_config(
-        _env(LANGGRAPH_SHADOW_DATABASE_DSN=dsn)
+        _env(LANGGRAPH_SHADOW_DATABASE_DSN=dsn, LANGGRAPH_S2S_TOKEN=secret)
     )
     assert config.shadow_database_dsn == dsn
+    assert config.s2s_token == secret
     serialized = repr(config) + str(config)
     assert "opaque-marker" not in serialized
     assert dsn not in serialized
+    assert secret not in serialized
 
 
 def test_config_ausente_falha_fechado() -> None:
@@ -192,6 +202,17 @@ def test_config_ausente_falha_fechado() -> None:
         assert "LANGGRAPH_RUNTIME_MODE" in str(error)
     else:
         raise AssertionError("missing config should fail closed")
+
+
+def test_s2s_token_ausente_falha_startup() -> None:
+    env = _env()
+    del env["LANGGRAPH_S2S_TOKEN"]
+    try:
+        load_shadow_test_runtime_config(env)
+    except RuntimeError as error:
+        assert "LANGGRAPH_S2S_TOKEN" in str(error)
+    else:
+        raise AssertionError("missing S2S token should fail closed")
 
 
 def test_real_sql_execution_true_falha_startup() -> None:
@@ -347,6 +368,7 @@ def main() -> None:
         test_config_shadow_test_valida,
         test_config_repr_nao_expoe_dsn,
         test_config_ausente_falha_fechado,
+        test_s2s_token_ausente_falha_startup,
         test_real_sql_execution_true_falha_startup,
         test_healthcheck_responde_sem_segredos,
         test_generate_endpoint_v1_exposto,

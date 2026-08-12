@@ -179,6 +179,10 @@ STEPS = [
         [sys.executable, "testar_auth_header.py"],
     ),
     (
+        "testar_internal_service_auth.py",
+        [sys.executable, "testar_internal_service_auth.py"],
+    ),
+    (
         "testar_http_request.py",
         [sys.executable, "testar_http_request.py"],
     ),

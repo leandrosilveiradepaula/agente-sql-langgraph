@@ -22,11 +22,16 @@ from app.http.http_response import default_http_response_limits
 from app.http.internal_shadow_read_v1_handler import (
     create_internal_shadow_read_v1_http_handler,
 )
+from app.http.internal_service_auth_handler import (
+    protect_internal_service_http_handler,
+)
+from app.security.internal_service_auth import InternalServiceAuthConfig
 from app.test_runtime.composition import create_shadow_test_runtime
 from app.test_runtime.offline_adapters import OFFLINE_SQL
 
 
 AGENT_RUN_ID = "agent-run-shadow-read-http"
+S2S_TOKEN = "test-s2s-token"
 
 
 class FailingRepository:
@@ -37,6 +42,31 @@ class FailingRepository:
     def list_by_agent_run_id(self, agent_run_id: str):
         del agent_run_id
         raise RuntimeError("raw postgresql://secret value")
+
+
+class CountingRepository:
+    def __init__(self) -> None:
+        self.fetch_calls = 0
+        self.list_calls = 0
+
+    def fetch_by_shadow_record_id(self, shadow_record_id: str):
+        del shadow_record_id
+        self.fetch_calls += 1
+        return {
+            "status": "not_found",
+            "record": None,
+            "diagnostic": {
+                "code": "SHADOW_RECORD_NOT_FOUND",
+                "message": "not found",
+                "failure_category": "not_found",
+                "safe_details": {},
+            },
+        }
+
+    def list_by_agent_run_id(self, agent_run_id: str):
+        del agent_run_id
+        self.list_calls += 1
+        return {"status": "ok", "records": [], "diagnostic": None}
 
 
 class Receive:
@@ -61,6 +91,8 @@ def main() -> None:
         _test_get_list_handler,
         _test_get_visualization_handler,
         _test_http_errors,
+        _test_auth_boundary_bloqueia_read_antes_do_repository,
+        _test_auth_boundary_permite_read_com_token_correto,
         _test_content_negotiation_and_limit_edges,
         _test_asgi_read_routes_and_old_posts,
         _test_read_logging_sanitized,
@@ -87,6 +119,13 @@ def _handler(repo):
             repository=repo,
         ),
         response_limits=default_http_response_limits(),
+    )
+
+
+def _protected_handler(repo):
+    return protect_internal_service_http_handler(
+        inner=_handler(repo),
+        auth_config=InternalServiceAuthConfig(expected_token=S2S_TOKEN),
     )
 
 
@@ -202,10 +241,44 @@ def _test_http_errors() -> None:
     response = handler.handle(
         {
             **_request("GET", "/v1/internal/shadow-runs/x"),
-            "headers": {"Authorization": "Bearer test-token"},
+            "headers": {"Cookie": "session=browser"},
         }
     )
     assert response["status_code"] == 400
+
+
+def _test_auth_boundary_bloqueia_read_antes_do_repository() -> None:
+    repo = CountingRepository()
+    response = _protected_handler(repo).handle(
+        _request("GET", "/v1/internal/shadow-runs/shadow-any")
+    )
+    body = _body(response)
+
+    assert response["status_code"] == 401
+    assert response["headers"]["WWW-Authenticate"] == "Bearer"
+    assert body["error"]["code"] == "UNAUTHORIZED_SERVICE"
+    assert repo.fetch_calls == 0
+    assert repo.list_calls == 0
+
+
+def _test_auth_boundary_permite_read_com_token_correto() -> None:
+    repo = CountingRepository()
+    response = _protected_handler(repo).handle(
+        _request(
+            "GET",
+            "/v1/internal/agent-runs/agent-run-any/shadow-runs",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {S2S_TOKEN}",
+            },
+        )
+    )
+    body = _body(response)
+
+    assert response["status_code"] == 200
+    assert body["items"] == []
+    assert repo.fetch_calls == 0
+    assert repo.list_calls == 1
 
 
 def _test_content_negotiation_and_limit_edges() -> None:
@@ -364,6 +437,7 @@ def _env() -> dict[str, str]:
         "LANGGRAPH_HTTP_PORT": "8000",
         "LANGGRAPH_SHADOW_PERSISTENCE": "postgres",
         "LANGGRAPH_SHADOW_DATABASE_DSN": "postgresql://shadow-test-placeholder",
+        "LANGGRAPH_S2S_TOKEN": S2S_TOKEN,
         "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION": "false",
     }
 
@@ -374,7 +448,11 @@ def _scope(method: str, path: str, query_string: str) -> dict[str, Any]:
         "method": method,
         "path": path,
         "query_string": query_string.encode("ascii"),
-        "headers": [(b"content-type", b"application/json"), (b"accept", b"application/json")],
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"accept", b"application/json"),
+            (b"authorization", f"Bearer {S2S_TOKEN}".encode("ascii")),
+        ],
     }
 
 

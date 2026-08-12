@@ -16,6 +16,7 @@ class ShadowTestRuntimeConfig:
     http_port: int
     shadow_persistence: str
     shadow_database_dsn: str = field(repr=False)
+    s2s_token: str = field(repr=False)
     allow_real_sql_execution: bool
     langgraph_version: str | None
     langgraph_commit: str | None
@@ -47,6 +48,7 @@ def load_shadow_test_runtime_config(
         http_port=_port(_optional(env, "LANGGRAPH_HTTP_PORT", "8000")),
         shadow_persistence=persistence,
         shadow_database_dsn=dsn,
+        s2s_token=_required_secret(env, "LANGGRAPH_S2S_TOKEN"),
         allow_real_sql_execution=False,
         langgraph_version=_safe_optional(env.get("LANGGRAPH_VERSION")),
         langgraph_commit=_safe_optional(env.get("LANGGRAPH_COMMIT")),
@@ -58,6 +60,17 @@ def _required(env: Mapping[str, str], name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise RuntimeError(f"{name} must be configured explicitly.")
     return value.strip()
+
+
+def _required_secret(env: Mapping[str, str], name: str) -> str:
+    value = _required(env, name)
+    if value != value.strip() or any(char.isspace() for char in value):
+        raise RuntimeError(f"{name} must be configured explicitly.")
+    if any(ord(char) < 33 or ord(char) == 127 for char in value):
+        raise RuntimeError(f"{name} must be configured explicitly.")
+    if len(value.encode("utf-8")) > 512:
+        raise RuntimeError(f"{name} must be configured explicitly.")
+    return value
 
 
 def _optional(env: Mapping[str, str], name: str, default: str) -> str:

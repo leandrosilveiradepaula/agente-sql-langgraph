@@ -195,10 +195,7 @@ def _validate_internal_route(request: HttpRequestEnvelope) -> None:
     headers = request.get("headers", {})
     if isinstance(headers, Mapping):
         for key in headers:
-            if isinstance(key, str) and key.casefold() in {
-                "authorization",
-                "cookie",
-            }:
+            if isinstance(key, str) and key.casefold() == "cookie":
                 raise HttpRequestError("HTTP_JSON_INVALID")
         _validate_content_type(headers)
         _validate_accept(headers)

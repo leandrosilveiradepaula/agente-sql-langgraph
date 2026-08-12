@@ -8,6 +8,13 @@ from app.http.http_response import default_http_response_limits
 from app.http.internal_sql_agent_v1_handler import (
     InternalSqlAgentV1HttpHandler,
 )
+from app.http.internal_service_auth_handler import (
+    protect_internal_service_http_handler,
+)
+from app.security.internal_service_auth import InternalServiceAuthConfig
+
+
+S2S_TOKEN = "test-s2s-token"
 
 
 class FakeUseCase:
@@ -62,6 +69,13 @@ def _handler(generate=None, execute_shadow=None):
         execute_approved_shadow_use_case=execute_shadow or FakeUseCase(),
         request_limits=default_http_request_limits(),
         response_limits=default_http_response_limits(),
+    )
+
+
+def _protected_handler(generate=None, execute_shadow=None):
+    return protect_internal_service_http_handler(
+        inner=_handler(generate, execute_shadow),
+        auth_config=InternalServiceAuthConfig(expected_token=S2S_TOKEN),
     )
 
 
@@ -150,10 +164,49 @@ def test_method_content_type_json_e_headers_sensiveis() -> None:
             "/v1/internal/sql-agent/generate",
             headers={
                 "Content-Type": "application/json",
-                "Authorization": "Bearer hidden",
+                "Authorization": "Bearer test-s2s-token",
+            },
+        )
+    )["status_code"] == 200
+    assert handler.handle(
+        _request(
+            "/v1/internal/sql-agent/generate",
+            headers={
+                "Content-Type": "application/json",
+                "Cookie": "session=browser",
             },
         )
     )["status_code"] == 400
+
+
+def test_auth_boundary_bloqueia_antes_do_use_case() -> None:
+    generate = FakeUseCase()
+    response = _protected_handler(generate).handle(
+        _request("/v1/internal/sql-agent/generate")
+    )
+    body = _body(response)
+
+    assert response["status_code"] == 401
+    assert response["headers"]["WWW-Authenticate"] == "Bearer"
+    assert body["error"]["code"] == "UNAUTHORIZED_SERVICE"
+    assert generate.calls == 0
+
+
+def test_auth_boundary_permite_token_correto_sem_repassar_authorization() -> None:
+    generate = FakeUseCase()
+    response = _protected_handler(generate).handle(
+        _request(
+            "/v1/internal/sql-agent/generate",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {S2S_TOKEN}",
+            },
+        )
+    )
+
+    assert response["status_code"] == 200
+    assert generate.calls == 1
+    assert "Authorization" not in generate.requests[0]
 
 
 def test_response_invalida_nao_vaza_payload() -> None:
@@ -182,6 +235,8 @@ def main() -> None:
         test_execute_approved_shadow_route_chama_shadow_use_case,
         test_rota_legada_nao_e_consumida_pelo_handler_interno,
         test_method_content_type_json_e_headers_sensiveis,
+        test_auth_boundary_bloqueia_antes_do_use_case,
+        test_auth_boundary_permite_token_correto_sem_repassar_authorization,
         test_response_invalida_nao_vaza_payload,
     ]
     for index, test in enumerate(tests, start=1):
