@@ -1,0 +1,25 @@
+[Unit]
+Description=Agente SQL LangGraph Shadow TEST
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=langgraph-shadow
+Group=langgraph-shadow
+WorkingDirectory=/srv/agente-sql-langgraph/current
+EnvironmentFile=/etc/agente-sql-langgraph/shadow-test.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/srv/agente-sql-langgraph/current/.venv/bin/python -m uvicorn app.test_runtime.sql_agent_test_app:create_app --factory --host ${LANGGRAPH_HTTP_HOST} --port ${LANGGRAPH_HTTP_PORT}
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

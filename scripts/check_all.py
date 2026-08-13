@@ -155,6 +155,10 @@ STEPS = [
         [sys.executable, "testar_shadow_test_uvicorn_smoke.py"],
     ),
     (
+        "testar_shadow_test_deploy_runbook.py",
+        [sys.executable, "testar_shadow_test_deploy_runbook.py"],
+    ),
+    (
         "testar_langgraph_graph_visualization.py",
         [sys.executable, "testar_langgraph_graph_visualization.py"],
     ),
