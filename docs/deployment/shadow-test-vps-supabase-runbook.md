@@ -1,121 +1,216 @@
-# LangGraph Shadow TEST VPS + Supabase Runbook
+# LangGraph Shadow TEST Docker + Traefik Runbook
 
-This runbook describes the real TEST deployment path for the LangGraph shadow
-service. It is an operational plan only: do not deploy, change DNS, change
-Vercel, change Hostinger, change Supabase, generate real secrets, apply real
-migrations, or run real SQL from this document review step.
+This runbook adapts the LangGraph shadow TEST deployment to the real Hostinger
+VPS discovery from Microetapa 5.8. It is still a preparation artifact only: do
+not deploy, change DNS, change Vercel, change Supabase, create real secrets,
+run migrations, restart services, or alter existing containers from this step.
 
-## 1. Target Topology
+## 1. Real Target
+
+Discovered VPS baseline:
+
+```text
+OS: Ubuntu 24.04.3 LTS
+Docker: 29.1.5
+Docker Compose: v5.0.2
+Traefik: 3.6.7
+Traefik container: n8n-traefik-1
+Traefik Docker provider: exposedbydefault=false
+EntryPoints: web :80, websecure :443
+TLS resolver: mytlschallenge
+Shared Docker network: n8n_default
+RAM: 3.8 GiB
+vCPU: 1
+Free disk: about 41 GiB
+Swap: 0
+UFW: inactive
+Reboot flag: required, but out of scope here
+```
+
+Target topology:
 
 ```text
 Original Product on Vercel
   -> HTTPS
-  -> reverse proxy on Hostinger VPS
-  -> Uvicorn bound to 127.0.0.1
-  -> LangGraph shadow TEST runtime
+  -> existing Traefik on Hostinger VPS
+  -> Docker network n8n_default
+  -> langgraph-shadow-test container on port 8000
   -> Supabase SaaS PostgreSQL over TLS
 ```
 
-The n8n production flow remains official and unchanged. LangGraph runs on the
-same VPS only as a separate service with its own directory, virtualenv, process,
-internal port, logs, and secrets.
+The n8n production flow remains official and unchanged. LangGraph must not run
+inside n8n, as an n8n node, or in the n8n process.
 
-LangGraph must not run inside n8n, as an n8n node, or in the n8n process.
+## 2. Protected Existing Resources
 
-## 2. VPS Layout
+Do not alter these resources while preparing LangGraph:
 
-Recommended Linux layout:
+- `/docker/n8n/docker-compose.yml`
+- `n8n-n8n-1`
+- `n8n-traefik-1`
+- existing n8n hostname and Traefik router
+- `/docker/commercial-copilot-api-staging`
+- `commercial-copilot-api-staging`
+
+The existing Traefik network `n8n_default` is reused by joining it from the
+separate LangGraph Compose project. Do not run `docker compose down` in the n8n
+project.
+
+## 3. VPS Layout
+
+Recommended deployment directory:
 
 ```text
-/srv/agente-sql-langgraph/current/        # checked out source release
-/srv/agente-sql-langgraph/current/.venv/  # Python virtualenv
-/etc/agente-sql-langgraph/shadow-test.env # non-versioned environment file
-/var/log/agente-sql-langgraph/            # optional log directory if file logs are added later
+/docker/agente-sql-langgraph/
+  compose.yaml
+  shadow-test.env
+  source-or-image-reference
 ```
 
-Recommended service identity:
+The LangGraph Compose project is separate from n8n:
 
 ```text
-user:  langgraph-shadow
-group: langgraph-shadow
-shell: /usr/sbin/nologin or equivalent
+project: agente-sql-langgraph-shadow-test
+service: langgraph-shadow-test
 ```
 
-Keep ownership narrow:
+Do not add LangGraph to `/docker/n8n/docker-compose.yml`.
+
+## 4. Docker Image
+
+Versioned Dockerfile:
+
+```text
+deploy/docker/Dockerfile.shadow-test
+```
+
+Runtime decisions:
+
+- base image: `python:3.12-slim`;
+- dependency source: `requirements.txt`;
+- runtime user: non-root `langgraph`;
+- working directory: `/app`;
+- copied runtime files: `requirements.txt` and `app/`;
+- no `.env`, Git credentials, docs, tests, or local artifacts baked into the image.
+
+Container command:
 
 ```bash
-sudo chown -R langgraph-shadow:langgraph-shadow /srv/agente-sql-langgraph
-sudo install -d -o root -g langgraph-shadow -m 0750 /etc/agente-sql-langgraph
-sudo install -d -o langgraph-shadow -g langgraph-shadow -m 0750 /var/log/agente-sql-langgraph
+python -m uvicorn app.test_runtime.sql_agent_test_app:create_app \
+  --factory \
+  --host 0.0.0.0 \
+  --port 8000
 ```
 
-Do not place the service under `/root`, a random home directory, or the n8n
-installation directory.
+Inside the container, `0.0.0.0` is correct. Safety comes from zero host port
+publication, Docker network isolation, Traefik, HTTPS, and Python S2S auth.
 
-## 3. Python Runtime
+Use one Uvicorn worker for initial TEST because the VPS has 1 vCPU.
 
-Local validated runtime:
+## 5. Docker Ignore
+
+Versioned build context guard:
 
 ```text
-CPython 3.12.13
+.dockerignore
 ```
 
-Recommended VPS runtime:
+It excludes `.git`, `.env`, `.env.*`, `.venv`, Python caches, docs, deployment
+templates not needed in runtime, tests, scripts, and local artifacts. The
+Dockerfile still explicitly copies only `requirements.txt` and `app/`.
+
+## 6. Compose Template
+
+Versioned Compose template:
 
 ```text
-Python 3.12.x
+deploy/docker/compose.shadow-test.yaml.example
 ```
 
-Runtime dependencies are versioned in `requirements.txt`:
+Required properties:
+
+- project name `agente-sql-langgraph-shadow-test`;
+- service `langgraph-shadow-test`;
+- `restart: unless-stopped`;
+- `env_file: ./shadow-test.env`;
+- external network `n8n_default`;
+- `expose: "8000"`;
+- no `ports`;
+- healthcheck against `http://127.0.0.1:8000/health`;
+- Traefik labels for `websecure`;
+- TLS resolver `mytlschallenge`.
+
+The service must not publish a host port such as `8000:8000`.
+
+## 7. Traefik
+
+The existing Traefik container already uses Docker provider with
+`exposedbydefault=false`, so the LangGraph container must opt in with labels:
 
 ```text
-langgraph==1.2.9
-psycopg[binary]==3.3.4
-uvicorn==0.30.6
+traefik.enable=true
+traefik.docker.network=n8n_default
+traefik.http.routers.langgraph-shadow-test.rule=Host(`<LANGGRAPH_TEST_HOSTNAME>`)
+traefik.http.routers.langgraph-shadow-test.entrypoints=websecure
+traefik.http.routers.langgraph-shadow-test.tls=true
+traefik.http.routers.langgraph-shadow-test.tls.certresolver=mytlschallenge
+traefik.http.services.langgraph-shadow-test.loadbalancer.server.port=8000
 ```
 
-Create the virtualenv from the release directory:
+The current Traefik setup already has `web` and `websecure` entrypoints. Use
+only `websecure` for the LangGraph router unless discovery later proves an HTTP
+router is required. Do not add a middleware that removes `Authorization`, and do
+not validate `LANGGRAPH_S2S_TOKEN` in Traefik.
 
-```bash
-cd /srv/agente-sql-langgraph/current
-python3.12 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
+`Authorization` is forwarded by Traefik by default. Python remains responsible
+for S2S validation.
 
-Do not install ad hoc runtime dependencies outside `requirements.txt`.
+## 8. Hostname and TLS
 
-## 4. Environment File
-
-Use a non-versioned system env file:
+LangGraph TEST hostname is not decided:
 
 ```text
-/etc/agente-sql-langgraph/shadow-test.env
+LANGGRAPH_TEST_HOSTNAME TO CONFIRM
 ```
 
-Recommended permissions:
+Possible paths:
 
-```bash
-sudo chown root:langgraph-shadow /etc/agente-sql-langgraph/shadow-test.env
-sudo chmod 0640 /etc/agente-sql-langgraph/shadow-test.env
+- `langgraph-test.<owned-domain>`;
+- another hostname supported by the domain currently controlled by the operator.
+
+Do not hardcode a real LangGraph hostname in versioned files. Reuse the existing
+Traefik ACME resolver:
+
+```text
+mytlschallenge
 ```
 
-Required variables:
+Do not install Certbot and do not add Nginx for the current Hostinger target.
+
+## 9. Environment Strategy
+
+Versioned example:
+
+```text
+deploy/docker/shadow-test.env.example
+```
+
+Real env file on the VPS:
+
+```text
+/docker/agente-sql-langgraph/shadow-test.env
+```
+
+Required values:
 
 ```text
 LANGGRAPH_RUNTIME_MODE=shadow_test
-LANGGRAPH_HTTP_HOST=127.0.0.1
-LANGGRAPH_HTTP_PORT=<LANGGRAPH_INTERNAL_PORT>
+LANGGRAPH_HTTP_HOST=0.0.0.0
+LANGGRAPH_HTTP_PORT=8000
 LANGGRAPH_SHADOW_PERSISTENCE=postgres
-LANGGRAPH_SHADOW_DATABASE_DSN=<Supabase runtime Postgres DSN; include sslmode=require>
-LANGGRAPH_S2S_TOKEN=<generated outside Git and chat>
 LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false
-```
-
-Optional safe version metadata:
-
-```text
+LANGGRAPH_SHADOW_DATABASE_DSN=<secret Supabase runtime DSN with TLS>
+LANGGRAPH_S2S_TOKEN=<secret generated outside Git/chat/logs>
 LANGGRAPH_VERSION=<release version>
 LANGGRAPH_COMMIT=<git commit>
 ```
@@ -134,20 +229,16 @@ Classification:
 | `LANGGRAPH_SHADOW_DATABASE_DSN` | SECRET |
 | `LANGGRAPH_S2S_TOKEN` | SECRET |
 
-`LANGGRAPH_HTTP_HOST` should stay `127.0.0.1` when the reverse proxy runs on the
-same VPS. Do not bind Uvicorn to `0.0.0.0` for this TEST deployment.
+Do not place secrets in Compose labels, Dockerfile, image layers, Git, chat, or
+logs.
 
-## 5. S2S Authentication
+## 10. S2S Authentication
 
 The Original Product BFF sends:
 
 ```text
 Authorization: Bearer <LANGGRAPH_S2S_TOKEN>
 ```
-
-LangGraph validates the Bearer secret in Python. Nginx must forward the
-`Authorization` header but must not validate the token and must not store a copy
-of the S2S secret.
 
 Caller service:
 
@@ -158,250 +249,102 @@ product_original_bff
 Payload `principal.id`, `principal.email`, and `principal.profile` remain audit
 context. They are not service identity.
 
-Generate the future TEST secret outside Git/chat/logs with a shell command such
-as:
+Generate the future TEST secret outside Git/chat/logs with:
 
 ```bash
 openssl rand -hex 48
 ```
 
-Hex output is compatible with the strict Bearer parser and gives 384 bits of
-entropy. Store the same generated value only in Vercel TEST env and the VPS env
-file.
+Store the same generated value only in Vercel TEST env and
+`/docker/agente-sql-langgraph/shadow-test.env`.
 
-Current rotation model supports one secret. Rotation is coordinated:
+## 11. Image Strategy
 
-1. Put the new secret in the VPS env file.
-2. Restart the LangGraph service in a planned shadow maintenance window.
-3. Update the Vercel TEST secret.
-4. Redeploy the Original Product TEST environment.
-5. Validate negative and positive auth.
-
-Small shadow-only interruption is acceptable in TEST. Future hardening should
-add dual-secret rotation.
-
-## 6. Startup Command
-
-The project entrypoint is:
+Recommended first TEST deployment:
 
 ```text
-app.test_runtime.sql_agent_test_app:create_app
+build locally on the VPS from the approved repo commit
 ```
 
-The compatible Uvicorn command is:
+Reason: it avoids introducing GHCR authentication before the first controlled
+smoke. Record the deployed Git commit SHA in the deployment log and set
+`LANGGRAPH_COMMIT`.
 
-```bash
-.venv/bin/python -m uvicorn app.test_runtime.sql_agent_test_app:create_app --factory --host "${LANGGRAPH_HTTP_HOST}" --port "${LANGGRAPH_HTTP_PORT}"
-```
-
-For initial TEST, use one Uvicorn worker. This is enough for controlled shadow
-validation and avoids introducing a process manager stack beyond systemd.
-
-## 7. systemd
-
-Recommended process manager: systemd.
-
-Versioned template:
+Future improvement:
 
 ```text
-deploy/systemd/agente-sql-langgraph-shadow-test.service.example
+GHCR image tagged by immutable commit SHA
 ```
 
-Future install procedure:
+Do not use a mutable `latest` tag as the traceability mechanism.
 
-```bash
-sudo cp deploy/systemd/agente-sql-langgraph-shadow-test.service.example /etc/systemd/system/agente-sql-langgraph-shadow-test.service
-sudo systemctl daemon-reload
-sudo systemctl enable agente-sql-langgraph-shadow-test
-sudo systemctl start agente-sql-langgraph-shadow-test
-sudo systemctl status agente-sql-langgraph-shadow-test
-```
+## 12. Supabase
 
-Use logs without printing environment variables:
-
-```bash
-sudo journalctl -u agente-sql-langgraph-shadow-test -n 100 --no-pager
-```
-
-Do not use commands that dump service environment values.
-
-## 8. Reverse Proxy and HTTPS
-
-Recommended reverse proxy for this VPS plan: Nginx, unless VPS discovery proves
-the existing n8n stack uses another proxy that should be preserved.
-
-Versioned template:
+LangGraph connects directly from the container to Supabase PostgreSQL over TLS:
 
 ```text
-deploy/nginx/langgraph-shadow-test.conf.example
+langgraph-shadow-test container -> internet/TLS -> Supabase PostgreSQL
 ```
 
-External HTTP must redirect to HTTPS. External plain HTTP must not expose the
-internal API. TLS terminates at the reverse proxy.
+The connection does not pass through the Original Product, n8n, Traefik, or
+Commercial Copilot. Do not use a Supabase browser/public key.
 
-Recommended hostname:
-
-```text
-langgraph-test.<owned-domain>
-```
-
-Do not assume or reuse the n8n hostname. A dedicated hostname reduces routing
-risk.
-
-The Nginx route should:
-
-- proxy the dedicated hostname to `http://127.0.0.1:<LANGGRAPH_INTERNAL_PORT>`;
-- preserve `Host`, `X-Forwarded-For`, `X-Forwarded-Proto`, and request ID;
-- forward `Authorization`;
-- avoid forwarding browser cookies from Vercel because the BFF client does not
-  send them;
-- keep `client_max_body_size 1m`;
-- use conservative timeouts: connect `2s`, send/read `5s`.
-
-The Original Product defaults to a short shadow timeout. The proxy timeout must
-not be lower than the BFF timeout, but should also avoid long-running public
-requests.
-
-Optional TEST rate limiting can be added at Nginx after the first validation.
-It is not a replacement for S2S auth and is not required for the first smoke.
-
-## 9. Firewall
-
-Recommended future firewall posture:
-
-- SSH follows the existing VPS management policy.
-- Ports `80` and `443` are open only as required for TLS setup and HTTPS.
-- The Uvicorn port is not public.
-- No local Postgres port is needed.
-- Existing n8n ports and routes are not changed without backup and discovery.
-
-Do not execute firewall changes during this microstep.
-
-## 10. Supabase Architecture
-
-LangGraph connects directly from the VPS to Supabase PostgreSQL over TLS:
-
-```text
-VPS LangGraph -> internet/TLS -> Supabase PostgreSQL
-```
-
-The connection does not pass through the Original Product and does not pass
-through n8n. Do not use a Supabase browser/public key. Use a server-side
-Postgres connection string stored only in the VPS env file.
-
-Connection mode is not decided by the repo. During deploy, confirm whether the
-Supabase project should use direct Postgres or a Supabase pooler endpoint:
+Connection mode is still an operator decision:
 
 ```text
 SUPABASE CONNECTION MODE TO CONFIRM DURING DEPLOY
 ```
 
-The DSN should require TLS, typically with:
+The runtime DSN should require TLS, typically with `sslmode=require`.
 
-```text
-sslmode=require
-```
-
-The code uses `psycopg.connect(...)`, so TLS mode is controlled by the DSN.
-
-## 11. Supabase Roles
-
-Use separate credentials:
-
-- migration credential: may have DDL permission for the migration;
-- runtime credential: least privilege for the running service.
-
-The runtime repository currently requires:
+Runtime role:
 
 - `SELECT` on `public.langgraph_shadow_runs`;
 - `INSERT` on `public.langgraph_shadow_runs`;
-- `UPDATE` on `public.langgraph_shadow_runs`.
+- `UPDATE` on `public.langgraph_shadow_runs`;
+- no `DELETE`.
 
-`DELETE` is not required by the runtime.
+Migration role:
 
-The migration credential applies `scripts/migrations/001_create_langgraph_shadow_runs.sql`.
-That migration uses `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`.
-It is idempotent for initial object creation, but it is not a schema drift
-repair tool.
+- separate credential with DDL permission;
+- apply `scripts/migrations/001_create_langgraph_shadow_runs.sql` manually;
+- do not execute the migration in this step.
 
-## 12. Migration Procedure
+## 13. Vercel Handoff
 
-Future manual migration order:
-
-1. Open the Supabase SQL editor or a trusted admin SQL client.
-2. Use the migration credential, not the runtime credential.
-3. Review `scripts/migrations/001_create_langgraph_shadow_runs.sql`.
-4. Apply the migration once.
-5. Re-run only if the target schema is known to be compatible.
-6. Confirm table, columns, primary key, checks, and indexes.
-
-Do not execute this migration from this runbook review step.
-
-Safe metadata validation SQL for future use:
-
-```sql
-select to_regclass('public.langgraph_shadow_runs') as table_ref;
-
-select column_name, data_type, is_nullable
-from information_schema.columns
-where table_schema = 'public'
-  and table_name = 'langgraph_shadow_runs'
-order by ordinal_position;
-
-select indexname, indexdef
-from pg_indexes
-where schemaname = 'public'
-  and tablename = 'langgraph_shadow_runs'
-order by indexname;
-
-select conname, contype
-from pg_constraint
-where conrelid = 'public.langgraph_shadow_runs'::regclass
-order by conname;
-```
-
-Future runtime permission validation:
-
-- connect with the runtime DSN;
-- confirm metadata `SELECT` works;
-- confirm controlled synthetic `INSERT` and `UPDATE` work;
-- confirm unnecessary `DELETE` is denied, if feasible;
-- use synthetic data only.
-
-## 13. Vercel TEST Configuration
-
-The Original Product needs these server-side env vars in the chosen TEST Vercel
-environment:
+No Vercel change happens in this step. After container, HTTPS, auth, and
+persistence are validated independently, configure the chosen TEST environment:
 
 ```text
 LANGGRAPH_INTERNAL_BASE_URL=https://<LANGGRAPH_TEST_HOSTNAME>
-LANGGRAPH_S2S_TOKEN=<same TEST secret as VPS>
+LANGGRAPH_S2S_TOKEN=<same TEST secret as container>
 LANGGRAPH_SHADOW_ENABLED=true
-LANGGRAPH_SHADOW_TIMEOUT_MS=1500
+LANGGRAPH_SHADOW_TIMEOUT_MS=<test-value>
 ```
 
-`LANGGRAPH_INTERNAL_BASE_URL` should be the HTTPS reverse proxy URL, not the
-Uvicorn localhost URL. The client trims trailing slashes, but use no trailing
-slash for clarity.
+No variable should use `NEXT_PUBLIC_`.
 
-No variable should use `NEXT_PUBLIC_`. The browser must not receive the S2S
-credential.
+## 14. Future Compose Commands
 
-Vercel environment choice remains an operator decision:
-
-```text
-VERCEL TEST ENVIRONMENT TO CONFIRM: Preview or Production-backed TEST.
-```
-
-Configure Vercel only after Python, HTTPS, negative auth, positive auth, and
-Supabase persistence pass independently.
-
-## 14. Validation Flow
-
-Local health on the VPS:
+Run only inside `/docker/agente-sql-langgraph` in the future:
 
 ```bash
-curl --fail http://127.0.0.1:<LANGGRAPH_INTERNAL_PORT>/health
+docker compose -f compose.yaml config
+docker compose -f compose.yaml build
+docker compose -f compose.yaml up -d
+docker compose -f compose.yaml ps
+docker compose -f compose.yaml logs langgraph-shadow-test
+```
+
+Do not run these commands against `/docker/n8n`.
+
+## 15. Validation Flow
+
+Internal health without host port publication:
+
+```bash
+docker compose -f compose.yaml exec langgraph-shadow-test \
+  python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status)"
 ```
 
 External health:
@@ -410,7 +353,7 @@ External health:
 curl --fail https://<LANGGRAPH_TEST_HOSTNAME>/health
 ```
 
-Negative auth examples:
+Negative auth:
 
 ```bash
 curl -i -X POST https://<LANGGRAPH_TEST_HOSTNAME>/v1/internal/sql-agent/generate \
@@ -425,7 +368,11 @@ curl -i -X POST https://<LANGGRAPH_TEST_HOSTNAME>/v1/internal/sql-agent/generate
 curl -i https://<LANGGRAPH_TEST_HOSTNAME>/v1/internal/agent-runs/<synthetic-agent-run-id>/shadow-runs
 ```
 
-Expected result: `401` with safe S2S error for internal endpoints.
+Expected:
+
+- `/health` returns `200`;
+- internal POST/GET without S2S returns `401`;
+- wrong Bearer returns `401`.
 
 Positive auth without echoing the token:
 
@@ -457,7 +404,7 @@ Persistence validation:
 4. Call `GET /v1/internal/shadow-runs/{shadow_record_id}/visualization`.
 5. Confirm IDs correlate and no real SQL was executed.
 
-## 15. Failure Isolation
+## 16. Failure Isolation
 
 After Vercel TEST is configured:
 
@@ -469,112 +416,83 @@ After Vercel TEST is configured:
 - Admin UI with LangGraph offline: official run detail opens and shadow panel
   reports unavailable.
 
-## 16. n8n Protection
-
-Do not alter n8n for this deploy. Before changing reverse proxy configuration
-for LangGraph, take a backup of the current proxy config and identify:
-
-- how n8n runs;
-- whether it uses systemd, Docker, or another supervisor;
-- its hostname;
-- its internal port;
-- its TLS route;
-- its current reverse proxy owner.
-
-LangGraph must use a separate internal port and must not break n8n routing.
-
-## 17. Capacity Checklist
-
-Future read-only VPS checks before deploy:
-
-```bash
-uname -a
-cat /etc/os-release
-python3 --version
-free -h
-df -h
-ss -ltnp
-systemctl --type=service --state=running
-nginx -v
-caddy version
-docker version
-```
-
-It is acceptable for some commands to be unavailable; record what exists.
-
-Check CPU, RAM, disk, Python availability, listening ports, current reverse
-proxy, current n8n service, and whether a safe internal port is free.
-
-## 18. Rollback
+## 17. Rollback
 
 TEST rollback order:
 
 1. Set `LANGGRAPH_SHADOW_ENABLED=false` in Vercel TEST.
 2. Redeploy the Original Product TEST environment.
-3. Stop LangGraph service:
-   `sudo systemctl stop agente-sql-langgraph-shadow-test`.
-4. Disable LangGraph service if needed:
-   `sudo systemctl disable agente-sql-langgraph-shadow-test`.
-5. Revert the LangGraph reverse proxy config from the backup.
+3. Stop only the LangGraph Compose project:
+   `docker compose -f /docker/agente-sql-langgraph/compose.yaml stop`.
+4. If needed, remove only the LangGraph container:
+   `docker compose -f /docker/agente-sql-langgraph/compose.yaml down`.
+5. The Traefik router disappears with the LangGraph container labels.
 6. Keep Supabase evidence/table intact by default.
-7. Do not touch n8n.
+7. Do not touch n8n, Traefik, or Commercial Copilot containers.
 
 Database rollback requires explicit review. Do not invent or run `DROP TABLE`
 as default rollback.
 
+## 18. Reboot Note
+
+The VPS discovery reported `REBOOT_REQUIRED`. Reboot is out of scope for this
+microstep. Before any future reboot:
+
+- confirm backups/config snapshots;
+- confirm Docker restart policies;
+- check n8n and Traefik recovery expectations;
+- use a controlled maintenance window.
+
 ## 19. Deploy Order
 
-1. Audit VPS.
-2. Confirm reverse proxy.
-3. Confirm hostname/DNS.
-4. Prepare Supabase role and DSN.
-5. Apply migration.
-6. Install LangGraph source.
-7. Create env file.
-8. Create systemd service.
-9. Start only on localhost.
-10. Test localhost health.
-11. Configure reverse proxy.
-12. Configure HTTPS.
-13. Test external health.
-14. Test negative auth.
-15. Test positive synthetic auth.
-16. Validate Supabase persistence.
-17. Configure Vercel TEST.
-18. Redeploy Original Product TEST.
-19. Test end-to-end dispatch.
-20. Test Read API and admin UI.
-21. Test failure isolation.
-22. Register result.
+1. Confirm LangGraph TEST hostname/DNS.
+2. Prepare Supabase migration and runtime roles.
+3. Apply migration manually.
+4. Generate S2S secret outside code.
+5. Prepare `/docker/agente-sql-langgraph/shadow-test.env`.
+6. Obtain source for the approved commit or a commit-tagged image.
+7. Create `/docker/agente-sql-langgraph/compose.yaml` from the template.
+8. Join external network `n8n_default`.
+9. Start container without host ports.
+10. Validate internal health from inside Docker.
+11. Validate Traefik router.
+12. Validate HTTPS.
+13. Validate negative auth.
+14. Validate positive synthetic auth.
+15. Validate Supabase persistence.
+16. Configure Vercel TEST.
+17. Validate dispatch.
+18. Validate Read API and admin UI.
+19. Validate failure isolation.
 
 ## 20. GO / NO-GO Gates
 
-GO GATE A - VPS:
+GO GATE A - Docker:
 
-- resources sufficient;
-- current proxy identified;
-- n8n topology understood;
-- internal port free.
+- Compose project separate from n8n;
+- external network `n8n_default` available;
+- no host ports published;
+- container health OK.
 
-GO GATE B - DB:
+GO GATE B - Traefik:
 
-- migration applied;
+- labels detected;
+- router bound to `websecure`;
+- TLS resolver `mytlschallenge`;
+- `Authorization` not stripped;
+- existing n8n router unaffected.
+
+GO GATE C - DB:
+
+- migration applied manually;
 - table and indexes validated;
-- runtime credential has minimum required permissions.
+- runtime credential has minimum permissions.
 
-GO GATE C - Python local:
+GO GATE D - Auth:
 
-- systemd starts;
-- health OK on localhost;
-- negative auth OK;
-- positive synthetic auth OK.
-
-GO GATE D - HTTPS:
-
-- certificate valid;
-- Uvicorn not public;
-- reverse proxy forwards `Authorization`;
-- external health OK.
+- `/health` public and minimal;
+- internal endpoints return `401` without S2S;
+- synthetic positive auth works.
 
 GO GATE E - Vercel:
 
@@ -591,7 +509,17 @@ GO GATE F - UI:
 
 If any gate fails, stop and fix before moving forward.
 
-## 21. Production Separation
+## 21. Alternative Templates
+
+The old templates remain versioned only as alternative deployment references:
+
+- `deploy/systemd/agente-sql-langgraph-shadow-test.service.example`;
+- `deploy/nginx/langgraph-shadow-test.conf.example`.
+
+They are not the target for the current Hostinger VPS because discovery found
+Docker Compose + Traefik as the active deployment pattern.
+
+## 22. Production Separation
 
 This TEST runbook is not production-ready. Production still needs:
 

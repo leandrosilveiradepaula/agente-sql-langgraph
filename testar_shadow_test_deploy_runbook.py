@@ -12,6 +12,10 @@ SYSTEMD = (
     / "agente-sql-langgraph-shadow-test.service.example"
 )
 NGINX = ROOT / "deploy" / "nginx" / "langgraph-shadow-test.conf.example"
+DOCKERFILE = ROOT / "deploy" / "docker" / "Dockerfile.shadow-test"
+COMPOSE = ROOT / "deploy" / "docker" / "compose.shadow-test.yaml.example"
+DOCKER_ENV = ROOT / "deploy" / "docker" / "shadow-test.env.example"
+DOCKERIGNORE = ROOT / ".dockerignore"
 
 
 def _read(path: Path) -> str:
@@ -19,109 +23,167 @@ def _read(path: Path) -> str:
 
 
 def test_templates_exist() -> None:
-    assert RUNBOOK.is_file()
-    assert SYSTEMD.is_file()
-    assert NGINX.is_file()
+    for path in (RUNBOOK, SYSTEMD, NGINX, DOCKERFILE, COMPOSE, DOCKER_ENV, DOCKERIGNORE):
+        assert path.is_file(), str(path)
 
 
-def test_systemd_template_safe_and_localhost_runtime() -> None:
-    text = _read(SYSTEMD)
-    assert "User=langgraph-shadow" in text
-    assert "Group=langgraph-shadow" in text
-    assert "WorkingDirectory=/srv/agente-sql-langgraph/current" in text
-    assert "EnvironmentFile=/etc/agente-sql-langgraph/shadow-test.env" in text
+def test_dockerfile_runtime_is_minimal_and_non_root() -> None:
+    text = _read(DOCKERFILE)
+    assert "FROM python:3.12-slim" in text
+    assert "WORKDIR /app" in text
+    assert "COPY requirements.txt ./requirements.txt" in text
+    assert "COPY app ./app" in text
+    assert "USER langgraph" in text
+    assert "EXPOSE 8000" in text
     assert "app.test_runtime.sql_agent_test_app:create_app" in text
-    assert "--factory" in text
-    assert "--host ${LANGGRAPH_HTTP_HOST}" in text
-    assert "--port ${LANGGRAPH_HTTP_PORT}" in text
-    assert "NoNewPrivileges=true" in text
-    assert "PrivateTmp=true" in text
-    assert "ProtectSystem=full" in text
-    assert "ProtectHome=true" in text
-    assert "LANGGRAPH_S2S_TOKEN=" not in text
-    assert "LANGGRAPH_SHADOW_DATABASE_DSN=" not in text
-    assert "0.0.0.0" not in text
-
-
-def test_nginx_template_preserves_auth_without_secret() -> None:
-    text = _read(NGINX)
-    assert "server_name <LANGGRAPH_TEST_HOSTNAME>;" in text
-    assert "proxy_pass http://127.0.0.1:<LANGGRAPH_INTERNAL_PORT>;" in text
-    assert "proxy_set_header Authorization $http_authorization;" in text
-    assert "client_max_body_size 1m;" in text
-    assert "proxy_connect_timeout 2s;" in text
-    assert "proxy_send_timeout 5s;" in text
-    assert "proxy_read_timeout 5s;" in text
-    assert "Bearer " not in text
+    assert '"--factory"' in text
+    assert '"--host", "0.0.0.0"' in text
+    assert '"--port", "8000"' in text
     assert "LANGGRAPH_S2S_TOKEN" not in text
+    assert "LANGGRAPH_SHADOW_DATABASE_DSN" not in text
+    assert "latest" not in text
 
 
-def test_runbook_covers_deploy_contract() -> None:
+def test_dockerignore_excludes_sensitive_and_local_artifacts() -> None:
+    text = _read(DOCKERIGNORE)
+    required = [
+        ".git",
+        ".env",
+        ".env.*",
+        ".venv",
+        "__pycache__/",
+        "*.pyc",
+        "docs/",
+        "testar_*.py",
+        "scripts/",
+        "payload.json",
+        "response.json",
+    ]
+    for item in required:
+        assert item in text
+
+
+def test_compose_uses_traefik_network_without_host_ports() -> None:
+    text = _read(COMPOSE)
+    assert "name: agente-sql-langgraph-shadow-test" in text
+    assert "langgraph-shadow-test:" in text
+    assert "restart: unless-stopped" in text
+    assert "env_file:" in text
+    assert "- ./shadow-test.env" in text
+    assert "LANGGRAPH_HTTP_HOST: 0.0.0.0" in text
+    assert 'LANGGRAPH_HTTP_PORT: "8000"' in text
+    assert 'LANGGRAPH_ALLOW_REAL_SQL_EXECUTION: "false"' in text
+    assert "expose:" in text
+    assert '- "8000"' in text
+    assert "ports:" not in text
+    assert "n8n_default:" in text
+    assert "external: true" in text
+    assert "traefik.enable=true" in text
+    assert "traefik.docker.network=n8n_default" in text
+    assert "Host(`<LANGGRAPH_TEST_HOSTNAME>`)" in text
+    assert "entrypoints=websecure" in text
+    assert "tls.certresolver=mytlschallenge" in text
+    assert "loadbalancer.server.port=8000" in text
+    assert "LANGGRAPH_S2S_TOKEN" not in text
+    assert "LANGGRAPH_SHADOW_DATABASE_DSN" not in text
+
+
+def test_compose_healthcheck_uses_python_stdlib() -> None:
+    text = _read(COMPOSE)
+    assert "healthcheck:" in text
+    assert "urllib.request" in text
+    assert "http://127.0.0.1:8000/health" in text
+    assert "curl" not in text
+
+
+def test_docker_env_example_has_only_empty_secrets() -> None:
+    text = _read(DOCKER_ENV)
+    assert "LANGGRAPH_RUNTIME_MODE=shadow_test" in text
+    assert "LANGGRAPH_HTTP_HOST=0.0.0.0" in text
+    assert "LANGGRAPH_HTTP_PORT=8000" in text
+    assert "LANGGRAPH_SHADOW_PERSISTENCE=postgres" in text
+    assert "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false" in text
+    assert "LANGGRAPH_SHADOW_DATABASE_DSN=" in text
+    assert "LANGGRAPH_S2S_TOKEN=" in text
+    assert "LANGGRAPH_SHADOW_DATABASE_DSN=postgres" not in text
+    assert "LANGGRAPH_S2S_TOKEN=abc" not in text
+
+
+def test_old_nginx_and_systemd_marked_as_alternative() -> None:
+    for path in (SYSTEMD, NGINX):
+        text = _read(path)
+        assert "Alternative deployment template only." in text
+        assert "Not used for the current Hostinger VPS target" in text
+        assert "Docker Compose + existing Traefik + n8n_default" in text
+
+
+def test_runbook_covers_real_docker_traefik_contract() -> None:
     text = _read(RUNBOOK)
     required = [
-        "Original Product on Vercel",
-        "Hostinger VPS",
-        "Supabase SaaS PostgreSQL",
-        "CPython 3.12.13",
-        "python -m pip install -r requirements.txt",
-        "/etc/agente-sql-langgraph/shadow-test.env",
-        "LANGGRAPH_RUNTIME_MODE=shadow_test",
-        "LANGGRAPH_HTTP_HOST=127.0.0.1",
-        "LANGGRAPH_SHADOW_PERSISTENCE=postgres",
+        "Docker: 29.1.5",
+        "Docker Compose: v5.0.2",
+        "Traefik: 3.6.7",
+        "n8n-traefik-1",
+        "TLS resolver: mytlschallenge",
+        "Shared Docker network: n8n_default",
+        "/docker/agente-sql-langgraph/",
+        "project: agente-sql-langgraph-shadow-test",
+        "service: langgraph-shadow-test",
+        "python:3.12-slim",
+        "runtime user: non-root `langgraph`",
+        "--host 0.0.0.0",
+        "--port 8000",
+        "zero host port",
+        "deploy/docker/compose.shadow-test.yaml.example",
+        "traefik.http.routers.langgraph-shadow-test.entrypoints=websecure",
+        "traefik.http.routers.langgraph-shadow-test.tls.certresolver=mytlschallenge",
+        "LANGGRAPH_TEST_HOSTNAME TO CONFIRM",
+        "deploy/docker/shadow-test.env.example",
         "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false",
-        "LANGGRAPH_SHADOW_DATABASE_DSN",
-        "LANGGRAPH_S2S_TOKEN",
         "Authorization: Bearer <LANGGRAPH_S2S_TOKEN>",
-        "product_original_bff",
-        "openssl rand -hex 48",
-        "app.test_runtime.sql_agent_test_app:create_app",
-        "systemd",
-        "Nginx",
-        "sslmode=require",
-        "SELECT",
-        "INSERT",
-        "UPDATE",
-        "`DELETE` is not required",
+        "build locally on the VPS from the approved repo commit",
+        "SUPABASE CONNECTION MODE TO CONFIRM DURING DEPLOY",
         "LANGGRAPH_INTERNAL_BASE_URL=https://<LANGGRAPH_TEST_HOSTNAME>",
-        "No variable should use `NEXT_PUBLIC_`",
-        "curl --fail http://127.0.0.1:<LANGGRAPH_INTERNAL_PORT>/health",
-        "negative auth",
-        "positive synthetic auth",
-        "failure isolation",
-        "Do not alter n8n",
-        "Database rollback requires explicit review",
-        "GO GATE A",
-        "GO GATE F",
+        "Do not run these commands against `/docker/n8n`.",
+        "docker compose -f compose.yaml exec langgraph-shadow-test",
+        "REBOOT_REQUIRED",
+        "GO GATE A - Docker",
+        "GO GATE B - Traefik",
+        "They are not the target for the current Hostinger VPS",
         "This TEST runbook is not production-ready",
     ]
     for item in required:
         assert item in text
 
 
-def test_no_real_secret_or_real_host_in_artifacts() -> None:
-    combined = "\n".join(_read(path) for path in (RUNBOOK, SYSTEMD, NGINX))
-    templates = "\n".join(_read(path) for path in (SYSTEMD, NGINX))
+def test_no_real_secret_or_real_langgraph_host_in_artifacts() -> None:
+    paths = (RUNBOOK, SYSTEMD, NGINX, DOCKERFILE, COMPOSE, DOCKER_ENV, DOCKERIGNORE)
+    combined = "\n".join(_read(path) for path in paths)
     forbidden = [
         "NEXT_PUBLIC_LANGGRAPH_S2S_TOKEN",
         "LANGGRAPH_S2S_TOKEN=abc",
         "LANGGRAPH_SHADOW_DATABASE_DSN=postgres",
         "postgresql://",
+        "BEGIN PRIVATE KEY",
+        "root@",
+        "langgraph-test.srv",
         "supabase.co",
-        "hostinger.com",
-        "leandro",
     ]
     for item in forbidden:
         assert item.casefold() not in combined.casefold()
-    assert "0.0.0.0" not in templates
 
 
 if __name__ == "__main__":
     tests = [
         test_templates_exist,
-        test_systemd_template_safe_and_localhost_runtime,
-        test_nginx_template_preserves_auth_without_secret,
-        test_runbook_covers_deploy_contract,
-        test_no_real_secret_or_real_host_in_artifacts,
+        test_dockerfile_runtime_is_minimal_and_non_root,
+        test_dockerignore_excludes_sensitive_and_local_artifacts,
+        test_compose_uses_traefik_network_without_host_ports,
+        test_compose_healthcheck_uses_python_stdlib,
+        test_docker_env_example_has_only_empty_secrets,
+        test_old_nginx_and_systemd_marked_as_alternative,
+        test_runbook_covers_real_docker_traefik_contract,
+        test_no_real_secret_or_real_langgraph_host_in_artifacts,
     ]
     for index, test in enumerate(tests, start=1):
         test()

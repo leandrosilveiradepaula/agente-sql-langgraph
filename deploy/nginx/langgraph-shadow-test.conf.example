@@ -1,3 +1,7 @@
+# Alternative deployment template only.
+# Not used for the current Hostinger VPS target discovered in Microetapa 5.8.
+# The current target uses Docker Compose + existing Traefik + n8n_default.
+
 server {
     listen 80;
     server_name <LANGGRAPH_TEST_HOSTNAME>;

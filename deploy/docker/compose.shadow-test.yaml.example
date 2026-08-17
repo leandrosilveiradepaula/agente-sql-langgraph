@@ -1,0 +1,43 @@
+name: agente-sql-langgraph-shadow-test
+
+services:
+  langgraph-shadow-test:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.shadow-test
+    image: agente-sql-langgraph-shadow-test:<COMMIT_SHA>
+    restart: unless-stopped
+    env_file:
+      - ./shadow-test.env
+    environment:
+      LANGGRAPH_RUNTIME_MODE: shadow_test
+      LANGGRAPH_HTTP_HOST: 0.0.0.0
+      LANGGRAPH_HTTP_PORT: "8000"
+      LANGGRAPH_SHADOW_PERSISTENCE: postgres
+      LANGGRAPH_ALLOW_REAL_SQL_EXECUTION: "false"
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=n8n_default
+      - traefik.http.routers.langgraph-shadow-test.rule=Host(`<LANGGRAPH_TEST_HOSTNAME>`)
+      - traefik.http.routers.langgraph-shadow-test.entrypoints=websecure
+      - traefik.http.routers.langgraph-shadow-test.tls=true
+      - traefik.http.routers.langgraph-shadow-test.tls.certresolver=mytlschallenge
+      - traefik.http.services.langgraph-shadow-test.loadbalancer.server.port=8000
+    networks:
+      - n8n_default
+
+networks:
+  n8n_default:
+    external: true
