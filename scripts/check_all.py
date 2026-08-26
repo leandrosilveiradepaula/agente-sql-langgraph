@@ -151,6 +151,10 @@ STEPS = [
         [sys.executable, "testar_shadow_test_runtime.py"],
     ),
     (
+        "testar_shadow_real_generation_adapters.py",
+        [sys.executable, "testar_shadow_real_generation_adapters.py"],
+    ),
+    (
         "testar_shadow_test_uvicorn_smoke.py",
         [sys.executable, "testar_shadow_test_uvicorn_smoke.py"],
     ),

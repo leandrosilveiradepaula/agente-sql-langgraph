@@ -83,6 +83,8 @@ class SqlRepairHistoryEntry(TypedDict, total=False):
     repair_applied: bool
     reason: SqlRepairReason
     provider_name: str
+    provider_model: str | None
+    token_usage: dict[str, int | str | None]
     duration_ms: int | None
     errors: list[dict[str, Any]]
     warnings: list[str]
@@ -116,9 +118,11 @@ class SqlRepairRequest(TypedDict):
 
 class SqlRepairProviderResult(TypedDict, total=False):
     provider_name: str
+    provider_model: str
     output_text: str
     raw_response: Any
     duration_ms: int
+    token_usage: dict[str, int | str | None]
     warnings: list[str]
 
 
@@ -133,6 +137,8 @@ class SqlRepairDiagnostic(TypedDict):
     attempt: int
     max_attempts: int
     provider_name: str
+    provider_model: str | None
+    token_usage: dict[str, int | str | None]
     duration_ms: int | None
 
 

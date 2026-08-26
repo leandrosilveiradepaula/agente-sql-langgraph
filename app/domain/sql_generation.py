@@ -65,9 +65,11 @@ class SqlGenerationRequest(TypedDict):
 
 class SqlGenerationProviderResult(TypedDict, total=False):
     provider_name: str
+    provider_model: str
     output_text: str
     raw_response: Any
     duration_ms: int
+    token_usage: dict[str, int | str | None]
 
 
 class SqlGenerationDiagnostic(TypedDict):
@@ -531,13 +533,36 @@ def _provider_summary(
         "provider_name": str(provider_result.get("provider_name", "")),
         "output_text": "",
     }
+    if isinstance(provider_result.get("provider_model"), str):
+        summary["provider_model"] = str(provider_result["provider_model"])
     if "duration_ms" in provider_result:
         summary["duration_ms"] = provider_result["duration_ms"]
+    token_usage = provider_result.get("token_usage")
+    if isinstance(token_usage, Mapping):
+        summary["token_usage"] = _token_usage_summary(token_usage)
     if "raw_response" in provider_result:
         summary["raw_response"] = {
             "present": provider_result.get("raw_response") is not None
         }
     return summary
+
+
+def _token_usage_summary(
+    token_usage: Mapping[str, Any],
+) -> dict[str, int | str | None]:
+    return {
+        "provider": _optional_public_text(token_usage.get("provider")),
+        "model": _optional_public_text(token_usage.get("model")),
+        "prompt_tokens": _optional_non_negative_int(
+            token_usage.get("prompt_tokens")
+        ),
+        "response_tokens": _optional_non_negative_int(
+            token_usage.get("response_tokens")
+        ),
+        "total_tokens": _optional_non_negative_int(
+            token_usage.get("total_tokens")
+        ),
+    }
 
 
 def _validate_request(
@@ -689,6 +714,27 @@ def _priority_sort_value(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float("inf")
+
+
+def _optional_non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value >= 0:
+        return value
+    return None
+
+
+def _optional_public_text(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    lowered = text.casefold()
+    if any(
+        marker in lowered
+        for marker in ("bearer", "apikey", "api_key", "token", "secret")
+    ):
+        return None
+    return text[:128]
 
 
 def _has_forbidden_control_character(value: str) -> bool:

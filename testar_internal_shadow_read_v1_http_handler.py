@@ -27,7 +27,12 @@ from app.http.internal_service_auth_handler import (
 )
 from app.security.internal_service_auth import InternalServiceAuthConfig
 from app.test_runtime.composition import create_shadow_test_runtime
-from app.test_runtime.offline_adapters import OFFLINE_SQL
+from app.test_runtime.offline_adapters import (
+    OFFLINE_SQL,
+    ShadowTestContextRepository,
+    ShadowTestSqlGenerator,
+    ShadowTestSqlRepairer,
+)
 
 
 AGENT_RUN_ID = "agent-run-shadow-read-http"
@@ -359,6 +364,9 @@ def _test_read_logging_sanitized() -> None:
     runtime = create_shadow_test_runtime(
         _env(),
         shadow_repository_override=FakeShadowEvidenceRepository(),
+        context_repository_override=ShadowTestContextRepository(),
+        sql_generator_override=ShadowTestSqlGenerator(),
+        sql_repairer_override=ShadowTestSqlRepairer(),
         logger=logger,
     )
     _run_asgi(
@@ -382,6 +390,9 @@ def _test_asgi_read_routes_and_old_posts() -> None:
     runtime = create_shadow_test_runtime(
         _env(),
         shadow_repository_override=FakeShadowEvidenceRepository(),
+        context_repository_override=ShadowTestContextRepository(),
+        sql_generator_override=ShadowTestSqlGenerator(),
+        sql_repairer_override=ShadowTestSqlRepairer(),
     )
     health_status, health = _run_asgi(runtime.app, "GET", "/health")
     generate_status, generate = _run_asgi(
@@ -437,6 +448,8 @@ def _env() -> dict[str, str]:
         "LANGGRAPH_HTTP_PORT": "8000",
         "LANGGRAPH_SHADOW_PERSISTENCE": "postgres",
         "LANGGRAPH_SHADOW_DATABASE_DSN": "postgresql://shadow-test-placeholder",
+        "CONTEXT_POSTGRES_DSN": "postgresql://context-test-placeholder",
+        "SEMANTIC_AGENT_VERSION": "semantic-version-test",
         "LANGGRAPH_S2S_TOKEN": S2S_TOKEN,
         "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION": "false",
     }

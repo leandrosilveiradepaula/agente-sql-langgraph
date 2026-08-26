@@ -96,6 +96,35 @@ def _adapter_success(output_text: str = "SELECT id FROM schema_test.table_test")
     return GoogleGeminiSqlGeneratorAdapter(client=client), transport, secret_provider
 
 
+def _adapter_success_with_usage(
+    output_text: str = "SELECT id FROM schema_test.table_test",
+):
+    client, transport, secret_provider = _client(
+        transport_result=_http_success(
+            {
+                "candidates": [
+                    {
+                        "finishReason": "STOP",
+                        "content": {
+                            "parts": [
+                                {
+                                    "text": output_text,
+                                }
+                            ]
+                        },
+                    }
+                ],
+                "usageMetadata": {
+                    "promptTokenCount": 11,
+                    "candidatesTokenCount": 7,
+                    "totalTokenCount": 18,
+                },
+            }
+        )
+    )
+    return GoogleGeminiSqlGeneratorAdapter(client=client), transport, secret_provider
+
+
 def _assert_domain_rejects(output_text: str, expected_code: str) -> None:
     adapter, _transport, _secret = _adapter_success(output_text)
     result = adapter.generate(_request())
@@ -283,6 +312,13 @@ def test_client_sucesso_monta_http_sem_vazar_chave() -> None:
     assert result["status"] == "success"
     assert result["output_text"] == "SELECT id FROM schema_test.table_test"
     assert result["duration_ms"] == 9
+    assert result["token_usage"] == {
+        "provider": "google_gemini",
+        "model": "gemini-2.5-flash",
+        "prompt_tokens": None,
+        "response_tokens": None,
+        "total_tokens": None,
+    }
     assert transport.calls == 1
     assert secret_provider.calls == 1
     assert secret_provider.secret_names == [GEMINI_API_KEY_SECRET_NAME]
@@ -546,14 +582,37 @@ def test_adapter_implementa_sql_generator_e_nao_raw_response() -> None:
 
     assert result == {
         "provider_name": "google_gemini",
+        "provider_model": "gemini-2.5-flash",
         "output_text": "SELECT id FROM schema_test.table_test",
         "duration_ms": 7,
+        "token_usage": {
+            "provider": "google_gemini",
+            "model": "gemini-2.5-flash",
+            "prompt_tokens": None,
+            "response_tokens": None,
+            "total_tokens": None,
+        },
     }
     assert "raw_response" not in result
     assert transport.calls == 1
     assert validate_sql_generation_response(result) == (
         "SELECT id FROM schema_test.table_test"
     )
+
+
+def test_adapter_mapeia_usage_metadata() -> None:
+    adapter, _transport, _secret = _adapter_success_with_usage()
+
+    result = adapter.generate(_request())
+
+    assert result["provider_model"] == "gemini-2.5-flash"
+    assert result["token_usage"] == {
+        "provider": "google_gemini",
+        "model": "gemini-2.5-flash",
+        "prompt_tokens": 11,
+        "response_tokens": 7,
+        "total_tokens": 18,
+    }
 
 
 def test_adapter_rejeita_contract_version_invalido() -> None:
@@ -728,6 +787,7 @@ def main() -> None:
         ("secret ausente", test_client_secret_ausente_nao_chama_http),
         ("secret unavailable invalid", test_client_secret_unavailable_e_invalid_nao_chamam_http),
         ("adapter sucesso", test_adapter_implementa_sql_generator_e_nao_raw_response),
+        ("adapter usage metadata", test_adapter_mapeia_usage_metadata),
         ("contract invalido", test_adapter_rejeita_contract_version_invalido),
         ("adapter nao limpa", test_adapter_nao_limpa_respostas_invalidas_do_modelo),
         ("dominio rejeita invalidas", test_adapter_deixa_dominio_rejeitar_sql_invalida),

@@ -195,9 +195,11 @@ def build_sql_repair_request(
             engine_preflight_result,
             forbidden_texts=(current_sql,),
         ),
-        "previous_attempts": _safe_history(
-            repair_history or [],
-            forbidden_texts=(current_sql,),
+        "previous_attempts": _provider_visible_history(
+            _safe_history(
+                repair_history or [],
+                forbidden_texts=(current_sql,),
+            )
         ),
         "instructions": deepcopy(_INSTRUCTIONS),
         "output_constraints": list(_OUTPUT_CONSTRAINTS),
@@ -260,6 +262,12 @@ def create_sql_repair_success_result(
     duration_ms = _optional_non_negative_int(
         provider_result.get("duration_ms")
     )
+    provider_model = _optional_public_text(
+        provider_result.get("provider_model")
+    )
+    token_usage = _token_usage_summary(
+        provider_result.get("token_usage")
+    )
     response_fp = response_fingerprint(
         str(provider_result.get("output_text", ""))
     )
@@ -277,6 +285,8 @@ def create_sql_repair_success_result(
         repair_applied=True,
         reason="sql_repair_applied",
         provider_name=provider_name,
+        provider_model=provider_model,
+        token_usage=token_usage,
         duration_ms=duration_ms,
         errors=[],
         warnings=safe_warnings(
@@ -298,6 +308,8 @@ def create_sql_repair_success_result(
             repair_applied=True,
             reason="sql_repair_applied",
             provider_name=provider_name,
+            provider_model=provider_model,
+            token_usage=token_usage,
             duration_ms=duration_ms,
         ),
         "history_entry": history,
@@ -323,6 +335,12 @@ def create_sql_repair_error_result(
     )
     duration_ms = _optional_non_negative_int(
         provider_result.get("duration_ms") if provider_result else None
+    )
+    provider_model = _optional_public_text(
+        provider_result.get("provider_model") if provider_result else None
+    )
+    token_usage = _token_usage_summary(
+        provider_result.get("token_usage") if provider_result else None
     )
     response_text = (
         provider_result.get("output_text")
@@ -363,6 +381,8 @@ def create_sql_repair_error_result(
         repair_applied=False,
         reason=reason,
         provider_name=provider_name,
+        provider_model=provider_model,
+        token_usage=token_usage,
         duration_ms=duration_ms,
         errors=[
             {
@@ -394,6 +414,8 @@ def create_sql_repair_error_result(
             "attempt": attempt,
             "max_attempts": max_attempts,
             "provider_name": provider_name,
+            "provider_model": provider_model,
+            "token_usage": token_usage,
             "duration_ms": duration_ms,
         },
         "history_entry": history,
@@ -423,6 +445,8 @@ def _diagnostic(
     repair_applied: bool,
     reason: SqlRepairReason,
     provider_name: str,
+    provider_model: str | None,
+    token_usage: dict[str, int | str | None],
     duration_ms: int | None,
 ) -> SqlRepairDiagnostic:
     return {
@@ -436,6 +460,8 @@ def _diagnostic(
         "attempt": request["attempt"],
         "max_attempts": request["max_attempts"],
         "provider_name": provider_name,
+        "provider_model": provider_model,
+        "token_usage": token_usage,
         "duration_ms": duration_ms,
     }
 
@@ -551,6 +577,12 @@ def _safe_history(
                     item.get("provider_name"),
                     forbidden_texts=forbidden_texts,
                 ),
+                provider_model=_optional_public_text(
+                    item.get("provider_model")
+                ),
+                token_usage=_token_usage_summary(
+                    item.get("token_usage")
+                ),
                 duration_ms=_optional_non_negative_int(
                     item.get("duration_ms")
                 ),
@@ -568,6 +600,18 @@ def _safe_history(
     return output
 
 
+def _provider_visible_history(
+    history: list[SqlRepairHistoryEntry],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for item in history:
+        visible = dict(item)
+        visible.pop("provider_model", None)
+        visible.pop("token_usage", None)
+        output.append(visible)
+    return output
+
+
 def _history_entry(
     *,
     attempt: int,
@@ -582,6 +626,8 @@ def _history_entry(
     repair_applied: bool,
     reason: SqlRepairReason,
     provider_name: str,
+    provider_model: str | None,
+    token_usage: dict[str, int | str | None],
     duration_ms: int | None,
     errors: list[dict[str, Any]],
     warnings: list[str],
@@ -599,6 +645,8 @@ def _history_entry(
         "repair_applied": repair_applied,
         "reason": reason,
         "provider_name": provider_name,
+        "provider_model": provider_model,
+        "token_usage": token_usage,
         "duration_ms": duration_ms,
         "errors": deepcopy(errors),
         "warnings": list(warnings),
@@ -782,6 +830,37 @@ def _optional_non_negative_int(value: Any) -> int | None:
     if isinstance(value, int) and value >= 0:
         return value
     return None
+
+
+def _token_usage_summary(value: Any) -> dict[str, int | str | None]:
+    if not isinstance(value, Mapping):
+        value = {}
+    return {
+        "provider": _optional_public_text(value.get("provider")),
+        "model": _optional_public_text(value.get("model")),
+        "prompt_tokens": _optional_non_negative_int(
+            value.get("prompt_tokens")
+        ),
+        "response_tokens": _optional_non_negative_int(
+            value.get("response_tokens")
+        ),
+        "total_tokens": _optional_non_negative_int(
+            value.get("total_tokens")
+        ),
+    }
+
+
+def _optional_public_text(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    lowered = text.casefold()
+    if any(
+        marker in lowered
+        for marker in ("bearer", "apikey", "api_key", "token", "secret")
+    ):
+        return None
+    return text[:128]
 
 
 def _priority_sort_value(value: Any) -> float:

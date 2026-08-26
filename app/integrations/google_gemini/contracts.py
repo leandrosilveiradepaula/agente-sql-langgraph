@@ -33,6 +33,7 @@ class GeminiClientResult(TypedDict, total=False):
     output_text: str
     finish_reasons: list[str]
     duration_ms: int
+    token_usage: dict[str, int | str | None]
     public_error_code: str
     public_error_message: str
     diagnostics: dict[str, object]
@@ -176,6 +177,30 @@ def extract_gemini_text(value: Mapping[str, Any]) -> tuple[str, list[str]]:
     return output, finish_reasons
 
 
+def extract_gemini_token_usage(
+    value: Mapping[str, Any],
+    *,
+    provider: str,
+    model: str,
+) -> dict[str, int | str | None]:
+    usage = value.get("usageMetadata")
+    if not isinstance(usage, Mapping):
+        return _empty_token_usage(provider=provider, model=model)
+    return {
+        "provider": provider,
+        "model": model,
+        "prompt_tokens": _optional_non_negative_int(
+            usage.get("promptTokenCount")
+        ),
+        "response_tokens": _optional_non_negative_int(
+            usage.get("candidatesTokenCount")
+        ),
+        "total_tokens": _optional_non_negative_int(
+            usage.get("totalTokenCount")
+        ),
+    }
+
+
 def parse_gemini_json_response(body: bytes) -> dict[str, Any]:
     try:
         text = body.decode("utf-8", errors="strict")
@@ -211,12 +236,14 @@ def gemini_success(
     output_text: str,
     finish_reasons: list[str],
     duration_ms: int,
+    token_usage: Mapping[str, int | str | None] | None = None,
 ) -> GeminiClientResult:
     return {
         "status": "success",
         "output_text": output_text,
         "finish_reasons": list(finish_reasons),
         "duration_ms": duration_ms,
+        "token_usage": _safe_token_usage(token_usage),
         "diagnostics": {
             "finish_reasons": list(finish_reasons),
         },
@@ -279,6 +306,61 @@ def _sanitize_diagnostics(value: Mapping[str, object] | None) -> dict[str, objec
                 continue
             output[key[:64]] = raw
     return output
+
+
+def _safe_token_usage(
+    value: Mapping[str, int | str | None] | None,
+) -> dict[str, int | str | None]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        "provider": _optional_public_text(value.get("provider")),
+        "model": _optional_public_text(value.get("model")),
+        "prompt_tokens": _optional_non_negative_int(
+            value.get("prompt_tokens")
+        ),
+        "response_tokens": _optional_non_negative_int(
+            value.get("response_tokens")
+        ),
+        "total_tokens": _optional_non_negative_int(
+            value.get("total_tokens")
+        ),
+    }
+
+
+def _empty_token_usage(
+    *,
+    provider: str,
+    model: str,
+) -> dict[str, int | str | None]:
+    return {
+        "provider": provider,
+        "model": model,
+        "prompt_tokens": None,
+        "response_tokens": None,
+        "total_tokens": None,
+    }
+
+
+def _optional_non_negative_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value >= 0:
+        return value
+    return None
+
+
+def _optional_public_text(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    lowered = text.casefold()
+    if any(
+        marker in lowered
+        for marker in ("bearer", "apikey", "api_key", "token", "secret")
+    ):
+        return None
+    return text[:128]
 
 
 def _is_public_text(value: str) -> bool:

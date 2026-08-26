@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 from copy import deepcopy
 from typing import Any
 
@@ -14,14 +13,28 @@ from app.infrastructure.persistence.postgres_shadow_evidence_repository import (
     INSERT_SHADOW_RUN_SQL,
     PostgresShadowEvidenceRepository,
 )
+from app.adapters.postgres.context_repository import PostgresContextRepository
+from app.integrations.google_gemini.sql_generator_adapter import (
+    GoogleGeminiSqlGeneratorAdapter,
+)
+from app.integrations.google_gemini.sql_repairer_adapter import (
+    GoogleGeminiSqlRepairerAdapter,
+)
 from app.test_runtime.composition import create_shadow_test_runtime
 from app.test_runtime.config import load_shadow_test_runtime_config
-from app.test_runtime.offline_adapters import OFFLINE_SQL
+from app.test_runtime.offline_adapters import (
+    OFFLINE_SQL,
+    ShadowTestContextRepository,
+    ShadowTestSqlGenerator,
+    ShadowTestSqlRepairer,
+)
 
 
 DSN_PLACEHOLDER = "postgresql://shadow-test-placeholder"
 AGENT_RUN_ID = "agent-run-shadow-test"
 S2S_TOKEN = "test-s2s-token"
+CONTEXT_DSN_PLACEHOLDER = "postgresql://context-test-placeholder"
+SEMANTIC_AGENT_VERSION = "semantic-version-test"
 
 
 class TestLogger:
@@ -108,6 +121,8 @@ def _env(**overrides: str) -> dict[str, str]:
         "LANGGRAPH_HTTP_PORT": "8000",
         "LANGGRAPH_SHADOW_PERSISTENCE": "postgres",
         "LANGGRAPH_SHADOW_DATABASE_DSN": DSN_PLACEHOLDER,
+        "CONTEXT_POSTGRES_DSN": CONTEXT_DSN_PLACEHOLDER,
+        "SEMANTIC_AGENT_VERSION": SEMANTIC_AGENT_VERSION,
         "LANGGRAPH_S2S_TOKEN": S2S_TOKEN,
         "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION": "false",
     }
@@ -170,6 +185,9 @@ def _runtime_with_fake_repo(logger: TestLogger | None = None):
     return create_shadow_test_runtime(
         _env(),
         shadow_repository_override=FakeShadowEvidenceRepository(),
+        context_repository_override=ShadowTestContextRepository(),
+        sql_generator_override=ShadowTestSqlGenerator(),
+        sql_repairer_override=ShadowTestSqlRepairer(),
         logger=logger,
     )
 
@@ -179,19 +197,28 @@ def test_config_shadow_test_valida() -> None:
     assert config.runtime_mode == "shadow_test"
     assert config.allow_real_sql_execution is False
     assert config.s2s_token == S2S_TOKEN
+    assert config.shadow_database_dsn == DSN_PLACEHOLDER
+    assert config.context_postgres_dsn == CONTEXT_DSN_PLACEHOLDER
+    assert config.semantic_agent_version == SEMANTIC_AGENT_VERSION
 
 
 def test_config_repr_nao_expoe_dsn() -> None:
     dsn = "postgresql://example.invalid/test?marker=opaque-marker"
     secret = "test-hidden-s2s-token"
     config = load_shadow_test_runtime_config(
-        _env(LANGGRAPH_SHADOW_DATABASE_DSN=dsn, LANGGRAPH_S2S_TOKEN=secret)
+        _env(
+            LANGGRAPH_SHADOW_DATABASE_DSN=dsn,
+            CONTEXT_POSTGRES_DSN="postgresql://context-hidden",
+            LANGGRAPH_S2S_TOKEN=secret,
+        )
     )
     assert config.shadow_database_dsn == dsn
+    assert config.context_postgres_dsn == "postgresql://context-hidden"
     assert config.s2s_token == secret
     serialized = repr(config) + str(config)
     assert "opaque-marker" not in serialized
     assert dsn not in serialized
+    assert "context-hidden" not in serialized
     assert secret not in serialized
 
 
@@ -222,6 +249,28 @@ def test_real_sql_execution_true_falha_startup() -> None:
         assert "Real SQL execution" in str(error)
     else:
         raise AssertionError("real SQL execution must not be enabled")
+
+
+def test_context_dsn_ausente_falha_startup() -> None:
+    env = _env()
+    del env["CONTEXT_POSTGRES_DSN"]
+    try:
+        load_shadow_test_runtime_config(env)
+    except RuntimeError as error:
+        assert "CONTEXT_POSTGRES_DSN" in str(error)
+    else:
+        raise AssertionError("missing context DSN should fail closed")
+
+
+def test_context_dsn_nao_pode_reutilizar_persistencia() -> None:
+    try:
+        load_shadow_test_runtime_config(
+            _env(CONTEXT_POSTGRES_DSN=DSN_PLACEHOLDER)
+        )
+    except RuntimeError as error:
+        assert "separate" in str(error)
+    else:
+        raise AssertionError("context DSN must be separated")
 
 
 def test_healthcheck_responde_sem_segredos() -> None:
@@ -261,17 +310,20 @@ def test_execute_approved_shadow_endpoint_v1_exposto() -> None:
     assert body["approved_sql_original"] == OFFLINE_SQL
 
 
-def test_gemini_watson_e_execute_sql_real_nao_instanciados() -> None:
-    _runtime_with_fake_repo()
-    loaded = set(sys.modules)
-    assert "app.integrations.google_gemini.client" not in loaded
-    assert "app.integrations.watson.live_watson_flow_client" not in loaded
-    assert "app.integrations.watson.flow_sql_executor" not in loaded
+def test_watson_e_execute_sql_real_nao_instanciados() -> None:
+    runtime = _runtime_with_fake_repo()
+    serialized = repr(runtime).casefold()
+    assert "watson" not in serialized
+    assert "sqlexecutor" not in serialized
+    assert "sql_executor" not in serialized
 
 
 def test_postgres_repository_selecionado_quando_configurado() -> None:
     runtime = create_shadow_test_runtime(_env())
     assert isinstance(runtime.raw_shadow_repository, PostgresShadowEvidenceRepository)
+    assert isinstance(runtime.context_repository, PostgresContextRepository)
+    assert isinstance(runtime.sql_generator, GoogleGeminiSqlGeneratorAdapter)
+    assert isinstance(runtime.sql_repairer, GoogleGeminiSqlRepairerAdapter)
 
 
 def test_fake_repository_nao_e_usado_no_composition_root_test_real() -> None:
@@ -327,7 +379,13 @@ def test_logger_falha_nao_quebra_request_ou_persistencia() -> None:
 
 def test_postgres_wiring_create_e_finalize_com_fake_connect() -> None:
     connect = FakePostgresConnect()
-    runtime = create_shadow_test_runtime(_env(), connect_override=connect)
+    runtime = create_shadow_test_runtime(
+        _env(),
+        connect_override=connect,
+        context_repository_override=ShadowTestContextRepository(),
+        sql_generator_override=ShadowTestSqlGenerator(),
+        sql_repairer_override=ShadowTestSqlRepairer(),
+    )
     status, body = _run_asgi(
         runtime.app,
         "POST",
@@ -349,7 +407,13 @@ def test_postgres_wiring_create_e_finalize_com_fake_connect() -> None:
 
 def test_postgres_wiring_execute_event_type() -> None:
     connect = FakePostgresConnect()
-    runtime = create_shadow_test_runtime(_env(), connect_override=connect)
+    runtime = create_shadow_test_runtime(
+        _env(),
+        connect_override=connect,
+        context_repository_override=ShadowTestContextRepository(),
+        sql_generator_override=ShadowTestSqlGenerator(),
+        sql_repairer_override=ShadowTestSqlRepairer(),
+    )
     status, body = _run_asgi(
         runtime.app,
         "POST",
@@ -370,10 +434,12 @@ def main() -> None:
         test_config_ausente_falha_fechado,
         test_s2s_token_ausente_falha_startup,
         test_real_sql_execution_true_falha_startup,
+        test_context_dsn_ausente_falha_startup,
+        test_context_dsn_nao_pode_reutilizar_persistencia,
         test_healthcheck_responde_sem_segredos,
         test_generate_endpoint_v1_exposto,
         test_execute_approved_shadow_endpoint_v1_exposto,
-        test_gemini_watson_e_execute_sql_real_nao_instanciados,
+        test_watson_e_execute_sql_real_nao_instanciados,
         test_postgres_repository_selecionado_quando_configurado,
         test_fake_repository_nao_e_usado_no_composition_root_test_real,
         test_dsn_nao_aparece_em_logs_ou_erros,

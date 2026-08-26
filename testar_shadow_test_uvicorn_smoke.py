@@ -18,6 +18,11 @@ from app.adapters.testing.fake_shadow_evidence_repository import (
 )
 from app.application.internal_sql_agent_v1_shared import shadow_record_id
 from app.test_runtime.composition import create_shadow_test_asgi_app
+from app.test_runtime.offline_adapters import (
+    ShadowTestContextRepository,
+    ShadowTestSqlGenerator,
+    ShadowTestSqlRepairer,
+)
 
 
 HOST = "127.0.0.1"
@@ -67,7 +72,10 @@ socket.socket.connect = _guarded_socket_connect
 
 def create_app():
     return create_shadow_test_asgi_app(
-        shadow_repository_override=FakeShadowEvidenceRepository()
+        shadow_repository_override=FakeShadowEvidenceRepository(),
+        context_repository_override=ShadowTestContextRepository(),
+        sql_generator_override=ShadowTestSqlGenerator(),
+        sql_repairer_override=ShadowTestSqlRepairer(),
     )
 
 
@@ -158,6 +166,8 @@ def test_uvicorn_local_smoke() -> bool:
             "LANGGRAPH_HTTP_PORT": str(port),
             "LANGGRAPH_SHADOW_PERSISTENCE": "postgres",
             "LANGGRAPH_SHADOW_DATABASE_DSN": "postgresql://shadow-test-placeholder",
+            "CONTEXT_POSTGRES_DSN": "postgresql://context-test-placeholder",
+            "SEMANTIC_AGENT_VERSION": "semantic-version-test",
             "LANGGRAPH_S2S_TOKEN": S2S_TOKEN,
             "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION": "false",
             "PYTHONDONTWRITEBYTECODE": "1",

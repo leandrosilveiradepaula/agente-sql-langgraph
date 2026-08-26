@@ -64,6 +64,37 @@ def test_requisicao_nao_contem_snapshot_catalogo_ou_credenciais() -> None:
     assert "query_patterns" not in serialized
 
 
+def test_requisicao_nao_contem_campos_esperados_de_benchmark() -> None:
+    query_plan = _query_plan()
+    query_plan["benchmark_id"] = "benchmark-1"
+    query_plan["benchmark_mode"] = True
+    query_plan["benchmark_target"] = "TEST"
+    query_plan["tabelas_obrigatorias"] = ["forbidden_table"]
+    query_plan["filtros_obrigatorios"] = ["forbidden_filter"]
+    query_plan["deve_conter_sql"] = ["forbidden_must"]
+    query_plan["nao_deve_conter_sql"] = ["forbidden_must_not"]
+    query_plan["criterio_semantico"] = "forbidden_criterion"
+    query_plan["expected_sql"] = "SELECT forbidden"
+    query_plan["expected_answer"] = "forbidden_answer"
+    query_plan["golden answer"] = "forbidden_golden"
+
+    request = build_sql_generation_request(query_plan)
+    serialized = repr(request).casefold()
+
+    assert "benchmark-1" not in serialized
+    assert "benchmark_mode" not in serialized
+    assert "benchmark_target" not in serialized
+    assert "tabelas_obrigatorias" not in serialized
+    assert "filtros_obrigatorios" not in serialized
+    assert "deve_conter_sql" not in serialized
+    assert "nao_deve_conter_sql" not in serialized
+    assert "criterio_semantico" not in serialized
+    assert "expected_sql" not in serialized
+    assert "expected_answer" not in serialized
+    assert "golden" not in serialized
+    assert "forbidden" not in serialized
+
+
 def test_ordem_fingerprint_e_imutabilidade() -> None:
     query_plan = _query_plan()
     original = deepcopy(query_plan)
@@ -223,6 +254,10 @@ def main() -> None:
         (
             "sem snapshot catalogo ou credenciais",
             test_requisicao_nao_contem_snapshot_catalogo_ou_credenciais,
+        ),
+        (
+            "sem campos esperados de benchmark",
+            test_requisicao_nao_contem_campos_esperados_de_benchmark,
         ),
         (
             "ordem fingerprint e imutabilidade",

@@ -16,6 +16,7 @@ from app.integrations.google_gemini.configuration import (
 from app.integrations.google_gemini.contracts import (
     GeminiClientResult,
     build_gemini_payload,
+    extract_gemini_token_usage,
     extract_gemini_text,
     gemini_failure,
     gemini_success,
@@ -152,6 +153,11 @@ class GoogleGeminiClient:
             try:
                 payload = parse_gemini_json_response(response.body)
                 output_text, finish_reasons = extract_gemini_text(payload)
+                token_usage = extract_gemini_token_usage(
+                    payload,
+                    provider="google_gemini",
+                    model=self._configuration.model_id,
+                )
             except Exception:
                 return gemini_failure(
                     "invalid_response",
@@ -161,6 +167,7 @@ class GoogleGeminiClient:
                 output_text=output_text,
                 finish_reasons=finish_reasons,
                 duration_ms=duration_ms,
+                token_usage=token_usage,
             )
         except Exception:
             return gemini_failure(

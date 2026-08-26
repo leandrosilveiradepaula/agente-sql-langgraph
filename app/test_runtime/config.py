@@ -7,6 +7,10 @@ from dataclasses import dataclass, field
 
 RUNTIME_MODE = "shadow_test"
 PERSISTENCE_POSTGRES = "postgres"
+CONTEXT_POSTGRES_DSN_ENV = "CONTEXT_POSTGRES_DSN"
+SEMANTIC_AGENT_VERSION_ENV = "SEMANTIC_AGENT_VERSION"
+POSTGRES_CONNECT_TIMEOUT_ENV = "POSTGRES_CONNECT_TIMEOUT_SECONDS"
+DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +20,9 @@ class ShadowTestRuntimeConfig:
     http_port: int
     shadow_persistence: str
     shadow_database_dsn: str = field(repr=False)
+    context_postgres_dsn: str = field(repr=False)
+    semantic_agent_version: str
+    context_connect_timeout_seconds: int
     s2s_token: str = field(repr=False)
     allow_real_sql_execution: bool
     langgraph_version: str | None
@@ -42,12 +49,27 @@ def load_shadow_test_runtime_config(
         raise RuntimeError("shadow_test persistence must be postgres.")
 
     dsn = _required(env, "LANGGRAPH_SHADOW_DATABASE_DSN")
+    context_dsn = _required(env, CONTEXT_POSTGRES_DSN_ENV)
+    if context_dsn == dsn:
+        raise RuntimeError(
+            "CONTEXT_POSTGRES_DSN must be separate from shadow persistence DSN."
+        )
     return ShadowTestRuntimeConfig(
         runtime_mode=runtime_mode,
         http_host=_optional(env, "LANGGRAPH_HTTP_HOST", "127.0.0.1"),
         http_port=_port(_optional(env, "LANGGRAPH_HTTP_PORT", "8000")),
         shadow_persistence=persistence,
         shadow_database_dsn=dsn,
+        context_postgres_dsn=context_dsn,
+        semantic_agent_version=_required(env, SEMANTIC_AGENT_VERSION_ENV),
+        context_connect_timeout_seconds=_positive_int(
+            _optional(
+                env,
+                POSTGRES_CONNECT_TIMEOUT_ENV,
+                str(DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS),
+            ),
+            POSTGRES_CONNECT_TIMEOUT_ENV,
+        ),
         s2s_token=_required_secret(env, "LANGGRAPH_S2S_TOKEN"),
         allow_real_sql_execution=False,
         langgraph_version=_safe_optional(env.get("LANGGRAPH_VERSION")),
@@ -97,6 +119,15 @@ def _port(value: str) -> int:
     parsed = int(value)
     if parsed <= 0 or parsed > 65535:
         raise RuntimeError("LANGGRAPH_HTTP_PORT is out of range.")
+    return parsed
+
+
+def _positive_int(value: str, name: str) -> int:
+    if not value.isdecimal():
+        raise RuntimeError(f"{name} must be numeric.")
+    parsed = int(value)
+    if parsed <= 0:
+        raise RuntimeError(f"{name} must be positive.")
     return parsed
 
 

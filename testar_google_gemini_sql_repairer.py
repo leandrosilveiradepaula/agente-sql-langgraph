@@ -72,6 +72,16 @@ def _success_payload(output_text: str = REPAIRED_SQL) -> dict:
     }
 
 
+def _success_payload_with_usage(output_text: str = REPAIRED_SQL) -> dict:
+    payload = _success_payload(output_text)
+    payload["usageMetadata"] = {
+        "promptTokenCount": 13,
+        "candidatesTokenCount": 5,
+        "totalTokenCount": 18,
+    }
+    return payload
+
+
 def _client(*, transport_result):
     transport = FakeHttpTransport(result=transport_result)
     secret_provider = FakeSecretValueProvider(
@@ -486,11 +496,37 @@ def test_adapter_retorna_provider_output_e_duration() -> None:
 
     assert result == {
         "provider_name": "google_gemini",
+        "provider_model": "gemini-2.5-flash",
         "output_text": REPAIRED_SQL,
         "duration_ms": 7,
+        "token_usage": {
+            "provider": "google_gemini",
+            "model": "gemini-2.5-flash",
+            "prompt_tokens": None,
+            "response_tokens": None,
+            "total_tokens": None,
+        },
     }
     assert transport.calls == 1
     assert secret_provider.secret_names == [GEMINI_API_KEY_SECRET_NAME]
+
+
+def test_adapter_mapeia_usage_metadata() -> None:
+    client, _transport, _secret = _client(
+        transport_result=_http_success(_success_payload_with_usage())
+    )
+    adapter = GoogleGeminiSqlRepairerAdapter(client=client)
+
+    result = adapter.repair(_repair_request())
+
+    assert result["provider_model"] == "gemini-2.5-flash"
+    assert result["token_usage"] == {
+        "provider": "google_gemini",
+        "model": "gemini-2.5-flash",
+        "prompt_tokens": 13,
+        "response_tokens": 5,
+        "total_tokens": 18,
+    }
 
 
 def test_raw_response_ausente() -> None:
@@ -680,6 +716,7 @@ def main() -> None:
         ("dns tls", test_dns_tls_failure),
         ("response too large", test_response_too_large),
         ("adapter sucesso", test_adapter_retorna_provider_output_e_duration),
+        ("adapter usage metadata", test_adapter_mapeia_usage_metadata),
         ("sem raw_response", test_raw_response_ausente),
         ("adapter nao limpa", test_adapter_nao_limpa_markdown),
         ("dominio rejeita ddl", test_dominio_rejeita_ddl),

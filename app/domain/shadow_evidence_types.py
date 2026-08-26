@@ -9,6 +9,21 @@ from app.domain.result_normalization import canonical_json, stable_fingerprint
 
 
 SHADOW_EVIDENCE_CONTRACT_VERSION = "v1.0.0-shadow-evidence"
+SAFE_CORRELATION_METADATA_KEYS = frozenset(
+    {
+        "benchmark_id",
+        "benchmark_mode",
+        "benchmark_target",
+        "environment",
+        "operation",
+        "product_run_id",
+        "query_id",
+        "request_id",
+        "source",
+        "workflow_name",
+        "workflow_version",
+    }
+)
 
 ShadowEventType = Literal["generate", "execute_approved_shadow"]
 ShadowStatus = Literal["started", "success", "rejected", "infrastructure_error"]
@@ -362,7 +377,9 @@ def _build_record(
         "repaired_sql_proposal": repaired_sql_proposal,
         "requires_reapproval": bool(requires_reapproval),
         "principal": dict(cast(Mapping[str, Any], request.get("principal", {}))),
-        "correlation_metadata": dict(cast(Mapping[str, Any], request.get("correlation_metadata", {}))),
+        "correlation_metadata": _safe_correlation_metadata(
+            cast(Mapping[str, Any], request.get("correlation_metadata", {}))
+        ),
         "options": dict(cast(Mapping[str, Any], state.get("options", {}))),
         "semantic_context": dict(cast(Mapping[str, Any], state.get("context") or {})),
         "n8n_baseline": n8n_baseline,
@@ -451,16 +468,44 @@ def _lineage_from_state(state: Mapping[str, Any]) -> dict[str, Any]:
 
 def _provider_metadata(state: Mapping[str, Any]) -> dict[str, Any]:
     output: dict[str, Any] = {}
-    for source in ("generation_result", "repair_result", "engine_preflight_result"):
+    for source in (
+        "sql_generation_result",
+        "sql_repair_result",
+        "generation_result",
+        "repair_result",
+        "engine_preflight_result",
+    ):
         value = state.get(source)
         if not isinstance(value, Mapping):
             continue
         provider = value.get("provider_name")
         version = value.get("provider_version")
+        provider_model = value.get("provider_model")
+        token_usage = value.get("token_usage")
+        nested_provider = value.get("provider_result")
+        if isinstance(nested_provider, Mapping):
+            provider = provider or nested_provider.get("provider_name")
+            provider_model = provider_model or nested_provider.get(
+                "provider_model"
+            )
+            token_usage = token_usage or nested_provider.get("token_usage")
         if isinstance(provider, str):
             output[f"{source}_provider_name"] = provider
         if isinstance(version, str):
             output[f"{source}_provider_version"] = version
+        if isinstance(provider_model, str):
+            output[f"{source}_provider_model"] = provider_model
+        if isinstance(token_usage, Mapping):
+            output[f"{source}_token_usage"] = dict(token_usage)
+    return output
+
+
+def _safe_correlation_metadata(value: Mapping[str, Any]) -> dict[str, Any]:
+    output: dict[str, Any] = {}
+    for key, item in value.items():
+        if key not in SAFE_CORRELATION_METADATA_KEYS:
+            continue
+        output[key] = item
     return output
 
 
