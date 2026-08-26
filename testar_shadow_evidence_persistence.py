@@ -232,6 +232,50 @@ def _generate_record(
     )
 
 
+def _execute_record(
+    *,
+    agent_run_id: str = "agent-run-1",
+    run_id: str = "lg-run-execute-1",
+    sql: str = "SELECT id FROM schema_test.table_test",
+    status: str = "success",
+) -> dict[str, Any]:
+    request = _execute_request(sql)
+    request["agent_run_id"] = agent_run_id
+    state = {
+        "request_id": agent_run_id,
+        "run_id": run_id,
+        "security_result": {"status": "approved", "executed": False},
+        "contract_result": {"status": "approved", "executed": False},
+        "engine_preflight_result": {"status": "approved", "executed": False},
+        "repair_history": [],
+        "repair_attempts": 0,
+        "options": {"shadow_mode": True},
+        "final_status": "approved",
+    }
+    response = {
+        "agent_run_id": agent_run_id,
+        "run_id": run_id,
+        "status": status,
+        "approved_sql_original": sql,
+        "validation": {},
+        "errors": [],
+        "requires_reapproval": False,
+    }
+    return build_execute_shadow_record(
+        shadow_record_id=f"shadow-{run_id}",
+        agent_run_id=agent_run_id,
+        run_id=run_id,
+        created_at="2026-08-08T00:00:00+00:00",
+        completed_at="2026-08-08T00:00:01+00:00",
+        status=status,
+        request=request,
+        state=state,
+        response=response,
+        langgraph_version="test-version",
+        langgraph_commit="test-commit",
+    )
+
+
 def _generate_use_case(
     *,
     repository: FakeShadowEvidenceRepository | None = None,
@@ -703,6 +747,52 @@ def test_postgres_fetch_and_list_normalize_timestamps_for_fingerprint() -> None:
     assert listed["records"][0]["evidence_fingerprint"] == record["evidence_fingerprint"]
 
 
+def test_generate_shadow_postgres_round_trip_matches_fingerprint() -> None:
+    record = _generate_record()
+    fetched, listed = _postgres_round_trip(record)
+
+    assert record["semantic_context"] == {}
+    assert fetched["status"] == "ok"
+    assert fetched["record"] is not None
+    assert fetched["record"]["evidence_fingerprint"] == record["evidence_fingerprint"]
+    assert listed["status"] == "ok"
+    assert listed["records"][0]["evidence_fingerprint"] == record["evidence_fingerprint"]
+
+
+def test_execute_shadow_postgres_round_trip_matches_fingerprint() -> None:
+    record = _execute_record()
+    fetched, listed = _postgres_round_trip(record)
+
+    assert record["event_type"] == "execute_approved_shadow"
+    assert record["semantic_context"] == {}
+    assert fetched["status"] == "ok"
+    assert fetched["record"] is not None
+    assert fetched["record"]["evidence_fingerprint"] == record["evidence_fingerprint"]
+    assert listed["status"] == "ok"
+    assert listed["records"][0]["evidence_fingerprint"] == record["evidence_fingerprint"]
+
+
+def test_postgres_round_trip_still_detects_fingerprint_mismatch() -> None:
+    record = _execute_record()
+    cursor = FakePostgresCursor()
+    repository = PostgresShadowEvidenceRepository(
+        dsn="postgresql://shadow-test",
+        connect=FakePostgresConnect(cursor),
+    )
+    repository.create(record)
+    assert cursor.parameters is not None
+    row = _postgres_row_from_write_parameters(cursor.parameters)
+    row["semantic_context"] = "null"
+    cursor.rows = [row]
+
+    try:
+        repository.fetch_by_shadow_record_id(record["shadow_record_id"])
+    except ShadowEvidenceValidationError as error:
+        assert error.code == "SHADOW_RECORD_FINGERPRINT_MISMATCH"
+    else:
+        raise AssertionError("tampered postgres row should keep failing fingerprint validation")
+
+
 def test_postgres_fetch_failure_returns_unavailable_result() -> None:
     cursor = FakePostgresCursor(exception=psycopg.Error("raw DSN password traceback"))
     repository = PostgresShadowEvidenceRepository(
@@ -797,6 +887,31 @@ def _execute_repair_case() -> tuple[
     return _execute_use_case(preflight=preflight, repairer=repairer)
 
 
+def _postgres_round_trip(record: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    cursor = FakePostgresCursor()
+    repository = PostgresShadowEvidenceRepository(
+        dsn="postgresql://shadow-test",
+        connect=FakePostgresConnect(cursor),
+    )
+    create_result = repository.create(record)
+    assert create_result["status"] == "created"
+    assert cursor.parameters is not None
+    cursor.rows = [_postgres_row_from_write_parameters(cursor.parameters)]
+
+    return (
+        repository.fetch_by_shadow_record_id(record["shadow_record_id"]),
+        repository.list_by_agent_run_id(record["agent_run_id"]),
+    )
+
+
+def _postgres_row_from_write_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
+    row = deepcopy(parameters)
+    row["created_at"] = str(row["created_at"]).replace("T", " ", 1).replace("+00:00", "+00")
+    if row.get("completed_at") is not None:
+        row["completed_at"] = str(row["completed_at"]).replace("T", " ", 1).replace("+00:00", "+00")
+    return row
+
+
 def main() -> None:
     tests = [
         test_repository_create_shadow_record,
@@ -832,6 +947,9 @@ def main() -> None:
         test_postgres_create_returns_already_exists_when_rowcount_zero,
         test_postgres_finalize_returns_not_found_when_rowcount_zero,
         test_postgres_fetch_and_list_normalize_timestamps_for_fingerprint,
+        test_generate_shadow_postgres_round_trip_matches_fingerprint,
+        test_execute_shadow_postgres_round_trip_matches_fingerprint,
+        test_postgres_round_trip_still_detects_fingerprint_mismatch,
         test_postgres_fetch_failure_returns_unavailable_result,
         test_postgres_list_failure_returns_unavailable_result,
         test_generate_shadow_repository_failure_does_not_change_response,

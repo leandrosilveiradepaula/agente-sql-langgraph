@@ -364,7 +364,7 @@ def _build_record(
         "principal": dict(cast(Mapping[str, Any], request.get("principal", {}))),
         "correlation_metadata": dict(cast(Mapping[str, Any], request.get("correlation_metadata", {}))),
         "options": dict(cast(Mapping[str, Any], state.get("options", {}))),
-        "semantic_context": cast(dict[str, Any] | None, state.get("context")),
+        "semantic_context": dict(cast(Mapping[str, Any], state.get("context") or {})),
         "n8n_baseline": n8n_baseline,
         "langgraph_evidence": dict(langgraph_evidence),
         "execution_future": execution_future,
