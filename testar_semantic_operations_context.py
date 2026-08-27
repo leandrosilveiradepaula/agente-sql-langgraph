@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 from app.domain.context_normalizer import normalize_context_snapshot
 from app.domain.intent_resolver import resolve_intent
@@ -11,6 +12,12 @@ SEMANTIC_VERSION = (
     "v2.0-ducklake-query-generator-semantic-operations-v1"
 )
 GENERIC_INTENT = "metric_total_by_period"
+MIGRATION_PATH = (
+    Path(__file__).resolve().parent
+    / "scripts"
+    / "migrations"
+    / "002_prepare_semantic_operations_context_v1.sql"
+)
 
 
 def _resolver_config_rule() -> dict:
@@ -394,8 +401,8 @@ def _raw_context() -> dict:
                     "Exemplo documental nao usado pelas perguntas do teste."
                 ],
                 "required_tables": [
-                    "main_gold.gold_lancamentos_contabeis",
-                    "main_gold.gold_plano_contas",
+                    "gold_lancamentos_contabeis",
+                    "gold_plano_contas",
                 ],
                 "required_rules": [
                     "metric_total_by_period_contract",
@@ -623,6 +630,23 @@ def test_contexto_original_nao_e_mutado_pelo_planejamento() -> None:
     assert context == original
 
 
+def test_migration_usa_tipos_reais_do_contexto_semantico() -> None:
+    sql = MIGRATION_PATH.read_text(encoding="utf-8")
+
+    assert "'[\"metric_total_by_period\"]'::jsonb" in sql
+    assert "ARRAY['metric_total_by_period']::text[]" not in sql
+    assert "ARRAY[" not in sql
+    assert "'[]'::jsonb" in sql
+    assert '"gold_lancamentos_contabeis"' in sql
+    assert '"gold_plano_contas"' in sql
+    assert "main_gold.gold_lancamentos_contabeis" not in sql
+    assert "main_gold.gold_plano_contas" not in sql
+    assert "COALESCE(sql_filter_hint, '{}'::jsonb)" not in sql
+    assert "sql_filter_hint::jsonb" not in sql
+    assert "ROLLBACK;" not in sql
+    assert sql.rstrip().endswith("COMMIT;")
+
+
 def main() -> None:
     tests = [
         (
@@ -652,6 +676,10 @@ def main() -> None:
         (
             "planejamento sem mutacao",
             test_contexto_original_nao_e_mutado_pelo_planejamento,
+        ),
+        (
+            "migration tipos reais",
+            test_migration_usa_tipos_reais_do_contexto_semantico,
         ),
     ]
 

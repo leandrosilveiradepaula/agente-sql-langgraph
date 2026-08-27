@@ -227,8 +227,8 @@ VALUES (
       "question_specific_lookup",
       "benchmark_lookup"
     ]
-  }'::jsonb,
-  ARRAY['metric_total_by_period']::text[],
+  }',
+  '["metric_total_by_period"]'::jsonb,
   NULL,
   'error',
   120,
@@ -462,7 +462,7 @@ VALUES (
         }
       ]
     }
-  }'::jsonb,
+  }',
   120,
   TRUE
 )
@@ -484,12 +484,12 @@ VALUES (
   'v2.0-ducklake-query-generator-semantic-operations-v1',
   'metric_total_by_period',
   'metric_total_by_period_default',
-  ARRAY['Exemplo documental generico; nao usar como lookup de benchmark.']::text[],
-  ARRAY[
-    'main_gold.gold_lancamentos_contabeis',
-    'main_gold.gold_plano_contas'
-  ]::text[],
-  ARRAY['metric_total_by_period_contract']::text[],
+  '[]'::jsonb,
+  '[
+    "gold_lancamentos_contabeis",
+    "gold_plano_contas"
+  ]'::jsonb,
+  '["metric_total_by_period_contract"]'::jsonb,
   'Aggregate the configured financial metric over the requested period using authorized accounting and account-plan context.',
   'Generic semantic operation pattern; not tied to a specific question or expected SQL.',
   120,
@@ -497,16 +497,11 @@ VALUES (
 )
 ON CONFLICT DO NOTHING;
 
-UPDATE public.ai_ducklake_dre_mapping
-SET sql_filter_hint = COALESCE(sql_filter_hint, '{}'::jsonb)
-  || '{"intent_name": "metric_total_by_period"}'::jsonb
-WHERE agent_version =
-  'v2.0-ducklake-query-generator-semantic-operations-v1'
-  AND (
-    is_revenue = TRUE
-    OR is_cost = TRUE
-    OR is_opex = TRUE
-  );
+-- sql_filter_hint em ai_ducklake_dre_mapping é TEXT no schema real.
+-- A versão inicial desta migration não altera esses 11 registros para evitar
+-- cast/overwrite às cegas. Se a inspeção dos hints da versão origem confirmar
+-- JSON objeto em todos os casos, uma migration posterior pode acrescentar
+-- intent_name de forma controlada apenas na nova versão.
 
 -- Rollback manual, se a versao nova precisar ser removida antes de uso:
 --
