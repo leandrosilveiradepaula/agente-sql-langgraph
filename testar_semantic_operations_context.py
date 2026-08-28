@@ -729,6 +729,22 @@ def test_migration_v2_remove_inducao_de_coluna_responsavel() -> None:
     assert "coluna fisica confirmada" in sql
 
 
+def test_migration_v2_preserva_conhecimento_responsavel_da_v1() -> None:
+    sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
+
+    assert "NULLIF(source.rule_content, '')" in sql
+    assert "NULLIF(source.validation_hint, '')" in sql
+    assert "NULLIF(source.business_rule, '')" in sql
+    assert "NULLIF(source.sql_pattern, '')" in sql
+    assert "NULLIF(source.notes, '')" in sql
+    assert "Regra adicional v2:" in sql
+    assert "Hint adicional v2:" in sql
+    assert "Orientacao adicional v2:" in sql
+    assert "Nota adicional v2:" in sql
+    assert "mapeamento fisico de responsavel indisponivel" in sql
+    assert "nao projetar coluna inventada" in sql
+
+
 def test_migration_v2_corrige_unidade_sem_replace_global() -> None:
     sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
 
@@ -737,6 +753,17 @@ def test_migration_v2_corrige_unidade_sem_replace_global() -> None:
     assert "Nao extrapolar nk_unid_neg para gold_unidade_negocio" in sql
     assert "gcc.nk_unid_neg" in sql
     assert "gold_lancamentos_contabeis" not in sql
+
+
+def test_migration_v2_preserva_notes_e_ai_hint_ao_corrigir_unidade() -> None:
+    sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
+
+    assert "NULLIF(source.notes, '')" in sql
+    assert "NULLIF(source.ai_hint, '')" in sql
+    assert "Addendum v2:" in sql
+    assert "quando gold_unidade_negocio estiver envolvida" in sql
+    assert "chave fisica confirmada nesta tabela = nk_unide_neg" in sql
+    assert "Nao usar nk_unid_neg nesta tabela" in sql
 
 
 def test_fixture_preserva_chaves_diferentes_por_tabela() -> None:
@@ -834,8 +861,16 @@ def main() -> None:
             test_migration_v2_remove_inducao_de_coluna_responsavel,
         ),
         (
+            "migration v2 preserva responsavel",
+            test_migration_v2_preserva_conhecimento_responsavel_da_v1,
+        ),
+        (
             "migration v2 unidade",
             test_migration_v2_corrige_unidade_sem_replace_global,
+        ),
+        (
+            "migration v2 preserva unidade",
+            test_migration_v2_preserva_notes_e_ai_hint_ao_corrigir_unidade,
         ),
         (
             "chaves por tabela",

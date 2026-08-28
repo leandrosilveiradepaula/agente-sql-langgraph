@@ -35,7 +35,11 @@ SELECT
     WHEN source.rule_group = 'responsavel_centro_custo'
       AND source.rule_name = 'nao_retornar_responsavel_nulo'
     THEN
-      'Mapeamento fisico de responsavel indisponivel nesta versao. Nao gerar coluna de responsavel ate que o catalogo versionado contenha uma coluna fisica confirmada.'
+      concat_ws(
+        E'\n',
+        NULLIF(source.rule_content, ''),
+        'Regra adicional v2: mapeamento fisico de responsavel indisponivel nesta versao. Nao gerar coluna de responsavel ate que o catalogo versionado contenha uma coluna fisica confirmada.'
+      )
     ELSE source.rule_content
   END,
   source.applies_to_intents,
@@ -46,7 +50,11 @@ SELECT
         'nao_retornar_responsavel_nulo'
       )
     THEN
-      'Sem coluna fisica confirmada para responsavel. Rejeicao controlada por contexto insuficiente e preferivel a inventar coluna.'
+      concat_ws(
+        E'\n',
+        NULLIF(source.validation_hint, ''),
+        'Hint adicional v2: sem coluna fisica confirmada para responsavel. Rejeicao controlada por contexto insuficiente e preferivel a inventar coluna.'
+      )
     ELSE source.validation_hint
   END,
   source.severity,
@@ -94,7 +102,11 @@ SELECT
     WHEN source.target_table = 'gold_gestor_cc'
       AND source.target_column = 'responsavel'
     THEN
-      'Sinal semantico de consulta cadastral. Mapeamento fisico de responsavel indisponivel nesta versao; nao projetar coluna ate confirmacao em catalogo versionado.'
+      concat_ws(
+        E'\n',
+        NULLIF(source.business_rule, ''),
+        'Regra adicional v2: mapeamento fisico de responsavel indisponivel; nao projetar coluna inventada.'
+      )
     ELSE source.business_rule
   END,
   source.priority,
@@ -179,18 +191,30 @@ SELECT
     WHEN source.intent_name = 'responsavel_centro_custo'
       AND source.pattern_name = 'lookup_responsavel_por_centro_e_unidade'
     THEN
-      'Consulta cadastral de responsavel por centro de custo. Mapeamento fisico de responsavel indisponivel nesta versao; nao gerar coluna de responsavel ate que o catalogo versionado contenha coluna fisica confirmada.'
+      concat_ws(
+        E'\n',
+        NULLIF(source.sql_pattern, ''),
+        'Orientacao adicional v2: mapeamento fisico de responsavel indisponivel nesta versao; nao gerar coluna de responsavel ate que o catalogo versionado contenha coluna fisica confirmada.'
+      )
     ELSE source.sql_pattern
   END,
   CASE
     WHEN source.intent_name = 'responsavel_centro_custo'
       AND source.pattern_name = 'lookup_responsavel_por_centro_e_unidade'
     THEN
-      'Preservar centro de custo e unidade quando houver mapeamento fisico autorizado. Sem coluna fisica confirmada para responsavel, retornar rejeicao controlada por contexto insuficiente.'
+      concat_ws(
+        E'\n',
+        NULLIF(source.notes, ''),
+        'Nota adicional v2: preservar centro de custo e unidade quando houver mapeamento fisico autorizado. Sem coluna fisica confirmada para responsavel, retornar rejeicao controlada por contexto insuficiente.'
+      )
     WHEN source.intent_name = 'estouro_orcamento'
       AND source.pattern_name = 'maiores_estouros_conta_ou_centro_custo'
     THEN
-      'Se usar gold_unidade_negocio, a chave fisica correta da unidade e un.nk_unide_neg. Nao extrapolar nk_unid_neg para gold_unidade_negocio. Outras tabelas podem possuir nk_unid_neg legitimamente.'
+      concat_ws(
+        E'\n',
+        NULLIF(source.notes, ''),
+        'Nota adicional v2: quando gold_unidade_negocio estiver envolvida, usar un.nk_unide_neg. Nao extrapolar nk_unid_neg para gold_unidade_negocio. Outras tabelas podem possuir nk_unid_neg legitimamente.'
+      )
     ELSE source.notes
   END,
   source.priority,
@@ -239,10 +263,18 @@ SELECT
   CASE
     WHEN source.table_name = 'gold_gestor_cc'
     THEN
-      'Use gcc como alias. O grao e centro de custo mais unidade de negocio. Nao ha coluna fisica confirmada para responsavel nesta versao; nao inventar coluna de responsavel. Nao confundir gcc.nk_unid_neg com un.nk_unide_neg.'
+      concat_ws(
+        E'\n',
+        NULLIF(source.ai_hint, ''),
+        'Addendum v2: nao ha coluna fisica responsavel confirmada nesta tabela; nao inventar coluna de responsavel. gcc.nk_unid_neg e un.nk_unide_neg sao campos de tabelas diferentes.'
+      )
     WHEN source.table_name = 'gold_unidade_negocio'
     THEN
-      'Usar para perguntas sobre marca, unidade, filial ou negocio. Campo correto para marca comercial: marca. Chave fisica correta da unidade nesta tabela: nk_unide_neg. Nao usar nk_unid_neg nesta tabela.'
+      concat_ws(
+        E'\n',
+        NULLIF(source.ai_hint, ''),
+        'Addendum v2: chave fisica confirmada nesta tabela = nk_unide_neg. Nao usar nk_unid_neg nesta tabela.'
+      )
     ELSE source.ai_hint
   END,
   source.priority,
