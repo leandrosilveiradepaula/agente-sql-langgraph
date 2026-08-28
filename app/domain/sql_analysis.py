@@ -80,6 +80,7 @@ class SqlStatementAnalysis(TypedDict):
     column_references: list[SqlColumnReference]
     joins: list[SqlJoinReference]
     ctes: list[str]
+    cte_output_columns: dict[str, list[str]]
     aliases: dict[str, str]
     expression_aliases: list[str]
     functions: list[str]
@@ -128,6 +129,9 @@ _RESERVED_WORDS = {
     "by",
     "case",
     "cast",
+    "current_date",
+    "current_time",
+    "current_timestamp",
     "desc",
     "distinct",
     "else",
@@ -140,6 +144,7 @@ _RESERVED_WORDS = {
     "having",
     "in",
     "inner",
+    "interval",
     "is",
     "join",
     "left",
@@ -208,6 +213,7 @@ def analyze_sql(sql: str) -> SqlStatementAnalysis:
 
     statement_type = _first_word(statement_tokens)
     ctes = _extract_ctes(statement_tokens)
+    cte_output_columns = _extract_cte_output_columns(statement_tokens)
     with_body_is_select = (
         _first_word_after_ctes(statement_tokens, ctes) == "select"
         if statement_type == "with"
@@ -215,7 +221,11 @@ def analyze_sql(sql: str) -> SqlStatementAnalysis:
     )
 
     object_references = _extract_objects(statement_tokens, ctes)
-    column_references = _extract_columns(statement_tokens, object_references)
+    column_references = _extract_columns(
+        statement_tokens,
+        object_references,
+        cte_output_columns,
+    )
     joins = _extract_joins(statement_tokens, object_references)
     aliases = {
         item["alias"].casefold(): _qualified_or_table(item)
@@ -253,6 +263,7 @@ def analyze_sql(sql: str) -> SqlStatementAnalysis:
         "column_references": column_references,
         "joins": joins,
         "ctes": ctes,
+        "cte_output_columns": cte_output_columns,
         "aliases": aliases,
         "expression_aliases": expression_aliases,
         "functions": functions,
@@ -557,8 +568,14 @@ def _extract_objects(
 def _extract_columns(
     tokens: list[SqlToken],
     objects: list[SqlObjectReference],
+    cte_output_columns: Mapping[str, list[str]] | None = None,
 ) -> list[SqlColumnReference]:
     columns: list[SqlColumnReference] = []
+    cte_outputs = {
+        name.casefold(): {column.casefold() for column in output_columns}
+        for name, output_columns in (cte_output_columns or {}).items()
+    }
+    cte_qualifiers = _cte_qualifiers(objects)
     expression_aliases = set(_extract_expression_aliases(tokens))
     table_aliases = {
         alias.casefold()
@@ -614,6 +631,14 @@ def _extract_columns(
                     continue
                 qualifier = left["normalized"]
                 column = right["normalized"]
+                if _is_cte_output_reference(
+                    qualifier,
+                    column,
+                    cte_qualifiers,
+                    cte_outputs,
+                ):
+                    index += 1
+                    continue
                 columns.append(
                     {
                         "raw": f"{left['value']}.{right['value']}",
@@ -639,6 +664,12 @@ def _extract_columns(
             and _norm_at(tokens, index + 1) != "."
             and norm not in table_aliases
             and norm not in table_names
+            and not _is_cte_output_reference(
+                None,
+                norm,
+                cte_qualifiers,
+                cte_outputs,
+            )
         ):
             columns.append(
                 {
@@ -782,9 +813,191 @@ def _columns_after_join(
     del item
     return [
         column
-        for column in _extract_columns(tokens, [])
+        for column in _extract_columns(tokens, [], {})
         if column.get("clause") == "on"
     ]
+
+
+def _extract_cte_output_columns(
+    tokens: list[SqlToken],
+) -> dict[str, list[str]]:
+    if _first_word(tokens) != "with":
+        return {}
+    outputs: dict[str, list[str]] = {}
+    index = 1
+    if _norm_at(tokens, index) == "recursive":
+        index += 1
+    while index < len(tokens):
+        if not _is_identifier(tokens[index]):
+            break
+        cte_name = tokens[index]["normalized"]
+        index += 1
+        explicit_columns: list[str] = []
+        if _norm_at(tokens, index) == "(":
+            end = _matching_paren_index(tokens, index)
+            explicit_columns = [
+                token["normalized"]
+                for token in tokens[index + 1 : end]
+                if _is_identifier(token)
+            ]
+            index = end + 1
+        if _norm_at(tokens, index) != "as":
+            break
+        index += 1
+        if _norm_at(tokens, index) != "(":
+            break
+        body_end = _matching_paren_index(tokens, index)
+        body = tokens[index + 1 : body_end]
+        outputs[cte_name] = sorted(
+            set(explicit_columns or _select_output_columns(body))
+        )
+        index = body_end + 1
+        if _norm_at(tokens, index) == ",":
+            index += 1
+            continue
+        break
+    return outputs
+
+
+def _select_output_columns(tokens: list[SqlToken]) -> list[str]:
+    select_index = _top_level_keyword_index(tokens, "select")
+    if select_index is None:
+        return []
+    from_index = _top_level_keyword_index(tokens, "from", start=select_index + 1)
+    end = from_index if from_index is not None else len(tokens)
+    items = _split_top_level_commas(tokens[select_index + 1 : end])
+    output: list[str] = []
+    for item in items:
+        alias = _select_item_alias(item)
+        if alias:
+            output.append(alias)
+            continue
+        name = _select_item_column_name(item)
+        if name:
+            output.append(name)
+    return output
+
+
+def _select_item_alias(tokens: list[SqlToken]) -> str | None:
+    for index, token in enumerate(tokens[:-1]):
+        if token["normalized"] == "as" and _is_identifier(tokens[index + 1]):
+            return tokens[index + 1]["normalized"]
+    if len(tokens) >= 2 and _is_identifier(tokens[-1]):
+        previous = tokens[-2]["normalized"]
+        if (
+            previous not in {".", ")"}
+            and tokens[-1]["normalized"] not in _RESERVED_WORDS
+        ):
+            return tokens[-1]["normalized"]
+    return None
+
+
+def _select_item_column_name(tokens: list[SqlToken]) -> str | None:
+    if not tokens:
+        return None
+    if len(tokens) >= 3 and _norm_at(tokens, len(tokens) - 2) == ".":
+        candidate = tokens[-1]
+        if _is_identifier(candidate) or candidate["value"] == "*":
+            return candidate["normalized"]
+    if len(tokens) == 1 and _is_identifier(tokens[0]):
+        norm = tokens[0]["normalized"]
+        if norm not in _RESERVED_WORDS:
+            return norm
+    return None
+
+
+def _split_top_level_commas(tokens: list[SqlToken]) -> list[list[SqlToken]]:
+    output: list[list[SqlToken]] = []
+    current: list[SqlToken] = []
+    depth = 0
+    for token in tokens:
+        if token["value"] == "(":
+            depth += 1
+        elif token["value"] == ")":
+            depth = max(0, depth - 1)
+        if token["value"] == "," and depth == 0:
+            if current:
+                output.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        output.append(current)
+    return output
+
+
+def _cte_qualifiers(
+    objects: list[SqlObjectReference],
+) -> dict[str, str]:
+    qualifiers: dict[str, str] = {}
+    for item in objects:
+        if not item.get("is_cte"):
+            continue
+        table = item.get("table")
+        if not table:
+            continue
+        table_name = str(table).casefold()
+        qualifiers[table_name] = table_name
+        alias = item.get("alias")
+        if alias:
+            qualifiers[str(alias).casefold()] = table_name
+    return qualifiers
+
+
+def _is_cte_output_reference(
+    qualifier: str | None,
+    column: str,
+    cte_qualifiers: Mapping[str, str],
+    cte_outputs: Mapping[str, set[str]],
+) -> bool:
+    column_name = column.casefold()
+    if qualifier:
+        cte_name = cte_qualifiers.get(qualifier.casefold())
+        return bool(cte_name and column_name in cte_outputs.get(cte_name, set()))
+    matches = [
+        cte_name
+        for cte_name, output_columns in cte_outputs.items()
+        if column_name in output_columns and cte_name in cte_qualifiers.values()
+    ]
+    return len(matches) == 1
+
+
+def _top_level_keyword_index(
+    tokens: list[SqlToken],
+    keyword: str,
+    *,
+    start: int = 0,
+) -> int | None:
+    depth = 0
+    for index in range(start, len(tokens)):
+        token = tokens[index]
+        if token["value"] == "(":
+            depth += 1
+            continue
+        if token["value"] == ")":
+            depth = max(0, depth - 1)
+            continue
+        if depth == 0 and token["normalized"] == keyword:
+            return index
+    return None
+
+
+def _matching_paren_index(tokens: list[SqlToken], index: int) -> int:
+    if _norm_at(tokens, index) != "(":
+        return index
+    depth = 0
+    while index < len(tokens):
+        if tokens[index]["value"] == "(":
+            depth += 1
+        elif tokens[index]["value"] == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    raise SqlAnalysisError(
+        "SQL_ANALYSIS_UNSUPPORTED_STRUCTURE",
+        "Parenteses SQL nao balanceados.",
+    )
 
 
 def _read_single_quoted(sql: str, index: int) -> tuple[str, int]:

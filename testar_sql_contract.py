@@ -305,6 +305,56 @@ def test_cte_e_subquery_validas() -> None:
     assert subquery["status"] == "approved"
 
 
+def test_expressoes_sql_nao_coluna_aprovadas() -> None:
+    result = _run(
+        "SELECT DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AS mes "
+        "FROM schema_test.table_test"
+    )
+
+    assert result["status"] == "approved"
+
+
+def test_cte_output_alias_qualificado_aprovado() -> None:
+    result = _run(
+        "WITH realizado AS ("
+        "SELECT t.id, SUM(t.value) AS realizado "
+        "FROM schema_test.table_test t GROUP BY t.id"
+        ") SELECT r.realizado FROM realizado r"
+    )
+
+    assert result["status"] == "approved"
+
+
+def test_cte_output_com_alias_colidido_nao_vira_coluna_fisica() -> None:
+    result = _run(
+        "WITH table_test AS ("
+        "SELECT t.id, SUM(t.value) AS realizado "
+        "FROM schema_test.table_test t GROUP BY t.id"
+        ") SELECT t.realizado FROM table_test t"
+    )
+
+    assert result["status"] == "approved"
+
+
+def test_alias_fisico_continua_validado_contra_tabela_correta() -> None:
+    result = _run("SELECT t.missing_column FROM schema_test.table_test t")
+
+    assert result["status"] == "rejected"
+    assert result["errors"][0]["code"] == "SQL_CONTRACT_UNKNOWN_COLUMN"
+
+
+def test_cte_output_desconhecido_continua_rejeitado() -> None:
+    result = _run(
+        "WITH realizado AS ("
+        "SELECT t.id, SUM(t.value) AS realizado "
+        "FROM schema_test.table_test t GROUP BY t.id"
+        ") SELECT r.missing_column FROM realizado r"
+    )
+
+    assert result["status"] == "rejected"
+    assert result["errors"][0]["code"] == "SQL_CONTRACT_INVALID_ALIAS"
+
+
 def test_diagnostico_determinismo_e_sem_mutacao() -> None:
     plan = _query_plan()
     original = deepcopy(plan)
@@ -342,6 +392,20 @@ def main() -> None:
         ("SELECT star", test_select_star_politica_padrao_e_rejeicao),
         ("table star", test_table_star_politica_padrao),
         ("CTE subquery", test_cte_e_subquery_validas),
+        ("expressoes SQL nao coluna", test_expressoes_sql_nao_coluna_aprovadas),
+        ("CTE output qualificado", test_cte_output_alias_qualificado_aprovado),
+        (
+            "CTE alias colidido",
+            test_cte_output_com_alias_colidido_nao_vira_coluna_fisica,
+        ),
+        (
+            "alias fisico validado",
+            test_alias_fisico_continua_validado_contra_tabela_correta,
+        ),
+        (
+            "CTE output desconhecido",
+            test_cte_output_desconhecido_continua_rejeitado,
+        ),
         ("diagnostico determinismo", test_diagnostico_determinismo_e_sem_mutacao),
     ]
 

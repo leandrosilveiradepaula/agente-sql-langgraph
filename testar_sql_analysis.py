@@ -187,6 +187,48 @@ def test_limit_e_funcoes() -> None:
     assert "count" in analysis["functions"]
 
 
+def test_expressoes_temporais_nao_viram_colunas() -> None:
+    analysis = analyze_sql(
+        "SELECT DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AS mes "
+        "FROM schema_test.table_test"
+    )
+
+    columns = {column["column"] for column in analysis["column_references"]}
+    assert "current_date" not in columns
+    assert "interval" not in columns
+    assert "date_trunc" in analysis["functions"]
+
+
+def test_cte_output_alias_qualificado_nao_vira_coluna_fisica() -> None:
+    analysis = analyze_sql(
+        "WITH realizado AS ("
+        "SELECT t.id, SUM(t.value) AS realizado "
+        "FROM schema_test.table_test t GROUP BY t.id"
+        ") SELECT r.realizado FROM realizado r"
+    )
+
+    assert analysis["cte_output_columns"]["realizado"] == ["id", "realizado"]
+    assert not any(
+        column["qualifier"] == "r" and column["column"] == "realizado"
+        for column in analysis["column_references"]
+    )
+
+
+def test_cte_alias_nao_sobrescreve_alias_fisico() -> None:
+    analysis = analyze_sql(
+        "WITH orcado AS ("
+        "SELECT o.id, SUM(o.value) AS orcado "
+        "FROM schema_test.table_test o GROUP BY o.id"
+        ") SELECT o.orcado FROM orcado o"
+    )
+
+    assert analysis["aliases"]["o"] == "schema_test.table_test"
+    assert not any(
+        column["qualifier"] == "o" and column["column"] == "orcado"
+        for column in analysis["column_references"]
+    )
+
+
 def test_caractere_de_controle() -> None:
     try:
         analyze_sql("SELECT id FROM schema_test.table_test\x00")
@@ -235,6 +277,15 @@ def main() -> None:
         ("colunas qualificadas", test_coluna_qualificada_e_nao_qualificada),
         ("GROUP ORDER HAVING", test_group_order_having),
         ("LIMIT e funcoes", test_limit_e_funcoes),
+        ("expressoes temporais", test_expressoes_temporais_nao_viram_colunas),
+        (
+            "CTE output qualificado",
+            test_cte_output_alias_qualificado_nao_vira_coluna_fisica,
+        ),
+        (
+            "CTE alias preserva fisico",
+            test_cte_alias_nao_sobrescreve_alias_fisico,
+        ),
         ("controle", test_caractere_de_controle),
         ("SQL malformada", test_sql_malformada),
         ("determinismo", test_determinismo_e_ausencia_de_mutacao),
