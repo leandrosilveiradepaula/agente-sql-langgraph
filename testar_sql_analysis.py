@@ -229,6 +229,30 @@ def test_cte_alias_nao_sobrescreve_alias_fisico() -> None:
     )
 
 
+def test_nomes_arbitrarios_de_cte_nao_viram_colunas_fisicas() -> None:
+    analysis = analyze_sql(
+        "WITH cte_a AS ("
+        "SELECT t.id, SUM(t.value) AS total_a "
+        "FROM schema_test.table_test t GROUP BY t.id"
+        "), cte_b AS ("
+        "SELECT t.id, SUM(t.value) AS total_b "
+        "FROM schema_test.table_test t GROUP BY t.id"
+        "), totais AS ("
+        "SELECT a.id, a.total_a, b.total_b "
+        "FROM cte_a a JOIN cte_b b ON a.id = b.id"
+        ") SELECT base_x.id, base_x.total_a "
+        "FROM totais base_x ORDER BY base_x.total_a"
+    )
+
+    columns = {column["column"] for column in analysis["column_references"]}
+    assert {"cte_a", "cte_b", "totais", "base_x"}.isdisjoint(columns)
+    assert analysis["cte_output_columns"]["totais"] == [
+        "id",
+        "total_a",
+        "total_b",
+    ]
+
+
 def test_caractere_de_controle() -> None:
     try:
         analyze_sql("SELECT id FROM schema_test.table_test\x00")
@@ -285,6 +309,10 @@ def main() -> None:
         (
             "CTE alias preserva fisico",
             test_cte_alias_nao_sobrescreve_alias_fisico,
+        ),
+        (
+            "CTE nomes arbitrarios",
+            test_nomes_arbitrarios_de_cte_nao_viram_colunas_fisicas,
         ),
         ("controle", test_caractere_de_controle),
         ("SQL malformada", test_sql_malformada),

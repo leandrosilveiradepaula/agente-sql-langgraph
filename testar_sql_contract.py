@@ -86,6 +86,36 @@ def _run(sql: str, plan: dict | None = None):
     )[0]
 
 
+def _unidade_negocio_plan() -> dict:
+    plan = deepcopy(_query_plan())
+    projection = plan["planning_context"]
+    table = {
+        "schema_name": "main_gold",
+        "table_name": "gold_unidade_negocio",
+        "qualified_name": "main_gold.gold_unidade_negocio",
+        "primary_key": ["sk"],
+        "key_columns": ["sk", "nk_unide_neg"],
+        "metric_columns": [],
+        "date_columns": [],
+        "join_rules": [],
+        "columns": [
+            {"name": "sk"},
+            {"name": "nk_unide_neg"},
+            {"name": "marca"},
+        ],
+    }
+    projection["required_tables"] = [table]
+    projection["relevant_columns"] = {
+        "main_gold.gold_unidade_negocio": [
+            {"name": "sk"},
+            {"name": "nk_unide_neg"},
+            {"name": "marca"},
+        ]
+    }
+    projection["authorized_joins"] = []
+    return plan
+
+
 def test_contrato_valido_aprovado() -> None:
     result = _run("SELECT id, value FROM schema_test.table_test")
 
@@ -355,6 +385,51 @@ def test_cte_output_desconhecido_continua_rejeitado() -> None:
     assert result["errors"][0]["code"] == "SQL_CONTRACT_INVALID_ALIAS"
 
 
+def test_nomes_de_cte_nao_viram_unknown_columns_mas_coluna_real_invalida_sim() -> None:
+    result = _run(
+        "WITH cte_a AS ("
+        "SELECT t.id, SUM(t.value) AS total_a "
+        "FROM schema_test.table_test t GROUP BY t.id"
+        "), cte_b AS ("
+        "SELECT t.id, SUM(t.value) AS total_b "
+        "FROM schema_test.table_test t GROUP BY t.id"
+        "), totais AS ("
+        "SELECT a.id, a.total_a, b.total_b "
+        "FROM cte_a a JOIN cte_b b ON a.id = b.id"
+        ") SELECT base_x.id, base_x.missing_column "
+        "FROM totais base_x ORDER BY base_x.total_a"
+    )
+
+    violated = [
+        column["column"]
+        for column in result["columns"]
+        if column["status"] == "violated"
+    ]
+    assert result["status"] == "rejected"
+    assert "missing_column" in violated
+    assert not {"cte_a", "cte_b", "totais", "base_x"} & set(violated)
+
+
+def test_unidade_negocio_valida_sk_e_nk_unide_neg_sem_replace_global() -> None:
+    plan = _unidade_negocio_plan()
+    valid = _run(
+        "SELECT un.sk, un.nk_unide_neg "
+        "FROM main_gold.gold_unidade_negocio un",
+        plan,
+    )
+    invalid = _run(
+        "SELECT un.sk_unid_neg "
+        "FROM main_gold.gold_unidade_negocio un",
+        plan,
+    )
+
+    assert valid["status"] == "approved"
+    assert invalid["status"] == "rejected"
+    assert invalid["errors"][0]["code"] == "SQL_CONTRACT_UNKNOWN_COLUMN"
+    assert invalid["columns"][0]["table"] == "main_gold.gold_unidade_negocio"
+    assert invalid["columns"][0]["column"] == "sk_unid_neg"
+
+
 def test_diagnostico_determinismo_e_sem_mutacao() -> None:
     plan = _query_plan()
     original = deepcopy(plan)
@@ -405,6 +480,14 @@ def main() -> None:
         (
             "CTE output desconhecido",
             test_cte_output_desconhecido_continua_rejeitado,
+        ),
+        (
+            "CTE relation nao unknown",
+            test_nomes_de_cte_nao_viram_unknown_columns_mas_coluna_real_invalida_sim,
+        ),
+        (
+            "unidade negocio chaves",
+            test_unidade_negocio_valida_sk_e_nk_unide_neg_sem_replace_global,
         ),
         ("diagnostico determinismo", test_diagnostico_determinismo_e_sem_mutacao),
     ]

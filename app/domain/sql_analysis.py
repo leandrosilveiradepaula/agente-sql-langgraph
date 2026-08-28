@@ -589,6 +589,13 @@ def _extract_columns(
         for item in objects
         if not item.get("is_cte")
     }
+    relation_identifiers = (
+        table_aliases
+        | table_names
+        | set(cte_outputs)
+        | set(cte_qualifiers)
+        | set(cte_qualifiers.values())
+    )
     index = 0
     current_clause = ""
     while index < len(tokens):
@@ -662,8 +669,7 @@ def _extract_columns(
             and _norm_at(tokens, index + 1) != "("
             and _norm_at(tokens, index - 1) != "."
             and _norm_at(tokens, index + 1) != "."
-            and norm not in table_aliases
-            and norm not in table_names
+            and norm not in relation_identifiers
             and not _is_cte_output_reference(
                 None,
                 norm,
