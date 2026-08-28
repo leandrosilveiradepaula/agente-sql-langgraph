@@ -633,6 +633,9 @@ def test_contexto_original_nao_e_mutado_pelo_planejamento() -> None:
 def test_migration_usa_tipos_reais_do_contexto_semantico() -> None:
     sql = MIGRATION_PATH.read_text(encoding="utf-8")
 
+    assert "FROM public.ai_ducklake_agent_rules source" in sql
+    assert "source.is_active = TRUE" in sql
+    assert "source.is_allowed = TRUE" in sql
     assert "'[\"metric_total_by_period\"]'::jsonb" in sql
     assert "ARRAY['metric_total_by_period']::text[]" not in sql
     assert "ARRAY[" not in sql
@@ -645,6 +648,49 @@ def test_migration_usa_tipos_reais_do_contexto_semantico() -> None:
     assert "sql_filter_hint::jsonb" not in sql
     assert "ROLLBACK;" not in sql
     assert sql.rstrip().endswith("COMMIT;")
+
+
+def test_migration_separa_total_bruto_de_contexto_efetivo() -> None:
+    sql = MIGRATION_PATH.read_text(encoding="utf-8")
+    raw_source_counts = {
+        "agent_rules_total": 30,
+        "agent_rules_active": 29,
+        "entity_aliases_total": 66,
+        "entity_aliases_active": 66,
+        "dre_mapping_total": 11,
+        "dre_mapping_active": 11,
+        "sql_patterns_total": 9,
+        "sql_patterns_active": 9,
+        "table_catalog_total": 9,
+        "table_catalog_allowed": 9,
+    }
+
+    expected_target_counts = {
+        "agent_rules_total": raw_source_counts["agent_rules_active"] + 1,
+        "agent_rules_active": raw_source_counts["agent_rules_active"] + 1,
+        "entity_aliases_total": raw_source_counts["entity_aliases_active"] + 1,
+        "entity_aliases_active": raw_source_counts["entity_aliases_active"] + 1,
+        "dre_mapping_total": raw_source_counts["dre_mapping_active"],
+        "dre_mapping_active": raw_source_counts["dre_mapping_active"],
+        "sql_patterns_total": raw_source_counts["sql_patterns_active"] + 1,
+        "sql_patterns_active": raw_source_counts["sql_patterns_active"] + 1,
+        "table_catalog_total": raw_source_counts["table_catalog_allowed"],
+        "table_catalog_allowed": raw_source_counts["table_catalog_allowed"],
+    }
+
+    assert expected_target_counts["agent_rules_total"] == 30
+    assert expected_target_counts["agent_rules_active"] == 30
+    assert expected_target_counts["entity_aliases_total"] == 67
+    assert expected_target_counts["entity_aliases_active"] == 67
+    assert expected_target_counts["dre_mapping_total"] == 11
+    assert expected_target_counts["dre_mapping_active"] == 11
+    assert expected_target_counts["sql_patterns_total"] == 10
+    assert expected_target_counts["sql_patterns_active"] == 10
+    assert expected_target_counts["table_catalog_total"] == 9
+    assert expected_target_counts["table_catalog_allowed"] == 9
+
+    assert sql.count("source.is_active = TRUE") == 4
+    assert sql.count("source.is_allowed = TRUE") == 1
 
 
 def main() -> None:
@@ -680,6 +726,10 @@ def main() -> None:
         (
             "migration tipos reais",
             test_migration_usa_tipos_reais_do_contexto_semantico,
+        ),
+        (
+            "migration counts efetivos",
+            test_migration_separa_total_bruto_de_contexto_efetivo,
         ),
     ]
 

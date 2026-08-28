@@ -43,6 +43,7 @@ SELECT
 FROM public.ai_ducklake_agent_rules source
 CROSS JOIN versions
 WHERE source.agent_version = versions.source_version
+  AND source.is_active = TRUE
 ON CONFLICT DO NOTHING;
 
 WITH versions AS (
@@ -78,6 +79,7 @@ SELECT
 FROM public.ai_ducklake_entity_aliases source
 CROSS JOIN versions
 WHERE source.agent_version = versions.source_version
+  AND source.is_active = TRUE
 ON CONFLICT DO NOTHING;
 
 WITH versions AS (
@@ -121,6 +123,7 @@ SELECT
 FROM public.ai_ducklake_dre_mapping source
 CROSS JOIN versions
 WHERE source.agent_version = versions.source_version
+  AND source.is_active = TRUE
 ON CONFLICT DO NOTHING;
 
 WITH versions AS (
@@ -156,6 +159,7 @@ SELECT
 FROM public.ai_ducklake_sql_patterns source
 CROSS JOIN versions
 WHERE source.agent_version = versions.source_version
+  AND source.is_active = TRUE
 ON CONFLICT DO NOTHING;
 
 WITH versions AS (
@@ -199,6 +203,7 @@ SELECT
 FROM public.ai_ducklake_table_catalog source
 CROSS JOIN versions
 WHERE source.agent_version = versions.source_version
+  AND source.is_allowed = TRUE
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.ai_ducklake_agent_rules (
