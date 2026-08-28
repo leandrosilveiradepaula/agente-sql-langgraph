@@ -24,6 +24,12 @@ MIGRATION_V2_PATH = (
     / "migrations"
     / "003_prepare_semantic_operations_context_v2.sql"
 )
+MIGRATION_V3_PATH = (
+    Path(__file__).resolve().parent
+    / "scripts"
+    / "migrations"
+    / "004_prepare_semantic_operations_context_v3.sql"
+)
 
 
 def _resolver_config_rule() -> dict:
@@ -814,6 +820,43 @@ def test_business_question_examples_nao_sao_base_da_v2() -> None:
     assert "VALUES (" not in sql
 
 
+def test_migration_v3_deriva_de_v2_sem_alterar_v2() -> None:
+    sql = MIGRATION_V3_PATH.read_text(encoding="utf-8")
+
+    assert "semantic-operations-v2'::text" in sql
+    assert "semantic-operations-v3'::text" in sql
+    assert sql.count("source.is_active = TRUE") == 4
+    assert sql.count("source.is_allowed = TRUE") == 1
+    assert "ON CONFLICT DO NOTHING" in sql
+    assert "ROLLBACK;" not in sql
+    assert sql.rstrip().endswith("COMMIT;")
+
+
+def test_migration_v3_neutraliza_coluna_fisica_responsavel_sem_perder_semantica() -> None:
+    sql = MIGRATION_V3_PATH.read_text(encoding="utf-8")
+
+    assert "source.intent_name = 'responsavel_centro_custo'" in sql
+    assert "source.rule_group = 'responsavel_centro_custo'" in sql
+    assert "source.target_column = 'responsavel'" in sql
+    assert "THEN NULL" in sql
+    assert "regexp_replace(" in sql
+    assert "mapeamento fisico de responsavel indisponivel" in sql
+    assert "responsavel continua como conceito semantico cadastral" in sql
+    assert "preservar centro de custo, unidade, joins e filtros cadastrais" in sql
+    assert "nao projetar nem filtrar coluna fisica de responsavel" in sql
+
+
+def test_migration_v3_corrige_sk_unid_neg_somente_em_gold_unidade_negocio() -> None:
+    sql = MIGRATION_V3_PATH.read_text(encoding="utf-8")
+
+    assert "source.table_name = 'gold_unidade_negocio'" in sql
+    assert "Use sk para join tecnico e nk_unide_neg para chave de negocio" in sql
+    assert "Nao usar sk_unid_neg nem nk_unid_neg nesta tabela" in sql
+    assert "source.table_name = 'gold_lancamentos_contabeis'" not in sql
+    assert "replace(source.ai_hint, 'sk_unid_neg'" not in sql
+    assert "replace(source.ai_hint, 'nk_unid_neg'" not in sql
+
+
 def main() -> None:
     tests = [
         (
@@ -883,6 +926,18 @@ def main() -> None:
         (
             "examples nao base v2",
             test_business_question_examples_nao_sao_base_da_v2,
+        ),
+        (
+            "migration v3 ativa",
+            test_migration_v3_deriva_de_v2_sem_alterar_v2,
+        ),
+        (
+            "migration v3 responsavel",
+            test_migration_v3_neutraliza_coluna_fisica_responsavel_sem_perder_semantica,
+        ),
+        (
+            "migration v3 unidade",
+            test_migration_v3_corrige_sk_unid_neg_somente_em_gold_unidade_negocio,
         ),
     ]
 
