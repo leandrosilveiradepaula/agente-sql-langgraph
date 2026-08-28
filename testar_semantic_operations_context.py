@@ -18,6 +18,12 @@ MIGRATION_PATH = (
     / "migrations"
     / "002_prepare_semantic_operations_context_v1.sql"
 )
+MIGRATION_V2_PATH = (
+    Path(__file__).resolve().parent
+    / "scripts"
+    / "migrations"
+    / "003_prepare_semantic_operations_context_v2.sql"
+)
 
 
 def _resolver_config_rule() -> dict:
@@ -255,6 +261,11 @@ def _specialized_signal(
 
 
 def _table(table_name: str, priority: int) -> dict:
+    key_columns = []
+    if table_name == "gold_gestor_cc":
+        key_columns = ["sk", "nk_centro_custo", "nk_unid_neg"]
+    elif table_name == "gold_unidade_negocio":
+        key_columns = ["sk", "nk_unide_neg", "nk_base"]
     return {
         "table_name": table_name,
         "schema_name": "main_gold",
@@ -262,7 +273,7 @@ def _table(table_name: str, priority: int) -> dict:
         "description": f"{table_name} semantic fixture",
         "grain": {"kind": "fixture"},
         "primary_key": [],
-        "key_columns": [],
+        "key_columns": key_columns,
         "metric_columns": ["valor"],
         "date_columns": ["data_competencia"],
         "join_rules": [],
@@ -420,6 +431,7 @@ def _raw_context() -> dict:
                 "business_question_examples": [],
                 "required_tables": [
                     "main_gold.gold_centro_custo",
+                    "main_gold.gold_gestor_cc",
                 ],
                 "required_rules": [
                     "specialized_intents_remain_preferred",
@@ -448,6 +460,8 @@ def _raw_context() -> dict:
             _table("gold_plano_contas", 2),
             _table("gold_centro_custo", 3),
             _table("gold_orcamento", 4),
+            _table("gold_gestor_cc", 5),
+            _table("gold_unidade_negocio", 6),
         ],
     }
 
@@ -693,6 +707,86 @@ def test_migration_separa_total_bruto_de_contexto_efetivo() -> None:
     assert sql.count("source.is_allowed = TRUE") == 1
 
 
+def test_migration_v2_preserva_v1_e_copia_somente_contexto_ativo() -> None:
+    sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
+
+    assert "semantic-operations-v1'::text" in sql
+    assert "semantic-operations-v2'::text" in sql
+    assert sql.count("source.is_active = TRUE") == 4
+    assert sql.count("source.is_allowed = TRUE") == 1
+    assert "ON CONFLICT DO NOTHING" in sql
+    assert "ROLLBACK;" not in sql
+    assert sql.rstrip().endswith("COMMIT;")
+
+
+def test_migration_v2_remove_inducao_de_coluna_responsavel() -> None:
+    sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
+
+    assert "gcc.responsavel" not in sql
+    assert "source.target_column = 'responsavel'" in sql
+    assert "THEN NULL" in sql
+    assert "nao gerar coluna de responsavel" in sql
+    assert "coluna fisica confirmada" in sql
+
+
+def test_migration_v2_corrige_unidade_sem_replace_global() -> None:
+    sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
+
+    assert "source.table_name = 'gold_unidade_negocio'" in sql
+    assert "un.nk_unide_neg" in sql
+    assert "Nao extrapolar nk_unid_neg para gold_unidade_negocio" in sql
+    assert "gcc.nk_unid_neg" in sql
+    assert "gold_lancamentos_contabeis" not in sql
+
+
+def test_fixture_preserva_chaves_diferentes_por_tabela() -> None:
+    context = _context()
+    catalog = {
+        item["table_name"]: item
+        for item in context["table_catalog"]
+    }
+
+    gestor = catalog["gold_gestor_cc"]
+    unidade = catalog["gold_unidade_negocio"]
+
+    assert "nk_unid_neg" in gestor["key_columns"]
+    assert "responsavel" not in gestor["key_columns"]
+    assert "nk_unide_neg" in unidade["key_columns"]
+    assert "nk_unid_neg" not in unidade["key_columns"]
+
+
+def test_responsavel_sem_mapping_fisico_nao_projeta_coluna_inexistente() -> None:
+    context = _context()
+    resolution = _resolve(
+        "Quem e o responsavel pelo centro de custo Comercial?",
+        context,
+    )
+    assert resolution["applied"] is True
+
+    plan_result = build_query_plan(
+        context=context,
+        intent_name=resolution["intent"],
+        intent_confidence=resolution["intent_confidence"],
+        normalized_question=resolution["normalized_question"],
+    )
+    columns = plan_result["query_plan"]["planning_context"]["relevant_columns"]
+
+    assert plan_result["status"] == "planned"
+    assert all(
+        column.get("name") != "responsavel"
+        for table_columns in columns.values()
+        for column in table_columns
+    )
+
+
+def test_business_question_examples_nao_sao_base_da_v2() -> None:
+    sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
+
+    assert "business_question_examples" in sql
+    assert "INSERT INTO public.ai_ducklake_sql_patterns" in sql
+    assert "VALUES (" not in sql
+
+
 def main() -> None:
     tests = [
         (
@@ -730,6 +824,30 @@ def main() -> None:
         (
             "migration counts efetivos",
             test_migration_separa_total_bruto_de_contexto_efetivo,
+        ),
+        (
+            "migration v2 ativa",
+            test_migration_v2_preserva_v1_e_copia_somente_contexto_ativo,
+        ),
+        (
+            "migration v2 responsavel",
+            test_migration_v2_remove_inducao_de_coluna_responsavel,
+        ),
+        (
+            "migration v2 unidade",
+            test_migration_v2_corrige_unidade_sem_replace_global,
+        ),
+        (
+            "chaves por tabela",
+            test_fixture_preserva_chaves_diferentes_por_tabela,
+        ),
+        (
+            "responsavel sem mapping",
+            test_responsavel_sem_mapping_fisico_nao_projeta_coluna_inexistente,
+        ),
+        (
+            "examples nao base v2",
+            test_business_question_examples_nao_sao_base_da_v2,
         ),
     ]
 
