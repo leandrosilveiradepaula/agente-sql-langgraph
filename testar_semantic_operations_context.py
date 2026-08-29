@@ -828,7 +828,7 @@ def test_responsavel_sem_mapping_fisico_nao_projeta_coluna_inexistente() -> None
     )
 
 
-def test_planner_promove_dimensao_unidade_com_contexto_versionado() -> None:
+def test_planner_nao_inventa_coluna_unidade_sem_metadata_explicita() -> None:
     context = _context()
     resolution = _resolve(
         "Mostre os custos por unidade no periodo passado.",
@@ -844,23 +844,20 @@ def test_planner_promove_dimensao_unidade_com_contexto_versionado() -> None:
         normalized_question=resolution["normalized_question"],
     )
     projection = plan_result["query_plan"]["planning_context"]
-    dimensions = projection["detected_dimensions"]
     tables = {
         table["qualified_name"]
         for table in projection["required_tables"]
     }
-    columns = projection["relevant_columns"]["main_gold.gold_unidade_negocio"]
 
     assert plan_result["status"] == "planned"
-    assert dimensions[0]["canonical_value"] == "unidade"
-    assert dimensions[0]["grouping_requested"] is True
-    assert dimensions[0]["target_table"] == "main_gold.gold_unidade_negocio"
-    assert dimensions[0]["target_column"] in {"sk", "nk_unide_neg"}
-    assert "main_gold.gold_unidade_negocio" in tables
-    assert any(
-        column["name"] == dimensions[0]["target_column"]
-        for column in columns
-    )
+    assert projection["detected_dimensions"] == []
+    assert projection["diagnostics"]["dimension_diagnostic"][
+        "grouping_requested"
+    ] is True
+    assert projection["diagnostics"]["dimension_diagnostic"][
+        "unresolved_terms"
+    ] == ["unidade"]
+    assert "main_gold.gold_unidade_negocio" not in tables
 
 
 def test_planner_promove_dimensao_marca_com_contexto_versionado() -> None:
@@ -1009,8 +1006,8 @@ def main() -> None:
             test_responsavel_sem_mapping_fisico_nao_projeta_coluna_inexistente,
         ),
         (
-            "planner promove unidade",
-            test_planner_promove_dimensao_unidade_com_contexto_versionado,
+            "planner nao inventa unidade",
+            test_planner_nao_inventa_coluna_unidade_sem_metadata_explicita,
         ),
         (
             "planner promove marca",

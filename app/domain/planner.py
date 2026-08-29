@@ -974,14 +974,11 @@ def _best_dimension_column(
         return None
 
     ranked: list[tuple[float, int, str]] = []
-    table_tokens = _search_tokens(str(table.get("table_name", "")))
     for index, column in enumerate(column_names):
         column_tokens = _search_tokens(column)
         score = _dimension_match_score(dimension_tokens, column_tokens)
         if score <= 0:
-            score = _dimension_match_score(dimension_tokens, table_tokens)
-            if score <= 0:
-                continue
+            continue
         if column in _string_list(table.get("key_columns")):
             score += 0.25
         if column in _string_list(table.get("primary_key")):
@@ -1039,11 +1036,7 @@ def _dimension_match_score(
 
 
 def _tokens_equivalent(left: str, right: str) -> bool:
-    if left == right:
-        return True
-    if len(left) >= 4 and len(right) >= 4:
-        return left.startswith(right[:4]) or right.startswith(left[:4])
-    return False
+    return left == right
 
 
 def _include_dimension_columns(

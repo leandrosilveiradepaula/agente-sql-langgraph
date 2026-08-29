@@ -195,6 +195,7 @@ def _dimension_context() -> dict:
                                         "terms": [
                                             "por region",
                                             "por channel",
+                                            "por territory",
                                             "por missing thing",
                                         ],
                                     }
@@ -270,6 +271,27 @@ def _dimension_context() -> dict:
                 "columns": [
                     {"name": "channel_id"},
                     {"name": "channel_name"},
+                ],
+            },
+            {
+                "schema_name": "schema_test",
+                "table_name": "dim_territory",
+                "table_type": "table",
+                "description": "territory dimension",
+                "grain": None,
+                "primary_key": ["id"],
+                "key_columns": ["id", "code"],
+                "metric_columns": [],
+                "date_columns": [],
+                "join_rules": [
+                    {"target_table": "schema_test.table_test"}
+                ],
+                "ai_hint": None,
+                "priority": 1,
+                "columns": [
+                    {"name": "id"},
+                    {"name": "code"},
+                    {"name": "label"},
                 ],
             },
         ]
@@ -683,6 +705,60 @@ def test_dimensao_inexistente_nao_inventa_coluna() -> None:
     ] == ["missing thing"]
 
 
+def test_nome_de_tabela_nao_autoriza_coluna_de_dimensao() -> None:
+    result = build_query_plan(
+        context=_dimension_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total amount por territory",
+    )
+
+    projection = result["query_plan"]["planning_context"]
+
+    assert projection["detected_dimensions"] == []
+    assert projection["diagnostics"]["dimension_diagnostic"][
+        "grouping_requested"
+    ] is True
+    assert projection["diagnostics"]["dimension_diagnostic"][
+        "unresolved_terms"
+    ] == ["territory"]
+    assert "schema_test.dim_territory" not in {
+        table["qualified_name"]
+        for table in projection["required_tables"]
+    }
+
+
+def test_alias_contextual_explicito_resolve_dimensao_sem_fallback_pk() -> None:
+    context = _dimension_context()
+    context["entities"].append(
+        {
+            "entity_type": "dimension",
+            "user_term": "territory",
+            "canonical_value": "territory",
+            "target_table": "schema_test.dim_territory",
+            "target_column": "label",
+            "sql_filter_hint": None,
+            "business_rule": None,
+            "priority": 1,
+        }
+    )
+
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total amount por territory",
+    )
+
+    projection = result["query_plan"]["planning_context"]
+    dimension = projection["detected_dimensions"][0]
+
+    assert dimension["target_table"] == "schema_test.dim_territory"
+    assert dimension["target_column"] == "label"
+    assert dimension["source"] == "entity_alias"
+    assert dimension["target_column"] not in {"id", "code"}
+
+
 def main() -> None:
     tests = [
         ("seleciona padrao unico", test_seleciona_padrao_unico),
@@ -748,6 +824,14 @@ def main() -> None:
         (
             "dimensao inexistente nao inventa",
             test_dimensao_inexistente_nao_inventa_coluna,
+        ),
+        (
+            "nome de tabela nao autoriza coluna",
+            test_nome_de_tabela_nao_autoriza_coluna_de_dimensao,
+        ),
+        (
+            "alias contextual resolve dimensao",
+            test_alias_contextual_explicito_resolve_dimensao_sem_fallback_pk,
         ),
     ]
 
