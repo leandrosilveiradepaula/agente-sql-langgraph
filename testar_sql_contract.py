@@ -410,6 +410,29 @@ def test_nomes_de_cte_nao_viram_unknown_columns_mas_coluna_real_invalida_sim() -
     assert not {"cte_a", "cte_b", "totais", "base_x"} & set(violated)
 
 
+def test_modificadores_de_join_nao_mascaram_coluna_fisica_invalida() -> None:
+    result = _run(
+        "SELECT t.id, o.other_value, r.missing_column "
+        "FROM schema_test.table_test t "
+        "CROSS JOIN schema_test.table_other o "
+        "INNER JOIN schema_test.table_other r ON r.id = t.id "
+        "LEFT JOIN schema_test.table_other l ON l.id = t.id "
+        "RIGHT JOIN schema_test.table_other rr ON rr.id = t.id "
+        "FULL OUTER JOIN schema_test.table_other f ON f.id = t.id",
+        _with_second_table(),
+    )
+
+    violated = [
+        column["column"]
+        for column in result["columns"]
+        if column["status"] == "violated"
+    ]
+    structural_tokens = {"cross", "inner", "left", "right", "full", "outer"}
+    assert result["status"] == "rejected"
+    assert "missing_column" in violated
+    assert structural_tokens.isdisjoint(violated)
+
+
 def test_tabela_sintetica_valida_chaves_sem_replace_automatico() -> None:
     plan = _dimension_test_plan()
     valid = _run(
@@ -484,6 +507,10 @@ def main() -> None:
         (
             "CTE relation nao unknown",
             test_nomes_de_cte_nao_viram_unknown_columns_mas_coluna_real_invalida_sim,
+        ),
+        (
+            "JOIN modifiers nao mascaram coluna",
+            test_modificadores_de_join_nao_mascaram_coluna_fisica_invalida,
         ),
         (
             "tabela sintetica chaves",

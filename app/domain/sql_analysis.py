@@ -129,6 +129,7 @@ _RESERVED_WORDS = {
     "by",
     "case",
     "cast",
+    "cross",
     "current_date",
     "current_time",
     "current_timestamp",
@@ -147,9 +148,11 @@ _RESERVED_WORDS = {
     "interval",
     "is",
     "join",
+    "lateral",
     "left",
     "like",
     "limit",
+    "natural",
     "not",
     "null",
     "on",
@@ -162,21 +165,29 @@ _RESERVED_WORDS = {
     "then",
     "true",
     "union",
+    "using",
     "when",
     "where",
     "with",
 }
 
-_TABLE_BOUNDARY_KEYWORDS = {
-    "where",
+_JOIN_STRUCTURE_KEYWORDS = {
     "join",
+    "inner",
     "left",
     "right",
-    "inner",
     "full",
-    "cross",
     "outer",
+    "cross",
+    "natural",
     "on",
+    "using",
+    "lateral",
+}
+
+_TABLE_BOUNDARY_KEYWORDS = {
+    "where",
+    *_JOIN_STRUCTURE_KEYWORDS,
     "group",
     "order",
     "having",
@@ -184,15 +195,7 @@ _TABLE_BOUNDARY_KEYWORDS = {
     "union",
 }
 
-_JOIN_PREFIX_WORDS = {
-    "join",
-    "left",
-    "right",
-    "inner",
-    "full",
-    "cross",
-    "outer",
-}
+_JOIN_PREFIX_WORDS = _JOIN_STRUCTURE_KEYWORDS - {"on", "using", "lateral"}
 
 
 def analyze_sql(sql: str) -> SqlStatementAnalysis:

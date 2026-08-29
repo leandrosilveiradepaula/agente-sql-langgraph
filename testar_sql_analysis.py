@@ -253,6 +253,39 @@ def test_nomes_arbitrarios_de_cte_nao_viram_colunas_fisicas() -> None:
     ]
 
 
+def test_modificadores_de_join_nao_viram_colunas_fisicas() -> None:
+    analysis = analyze_sql(
+        "WITH cte_a AS ("
+        "SELECT t.id FROM schema_test.table_test t"
+        "), cte_b AS ("
+        "SELECT t.id FROM schema_test.table_test t"
+        ") SELECT t.id, o.other_value "
+        "FROM schema_test.table_test t "
+        "CROSS JOIN cte_a ca "
+        "INNER JOIN schema_test.table_other o ON o.id = t.id "
+        "LEFT JOIN cte_b cb ON cb.id = t.id "
+        "RIGHT JOIN schema_test.table_other r ON r.id = t.id "
+        "FULL OUTER JOIN schema_test.table_other f ON f.id = t.id"
+    )
+
+    columns = {column["column"] for column in analysis["column_references"]}
+    structural_tokens = {
+        "cross",
+        "inner",
+        "left",
+        "right",
+        "full",
+        "outer",
+        "join",
+        "on",
+        "using",
+        "lateral",
+        "natural",
+    }
+    assert structural_tokens.isdisjoint(columns)
+    assert {"id", "other_value"} <= columns
+
+
 def test_caractere_de_controle() -> None:
     try:
         analyze_sql("SELECT id FROM schema_test.table_test\x00")
@@ -313,6 +346,10 @@ def main() -> None:
         (
             "CTE nomes arbitrarios",
             test_nomes_arbitrarios_de_cte_nao_viram_colunas_fisicas,
+        ),
+        (
+            "JOIN modifiers nao coluna",
+            test_modificadores_de_join_nao_viram_colunas_fisicas,
         ),
         ("controle", test_caractere_de_controle),
         ("SQL malformada", test_sql_malformada),
