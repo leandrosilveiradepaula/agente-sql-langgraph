@@ -86,30 +86,30 @@ def _run(sql: str, plan: dict | None = None):
     )[0]
 
 
-def _unidade_negocio_plan() -> dict:
+def _dimension_test_plan() -> dict:
     plan = deepcopy(_query_plan())
     projection = plan["planning_context"]
     table = {
-        "schema_name": "main_gold",
-        "table_name": "gold_unidade_negocio",
-        "qualified_name": "main_gold.gold_unidade_negocio",
-        "primary_key": ["sk"],
-        "key_columns": ["sk", "nk_unide_neg"],
+        "schema_name": "schema_test",
+        "table_name": "dimension_test",
+        "qualified_name": "schema_test.dimension_test",
+        "primary_key": ["pk_id"],
+        "key_columns": ["pk_id", "business_key"],
         "metric_columns": [],
         "date_columns": [],
         "join_rules": [],
         "columns": [
-            {"name": "sk"},
-            {"name": "nk_unide_neg"},
-            {"name": "marca"},
+            {"name": "pk_id"},
+            {"name": "business_key"},
+            {"name": "label"},
         ],
     }
     projection["required_tables"] = [table]
     projection["relevant_columns"] = {
-        "main_gold.gold_unidade_negocio": [
-            {"name": "sk"},
-            {"name": "nk_unide_neg"},
-            {"name": "marca"},
+        "schema_test.dimension_test": [
+            {"name": "pk_id"},
+            {"name": "business_key"},
+            {"name": "label"},
         ]
     }
     projection["authorized_joins"] = []
@@ -410,24 +410,24 @@ def test_nomes_de_cte_nao_viram_unknown_columns_mas_coluna_real_invalida_sim() -
     assert not {"cte_a", "cte_b", "totais", "base_x"} & set(violated)
 
 
-def test_unidade_negocio_valida_sk_e_nk_unide_neg_sem_replace_global() -> None:
-    plan = _unidade_negocio_plan()
+def test_tabela_sintetica_valida_chaves_sem_replace_automatico() -> None:
+    plan = _dimension_test_plan()
     valid = _run(
-        "SELECT un.sk, un.nk_unide_neg "
-        "FROM main_gold.gold_unidade_negocio un",
+        "SELECT d.pk_id, d.business_key "
+        "FROM schema_test.dimension_test d",
         plan,
     )
     invalid = _run(
-        "SELECT un.sk_unid_neg "
-        "FROM main_gold.gold_unidade_negocio un",
+        "SELECT d.invalid_key "
+        "FROM schema_test.dimension_test d",
         plan,
     )
 
     assert valid["status"] == "approved"
     assert invalid["status"] == "rejected"
     assert invalid["errors"][0]["code"] == "SQL_CONTRACT_UNKNOWN_COLUMN"
-    assert invalid["columns"][0]["table"] == "main_gold.gold_unidade_negocio"
-    assert invalid["columns"][0]["column"] == "sk_unid_neg"
+    assert invalid["columns"][0]["table"] == "schema_test.dimension_test"
+    assert invalid["columns"][0]["column"] == "invalid_key"
 
 
 def test_diagnostico_determinismo_e_sem_mutacao() -> None:
@@ -486,8 +486,8 @@ def main() -> None:
             test_nomes_de_cte_nao_viram_unknown_columns_mas_coluna_real_invalida_sim,
         ),
         (
-            "unidade negocio chaves",
-            test_unidade_negocio_valida_sk_e_nk_unide_neg_sem_replace_global,
+            "tabela sintetica chaves",
+            test_tabela_sintetica_valida_chaves_sem_replace_automatico,
         ),
         ("diagnostico determinismo", test_diagnostico_determinismo_e_sem_mutacao),
     ]

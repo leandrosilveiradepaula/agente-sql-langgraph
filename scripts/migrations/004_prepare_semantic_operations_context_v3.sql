@@ -239,7 +239,7 @@ SELECT
     THEN concat_ws(
       E'\n',
       NULLIF(source.notes, ''),
-      'Nota adicional v3: quando gold_unidade_negocio estiver envolvida, usar un.sk para join tecnico e un.nk_unide_neg para chave de negocio/filtro; nao usar un.sk_unid_neg nem un_dest.sk_unid_neg nessa tabela.'
+      'Nota adicional v3: quando gold_unidade_negocio estiver envolvida, usar gold_unidade_negocio.sk como chave tecnica confirmada e gold_unidade_negocio.nk_unide_neg como chave de negocio/filtro confirmada. gold_unidade_negocio.sk_unid_neg e gold_unidade_negocio.nk_unid_neg nao existem nesta tabela.'
     )
     ELSE source.notes
   END,
@@ -291,21 +291,17 @@ SELECT
     THEN concat_ws(
       E'\n',
       NULLIF(replace(
-        replace(
-          source.ai_hint,
-          'A coluna do responsável é gcc.responsavel.',
-          ''
-        ),
+        source.ai_hint,
         'gcc.responsavel',
         'mapeamento fisico de responsavel indisponivel'
       ), ''),
-      'Addendum v3: nao ha coluna fisica responsavel confirmada em gold_gestor_cc; nao inventar, projetar ou filtrar coluna de responsavel. gcc.nk_unid_neg e un.nk_unide_neg sao campos de tabelas diferentes.'
+      'Addendum v3: nao ha coluna fisica responsavel confirmada em gold_gestor_cc; nao inventar, projetar ou filtrar coluna de responsavel. gold_gestor_cc.nk_unid_neg e gold_unidade_negocio.nk_unide_neg sao campos de tabelas diferentes.'
     )
     WHEN source.table_name = 'gold_unidade_negocio'
     THEN concat_ws(
       E'\n',
       NULLIF(source.ai_hint, ''),
-      'Addendum v3: colunas fisicas autorizadas desta tabela incluem sk e nk_unide_neg. Use sk para join tecnico e nk_unide_neg para chave de negocio/filtro. Nao usar sk_unid_neg nem nk_unid_neg nesta tabela.'
+      'Addendum v3: gold_unidade_negocio.sk e chave tecnica confirmada. gold_unidade_negocio.nk_unide_neg e chave de negocio confirmada. gold_unidade_negocio.sk_unid_neg e gold_unidade_negocio.nk_unid_neg nao existem nesta tabela.'
     )
     ELSE source.ai_hint
   END,

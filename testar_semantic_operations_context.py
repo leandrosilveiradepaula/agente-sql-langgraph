@@ -850,8 +850,10 @@ def test_migration_v3_corrige_sk_unid_neg_somente_em_gold_unidade_negocio() -> N
     sql = MIGRATION_V3_PATH.read_text(encoding="utf-8")
 
     assert "source.table_name = 'gold_unidade_negocio'" in sql
-    assert "Use sk para join tecnico e nk_unide_neg para chave de negocio" in sql
-    assert "Nao usar sk_unid_neg nem nk_unid_neg nesta tabela" in sql
+    assert "gold_unidade_negocio.sk e chave tecnica confirmada" in sql
+    assert "gold_unidade_negocio.nk_unide_neg e chave de negocio confirmada" in sql
+    assert "gold_unidade_negocio.sk_unid_neg" in sql
+    assert "gold_unidade_negocio.nk_unid_neg" in sql
     assert "source.table_name = 'gold_lancamentos_contabeis'" not in sql
     assert "replace(source.ai_hint, 'sk_unid_neg'" not in sql
     assert "replace(source.ai_hint, 'nk_unid_neg'" not in sql
