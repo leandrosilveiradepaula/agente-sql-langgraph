@@ -180,6 +180,103 @@ def _context() -> dict:
     }
 
 
+def _dimension_context() -> dict:
+    context = _context()
+    context["intent_resolution"] = {
+        "intent_catalog": [
+            {
+                "business_rule": {
+                    "intent_catalog": {
+                        "rules": [
+                            {
+                                "concepts": [
+                                    {
+                                        "concept_name": "dimension_grouping",
+                                        "terms": [
+                                            "por region",
+                                            "por channel",
+                                            "por missing thing",
+                                        ],
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        ]
+    }
+    context["entities"].extend(
+        [
+            {
+                "entity_type": "dimension",
+                "user_term": "region",
+                "canonical_value": "region",
+                "target_table": "schema_test.dim_region",
+                "target_column": "region_name",
+                "sql_filter_hint": None,
+                "business_rule": None,
+                "priority": 1,
+            },
+            {
+                "entity_type": "dimension",
+                "user_term": "channel",
+                "canonical_value": "channel",
+                "target_table": "schema_test.dim_channel",
+                "target_column": "channel_name",
+                "sql_filter_hint": None,
+                "business_rule": None,
+                "priority": 1,
+            },
+        ]
+    )
+    context["table_catalog"].extend(
+        [
+            {
+                "schema_name": "schema_test",
+                "table_name": "dim_region",
+                "table_type": "table",
+                "description": "region dimension",
+                "grain": None,
+                "primary_key": ["region_id"],
+                "key_columns": ["region_id", "region_name"],
+                "metric_columns": [],
+                "date_columns": [],
+                "join_rules": [
+                    {"target_table": "schema_test.table_test"}
+                ],
+                "ai_hint": None,
+                "priority": 1,
+                "columns": [
+                    {"name": "region_id"},
+                    {"name": "region_name"},
+                ],
+            },
+            {
+                "schema_name": "schema_test",
+                "table_name": "dim_channel",
+                "table_type": "table",
+                "description": "channel dimension",
+                "grain": None,
+                "primary_key": ["channel_id"],
+                "key_columns": ["channel_id", "channel_name"],
+                "metric_columns": [],
+                "date_columns": [],
+                "join_rules": [
+                    {"target_table": "schema_test.table_test"}
+                ],
+                "ai_hint": None,
+                "priority": 1,
+                "columns": [
+                    {"name": "channel_id"},
+                    {"name": "channel_name"},
+                ],
+            },
+        ]
+    )
+    return context
+
+
 def test_seleciona_padrao_unico() -> None:
     result = select_query_pattern(
         intent_name="generic_test_intent",
@@ -508,6 +605,84 @@ def test_query_plan_autocontido_sem_sql_final() -> None:
     assert query_plan["sql_pattern_metadata"] == "SELECT 1"
 
 
+def test_promove_dimensao_contextual_para_query_plan() -> None:
+    result = build_query_plan(
+        context=_dimension_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total amount por region",
+    )
+
+    projection = result["query_plan"]["planning_context"]
+    dimensions = projection["detected_dimensions"]
+    table_names = {
+        table["qualified_name"]
+        for table in projection["required_tables"]
+    }
+
+    assert result["status"] == "planned"
+    assert dimensions[0]["canonical_value"] == "region"
+    assert dimensions[0]["target_table"] == "schema_test.dim_region"
+    assert dimensions[0]["target_column"] == "region_name"
+    assert dimensions[0]["grouping_requested"] is True
+    assert "schema_test.dim_region" in table_names
+    assert "schema_test.dim_region" in projection["relevant_columns"]
+
+
+def test_promove_dimensoes_sem_lista_de_negocio_no_python() -> None:
+    result = build_query_plan(
+        context=_dimension_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total value por channel",
+    )
+
+    projection = result["query_plan"]["planning_context"]
+    dimension = projection["detected_dimensions"][0]
+
+    assert dimension["canonical_value"] == "channel"
+    assert dimension["target_table"] == "schema_test.dim_channel"
+    assert dimension["target_column"] == "channel_name"
+    assert "schema_test.dim_channel" in projection["relevant_columns"]
+
+
+def test_sem_dimensao_nao_cria_grouping() -> None:
+    result = build_query_plan(
+        context=_dimension_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total amount in period",
+    )
+
+    projection = result["query_plan"]["planning_context"]
+
+    assert projection["detected_dimensions"] == []
+    assert projection["diagnostics"]["dimension_diagnostic"] == {
+        "grouping_requested": False,
+        "matched_terms": [],
+        "unresolved_terms": [],
+    }
+
+
+def test_dimensao_inexistente_nao_inventa_coluna() -> None:
+    result = build_query_plan(
+        context=_dimension_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total amount por missing thing",
+    )
+
+    projection = result["query_plan"]["planning_context"]
+
+    assert projection["detected_dimensions"] == []
+    assert projection["diagnostics"]["dimension_diagnostic"][
+        "grouping_requested"
+    ] is True
+    assert projection["diagnostics"]["dimension_diagnostic"][
+        "unresolved_terms"
+    ] == ["missing thing"]
+
+
 def main() -> None:
     tests = [
         ("seleciona padrao unico", test_seleciona_padrao_unico),
@@ -560,6 +735,19 @@ def main() -> None:
         (
             "query plan autocontido",
             test_query_plan_autocontido_sem_sql_final,
+        ),
+        (
+            "promove dimensao contextual",
+            test_promove_dimensao_contextual_para_query_plan,
+        ),
+        (
+            "promove outra dimensao generica",
+            test_promove_dimensoes_sem_lista_de_negocio_no_python,
+        ),
+        ("sem dimensao sem grouping", test_sem_dimensao_nao_cria_grouping),
+        (
+            "dimensao inexistente nao inventa",
+            test_dimensao_inexistente_nao_inventa_coluna,
         ),
     ]
 

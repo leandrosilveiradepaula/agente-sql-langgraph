@@ -154,12 +154,24 @@ class ProjectedDreMapping(TypedDict, total=False):
     selection_reasons: list[str]
 
 
+class ProjectedDimension(TypedDict, total=False):
+    canonical_value: str
+    matched_user_term: str
+    target_table: str
+    target_column: str
+    grouping_requested: bool
+    source: str
+    priority: int | None
+    confidence: float | None
+
+
 class ProjectionDiagnostic(TypedDict):
     missing_required_rules: list[str]
     missing_required_tables: list[str]
     ambiguous_required_tables: list[dict[str, Any]]
     join_diagnostics: list[dict[str, Any]]
     dre_diagnostic: dict[str, Any]
+    dimension_diagnostic: dict[str, Any]
 
 
 class PlanningContextProjection(TypedDict):
@@ -174,6 +186,7 @@ class PlanningContextProjection(TypedDict):
     authorized_joins: list[ProjectedJoin]
     relevant_entities: list[ProjectedEntity]
     relevant_dre_mappings: list[ProjectedDreMapping]
+    detected_dimensions: list[ProjectedDimension]
     allowed_schemas: list[str]
     component_configs: dict[str, dict[str, Any]]
     diagnostics: ProjectionDiagnostic

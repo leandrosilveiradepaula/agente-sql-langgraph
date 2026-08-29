@@ -23,6 +23,7 @@ from app.domain.planning import (
     PlanningDecisionReason,
     PlanningErrorCode,
     ProjectedDreMapping,
+    ProjectedDimension,
     ProjectedEntity,
     ProjectedJoin,
     ProjectedRule,
@@ -296,10 +297,19 @@ def project_planning_context(
             "Uma ou mais regras requeridas pelo padrao nao existem.",
         )
 
+    dimension_projection, dimension_diagnostic = _detect_grouping_dimensions(
+        context=context,
+        normalized_question=normalized_question,
+    )
+    required_table_names = _expand_required_tables_with_dimensions(
+        selected_pattern.get("required_tables", []),
+        dimension_projection,
+    )
+
     required_tables, missing_tables, ambiguous_tables = (
         _project_tables(
             context.get("table_catalog", []),
-            selected_pattern.get("required_tables", []),
+            required_table_names,
         )
     )
     if missing_tables or ambiguous_tables:
@@ -340,6 +350,7 @@ def project_planning_context(
         )
         for table in required_tables
     }
+    _include_dimension_columns(relevant_columns, dimension_projection)
 
     return {
         "context_version": context.get("version", ""),
@@ -353,6 +364,7 @@ def project_planning_context(
         "authorized_joins": join_projection["joins"],
         "relevant_entities": entity_projection,
         "relevant_dre_mappings": dre_projection,
+        "detected_dimensions": dimension_projection,
         "allowed_schemas": list(context.get("allowed_schemas", [])),
         "component_configs": deepcopy(
             context.get("component_configs", {})
@@ -363,6 +375,7 @@ def project_planning_context(
             "ambiguous_required_tables": ambiguous_tables,
             "join_diagnostics": join_projection["diagnostics"],
             "dre_diagnostic": dre_diagnostic,
+            "dimension_diagnostic": dimension_diagnostic,
         },
     }
 
@@ -672,6 +685,442 @@ def _project_rules(
         ),
     )
     return projected, missing_rules
+
+
+def _detect_grouping_dimensions(
+    *,
+    context: ContextSnapshot,
+    normalized_question: str,
+) -> tuple[list[ProjectedDimension], dict[str, Any]]:
+    requested_terms = _grouping_terms_from_context(
+        context.get("intent_resolution", {}),
+        normalized_question,
+    )
+    if not requested_terms:
+        return [], {
+            "grouping_requested": False,
+            "matched_terms": [],
+            "unresolved_terms": [],
+        }
+
+    dimensions: list[ProjectedDimension] = []
+    unresolved: list[str] = []
+    for matched_user_term, dimension_term in requested_terms:
+        dimension = _resolve_grouping_dimension(
+            context=context,
+            matched_user_term=matched_user_term,
+            dimension_term=dimension_term,
+        )
+        if dimension is None:
+            unresolved.append(dimension_term)
+            continue
+        dimensions.append(dimension)
+
+    return _dedupe_dimensions(dimensions), {
+        "grouping_requested": True,
+        "matched_terms": [term for term, _ in requested_terms],
+        "unresolved_terms": sorted(set(unresolved), key=str.casefold),
+    }
+
+
+def _grouping_terms_from_context(
+    intent_resolution: Any,
+    normalized_question: str,
+) -> list[tuple[str, str]]:
+    if not isinstance(intent_resolution, Mapping):
+        return []
+
+    catalog = intent_resolution.get("intent_catalog", [])
+    if not isinstance(catalog, list):
+        return []
+
+    matches: list[tuple[str, str]] = []
+    question = normalize_search_text(normalized_question)
+    for entry in catalog:
+        if not isinstance(entry, Mapping):
+            continue
+        rules = entry.get("rules")
+        if not isinstance(rules, list):
+            business_rule = entry.get("business_rule")
+            raw_catalog = (
+                business_rule.get("intent_catalog")
+                if isinstance(business_rule, Mapping)
+                else None
+            )
+            rules = (
+                raw_catalog.get("rules")
+                if isinstance(raw_catalog, Mapping)
+                else []
+            )
+        if not isinstance(rules, list):
+            continue
+        for rule in rules:
+            if not isinstance(rule, Mapping):
+                continue
+            concepts = rule.get("concepts", [])
+            if not isinstance(concepts, list):
+                continue
+            for concept in concepts:
+                if not isinstance(concept, Mapping):
+                    continue
+                if str(concept.get("concept_name", "")).casefold() != (
+                    "dimension_grouping"
+                ):
+                    continue
+                terms = concept.get("terms", [])
+                if not isinstance(terms, list):
+                    continue
+                for term in terms:
+                    if not isinstance(term, str) or not term.strip():
+                        continue
+                    normalized_term = normalize_search_text(term)
+                    if normalized_term and normalized_term in question:
+                        dimension = _dimension_name_from_grouping_term(
+                            normalized_term
+                        )
+                        if dimension:
+                            matches.append((normalized_term, dimension))
+    return sorted(set(matches), key=lambda item: (item[1], item[0]))
+
+
+def _dimension_name_from_grouping_term(term: str) -> str | None:
+    tokens = tokenize_search_text(term)
+    if not tokens:
+        return None
+    if tokens[0] == "por" and len(tokens) > 1:
+        return " ".join(tokens[1:])
+    return " ".join(tokens)
+
+
+def _resolve_grouping_dimension(
+    *,
+    context: ContextSnapshot,
+    matched_user_term: str,
+    dimension_term: str,
+) -> ProjectedDimension | None:
+    entity_dimension = _resolve_dimension_from_entities(
+        context.get("entities", []),
+        matched_user_term=matched_user_term,
+        dimension_term=dimension_term,
+    )
+    if entity_dimension is not None:
+        return entity_dimension
+
+    return _resolve_dimension_from_catalog(
+        context.get("table_catalog", []),
+        matched_user_term=matched_user_term,
+        dimension_term=dimension_term,
+    )
+
+
+def _resolve_dimension_from_entities(
+    entities: Any,
+    *,
+    matched_user_term: str,
+    dimension_term: str,
+) -> ProjectedDimension | None:
+    if not isinstance(entities, list):
+        return None
+
+    candidates: list[tuple[float, ProjectedDimension]] = []
+    dimension_tokens = _search_tokens(dimension_term)
+    for entity in entities:
+        if not isinstance(entity, Mapping):
+            continue
+        if str(entity.get("entity_type", "")).casefold() == "intent_definition":
+            continue
+        target_table = entity.get("target_table")
+        target_column = entity.get("target_column")
+        if not (
+            isinstance(target_table, str)
+            and target_table.strip()
+            and isinstance(target_column, str)
+            and target_column.strip()
+        ):
+            continue
+
+        text = " ".join(
+            str(value)
+            for value in (
+                entity.get("entity_type"),
+                entity.get("user_term"),
+                entity.get("canonical_value"),
+                target_table,
+                target_column,
+            )
+            if value
+        )
+        score = _dimension_match_score(
+            dimension_tokens,
+            _search_tokens(text),
+        )
+        if score <= 0:
+            continue
+        candidates.append(
+            (
+                score,
+                {
+                    "canonical_value": str(entity.get("canonical_value", "")),
+                    "matched_user_term": matched_user_term,
+                    "target_table": target_table,
+                    "target_column": target_column,
+                    "grouping_requested": True,
+                    "source": "entity_alias",
+                    "priority": _optional_int(entity.get("priority")),
+                    "confidence": score,
+                },
+            )
+        )
+
+    if not candidates:
+        return None
+    return sorted(
+        candidates,
+        key=lambda item: (
+            -item[0],
+            _priority_sort_value(item[1].get("priority")),
+            item[1]["target_table"].casefold(),
+            item[1]["target_column"].casefold(),
+        ),
+    )[0][1]
+
+
+def _resolve_dimension_from_catalog(
+    table_catalog: Any,
+    *,
+    matched_user_term: str,
+    dimension_term: str,
+) -> ProjectedDimension | None:
+    if not isinstance(table_catalog, list):
+        return None
+
+    dimension_tokens = _search_tokens(dimension_term)
+    candidates: list[tuple[float, ProjectedDimension]] = []
+    for table in table_catalog:
+        if not isinstance(table, Mapping):
+            continue
+        target_table = _qualified_table_name(table)
+        column = _best_dimension_column(table, dimension_tokens)
+        if not column:
+            continue
+        table_text = " ".join(
+            str(value)
+            for value in (
+                table.get("schema_name"),
+                table.get("table_name"),
+                table.get("description"),
+                table.get("grain"),
+                table.get("ai_hint"),
+                column,
+            )
+            if value
+        )
+        table_identity_text = " ".join(
+            str(value)
+            for value in (
+                table.get("schema_name"),
+                table.get("table_name"),
+                table.get("description"),
+                table.get("grain"),
+            )
+            if value
+        )
+        score = _dimension_match_score(
+            dimension_tokens,
+            _search_tokens(table_text),
+        )
+        if score <= 0:
+            continue
+        if _dimension_match_score(
+            dimension_tokens,
+            _search_tokens(table_identity_text),
+        ):
+            score += 1.0
+        candidates.append(
+            (
+                score,
+                {
+                    "canonical_value": dimension_term,
+                    "matched_user_term": matched_user_term,
+                    "target_table": target_table,
+                    "target_column": column,
+                    "grouping_requested": True,
+                    "source": "table_catalog",
+                    "priority": _optional_int(table.get("priority")),
+                    "confidence": score,
+                },
+            )
+        )
+
+    if not candidates:
+        return None
+    return sorted(
+        candidates,
+        key=lambda item: (
+            -item[0],
+            _priority_sort_value(item[1].get("priority")),
+            item[1]["target_table"].casefold(),
+            item[1]["target_column"].casefold(),
+        ),
+    )[0][1]
+
+
+def _best_dimension_column(
+    table: Mapping[str, Any],
+    dimension_tokens: set[str],
+) -> str | None:
+    column_names = _table_column_candidates(table)
+    if not column_names:
+        return None
+
+    ranked: list[tuple[float, int, str]] = []
+    table_tokens = _search_tokens(str(table.get("table_name", "")))
+    for index, column in enumerate(column_names):
+        column_tokens = _search_tokens(column)
+        score = _dimension_match_score(dimension_tokens, column_tokens)
+        if score <= 0:
+            score = _dimension_match_score(dimension_tokens, table_tokens)
+            if score <= 0:
+                continue
+        if column in _string_list(table.get("key_columns")):
+            score += 0.25
+        if column in _string_list(table.get("primary_key")):
+            score += 0.1
+        if any(
+            token in {"name", "nome", "label", "descricao", "description"}
+            for token in column_tokens
+        ):
+            score += 0.15
+        ranked.append((score, index, column))
+
+    if not ranked:
+        return None
+    return sorted(ranked, key=lambda item: (-item[0], item[1], item[2]))[0][2]
+
+
+def _table_column_candidates(table: Mapping[str, Any]) -> list[str]:
+    names: list[str] = []
+    for column in table.get("columns", []):
+        if isinstance(column, Mapping) and isinstance(column.get("name"), str):
+            names.append(column["name"].strip())
+    for collection_name in ("key_columns", "primary_key"):
+        names.extend(_string_list(table.get(collection_name)))
+
+    output: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        key = name.casefold()
+        if name and key not in seen:
+            seen.add(key)
+            output.append(name)
+    return output
+
+
+def _search_tokens(value: str) -> set[str]:
+    return set(tokenize_search_text(value.replace("_", " ")))
+
+
+def _dimension_match_score(
+    dimension_tokens: set[str],
+    candidate_tokens: set[str],
+) -> float:
+    if not dimension_tokens or not candidate_tokens:
+        return 0.0
+    matched = 0
+    for dimension_token in dimension_tokens:
+        if any(
+            _tokens_equivalent(dimension_token, candidate_token)
+            for candidate_token in candidate_tokens
+        ):
+            matched += 1
+    if matched != len(dimension_tokens):
+        return 0.0
+    return matched / max(len(candidate_tokens), 1)
+
+
+def _tokens_equivalent(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    if len(left) >= 4 and len(right) >= 4:
+        return left.startswith(right[:4]) or right.startswith(left[:4])
+    return False
+
+
+def _include_dimension_columns(
+    relevant_columns: dict[str, list[Any]],
+    dimensions: list[ProjectedDimension],
+) -> None:
+    for dimension in dimensions:
+        table = dimension.get("target_table")
+        column = dimension.get("target_column")
+        if not (
+            isinstance(table, str)
+            and table.strip()
+            and isinstance(column, str)
+            and column.strip()
+        ):
+            continue
+        table_columns = relevant_columns.setdefault(table, [])
+        if any(
+            isinstance(item, Mapping)
+            and str(item.get("name", "")).casefold() == column.casefold()
+            for item in table_columns
+        ):
+            continue
+        table_columns.append({"name": column})
+
+
+def _dedupe_dimensions(
+    dimensions: list[ProjectedDimension],
+) -> list[ProjectedDimension]:
+    output: list[ProjectedDimension] = []
+    seen: set[tuple[str, str]] = set()
+    for dimension in sorted(
+        dimensions,
+        key=lambda item: (
+            _priority_sort_value(item.get("priority")),
+            item["target_table"].casefold(),
+            item["target_column"].casefold(),
+        ),
+    ):
+        key = (
+            dimension["target_table"].casefold(),
+            dimension["target_column"].casefold(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(dimension)
+    return output
+
+
+def _expand_required_tables_with_dimensions(
+    required_table_names: list[str],
+    dimensions: list[ProjectedDimension],
+) -> list[str]:
+    output = [
+        name
+        for name in required_table_names
+        if isinstance(name, str) and name.strip()
+    ]
+    seen = {name.casefold() for name in output}
+    for dimension in dimensions:
+        table = dimension.get("target_table")
+        if not isinstance(table, str) or not table.strip():
+            continue
+        if table.casefold() in seen:
+            continue
+        seen.add(table.casefold())
+        output.append(table)
+    return output
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
 def _project_tables(

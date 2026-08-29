@@ -268,10 +268,25 @@ def _specialized_signal(
 
 def _table(table_name: str, priority: int) -> dict:
     key_columns = []
+    extra_columns = []
     if table_name == "gold_gestor_cc":
         key_columns = ["sk", "nk_centro_custo", "nk_unid_neg"]
     elif table_name == "gold_unidade_negocio":
         key_columns = ["sk", "nk_unide_neg", "nk_base"]
+        extra_columns = [
+            {
+                "name": "marca",
+                "data_type": "text",
+                "nullable": True,
+                "description": "Marca da unidade de negocio.",
+            },
+            {
+                "name": "nk_unide_neg",
+                "data_type": "text",
+                "nullable": True,
+                "description": "Chave de negocio da unidade.",
+            },
+        ]
     return {
         "table_name": table_name,
         "schema_name": "main_gold",
@@ -298,7 +313,8 @@ def _table(table_name: str, priority: int) -> dict:
                 "nullable": True,
                 "description": "Data de competencia.",
             },
-        ],
+        ]
+        + extra_columns,
     }
 
 
@@ -812,6 +828,73 @@ def test_responsavel_sem_mapping_fisico_nao_projeta_coluna_inexistente() -> None
     )
 
 
+def test_planner_promove_dimensao_unidade_com_contexto_versionado() -> None:
+    context = _context()
+    resolution = _resolve(
+        "Mostre os custos por unidade no periodo passado.",
+        context,
+    )
+    assert resolution["applied"] is True
+    assert resolution["intent"] == GENERIC_INTENT
+
+    plan_result = build_query_plan(
+        context=context,
+        intent_name=resolution["intent"],
+        intent_confidence=resolution["intent_confidence"],
+        normalized_question=resolution["normalized_question"],
+    )
+    projection = plan_result["query_plan"]["planning_context"]
+    dimensions = projection["detected_dimensions"]
+    tables = {
+        table["qualified_name"]
+        for table in projection["required_tables"]
+    }
+    columns = projection["relevant_columns"]["main_gold.gold_unidade_negocio"]
+
+    assert plan_result["status"] == "planned"
+    assert dimensions[0]["canonical_value"] == "unidade"
+    assert dimensions[0]["grouping_requested"] is True
+    assert dimensions[0]["target_table"] == "main_gold.gold_unidade_negocio"
+    assert dimensions[0]["target_column"] in {"sk", "nk_unide_neg"}
+    assert "main_gold.gold_unidade_negocio" in tables
+    assert any(
+        column["name"] == dimensions[0]["target_column"]
+        for column in columns
+    )
+
+
+def test_planner_promove_dimensao_marca_com_contexto_versionado() -> None:
+    context = _context()
+    resolution = _resolve(
+        "Qual foi a receita por marca no mes passado?",
+        context,
+    )
+    assert resolution["applied"] is True
+    assert resolution["intent"] == GENERIC_INTENT
+
+    plan_result = build_query_plan(
+        context=context,
+        intent_name=resolution["intent"],
+        intent_confidence=resolution["intent_confidence"],
+        normalized_question=resolution["normalized_question"],
+    )
+    projection = plan_result["query_plan"]["planning_context"]
+    dimensions = projection["detected_dimensions"]
+    tables = {
+        table["qualified_name"]
+        for table in projection["required_tables"]
+    }
+    columns = projection["relevant_columns"]["main_gold.gold_unidade_negocio"]
+
+    assert plan_result["status"] == "planned"
+    assert dimensions[0]["canonical_value"] == "marca"
+    assert dimensions[0]["grouping_requested"] is True
+    assert dimensions[0]["target_table"] == "main_gold.gold_unidade_negocio"
+    assert dimensions[0]["target_column"] == "marca"
+    assert "main_gold.gold_unidade_negocio" in tables
+    assert any(column["name"] == "marca" for column in columns)
+
+
 def test_business_question_examples_nao_sao_base_da_v2() -> None:
     sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
 
@@ -924,6 +1007,14 @@ def main() -> None:
         (
             "responsavel sem mapping",
             test_responsavel_sem_mapping_fisico_nao_projeta_coluna_inexistente,
+        ),
+        (
+            "planner promove unidade",
+            test_planner_promove_dimensao_unidade_com_contexto_versionado,
+        ),
+        (
+            "planner promove marca",
+            test_planner_promove_dimensao_marca_com_contexto_versionado,
         ),
         (
             "examples nao base v2",
