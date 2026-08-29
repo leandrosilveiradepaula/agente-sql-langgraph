@@ -845,7 +845,6 @@ def _resolve_dimension_from_entities(
                 entity.get("entity_type"),
                 entity.get("user_term"),
                 entity.get("canonical_value"),
-                target_table,
                 target_column,
             )
             if value

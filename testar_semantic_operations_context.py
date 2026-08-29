@@ -30,6 +30,12 @@ MIGRATION_V3_PATH = (
     / "migrations"
     / "004_prepare_semantic_operations_context_v3.sql"
 )
+MIGRATION_V4_PATH = (
+    Path(__file__).resolve().parent
+    / "scripts"
+    / "migrations"
+    / "005_prepare_semantic_dimensions_context_v4.sql"
+)
 
 
 def _resolver_config_rule() -> dict:
@@ -492,6 +498,52 @@ def _context() -> dict:
     return normalize_context_snapshot(_raw_context())
 
 
+def _context_v4() -> dict:
+    raw_context = _raw_context()
+    raw_context["semantic_agent_version"] = (
+        "v2.0-ducklake-query-generator-semantic-operations-v4"
+    )
+    raw_context["entidades"].extend(
+        [
+            {
+                "entity_type": "dimension",
+                "user_term": "unidade",
+                "canonical_value": "unidade",
+                "target_table": "main_gold.gold_unidade_negocio",
+                "target_column": "nk_unide_neg",
+                "sql_filter_hint": None,
+                "business_rule": {
+                    "source": "versioned_semantic_context",
+                    "dimension_mapping": {
+                        "evidence": [
+                            "gold_unidade_negocio.nk_unide_neg e chave de negocio confirmada"
+                        ],
+                    },
+                },
+                "priority": 5,
+            },
+            {
+                "entity_type": "dimension",
+                "user_term": "marca",
+                "canonical_value": "marca",
+                "target_table": "main_gold.gold_unidade_negocio",
+                "target_column": "marca",
+                "sql_filter_hint": None,
+                "business_rule": {
+                    "source": "versioned_semantic_context",
+                    "dimension_mapping": {
+                        "evidence": [
+                            "gold_unidade_negocio.marca consta como coluna catalogada"
+                        ],
+                    },
+                },
+                "priority": 5,
+            },
+        ]
+    )
+    return normalize_context_snapshot(raw_context)
+
+
 def _resolve(question: str, context: dict | None = None) -> dict:
     selected_context = _context() if context is None else context
     return resolve_intent(
@@ -892,6 +944,59 @@ def test_planner_promove_dimensao_marca_com_contexto_versionado() -> None:
     assert any(column["name"] == "marca" for column in columns)
 
 
+def test_planner_v4_promove_unidade_por_mapping_explicito() -> None:
+    context = _context_v4()
+    resolution = _resolve(
+        "Mostre os custos por unidade no periodo passado.",
+        context,
+    )
+    assert resolution["applied"] is True
+    assert resolution["intent"] == GENERIC_INTENT
+
+    plan_result = build_query_plan(
+        context=context,
+        intent_name=resolution["intent"],
+        intent_confidence=resolution["intent_confidence"],
+        normalized_question=resolution["normalized_question"],
+    )
+    projection = plan_result["query_plan"]["planning_context"]
+    dimension = projection["detected_dimensions"][0]
+    columns = projection["relevant_columns"]["main_gold.gold_unidade_negocio"]
+
+    assert dimension["canonical_value"] == "unidade"
+    assert dimension["target_table"] == "main_gold.gold_unidade_negocio"
+    assert dimension["target_column"] == "nk_unide_neg"
+    assert dimension["grouping_requested"] is True
+    assert dimension["source"] == "entity_alias"
+    assert dimension["target_column"] != "sk"
+    assert any(column["name"] == "nk_unide_neg" for column in columns)
+
+
+def test_planner_v4_promove_marca_por_mapping_explicito() -> None:
+    context = _context_v4()
+    resolution = _resolve(
+        "Qual foi a receita por marca no mes passado?",
+        context,
+    )
+    assert resolution["applied"] is True
+    assert resolution["intent"] == GENERIC_INTENT
+
+    plan_result = build_query_plan(
+        context=context,
+        intent_name=resolution["intent"],
+        intent_confidence=resolution["intent_confidence"],
+        normalized_question=resolution["normalized_question"],
+    )
+    projection = plan_result["query_plan"]["planning_context"]
+    dimension = projection["detected_dimensions"][0]
+
+    assert dimension["canonical_value"] == "marca"
+    assert dimension["target_table"] == "main_gold.gold_unidade_negocio"
+    assert dimension["target_column"] == "marca"
+    assert dimension["grouping_requested"] is True
+    assert dimension["source"] == "entity_alias"
+
+
 def test_business_question_examples_nao_sao_base_da_v2() -> None:
     sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
 
@@ -937,6 +1042,35 @@ def test_migration_v3_corrige_sk_unid_neg_somente_em_gold_unidade_negocio() -> N
     assert "source.table_name = 'gold_lancamentos_contabeis'" not in sql
     assert "replace(source.ai_hint, 'sk_unid_neg'" not in sql
     assert "replace(source.ai_hint, 'nk_unid_neg'" not in sql
+
+
+def test_migration_v4_deriva_de_v3_e_copia_somente_contexto_ativo() -> None:
+    sql = MIGRATION_V4_PATH.read_text(encoding="utf-8")
+
+    assert "semantic-operations-v3'::text" in sql
+    assert "semantic-operations-v4'::text" in sql
+    assert sql.count("source.is_active = TRUE") == 4
+    assert sql.count("source.is_allowed = TRUE") == 1
+    assert "ON CONFLICT DO NOTHING" in sql
+    assert "ROLLBACK;" not in sql
+    assert sql.rstrip().endswith("COMMIT;")
+
+
+def test_migration_v4_adiciona_mapeamentos_explicitos_de_dimensao() -> None:
+    sql = MIGRATION_V4_PATH.read_text(encoding="utf-8")
+
+    assert "'dimension'" in sql
+    assert "'unidade'" in sql
+    assert "'main_gold.gold_unidade_negocio'" in sql
+    assert "'nk_unide_neg'" in sql
+    assert "'marca'" in sql
+    assert "dimension_mapping" in sql
+    assert "gold_unidade_negocio.sk e chave tecnica, nao dimensao de negocio" in sql
+    assert "business_question_examples" in sql
+    assert "VALUES (" not in sql
+    assert "ai_ducklake_benchmarks" not in sql
+    assert "generated_sql" not in sql
+    assert "expected_sql" not in sql
 
 
 def main() -> None:
@@ -1014,6 +1148,14 @@ def main() -> None:
             test_planner_promove_dimensao_marca_com_contexto_versionado,
         ),
         (
+            "planner v4 promove unidade",
+            test_planner_v4_promove_unidade_por_mapping_explicito,
+        ),
+        (
+            "planner v4 promove marca",
+            test_planner_v4_promove_marca_por_mapping_explicito,
+        ),
+        (
             "examples nao base v2",
             test_business_question_examples_nao_sao_base_da_v2,
         ),
@@ -1028,6 +1170,14 @@ def main() -> None:
         (
             "migration v3 unidade",
             test_migration_v3_corrige_sk_unid_neg_somente_em_gold_unidade_negocio,
+        ),
+        (
+            "migration v4 ativa",
+            test_migration_v4_deriva_de_v3_e_copia_somente_contexto_ativo,
+        ),
+        (
+            "migration v4 dimensoes",
+            test_migration_v4_adiciona_mapeamentos_explicitos_de_dimensao,
         ),
     ]
 
