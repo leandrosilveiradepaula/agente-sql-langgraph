@@ -127,6 +127,19 @@ class IntentCatalogTermEvaluation(TypedDict):
     match_details: dict[str, Any] | None
 
 
+class SemanticSignal(TypedDict):
+    """
+    Evidência semântica extraída de termos já versionados no contexto.
+    """
+
+    concept_name: str
+    term: str
+    normalized_term: str
+    source: str
+    confidence: float
+    matched_tokens: list[str]
+
+
 class IntentCatalogConceptEvaluation(TypedDict):
     """
     Resultado determinístico de um conceito composto.
@@ -138,6 +151,7 @@ class IntentCatalogConceptEvaluation(TypedDict):
     matched_term_count: int
     satisfied: bool
     terms: list[IntentCatalogTermEvaluation]
+    semantic_signals: list[SemanticSignal]
 
 
 class IntentCatalogRuleEvaluation(TypedDict):
@@ -1003,10 +1017,15 @@ def _evaluate_catalog_rule(
     normalized_question: str,
     rule: IntentCatalogRule,
 ) -> IntentCatalogRuleEvaluation:
+    protected_token_indexes = _protected_dimension_token_indexes(
+        normalized_question,
+        rule["concepts"],
+    )
     concept_evaluations = [
         _evaluate_catalog_concept(
             normalized_question,
             concept,
+            protected_token_indexes=protected_token_indexes,
         )
         for concept in rule["concepts"]
     ]
@@ -1036,19 +1055,73 @@ def _evaluate_catalog_rule(
 def _evaluate_catalog_concept(
     normalized_question: str,
     concept: IntentCatalogConcept,
+    *,
+    protected_token_indexes: set[int] | None = None,
 ) -> IntentCatalogConceptEvaluation:
     term_evaluations: list[IntentCatalogTermEvaluation] = []
+    semantic_signals: list[SemanticSignal] = []
+    protected = protected_token_indexes or set()
 
     for raw_term, normalized_term in zip(
         concept["terms"],
         concept["normalized_terms"],
         strict=True,
     ):
-        match_result = _match_configured_rule(
-            normalized_question,
-            normalized_term,
-            concept["match_mode"],
-        )
+        if _requires_semantic_token_match(concept):
+            match_result = _match_catalog_term_semantically(
+                normalized_question,
+                normalized_term,
+                protected_token_indexes=(
+                    protected
+                    if concept["concept_name"]
+                    != "dimension_grouping"
+                    else set()
+                ),
+            )
+        else:
+            match_result = _match_configured_rule(
+                normalized_question,
+                normalized_term,
+                concept["match_mode"],
+            )
+            if not match_result["matched"]:
+                match_result = _match_catalog_term_semantically(
+                    normalized_question,
+                    normalized_term,
+                    protected_token_indexes=(
+                        protected
+                        if concept["concept_name"]
+                        != "dimension_grouping"
+                        else set()
+                    ),
+                )
+        if match_result["matched"]:
+            details = match_result["details"] or {}
+            semantic_signal = details.get("semantic_signal")
+            if isinstance(semantic_signal, Mapping):
+                semantic_signals.append(
+                    {
+                        "concept_name": concept["concept_name"],
+                        "term": raw_term,
+                        "normalized_term": normalized_term,
+                        "source": str(
+                            semantic_signal.get(
+                                "source",
+                                match_result["strategy"],
+                            )
+                        ),
+                        "confidence": float(
+                            semantic_signal.get("confidence", 1.0)
+                        ),
+                        "matched_tokens": [
+                            str(token)
+                            for token in semantic_signal.get(
+                                "matched_tokens",
+                                [],
+                            )
+                        ],
+                    }
+                )
         term_evaluations.append(
             {
                 "term": raw_term,
@@ -1078,7 +1151,175 @@ def _evaluate_catalog_concept(
             >= concept["minimum_term_matches"]
         ),
         "terms": term_evaluations,
+        "semantic_signals": semantic_signals,
     }
+
+
+_SEMANTIC_RELATION_TOKENS = {
+    "a",
+    "as",
+    "by",
+    "de",
+    "do",
+    "dos",
+    "das",
+    "e",
+    "em",
+    "entre",
+    "of",
+    "os",
+    "per",
+    "por",
+}
+_SEMANTIC_MAX_TOKEN_WINDOW = 3
+
+
+def _requires_semantic_token_match(
+    concept: IntentCatalogConcept,
+) -> bool:
+    return (
+        concept["match_mode"] == "contains"
+        and any(
+            len(_semantic_tokens(normalized_term)) == 1
+            for normalized_term in concept["normalized_terms"]
+        )
+    )
+
+
+def _protected_dimension_token_indexes(
+    normalized_question: str,
+    concepts: list[IntentCatalogConcept],
+) -> set[int]:
+    protected: set[int] = set()
+    for concept in concepts:
+        if concept["concept_name"] != "dimension_grouping":
+            continue
+        for normalized_term in concept["normalized_terms"]:
+            match_result = _match_catalog_term_semantically(
+                normalized_question,
+                normalized_term,
+                protected_token_indexes=set(),
+            )
+            if not match_result["matched"]:
+                continue
+            details = match_result["details"] or {}
+            indexes = details.get("matched_token_indexes", [])
+            if isinstance(indexes, list):
+                protected.update(
+                    int(index)
+                    for index in indexes
+                    if isinstance(index, int)
+                )
+    return protected
+
+
+def _match_catalog_term_semantically(
+    normalized_question: str,
+    normalized_term: str,
+    *,
+    protected_token_indexes: set[int],
+) -> _MatchResult:
+    question_tokens = _semantic_tokens(normalized_question)
+    term_tokens = _semantic_tokens(normalized_term)
+
+    if not question_tokens or not term_tokens:
+        return {
+            "matched": False,
+            "strategy": "configured_match",
+            "details": None,
+        }
+
+    selected_indexes: list[int] = []
+    selected_tokens: list[str] = []
+    consumed_indexes: set[int] = set()
+    next_start_index = 0
+
+    for term_token in term_tokens:
+        selected_index: int | None = None
+        selected_question_token: str | None = None
+        for index, question_token in enumerate(
+            question_tokens[next_start_index:],
+            start=next_start_index,
+        ):
+            if (
+                index in consumed_indexes
+                or index in protected_token_indexes
+            ):
+                continue
+            if _semantic_tokens_equivalent(
+                question_token,
+                term_token,
+            ):
+                selected_index = index
+                selected_question_token = question_token
+                break
+
+        if selected_index is None or selected_question_token is None:
+            return {
+                "matched": False,
+                "strategy": "configured_match",
+                "details": None,
+            }
+        consumed_indexes.add(selected_index)
+        selected_indexes.append(selected_index)
+        selected_tokens.append(selected_question_token)
+        next_start_index = selected_index + 1
+
+    if (
+        len(selected_indexes) > 1
+        and selected_indexes[-1] - selected_indexes[0] + 1
+        > _SEMANTIC_MAX_TOKEN_WINDOW
+    ):
+        return {
+            "matched": False,
+            "strategy": "configured_match",
+            "details": None,
+        }
+
+    return {
+        "matched": True,
+        "strategy": "configured_match",
+        "details": {
+            "match_mode": "semantic_token_concept",
+            "matched_token_indexes": selected_indexes,
+            "semantic_signal": {
+                "source": "intent_catalog_concept",
+                "confidence": 1.0,
+                "matched_tokens": selected_tokens,
+            },
+        },
+    }
+
+
+def _semantic_tokens(value: str) -> list[str]:
+    return [
+        _semantic_token_root(token)
+        for token in tokenize_search_text(value)
+        if token not in _SEMANTIC_RELATION_TOKENS
+    ]
+
+
+def _semantic_tokens_equivalent(
+    question_token: str,
+    term_token: str,
+) -> bool:
+    return _semantic_token_root(question_token) == _semantic_token_root(
+        term_token
+    )
+
+
+def _semantic_token_root(token: str) -> str:
+    if len(token) <= 3:
+        return token
+    if token.endswith("oes") and len(token) > 5:
+        return token[:-3] + "ao"
+    if (
+        token.endswith("s")
+        and len(token) > 4
+        and not token.endswith(("ss", "us", "is"))
+    ):
+        return token[:-1]
+    return token
 
 
 def _apply_catalog_evaluation(

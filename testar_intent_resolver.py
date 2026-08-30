@@ -916,6 +916,269 @@ def test_rejeita_catalogo_fora_do_contrato_validado() -> None:
         )
 
 
+def _semantic_metric_context() -> dict:
+    concepts = {
+        "metric": _concept(
+            concept_name="metric",
+            terms=["amount", "revenue"],
+        ),
+        "dimension": _concept(
+            concept_name="dimension_grouping",
+            terms=["by region", "by channel", "by cost center"],
+        ),
+        "period": _concept(
+            concept_name="period",
+            terms=["last period"],
+        ),
+        "operation": _concept(
+            concept_name="operation",
+            terms=["total", "distributed", "highest", "compare"],
+        ),
+    }
+
+    return _context(
+        [],
+        intent_catalog=[
+            _catalog_entry(
+                intent_name="synthetic_metric",
+                rules=[
+                    _rule(
+                        rule_name="semantic_require",
+                        effect="require",
+                        concepts=list(concepts.values()),
+                        minimum_concept_matches=2,
+                    ),
+                    _rule(
+                        rule_name="metric_dimension_period",
+                        effect="positive_score",
+                        concepts=[
+                            concepts["metric"],
+                            concepts["dimension"],
+                            concepts["period"],
+                        ],
+                        minimum_concept_matches=3,
+                        score=130,
+                    ),
+                    _rule(
+                        rule_name="metric_operation_period",
+                        effect="positive_score",
+                        concepts=[
+                            concepts["metric"],
+                            concepts["operation"],
+                            concepts["period"],
+                        ],
+                        minimum_concept_matches=3,
+                        score=125,
+                    ),
+                    _rule(
+                        rule_name="metric_operation_dimension",
+                        effect="positive_score",
+                        concepts=[
+                            concepts["metric"],
+                            concepts["operation"],
+                            concepts["dimension"],
+                        ],
+                        minimum_concept_matches=3,
+                        score=120,
+                    ),
+                ],
+            )
+        ],
+    )
+
+
+def test_reconhece_dimensao_sem_frase_literal_by() -> None:
+    result = resolve_intent(
+        "amount distributed across regions last period",
+        _semantic_metric_context(),
+    )
+
+    assert result["applied"] is True
+    assert result["intent"] == "synthetic_metric"
+    best = result["best_candidate"]
+    assert best is not None
+    matched = _matched_catalog_concepts(best)
+    assert "by region" in matched["dimension_grouping"]
+    assert "distributed" in matched["operation"]
+
+
+def test_reconhece_ranking_com_dimensao_sem_lookup_literal() -> None:
+    result = resolve_intent(
+        "highest amounts among regions last period",
+        _semantic_metric_context(),
+    )
+
+    assert result["applied"] is True
+    best = result["best_candidate"]
+    assert best is not None
+    matched = _matched_catalog_concepts(best)
+    assert "by region" in matched["dimension_grouping"]
+    assert "highest" in matched["operation"]
+
+
+def test_reconhece_comparacao_com_dimensao_sem_lookup_literal() -> None:
+    result = resolve_intent(
+        "compare amount across channels last period",
+        _semantic_metric_context(),
+    )
+
+    assert result["applied"] is True
+    best = result["best_candidate"]
+    assert best is not None
+    matched = _matched_catalog_concepts(best)
+    assert "by channel" in matched["dimension_grouping"]
+    assert "compare" in matched["operation"]
+
+
+def test_nao_extrai_metrica_de_termo_composto_de_dimensao() -> None:
+    result = resolve_intent(
+        "last period by cost center",
+        _semantic_metric_context(),
+    )
+
+    assert result["applied"] is False
+    metric_entry = result["intent_catalog"]["evaluations"][0]
+    metric_terms = [
+        term
+        for rule in metric_entry["rules"]
+        for concept in rule["concepts"]
+        if concept["concept_name"] == "metric"
+        for term in concept["terms"]
+        if term["matched"]
+    ]
+    assert metric_terms == []
+
+
+def test_metrica_periodo_sem_dimensao_continua_valida() -> None:
+    result = resolve_intent(
+        "total revenue last period",
+        _semantic_metric_context(),
+    )
+
+    assert result["applied"] is True
+    assert result["intent"] == "synthetic_metric"
+    best = result["best_candidate"]
+    assert best is not None
+    matched = _matched_catalog_concepts(best)
+    assert "revenue" in matched["metric"]
+    assert "dimension_grouping" not in matched
+
+
+def test_pergunta_desconhecida_nao_ganha_sinais_artificiais() -> None:
+    result = resolve_intent(
+        "explain the deployment status",
+        _semantic_metric_context(),
+    )
+
+    assert result["applied"] is False
+    assert result["candidates"] == []
+
+
+def _semantic_alpha_beta_context() -> dict:
+    concept = _concept(
+        concept_name="synthetic_concept",
+        terms=["alpha beta"],
+    )
+    return _context(
+        [],
+        intent_catalog=[
+            _catalog_entry(
+                intent_name="synthetic_intent",
+                rules=[
+                    _rule(
+                        rule_name="alpha_beta_score",
+                        effect="positive_score",
+                        concepts=[concept],
+                        score=120,
+                    )
+                ],
+            )
+        ],
+    )
+
+
+def test_termo_composto_nao_casa_tokens_invertidos() -> None:
+    result = resolve_intent(
+        "beta unrelated words alpha",
+        _semantic_alpha_beta_context(),
+    )
+
+    assert result["applied"] is False
+    assert result["candidates"] == []
+
+
+def test_termo_composto_casa_tokens_em_ordem_adjacente() -> None:
+    result = resolve_intent(
+        "alpha beta",
+        _semantic_alpha_beta_context(),
+    )
+
+    assert result["applied"] is True
+    assert result["intent"] == "synthetic_intent"
+
+
+def test_termo_composto_casa_tokens_em_janela_curta() -> None:
+    result = resolve_intent(
+        "alpha nearby beta",
+        _semantic_alpha_beta_context(),
+    )
+
+    assert result["applied"] is True
+    assert result["intent"] == "synthetic_intent"
+
+
+def test_pluralizacao_nao_cria_equivalencia_artificial() -> None:
+    context = _context(
+        [],
+        intent_catalog=[
+            _catalog_entry(
+                intent_name="synthetic_intent",
+                rules=[
+                    _rule(
+                        rule_name="status_score",
+                        effect="positive_score",
+                        concepts=[
+                            _concept(
+                                concept_name="synthetic_concept",
+                                terms=["status"],
+                            )
+                        ],
+                        score=120,
+                    )
+                ],
+            )
+        ],
+    )
+
+    result = resolve_intent(
+        "statu",
+        context,
+    )
+
+    assert result["applied"] is False
+    assert result["candidates"] == []
+
+
+def _matched_catalog_concepts(
+    candidate: dict,
+) -> dict[str, list[str]]:
+    matched: dict[str, list[str]] = {}
+    for item in candidate["matches"]:
+        details = item.get("match_details") or {}
+        for concept in details.get("concepts", []):
+            terms = [
+                term["term"]
+                for term in concept["terms"]
+                if term["matched"]
+            ]
+            if terms:
+                matched.setdefault(
+                    concept["concept_name"],
+                    [],
+                ).extend(terms)
+    return matched
+
+
 def main() -> None:
     tests = [
         (
@@ -1009,6 +1272,46 @@ def main() -> None:
         (
             "rejeita catálogo fora do contrato",
             test_rejeita_catalogo_fora_do_contrato_validado,
+        ),
+        (
+            "reconhece dimensão sem frase literal by",
+            test_reconhece_dimensao_sem_frase_literal_by,
+        ),
+        (
+            "reconhece ranking com dimensão",
+            test_reconhece_ranking_com_dimensao_sem_lookup_literal,
+        ),
+        (
+            "reconhece comparação com dimensão",
+            test_reconhece_comparacao_com_dimensao_sem_lookup_literal,
+        ),
+        (
+            "não extrai métrica de dimensão composta",
+            test_nao_extrai_metrica_de_termo_composto_de_dimensao,
+        ),
+        (
+            "métrica período sem dimensão continua válida",
+            test_metrica_periodo_sem_dimensao_continua_valida,
+        ),
+        (
+            "pergunta desconhecida não ganha sinais artificiais",
+            test_pergunta_desconhecida_nao_ganha_sinais_artificiais,
+        ),
+        (
+            "termo composto não casa tokens invertidos",
+            test_termo_composto_nao_casa_tokens_invertidos,
+        ),
+        (
+            "termo composto casa tokens adjacentes",
+            test_termo_composto_casa_tokens_em_ordem_adjacente,
+        ),
+        (
+            "termo composto casa janela curta",
+            test_termo_composto_casa_tokens_em_janela_curta,
+        ),
+        (
+            "pluralização não cria equivalência artificial",
+            test_pluralizacao_nao_cria_equivalencia_artificial,
         ),
     ]
 
