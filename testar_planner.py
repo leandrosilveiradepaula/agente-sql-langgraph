@@ -759,6 +759,213 @@ def test_alias_contextual_explicito_resolve_dimensao_sem_fallback_pk() -> None:
     assert dimension["target_column"] not in {"id", "code"}
 
 
+def test_dimensao_explicita_vence_alias_legado_com_prioridade_menor() -> None:
+    context = _dimension_context()
+    context["intent_resolution"]["intent_catalog"][0]["business_rule"][
+        "intent_catalog"
+    ]["rules"][0]["concepts"][0]["terms"].append("por market")
+    context["entities"].extend(
+        [
+            {
+                "entity_type": "dimension",
+                "user_term": "market",
+                "canonical_value": "market",
+                "target_table": "schema_test.dim_market",
+                "target_column": "market_code",
+                "sql_filter_hint": None,
+                "business_rule": None,
+                "priority": 10,
+            },
+            {
+                "entity_type": "location",
+                "user_term": "market",
+                "canonical_value": "market",
+                "target_table": "schema_test.dim_market",
+                "target_column": "market_name",
+                "sql_filter_hint": None,
+                "business_rule": None,
+                "priority": 1,
+            },
+        ]
+    )
+    context["table_catalog"].append(
+        {
+            "schema_name": "schema_test",
+            "table_name": "dim_market",
+            "table_type": "table",
+            "description": "market dimension",
+            "grain": None,
+            "primary_key": ["market_id"],
+            "key_columns": ["market_id", "market_code", "market_name"],
+            "metric_columns": [],
+            "date_columns": [],
+            "join_rules": [{"target_table": "schema_test.table_test"}],
+            "ai_hint": None,
+            "priority": 1,
+            "columns": [
+                {"name": "market_id"},
+                {"name": "market_code"},
+                {"name": "market_name"},
+            ],
+        }
+    )
+
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total amount por market",
+    )
+
+    dimension = result["query_plan"]["planning_context"][
+        "detected_dimensions"
+    ][0]
+
+    assert dimension["canonical_value"] == "market"
+    assert dimension["target_table"] == "schema_test.dim_market"
+    assert dimension["target_column"] == "market_code"
+    assert dimension["priority"] == 10
+
+
+def test_alias_legado_resolve_dimensao_quando_nao_ha_dimension_explicita() -> None:
+    context = _dimension_context()
+    context["intent_resolution"]["intent_catalog"][0]["business_rule"][
+        "intent_catalog"
+    ]["rules"][0]["concepts"][0]["terms"].append("por segment")
+    context["entities"].append(
+        {
+            "entity_type": "classification",
+            "user_term": "segment",
+            "canonical_value": "segment",
+            "target_table": "schema_test.dim_segment",
+            "target_column": "segment_name",
+            "sql_filter_hint": None,
+            "business_rule": None,
+            "priority": 1,
+        }
+    )
+    context["table_catalog"].append(
+        {
+            "schema_name": "schema_test",
+            "table_name": "dim_segment",
+            "table_type": "table",
+            "description": "segment dimension",
+            "grain": None,
+            "primary_key": ["segment_id"],
+            "key_columns": ["segment_id", "segment_name"],
+            "metric_columns": [],
+            "date_columns": [],
+            "join_rules": [{"target_table": "schema_test.table_test"}],
+            "ai_hint": None,
+            "priority": 1,
+            "columns": [
+                {"name": "segment_id"},
+                {"name": "segment_name"},
+            ],
+        }
+    )
+
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total amount por segment",
+    )
+
+    dimension = result["query_plan"]["planning_context"][
+        "detected_dimensions"
+    ][0]
+
+    assert dimension["canonical_value"] == "segment"
+    assert dimension["target_column"] == "segment_name"
+    assert dimension["source"] == "entity_alias"
+
+
+def test_dimension_explicita_sem_match_nao_bloqueia_fallback_legado() -> None:
+    context = _dimension_context()
+    context["intent_resolution"]["intent_catalog"][0]["business_rule"][
+        "intent_catalog"
+    ]["rules"][0]["concepts"][0]["terms"].append("por segment")
+    context["entities"].extend(
+        [
+            {
+                "entity_type": "dimension",
+                "user_term": "market",
+                "canonical_value": "market",
+                "target_table": "schema_test.dim_market",
+                "target_column": "market_code",
+                "sql_filter_hint": None,
+                "business_rule": None,
+                "priority": 1,
+            },
+            {
+                "entity_type": "classification",
+                "user_term": "segment",
+                "canonical_value": "segment",
+                "target_table": "schema_test.dim_segment",
+                "target_column": "segment_name",
+                "sql_filter_hint": None,
+                "business_rule": None,
+                "priority": 1,
+            },
+        ]
+    )
+    context["table_catalog"].extend(
+        [
+            {
+                "schema_name": "schema_test",
+                "table_name": "dim_market",
+                "table_type": "table",
+                "description": "market dimension",
+                "grain": None,
+                "primary_key": ["market_id"],
+                "key_columns": ["market_id", "market_code"],
+                "metric_columns": [],
+                "date_columns": [],
+                "join_rules": [{"target_table": "schema_test.table_test"}],
+                "ai_hint": None,
+                "priority": 1,
+                "columns": [
+                    {"name": "market_id"},
+                    {"name": "market_code"},
+                ],
+            },
+            {
+                "schema_name": "schema_test",
+                "table_name": "dim_segment",
+                "table_type": "table",
+                "description": "segment dimension",
+                "grain": None,
+                "primary_key": ["segment_id"],
+                "key_columns": ["segment_id", "segment_name"],
+                "metric_columns": [],
+                "date_columns": [],
+                "join_rules": [{"target_table": "schema_test.table_test"}],
+                "ai_hint": None,
+                "priority": 1,
+                "columns": [
+                    {"name": "segment_id"},
+                    {"name": "segment_name"},
+                ],
+            },
+        ]
+    )
+
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total amount por segment",
+    )
+
+    dimension = result["query_plan"]["planning_context"][
+        "detected_dimensions"
+    ][0]
+
+    assert dimension["canonical_value"] == "segment"
+    assert dimension["target_column"] == "segment_name"
+
+
 def main() -> None:
     tests = [
         ("seleciona padrao unico", test_seleciona_padrao_unico),
@@ -832,6 +1039,18 @@ def main() -> None:
         (
             "alias contextual resolve dimensao",
             test_alias_contextual_explicito_resolve_dimensao_sem_fallback_pk,
+        ),
+        (
+            "dimensao explicita vence legado",
+            test_dimensao_explicita_vence_alias_legado_com_prioridade_menor,
+        ),
+        (
+            "fallback legado preservado",
+            test_alias_legado_resolve_dimensao_quando_nao_ha_dimension_explicita,
+        ),
+        (
+            "dimension sem match permite fallback",
+            test_dimension_explicita_sem_match_nao_bloqueia_fallback_legado,
         ),
     ]
 

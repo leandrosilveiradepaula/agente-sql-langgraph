@@ -822,12 +822,14 @@ def _resolve_dimension_from_entities(
     if not isinstance(entities, list):
         return None
 
-    candidates: list[tuple[float, ProjectedDimension]] = []
+    explicit_candidates: list[tuple[float, ProjectedDimension]] = []
+    fallback_candidates: list[tuple[float, ProjectedDimension]] = []
     dimension_tokens = _search_tokens(dimension_term)
     for entity in entities:
         if not isinstance(entity, Mapping):
             continue
-        if str(entity.get("entity_type", "")).casefold() == "intent_definition":
+        entity_type = str(entity.get("entity_type", "")).casefold()
+        if entity_type == "intent_definition":
             continue
         target_table = entity.get("target_table")
         target_column = entity.get("target_column")
@@ -855,22 +857,25 @@ def _resolve_dimension_from_entities(
         )
         if score <= 0:
             continue
-        candidates.append(
-            (
-                score,
-                {
-                    "canonical_value": str(entity.get("canonical_value", "")),
-                    "matched_user_term": matched_user_term,
-                    "target_table": target_table,
-                    "target_column": target_column,
-                    "grouping_requested": True,
-                    "source": "entity_alias",
-                    "priority": _optional_int(entity.get("priority")),
-                    "confidence": score,
-                },
-            )
+        candidate = (
+            score,
+            {
+                "canonical_value": str(entity.get("canonical_value", "")),
+                "matched_user_term": matched_user_term,
+                "target_table": target_table,
+                "target_column": target_column,
+                "grouping_requested": True,
+                "source": "entity_alias",
+                "priority": _optional_int(entity.get("priority")),
+                "confidence": score,
+            },
         )
+        if entity_type == "dimension":
+            explicit_candidates.append(candidate)
+        else:
+            fallback_candidates.append(candidate)
 
+    candidates = explicit_candidates or fallback_candidates
     if not candidates:
         return None
     return sorted(
