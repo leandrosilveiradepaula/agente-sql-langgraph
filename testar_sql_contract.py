@@ -116,6 +116,70 @@ def _dimension_test_plan() -> dict:
     return plan
 
 
+def _with_grouping_dimension() -> dict:
+    plan = _dimension_test_plan()
+    plan["planning_context"]["detected_dimensions"] = [
+        {
+            "canonical_value": "dimension_test",
+            "target_table": "schema_test.dimension_test",
+            "target_column": "business_key",
+            "grouping_requested": True,
+            "source": "entity_alias",
+        }
+    ]
+    return plan
+
+
+def _with_cross_schema_grouping_dimension() -> dict:
+    plan = deepcopy(_query_plan())
+    projection = plan["planning_context"]
+    tables = []
+    relevant_columns = {}
+    for schema_name in ("schema_a", "schema_b"):
+        qualified_name = f"{schema_name}.dimension_test"
+        table = {
+            "schema_name": schema_name,
+            "table_name": "dimension_test",
+            "qualified_name": qualified_name,
+            "primary_key": ["pk_id"],
+            "key_columns": ["pk_id", "business_key"],
+            "metric_columns": [],
+            "date_columns": [],
+            "join_rules": [],
+            "columns": [
+                {"name": "pk_id"},
+                {"name": "business_key"},
+            ],
+        }
+        tables.append(table)
+        relevant_columns[qualified_name] = [
+            {"name": "pk_id"},
+            {"name": "business_key"},
+        ]
+    projection["required_tables"] = tables
+    projection["relevant_columns"] = relevant_columns
+    projection["allowed_schemas"] = ["schema_a", "schema_b"]
+    projection["authorized_joins"] = [
+        {
+            "source_table": "schema_a.dimension_test",
+            "join_rules": [
+                {"target_table": "schema_b.dimension_test"}
+            ],
+            "interpretation": "synthetic_cross_schema_join",
+        }
+    ]
+    projection["detected_dimensions"] = [
+        {
+            "canonical_value": "dimension_test",
+            "target_table": "schema_a.dimension_test",
+            "target_column": "business_key",
+            "grouping_requested": True,
+            "source": "entity_alias",
+        }
+    ]
+    return plan
+
+
 def test_contrato_valido_aprovado() -> None:
     result = _run("SELECT id, value FROM schema_test.table_test")
 
@@ -453,6 +517,94 @@ def test_tabela_sintetica_valida_chaves_sem_replace_automatico() -> None:
     assert invalid["columns"][0]["column"] == "invalid_key"
 
 
+def test_dimensao_planejada_agrupada_por_coluna_alvo_aprova() -> None:
+    result = _run(
+        "SELECT d.business_key, COUNT(*) "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key",
+        _with_grouping_dimension(),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "grouping_dimensions") == "passed"
+
+
+def test_dimensao_planejada_aceita_alias_sql_da_tabela() -> None:
+    result = _run(
+        "SELECT dim.business_key, COUNT(*) "
+        "FROM schema_test.dimension_test dim "
+        "GROUP BY dim.business_key",
+        _with_grouping_dimension(),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "grouping_dimensions") == "passed"
+
+
+def test_dimensao_planejada_rejeita_outra_coluna_fisica_valida() -> None:
+    result = _run(
+        "SELECT d.label, COUNT(*) "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.label",
+        _with_grouping_dimension(),
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["code"] == "SQL_CONTRACT_GROUPING_DIMENSION_MISMATCH"
+        for error in result["errors"]
+    )
+
+
+def test_dimensao_planejada_rejeita_group_by_ausente() -> None:
+    result = _run(
+        "SELECT COUNT(*) FROM schema_test.dimension_test d",
+        _with_grouping_dimension(),
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["code"] == "SQL_CONTRACT_GROUPING_DIMENSION_MISMATCH"
+        for error in result["errors"]
+    )
+
+
+def test_sem_dimensao_planejada_nao_exige_group_by() -> None:
+    result = _run(
+        "SELECT COUNT(*) FROM schema_test.dimension_test d",
+        _dimension_test_plan(),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "grouping_dimensions") == "passed"
+
+
+def test_dimensao_planejada_rejeita_colisao_basename_cross_schema() -> None:
+    result = _run(
+        "SELECT b.business_key, COUNT(*) "
+        "FROM schema_a.dimension_test a "
+        "INNER JOIN schema_b.dimension_test b ON b.pk_id = a.pk_id "
+        "GROUP BY b.business_key",
+        _with_cross_schema_grouping_dimension(),
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["code"] == "SQL_CONTRACT_GROUPING_DIMENSION_MISMATCH"
+        for error in result["errors"]
+    )
+
+
+def _check_status_by_name(result: dict, name: str) -> str:
+    matches = [
+        check["status"]
+        for check in result["checks"]
+        if check["name"] == name
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
 def test_diagnostico_determinismo_e_sem_mutacao() -> None:
     plan = _query_plan()
     original = deepcopy(plan)
@@ -515,6 +667,30 @@ def main() -> None:
         (
             "tabela sintetica chaves",
             test_tabela_sintetica_valida_chaves_sem_replace_automatico,
+        ),
+        (
+            "dimensao planejada coluna alvo",
+            test_dimensao_planejada_agrupada_por_coluna_alvo_aprova,
+        ),
+        (
+            "dimensao planejada alias",
+            test_dimensao_planejada_aceita_alias_sql_da_tabela,
+        ),
+        (
+            "dimensao planejada coluna errada",
+            test_dimensao_planejada_rejeita_outra_coluna_fisica_valida,
+        ),
+        (
+            "dimensao planejada sem group by",
+            test_dimensao_planejada_rejeita_group_by_ausente,
+        ),
+        (
+            "sem dimensao planejada",
+            test_sem_dimensao_planejada_nao_exige_group_by,
+        ),
+        (
+            "dimensao planejada colisao cross-schema",
+            test_dimensao_planejada_rejeita_colisao_basename_cross_schema,
         ),
         ("diagnostico determinismo", test_diagnostico_determinismo_e_sem_mutacao),
     ]

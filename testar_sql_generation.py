@@ -48,6 +48,55 @@ def test_constroi_requisicao_do_query_plan() -> None:
     assert context["pattern_metadata"]["sql_pattern_metadata"] == (
         "SELECT 1"
     )
+    assert context["grouping_dimensions"] == []
+
+
+def test_requisicao_propaga_dimensao_de_agrupamento_planejada() -> None:
+    query_plan = _query_plan()
+    query_plan["planning_context"]["detected_dimensions"] = [
+        {
+            "canonical_value": "dimension_test",
+            "target_table": "schema_test.dimension_test",
+            "target_column": "business_key",
+            "grouping_requested": True,
+            "source": "entity_alias",
+        }
+    ]
+
+    request = build_sql_generation_request(query_plan)
+
+    assert request["generation_context"]["grouping_dimensions"] == [
+        {
+            "canonical_value": "dimension_test",
+            "target_table": "schema_test.dimension_test",
+            "target_column": "business_key",
+            "grouping_requested": True,
+            "source": "entity_alias",
+        }
+    ]
+
+
+def test_requisicao_ignora_dimensao_sem_agrupamento_ou_incompleta() -> None:
+    query_plan = _query_plan()
+    query_plan["planning_context"]["detected_dimensions"] = [
+        {
+            "canonical_value": "not_grouped",
+            "target_table": "schema_test.dimension_test",
+            "target_column": "business_key",
+            "grouping_requested": False,
+            "source": "entity_alias",
+        },
+        {
+            "canonical_value": "missing_column",
+            "target_table": "schema_test.dimension_test",
+            "grouping_requested": True,
+            "source": "entity_alias",
+        },
+    ]
+
+    request = build_sql_generation_request(query_plan)
+
+    assert request["generation_context"]["grouping_dimensions"] == []
 
 
 def test_requisicao_nao_contem_snapshot_catalogo_ou_credenciais() -> None:
@@ -251,6 +300,14 @@ def test_comportamento_deterministico_repetido() -> None:
 def main() -> None:
     tests = [
         ("constroi requisicao", test_constroi_requisicao_do_query_plan),
+        (
+            "propaga dimensao de agrupamento",
+            test_requisicao_propaga_dimensao_de_agrupamento_planejada,
+        ),
+        (
+            "ignora dimensao sem agrupamento ou incompleta",
+            test_requisicao_ignora_dimensao_sem_agrupamento_ou_incompleta,
+        ),
         (
             "sem snapshot catalogo ou credenciais",
             test_requisicao_nao_contem_snapshot_catalogo_ou_credenciais,

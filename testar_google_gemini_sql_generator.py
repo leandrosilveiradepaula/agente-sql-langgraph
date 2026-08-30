@@ -213,6 +213,8 @@ def test_payload_deterministico_e_derivado_da_request() -> None:
     assert first == second
     assert build_gemini_prompt(request) == prompt
     assert request["contract_version"] in prompt
+    assert "grouping_dimensions" in prompt
+    assert "target_table e target_column" in prompt
     assert "GraphState" not in prompt
     assert "authorization" not in prompt.casefold()
     assert "headers" not in prompt.casefold()

@@ -57,6 +57,19 @@ def build_gemini_prompt(request: SqlGenerationRequest) -> str:
             "Nao use Markdown, comentarios, JSON ou explicacoes.",
             "Nao altere o plano recebido.",
             "Respeite integralmente instructions e output_constraints.",
+            (
+                "Quando generation_context.grouping_dimensions indicar "
+                "grouping_requested=true, preserve target_table e "
+                "target_column no SELECT e no GROUP BY."
+            ),
+            (
+                "Nao substitua uma grouping_dimension por outra coluna da "
+                "mesma tabela apenas por parecer mais descritiva."
+            ),
+            (
+                "Se nao puder cumprir uma grouping_dimension planejada, nao "
+                "invente alternativa."
+            ),
             "Use somente os dados contidos em SqlGenerationRequest.",
             "SqlGenerationRequest:",
             request_json,

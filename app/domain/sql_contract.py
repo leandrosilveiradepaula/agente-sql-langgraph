@@ -40,6 +40,7 @@ SqlContractErrorCode = Literal[
     "SQL_CONTRACT_JOIN_VIOLATED",
     "SQL_CONTRACT_LIMIT_VIOLATED",
     "SQL_CONTRACT_WILDCARD_VIOLATED",
+    "SQL_CONTRACT_GROUPING_DIMENSION_MISMATCH",
 ]
 
 
@@ -225,6 +226,12 @@ def run_sql_contract_gate(
 
     table_results = _verify_tables(sql_analysis, policy, findings)
     column_results = _verify_columns(sql_analysis, policy, findings)
+    grouping_results = _verify_grouping_dimensions(
+        sql_analysis,
+        query_plan,
+        policy,
+        findings,
+    )
     join_results = _verify_joins(sql_analysis, query_plan, findings)
     rule_results = _verify_rules(
         sql_token_norms=sql_token_norms,
@@ -247,6 +254,11 @@ def run_sql_contract_gate(
                 "columns",
                 _check_status(column_results),
                 {"count": len(column_results)},
+            ),
+            _check(
+                "grouping_dimensions",
+                _check_status(grouping_results),
+                {"count": len(grouping_results)},
             ),
             _check(
                 "joins",
@@ -390,6 +402,76 @@ def _verify_columns(
                 "table": resolved_table.get("table"),
                 "status": resolved_table["status"],
                 "reason": resolved_table["reason"],
+            }
+        )
+    return sorted(
+        results,
+        key=lambda item: (
+            str(item.get("table") or ""),
+            item["column"],
+            item["reason"],
+        ),
+    )
+
+
+def _verify_grouping_dimensions(
+    analysis: SqlStatementAnalysis,
+    query_plan: QueryPlan,
+    policy: SqlContractPolicy,
+    findings: list[SqlContractFinding],
+) -> list[ColumnVerificationResult]:
+    dimensions = _planned_grouping_dimensions(query_plan)
+    if not dimensions:
+        return []
+
+    allowed = {
+        table: set(columns)
+        for table, columns in policy["allowed_columns"].items()
+    }
+    aliases = _analysis_aliases(analysis, policy)
+    observed = [
+        _observed_grouping_column(column, allowed, aliases)
+        for column in analysis["column_references"]
+        if column.get("clause") == "group" and not column.get("is_wildcard")
+    ]
+
+    results: list[ColumnVerificationResult] = []
+    for dimension in dimensions:
+        target_table = dimension["target_table"].casefold()
+        target_column = dimension["target_column"].casefold()
+        matched = any(
+            item["column"] == target_column
+            and _same_table_reference(target_table, item["table"])
+            for item in observed
+        )
+        if matched:
+            results.append(
+                {
+                    "column": target_column,
+                    "table": target_table,
+                    "status": "satisfied",
+                    "reason": "planned_grouping_dimension_present",
+                }
+            )
+            continue
+        findings.append(
+            _finding(
+                "SQL_CONTRACT_GROUPING_DIMENSION_MISMATCH",
+                "GROUP BY nao preserva dimensao planejada pelo QueryPlan.",
+                details={
+                    "canonical_value": dimension["canonical_value"],
+                    "expected_table": dimension["target_table"],
+                    "expected_column": dimension["target_column"],
+                    "observed_groupings": observed,
+                },
+            )
+        )
+        results.append(
+            {
+                "column": target_column,
+                "table": target_table,
+                "status": "violated",
+                "reason": "planned_grouping_dimension_missing",
             }
         )
     return sorted(
@@ -690,6 +772,69 @@ def _column_on_table(
         "table": table_name,
         "reason": "column_in_projected_catalog",
     }
+
+
+def _planned_grouping_dimensions(
+    query_plan: QueryPlan,
+) -> list[dict[str, str]]:
+    planning_context = _planning_context(query_plan)
+    detected = planning_context.get("detected_dimensions", [])
+    if not isinstance(detected, list):
+        return []
+    dimensions: list[dict[str, str]] = []
+    for item in detected:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("grouping_requested") is not True:
+            continue
+        target_table = _clean_text(item.get("target_table"))
+        target_column = _clean_text(item.get("target_column"))
+        if not target_table or not target_column:
+            continue
+        dimensions.append(
+            {
+                "canonical_value": _clean_text(item.get("canonical_value")),
+                "target_table": target_table,
+                "target_column": target_column,
+            }
+        )
+    return sorted(
+        dimensions,
+        key=lambda dimension: (
+            dimension["canonical_value"].casefold(),
+            dimension["target_table"].casefold(),
+            dimension["target_column"].casefold(),
+        ),
+    )
+
+
+def _observed_grouping_column(
+    column: SqlColumnReference,
+    allowed: dict[str, set[str]],
+    aliases: dict[str, str],
+) -> dict[str, str | None]:
+    resolved = _resolve_column_table(column, allowed, aliases)
+    return {
+        "column": column["column"].casefold(),
+        "table": resolved.get("table"),
+        "qualifier": column.get("qualifier"),
+        "resolution": resolved["reason"],
+    }
+
+
+def _same_table_reference(
+    expected_table: str,
+    observed_table: str | None,
+) -> bool:
+    if not observed_table:
+        return False
+    expected = expected_table.casefold()
+    observed = observed_table.casefold()
+    return expected == observed
+
+
+def _clean_text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _resolved_tables(

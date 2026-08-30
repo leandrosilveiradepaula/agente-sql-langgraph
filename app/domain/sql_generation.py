@@ -39,6 +39,14 @@ class SqlGenerationInstruction(TypedDict):
     content: str
 
 
+class GroupingDimension(TypedDict):
+    canonical_value: str
+    target_table: str
+    target_column: str
+    grouping_requested: bool
+    source: str
+
+
 class SqlGenerationContext(TypedDict):
     context_version: str
     context_fingerprint: str
@@ -53,6 +61,7 @@ class SqlGenerationContext(TypedDict):
     authorized_joins: list[dict[str, Any]]
     operational_entities: list[dict[str, Any]]
     dre_mappings: list[dict[str, Any]]
+    grouping_dimensions: list[GroupingDimension]
     pattern_metadata: dict[str, Any]
 
 
@@ -144,6 +153,7 @@ _PLAN_FIELDS_USED = [
     "planning_context.authorized_joins",
     "planning_context.relevant_entities",
     "planning_context.relevant_dre_mappings",
+    "planning_context.detected_dimensions",
     "sql_pattern_metadata",
 ]
 
@@ -265,6 +275,9 @@ def build_sql_generation_request(
                 planning_context.get("relevant_dre_mappings", []),
                 text_fields=("dre_code", "nivel_1_bi"),
                 priority_field="sort_order",
+            ),
+            "grouping_dimensions": _grouping_dimensions(
+                planning_context.get("detected_dimensions", [])
             ),
             "pattern_metadata": {
                 "pattern_name": selected_pattern.get(
@@ -590,6 +603,7 @@ def _validate_request(
         "authorized_joins",
         "operational_entities",
         "dre_mappings",
+        "grouping_dimensions",
     ):
         if not isinstance(context.get(field_name), list):
             raise SqlGenerationInputError(
@@ -676,6 +690,47 @@ def _stable_columns(value: Any) -> dict[str, list[dict[str, Any]]]:
             text_fields=("name",),
         )
     return output
+
+
+def _grouping_dimensions(value: Any) -> list[GroupingDimension]:
+    if not isinstance(value, list):
+        raise SqlGenerationInputError(
+            "detected_dimensions deve ser lista."
+        )
+    output: list[GroupingDimension] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("grouping_requested") is not True:
+            continue
+        target_table = _optional_clean_text(item.get("target_table"))
+        target_column = _optional_clean_text(item.get("target_column"))
+        if not target_table or not target_column:
+            continue
+        output.append(
+            {
+                "canonical_value": _optional_clean_text(
+                    item.get("canonical_value")
+                ),
+                "target_table": target_table,
+                "target_column": target_column,
+                "grouping_requested": True,
+                "source": _optional_clean_text(item.get("source")),
+            }
+        )
+    output.sort(
+        key=lambda dimension: (
+            dimension["canonical_value"].casefold(),
+            dimension["target_table"].casefold(),
+            dimension["target_column"].casefold(),
+            dimension["source"].casefold(),
+        )
+    )
+    return output
+
+
+def _optional_clean_text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _stable_mapping_copy(
