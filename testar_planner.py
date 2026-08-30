@@ -180,6 +180,58 @@ def _context() -> dict:
     }
 
 
+def _intent_dimension_evidence(
+    *,
+    term: str,
+    matched_tokens: list[str],
+) -> dict:
+    return {
+        "applied": True,
+        "intent": "generic_test_intent",
+        "best_candidate": {
+            "intent_name": "generic_test_intent",
+            "score": 120.0,
+            "matches": [
+                {
+                    "pattern": "generic_dimension_rule",
+                    "match_details": {
+                        "concepts": [
+                            {
+                                "concept_name": "dimension_grouping",
+                                "satisfied": True,
+                                "terms": [
+                                    {
+                                        "term": term,
+                                        "normalized_term": term,
+                                        "matched": True,
+                                        "match_details": {
+                                            "semantic_signal": {
+                                                "concept_name": (
+                                                    "dimension_grouping"
+                                                ),
+                                                "term": term,
+                                                "normalized_term": term,
+                                                "source": (
+                                                    "intent_catalog_concept"
+                                                ),
+                                                "confidence": 1.0,
+                                                "matched_tokens": (
+                                                    matched_tokens
+                                                ),
+                                            }
+                                        },
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                }
+            ],
+        },
+        "candidates": [],
+    }
+
+
 def _dimension_context() -> dict:
     context = _context()
     context["intent_resolution"] = {
@@ -647,6 +699,9 @@ def test_promove_dimensao_contextual_para_query_plan() -> None:
     assert dimensions[0]["target_table"] == "schema_test.dim_region"
     assert dimensions[0]["target_column"] == "region_name"
     assert dimensions[0]["grouping_requested"] is True
+    assert dimensions[0]["source"] == "entity_alias"
+    assert dimensions[0]["mapping_source"] == "entity_alias"
+    assert dimensions[0]["detection_source"] == "planner_lexical_fallback"
     assert "schema_test.dim_region" in table_names
     assert "schema_test.dim_region" in projection["relevant_columns"]
 
@@ -665,7 +720,178 @@ def test_promove_dimensoes_sem_lista_de_negocio_no_python() -> None:
     assert dimension["canonical_value"] == "channel"
     assert dimension["target_table"] == "schema_test.dim_channel"
     assert dimension["target_column"] == "channel_name"
+    assert dimension["source"] == "entity_alias"
+    assert dimension["mapping_source"] == "entity_alias"
+    assert dimension["detection_source"] == "planner_lexical_fallback"
     assert "schema_test.dim_channel" in projection["relevant_columns"]
+
+
+def test_evidence_semantica_do_intent_promove_region_sem_por_literal() -> None:
+    result = build_query_plan(
+        context=_dimension_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="amount distributed across regions last period",
+        intent_resolution_result=_intent_dimension_evidence(
+            term="by region",
+            matched_tokens=["region"],
+        ),
+    )
+
+    projection = result["query_plan"]["planning_context"]
+    dimension = projection["detected_dimensions"][0]
+    diagnostic = projection["diagnostics"]["dimension_diagnostic"]
+
+    assert dimension["canonical_value"] == "region"
+    assert dimension["target_table"] == "schema_test.dim_region"
+    assert dimension["target_column"] == "region_name"
+    assert dimension["source"] == "entity_alias"
+    assert dimension["mapping_source"] == "entity_alias"
+    assert dimension["detection_source"] == "intent_semantic_evidence"
+    assert diagnostic["source"] == "intent_semantic_evidence"
+    assert diagnostic["detection_source"] == "intent_semantic_evidence"
+    assert diagnostic["fallback_used"] is False
+
+
+def test_evidence_semantica_do_intent_promove_channel() -> None:
+    result = build_query_plan(
+        context=_dimension_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="highest amounts among channels last period",
+        intent_resolution_result=_intent_dimension_evidence(
+            term="by channel",
+            matched_tokens=["channel"],
+        ),
+    )
+
+    dimension = result["query_plan"]["planning_context"][
+        "detected_dimensions"
+    ][0]
+
+    assert dimension["canonical_value"] == "channel"
+    assert dimension["target_table"] == "schema_test.dim_channel"
+    assert dimension["target_column"] == "channel_name"
+    assert dimension["source"] == "entity_alias"
+    assert dimension["mapping_source"] == "entity_alias"
+    assert dimension["detection_source"] == "intent_semantic_evidence"
+
+
+def test_evidence_semantica_explicita_vence_alias_legado() -> None:
+    context = _dimension_context()
+    context["entities"].extend(
+        [
+            {
+                "entity_type": "dimension",
+                "user_term": "market",
+                "canonical_value": "market",
+                "target_table": "schema_test.dim_market",
+                "target_column": "market_code",
+                "sql_filter_hint": None,
+                "business_rule": None,
+                "priority": 10,
+            },
+            {
+                "entity_type": "classification",
+                "user_term": "market",
+                "canonical_value": "market",
+                "target_table": "schema_test.dim_market",
+                "target_column": "market_name",
+                "sql_filter_hint": None,
+                "business_rule": None,
+                "priority": 1,
+            },
+        ]
+    )
+    context["table_catalog"].append(
+        {
+            "schema_name": "schema_test",
+            "table_name": "dim_market",
+            "table_type": "table",
+            "description": "market dimension",
+            "grain": None,
+            "primary_key": ["market_id"],
+            "key_columns": ["market_id", "market_code", "market_name"],
+            "metric_columns": [],
+            "date_columns": [],
+            "join_rules": [{"target_table": "schema_test.table_test"}],
+            "ai_hint": None,
+            "priority": 1,
+            "columns": [
+                {"name": "market_id"},
+                {"name": "market_code"},
+                {"name": "market_name"},
+            ],
+        }
+    )
+
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total amount across markets",
+        intent_resolution_result=_intent_dimension_evidence(
+            term="by market",
+            matched_tokens=["market"],
+        ),
+    )
+
+    dimension = result["query_plan"]["planning_context"][
+        "detected_dimensions"
+    ][0]
+
+    assert dimension["canonical_value"] == "market"
+    assert dimension["target_column"] == "market_code"
+    assert dimension["source"] == "entity_alias"
+    assert dimension["mapping_source"] == "entity_alias"
+    assert dimension["detection_source"] == "intent_semantic_evidence"
+
+
+def test_evidence_de_outro_conceito_nao_vira_dimensao() -> None:
+    evidence = _intent_dimension_evidence(
+        term="by region",
+        matched_tokens=["region"],
+    )
+    evidence["best_candidate"]["matches"][0]["match_details"]["concepts"][0][
+        "concept_name"
+    ] = "financial_metric"
+
+    result = build_query_plan(
+        context=_dimension_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="amount distributed across regions last period",
+        intent_resolution_result=evidence,
+    )
+
+    projection = result["query_plan"]["planning_context"]
+
+    assert projection["detected_dimensions"] == []
+    assert projection["diagnostics"]["dimension_diagnostic"]["source"] == (
+        "none"
+    )
+
+
+def test_evidence_semantica_incompleta_nao_inventa_dimensao() -> None:
+    evidence = _intent_dimension_evidence(
+        term="by unknown",
+        matched_tokens=[],
+    )
+
+    result = build_query_plan(
+        context=_dimension_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="amount distributed across regions last period",
+        intent_resolution_result=evidence,
+    )
+
+    projection = result["query_plan"]["planning_context"]
+
+    assert projection["detected_dimensions"] == []
+    assert projection["diagnostics"]["dimension_diagnostic"]["source"] == (
+        "none"
+    )
 
 
 def test_sem_dimensao_nao_cria_grouping() -> None:
@@ -683,6 +909,8 @@ def test_sem_dimensao_nao_cria_grouping() -> None:
         "grouping_requested": False,
         "matched_terms": [],
         "unresolved_terms": [],
+        "source": "none",
+        "fallback_used": False,
     }
 
 
@@ -756,6 +984,8 @@ def test_alias_contextual_explicito_resolve_dimensao_sem_fallback_pk() -> None:
     assert dimension["target_table"] == "schema_test.dim_territory"
     assert dimension["target_column"] == "label"
     assert dimension["source"] == "entity_alias"
+    assert dimension["mapping_source"] == "entity_alias"
+    assert dimension["detection_source"] == "planner_lexical_fallback"
     assert dimension["target_column"] not in {"id", "code"}
 
 
@@ -879,6 +1109,8 @@ def test_alias_legado_resolve_dimensao_quando_nao_ha_dimension_explicita() -> No
     assert dimension["canonical_value"] == "segment"
     assert dimension["target_column"] == "segment_name"
     assert dimension["source"] == "entity_alias"
+    assert dimension["mapping_source"] == "entity_alias"
+    assert dimension["detection_source"] == "planner_lexical_fallback"
 
 
 def test_dimension_explicita_sem_match_nao_bloqueia_fallback_legado() -> None:
@@ -1026,6 +1258,26 @@ def main() -> None:
         (
             "promove outra dimensao generica",
             test_promove_dimensoes_sem_lista_de_negocio_no_python,
+        ),
+        (
+            "evidence semantica promove region",
+            test_evidence_semantica_do_intent_promove_region_sem_por_literal,
+        ),
+        (
+            "evidence semantica promove channel",
+            test_evidence_semantica_do_intent_promove_channel,
+        ),
+        (
+            "evidence explicita vence legado",
+            test_evidence_semantica_explicita_vence_alias_legado,
+        ),
+        (
+            "evidence de outro conceito nao vira dimensao",
+            test_evidence_de_outro_conceito_nao_vira_dimensao,
+        ),
+        (
+            "evidence incompleta nao inventa dimensao",
+            test_evidence_semantica_incompleta_nao_inventa_dimensao,
         ),
         ("sem dimensao sem grouping", test_sem_dimensao_nao_cria_grouping),
         (

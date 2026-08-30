@@ -1029,6 +1029,8 @@ def test_planner_v4_promove_unidade_por_mapping_explicito() -> None:
     assert dimension["target_column"] == "nk_unide_neg"
     assert dimension["grouping_requested"] is True
     assert dimension["source"] == "entity_alias"
+    assert dimension["mapping_source"] == "entity_alias"
+    assert dimension["detection_source"] == "planner_lexical_fallback"
     assert dimension["target_column"] != "sk"
     assert any(column["name"] == "nk_unide_neg" for column in columns)
 
@@ -1056,6 +1058,8 @@ def test_planner_v4_promove_marca_por_mapping_explicito() -> None:
     assert dimension["target_column"] == "marca"
     assert dimension["grouping_requested"] is True
     assert dimension["source"] == "entity_alias"
+    assert dimension["mapping_source"] == "entity_alias"
+    assert dimension["detection_source"] == "planner_lexical_fallback"
 
 
 def test_planner_v4_promove_centro_custo_por_mapping_explicito() -> None:
@@ -1082,6 +1086,8 @@ def test_planner_v4_promove_centro_custo_por_mapping_explicito() -> None:
     assert dimension["target_column"] == "nk_centro_custo"
     assert dimension["grouping_requested"] is True
     assert dimension["source"] == "entity_alias"
+    assert dimension["mapping_source"] == "entity_alias"
+    assert dimension["detection_source"] == "planner_lexical_fallback"
     assert dimension["target_column"] != "sk"
     assert any(column["name"] == "nk_centro_custo" for column in columns)
 
@@ -1110,6 +1116,8 @@ def test_planner_v4_promove_conta_por_mapping_explicito() -> None:
     assert dimension["target_column"] == "nk_conta_contabil"
     assert dimension["grouping_requested"] is True
     assert dimension["source"] == "entity_alias"
+    assert dimension["mapping_source"] == "entity_alias"
+    assert dimension["detection_source"] == "planner_lexical_fallback"
     assert dimension["target_column"] not in {"sk", "nivel_1_bi", "nk_conta"}
     assert any(column["name"] == "nk_conta_contabil" for column in columns)
 

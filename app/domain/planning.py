@@ -161,6 +161,8 @@ class ProjectedDimension(TypedDict, total=False):
     target_column: str
     grouping_requested: bool
     source: str
+    detection_source: str
+    mapping_source: str
     priority: int | None
     confidence: float | None
 

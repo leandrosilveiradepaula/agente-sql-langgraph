@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
+from typing import Any
 from typing import cast
 
 from app.domain.context import ContextSnapshot
@@ -39,6 +41,9 @@ def build_plan(
             intent_name=intent_name,
             intent_confidence=state.get("intent_confidence"),
             normalized_question=normalized_question,
+            intent_resolution_result=_dimension_grouping_intent_evidence(
+                state.get("intent_resolution_result")
+            ),
         )
     except PlanningInputError as error:
         return _contract_error_state(
@@ -151,4 +156,77 @@ def _unexpected_error_state(
         "current_stage": "build_plan",
         "final_status": "infrastructure_error",
         "failure_stage": "build_plan",
+    }
+
+
+def _dimension_grouping_intent_evidence(
+    intent_resolution_result: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(intent_resolution_result, Mapping):
+        return None
+
+    projected: dict[str, Any] = {
+        "intent": intent_resolution_result.get("intent"),
+    }
+    best_candidate = _project_dimension_grouping_candidate(
+        intent_resolution_result.get("best_candidate")
+    )
+    if best_candidate is not None:
+        projected["best_candidate"] = best_candidate
+
+    candidates = intent_resolution_result.get("candidates")
+    if isinstance(candidates, list):
+        projected_candidates = [
+            candidate
+            for candidate in (
+                _project_dimension_grouping_candidate(candidate)
+                for candidate in candidates
+            )
+            if candidate is not None
+        ]
+        if projected_candidates:
+            projected["candidates"] = projected_candidates
+
+    if "best_candidate" not in projected and "candidates" not in projected:
+        return None
+    return projected
+
+
+def _project_dimension_grouping_candidate(
+    candidate: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(candidate, Mapping):
+        return None
+
+    matches = candidate.get("matches")
+    if not isinstance(matches, list):
+        return None
+
+    projected_matches: list[dict[str, Any]] = []
+    for match in matches:
+        if not isinstance(match, Mapping):
+            continue
+        details = match.get("match_details")
+        if not isinstance(details, Mapping):
+            continue
+        concepts = details.get("concepts")
+        if not isinstance(concepts, list):
+            continue
+        dimension_concepts = [
+            deepcopy(concept)
+            for concept in concepts
+            if isinstance(concept, Mapping)
+            and str(concept.get("concept_name", "")).casefold()
+            == "dimension_grouping"
+        ]
+        if dimension_concepts:
+            projected_matches.append(
+                {"match_details": {"concepts": dimension_concepts}}
+            )
+
+    if not projected_matches:
+        return None
+    return {
+        "intent_name": candidate.get("intent_name"),
+        "matches": projected_matches,
     }

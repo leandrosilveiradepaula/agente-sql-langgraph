@@ -65,6 +65,7 @@ def build_query_plan(
     intent_name: str | None,
     intent_confidence: float | None,
     normalized_question: str,
+    intent_resolution_result: Mapping[str, Any] | None = None,
 ) -> PlanningBuildResult:
     """
     Constroi um QueryPlan autocontido a partir do ContextSnapshot ja carregado.
@@ -98,6 +99,7 @@ def build_query_plan(
             intent_name=intent_name or "",
             normalized_question=normalized_question,
             selected_pattern=selected_pattern,
+            intent_resolution_result=intent_resolution_result,
         )
     except PlanningRejection as rejection:
         failed_selection = deepcopy(selection)
@@ -273,6 +275,7 @@ def project_planning_context(
     intent_name: str,
     normalized_question: str,
     selected_pattern: SelectedPattern,
+    intent_resolution_result: Mapping[str, Any] | None = None,
 ) -> PlanningContextProjection:
     """
     Projeta somente o necessario para planejamento e proximas fases.
@@ -300,6 +303,7 @@ def project_planning_context(
     dimension_projection, dimension_diagnostic = _detect_grouping_dimensions(
         context=context,
         normalized_question=normalized_question,
+        intent_resolution_result=intent_resolution_result,
     )
     required_table_names = _expand_required_tables_with_dimensions(
         selected_pattern.get("required_tables", []),
@@ -691,7 +695,38 @@ def _detect_grouping_dimensions(
     *,
     context: ContextSnapshot,
     normalized_question: str,
+    intent_resolution_result: Mapping[str, Any] | None = None,
 ) -> tuple[list[ProjectedDimension], dict[str, Any]]:
+    evidence_terms = _grouping_terms_from_intent_evidence(
+        intent_resolution_result,
+    )
+    evidence_dimensions: list[ProjectedDimension] = []
+    evidence_unresolved: list[str] = []
+    for matched_user_term, dimension_term in evidence_terms:
+        dimension = _resolve_grouping_dimension(
+            context=context,
+            matched_user_term=matched_user_term,
+            dimension_term=dimension_term,
+            detection_source="intent_semantic_evidence",
+        )
+        if dimension is None:
+            evidence_unresolved.append(dimension_term)
+            continue
+        evidence_dimensions.append(dimension)
+
+    if evidence_dimensions:
+        return _dedupe_dimensions(evidence_dimensions), {
+            "grouping_requested": True,
+            "matched_terms": [term for term, _ in evidence_terms],
+            "unresolved_terms": sorted(
+                set(evidence_unresolved),
+                key=str.casefold,
+            ),
+            "source": "intent_semantic_evidence",
+            "detection_source": "intent_semantic_evidence",
+            "fallback_used": False,
+        }
+
     requested_terms = _grouping_terms_from_context(
         context.get("intent_resolution", {}),
         normalized_question,
@@ -701,6 +736,8 @@ def _detect_grouping_dimensions(
             "grouping_requested": False,
             "matched_terms": [],
             "unresolved_terms": [],
+            "source": "none",
+            "fallback_used": False,
         }
 
     dimensions: list[ProjectedDimension] = []
@@ -710,6 +747,7 @@ def _detect_grouping_dimensions(
             context=context,
             matched_user_term=matched_user_term,
             dimension_term=dimension_term,
+            detection_source="planner_lexical_fallback",
         )
         if dimension is None:
             unresolved.append(dimension_term)
@@ -720,7 +758,111 @@ def _detect_grouping_dimensions(
         "grouping_requested": True,
         "matched_terms": [term for term, _ in requested_terms],
         "unresolved_terms": sorted(set(unresolved), key=str.casefold),
+        "source": "planner_lexical_fallback",
+        "detection_source": "planner_lexical_fallback",
+        "fallback_used": True,
     }
+
+
+def _grouping_terms_from_intent_evidence(
+    intent_resolution_result: Mapping[str, Any] | None,
+) -> list[tuple[str, str]]:
+    if not isinstance(intent_resolution_result, Mapping):
+        return []
+
+    selected_intent = intent_resolution_result.get("intent")
+    best_candidate = intent_resolution_result.get("best_candidate")
+    candidates: list[Any] = []
+    if isinstance(best_candidate, Mapping):
+        candidates.append(best_candidate)
+    candidates.extend(
+        candidate
+        for candidate in intent_resolution_result.get("candidates", [])
+        if isinstance(candidate, Mapping)
+        and (
+            selected_intent is None
+            or _same_text(candidate.get("intent_name"), selected_intent)
+        )
+    )
+
+    matches: list[tuple[str, str]] = []
+    for candidate in candidates:
+        for match in candidate.get("matches", []):
+            if not isinstance(match, Mapping):
+                continue
+            details = match.get("match_details")
+            if not isinstance(details, Mapping):
+                continue
+            for concept in details.get("concepts", []):
+                if not isinstance(concept, Mapping):
+                    continue
+                if str(concept.get("concept_name", "")).casefold() != (
+                    "dimension_grouping"
+                ):
+                    continue
+                if not concept.get("satisfied"):
+                    continue
+                matches.extend(
+                    _grouping_terms_from_concept_evidence(concept)
+                )
+    return sorted(set(matches), key=lambda item: (item[1], item[0]))
+
+
+def _grouping_terms_from_concept_evidence(
+    concept: Mapping[str, Any],
+) -> list[tuple[str, str]]:
+    matches: list[tuple[str, str]] = []
+    for term in concept.get("terms", []):
+        if not isinstance(term, Mapping) or not term.get("matched"):
+            continue
+        signal = _semantic_signal_from_term(term)
+        if signal is None:
+            continue
+        matched_user_term = str(signal.get("normalized_term") or "").strip()
+        dimension = _dimension_name_from_semantic_signal(signal)
+        if matched_user_term and dimension:
+            matches.append((matched_user_term, dimension))
+    return matches
+
+
+def _semantic_signal_from_term(
+    term: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    details = term.get("match_details")
+    if not isinstance(details, Mapping):
+        return None
+    signal = details.get("semantic_signal")
+    if isinstance(signal, Mapping):
+        output = dict(signal)
+        output.setdefault("term", term.get("term"))
+        output.setdefault("normalized_term", term.get("normalized_term"))
+        return output
+
+    signals = term.get("semantic_signals")
+    if isinstance(signals, list):
+        for signal_item in signals:
+            if isinstance(signal_item, Mapping):
+                return signal_item
+    return None
+
+
+def _dimension_name_from_semantic_signal(
+    signal: Mapping[str, Any],
+) -> str | None:
+    tokens = signal.get("matched_tokens")
+    if isinstance(tokens, list):
+        dimension_tokens = [
+            str(token).strip()
+            for token in tokens
+            if isinstance(token, str) and token.strip()
+        ]
+        if dimension_tokens:
+            return " ".join(dimension_tokens)
+
+    normalized_term = signal.get("normalized_term")
+    if isinstance(normalized_term, str):
+        return _dimension_name_from_grouping_term(normalized_term)
+    return None
 
 
 def _grouping_terms_from_context(
@@ -797,11 +939,13 @@ def _resolve_grouping_dimension(
     context: ContextSnapshot,
     matched_user_term: str,
     dimension_term: str,
+    detection_source: str,
 ) -> ProjectedDimension | None:
     entity_dimension = _resolve_dimension_from_entities(
         context.get("entities", []),
         matched_user_term=matched_user_term,
         dimension_term=dimension_term,
+        detection_source=detection_source,
     )
     if entity_dimension is not None:
         return entity_dimension
@@ -810,6 +954,7 @@ def _resolve_grouping_dimension(
         context.get("table_catalog", []),
         matched_user_term=matched_user_term,
         dimension_term=dimension_term,
+        detection_source=detection_source,
     )
 
 
@@ -818,6 +963,7 @@ def _resolve_dimension_from_entities(
     *,
     matched_user_term: str,
     dimension_term: str,
+    detection_source: str,
 ) -> ProjectedDimension | None:
     if not isinstance(entities, list):
         return None
@@ -866,6 +1012,8 @@ def _resolve_dimension_from_entities(
                 "target_column": target_column,
                 "grouping_requested": True,
                 "source": "entity_alias",
+                "mapping_source": "entity_alias",
+                "detection_source": detection_source,
                 "priority": _optional_int(entity.get("priority")),
                 "confidence": score,
             },
@@ -894,6 +1042,7 @@ def _resolve_dimension_from_catalog(
     *,
     matched_user_term: str,
     dimension_term: str,
+    detection_source: str,
 ) -> ProjectedDimension | None:
     if not isinstance(table_catalog, list):
         return None
@@ -950,6 +1099,8 @@ def _resolve_dimension_from_catalog(
                     "target_column": column,
                     "grouping_requested": True,
                     "source": "table_catalog",
+                    "mapping_source": "table_catalog",
+                    "detection_source": detection_source,
                     "priority": _optional_int(table.get("priority")),
                     "confidence": score,
                 },
