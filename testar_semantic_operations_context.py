@@ -275,8 +275,34 @@ def _specialized_signal(
 def _table(table_name: str, priority: int) -> dict:
     key_columns = []
     extra_columns = []
-    if table_name == "gold_gestor_cc":
+    if table_name == "gold_centro_custo":
+        key_columns = ["sk", "nk_centro_custo"]
+        extra_columns = [
+            {
+                "name": "nk_centro_custo",
+                "data_type": "text",
+                "nullable": True,
+                "description": "Chave de negocio do centro de custo.",
+            },
+        ]
+    elif table_name == "gold_gestor_cc":
         key_columns = ["sk", "nk_centro_custo", "nk_unid_neg"]
+    elif table_name == "gold_plano_contas":
+        key_columns = ["sk", "nk_conta_contabil"]
+        extra_columns = [
+            {
+                "name": "nk_conta_contabil",
+                "data_type": "text",
+                "nullable": True,
+                "description": "Chave de negocio da conta contabil.",
+            },
+            {
+                "name": "nivel_1_bi",
+                "data_type": "text",
+                "nullable": True,
+                "description": "Grupo DRE de primeiro nivel.",
+            },
+        ]
     elif table_name == "gold_unidade_negocio":
         key_columns = ["sk", "nk_unide_neg", "nk_base"]
         extra_columns = [
@@ -534,6 +560,41 @@ def _context_v4() -> dict:
                     "dimension_mapping": {
                         "evidence": [
                             "gold_unidade_negocio.marca consta como coluna catalogada"
+                        ],
+                    },
+                },
+                "priority": 5,
+            },
+            {
+                "entity_type": "dimension",
+                "user_term": "centro de custo",
+                "canonical_value": "centro_custo",
+                "target_table": "main_gold.gold_centro_custo",
+                "target_column": "nk_centro_custo",
+                "sql_filter_hint": None,
+                "business_rule": {
+                    "source": "physical_metadata_confirmed_by_sql_execution_proxy",
+                    "dimension_mapping": {
+                        "evidence": [
+                            "gold_centro_custo.nk_centro_custo existe fisicamente"
+                        ],
+                    },
+                },
+                "priority": 5,
+            },
+            {
+                "entity_type": "dimension",
+                "user_term": "conta",
+                "canonical_value": "conta",
+                "target_table": "main_gold.gold_plano_contas",
+                "target_column": "nk_conta_contabil",
+                "sql_filter_hint": None,
+                "business_rule": {
+                    "source": "physical_metadata_confirmed_by_sql_execution_proxy",
+                    "dimension_mapping": {
+                        "evidence": [
+                            "gold_plano_contas.nk_conta_contabil existe fisicamente",
+                            "nivel_1_bi representa grupo DRE, nao dimensao conta",
                         ],
                     },
                 },
@@ -997,6 +1058,62 @@ def test_planner_v4_promove_marca_por_mapping_explicito() -> None:
     assert dimension["source"] == "entity_alias"
 
 
+def test_planner_v4_promove_centro_custo_por_mapping_explicito() -> None:
+    context = _context_v4()
+    resolution = _resolve(
+        "Mostre os custos por centro de custo no periodo passado.",
+        context,
+    )
+    assert resolution["applied"] is True
+    assert resolution["intent"] == GENERIC_INTENT
+
+    plan_result = build_query_plan(
+        context=context,
+        intent_name=resolution["intent"],
+        intent_confidence=resolution["intent_confidence"],
+        normalized_question=resolution["normalized_question"],
+    )
+    projection = plan_result["query_plan"]["planning_context"]
+    dimension = projection["detected_dimensions"][0]
+    columns = projection["relevant_columns"]["main_gold.gold_centro_custo"]
+
+    assert dimension["canonical_value"] == "centro_custo"
+    assert dimension["target_table"] == "main_gold.gold_centro_custo"
+    assert dimension["target_column"] == "nk_centro_custo"
+    assert dimension["grouping_requested"] is True
+    assert dimension["source"] == "entity_alias"
+    assert dimension["target_column"] != "sk"
+    assert any(column["name"] == "nk_centro_custo" for column in columns)
+
+
+def test_planner_v4_promove_conta_por_mapping_explicito() -> None:
+    context = _context_v4()
+    resolution = _resolve(
+        "Qual foi o custo por conta no mes passado?",
+        context,
+    )
+    assert resolution["applied"] is True
+    assert resolution["intent"] == GENERIC_INTENT
+
+    plan_result = build_query_plan(
+        context=context,
+        intent_name=resolution["intent"],
+        intent_confidence=resolution["intent_confidence"],
+        normalized_question=resolution["normalized_question"],
+    )
+    projection = plan_result["query_plan"]["planning_context"]
+    dimension = projection["detected_dimensions"][0]
+    columns = projection["relevant_columns"]["main_gold.gold_plano_contas"]
+
+    assert dimension["canonical_value"] == "conta"
+    assert dimension["target_table"] == "main_gold.gold_plano_contas"
+    assert dimension["target_column"] == "nk_conta_contabil"
+    assert dimension["grouping_requested"] is True
+    assert dimension["source"] == "entity_alias"
+    assert dimension["target_column"] not in {"sk", "nivel_1_bi", "nk_conta"}
+    assert any(column["name"] == "nk_conta_contabil" for column in columns)
+
+
 def test_business_question_examples_nao_sao_base_da_v2() -> None:
     sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
 
@@ -1064,8 +1181,18 @@ def test_migration_v4_adiciona_mapeamentos_explicitos_de_dimensao() -> None:
     assert "'main_gold.gold_unidade_negocio'" in sql
     assert "'nk_unide_neg'" in sql
     assert "'marca'" in sql
+    assert "'centro de custo'" in sql
+    assert "'centro_custo'" in sql
+    assert "'main_gold.gold_centro_custo'" in sql
+    assert "'nk_centro_custo'" in sql
+    assert "'conta'" in sql
+    assert "'main_gold.gold_plano_contas'" in sql
+    assert "'nk_conta_contabil'" in sql
+    assert "'nk_conta'" not in sql
+    assert "'nivel_1_bi'" not in sql
     assert "dimension_mapping" in sql
     assert "gold_unidade_negocio.sk e chave tecnica, nao dimensao de negocio" in sql
+    assert "nivel_1_bi representa grupo DRE, nao dimensao conta" in sql
     assert "business_question_examples" in sql
     assert "VALUES (" not in sql
     assert "ai_ducklake_benchmarks" not in sql
@@ -1154,6 +1281,14 @@ def main() -> None:
         (
             "planner v4 promove marca",
             test_planner_v4_promove_marca_por_mapping_explicito,
+        ),
+        (
+            "planner v4 promove centro custo",
+            test_planner_v4_promove_centro_custo_por_mapping_explicito,
+        ),
+        (
+            "planner v4 promove conta",
+            test_planner_v4_promove_conta_por_mapping_explicito,
         ),
         (
             "examples nao base v2",

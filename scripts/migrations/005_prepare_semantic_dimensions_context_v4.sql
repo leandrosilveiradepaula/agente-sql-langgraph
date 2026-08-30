@@ -132,6 +132,49 @@ VALUES
   }',
   5,
   TRUE
+),
+(
+  'v2.0-ducklake-query-generator-semantic-operations-v4',
+  'dimension',
+  'centro de custo',
+  'centro_custo',
+  'main_gold.gold_centro_custo',
+  'nk_centro_custo',
+  NULL,
+  '{
+    "source": "physical_metadata_confirmed_by_sql_execution_proxy",
+    "dimension_mapping": {
+      "evidence": [
+        "gold_centro_custo.nk_centro_custo existe fisicamente",
+        "business key explicita preferida a chave tecnica para agrupamento"
+      ],
+      "planner_contract": "usar somente como metadata explicita de agrupamento; nao inferir por nome de tabela ou PK"
+    }
+  }',
+  5,
+  TRUE
+),
+(
+  'v2.0-ducklake-query-generator-semantic-operations-v4',
+  'dimension',
+  'conta',
+  'conta',
+  'main_gold.gold_plano_contas',
+  'nk_conta_contabil',
+  NULL,
+  '{
+    "source": "physical_metadata_confirmed_by_sql_execution_proxy",
+    "dimension_mapping": {
+      "evidence": [
+        "gold_plano_contas.nk_conta_contabil existe fisicamente",
+        "gold_plano_contas.nk_conta nao existe fisicamente",
+        "nivel_1_bi representa grupo DRE, nao dimensao conta"
+      ],
+      "planner_contract": "usar somente como metadata explicita de agrupamento; nao usar nivel_1_bi como conta"
+    }
+  }',
+  5,
+  TRUE
 )
 ON CONFLICT DO NOTHING;
 
