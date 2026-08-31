@@ -57,6 +57,12 @@ MIGRATION_V6_PATH = (
     / "migrations"
     / "008_prepare_semantic_analytical_operations_context_v6.sql"
 )
+MIGRATION_V7_PATH = (
+    Path(__file__).resolve().parent
+    / "scripts"
+    / "migrations"
+    / "009_prepare_semantic_planned_metrics_context_v7.sql"
+)
 
 
 def _resolver_config_rule() -> dict:
@@ -1644,6 +1650,179 @@ def test_contexto_v6_termo_desconhecido_nao_inventa_operacao() -> None:
     assert _operation_by_term("operacao desconhecida") is None
 
 
+def _v7_metric_entries() -> list[dict]:
+    sql = MIGRATION_V7_PATH.read_text(encoding="utf-8")
+    values_block = sql.rsplit(
+        "INSERT INTO public.ai_ducklake_entity_aliases", 1
+    )[1].split("ON CONFLICT DO NOTHING;", 1)[0]
+    entries: list[dict] = []
+    for match in re.finditer(
+        r"\(\s*"
+        r"'(?P<agent_version>[^']+)',\s*"
+        r"'(?P<entity_type>financial_metric)',\s*"
+        r"'(?P<user_term>[^']+)',\s*"
+        r"'(?P<canonical_value>[^']+)',\s*"
+        r"'(?P<target_table>[^']+)',\s*"
+        r"'(?P<target_column>[^']+)',\s*"
+        r"NULL,\s*"
+        r"'(?P<business_rule>\{[^']+\})',\s*"
+        r"(?P<priority>\d+),\s*TRUE\s*"
+        r"\)",
+        values_block,
+        re.MULTILINE,
+    ):
+        entries.append(
+            {
+                "entity_type": match.group("entity_type"),
+                "user_term": match.group("user_term"),
+                "canonical_value": match.group("canonical_value"),
+                "target_table": match.group("target_table"),
+                "target_column": match.group("target_column"),
+                "business_rule": match.group("business_rule"),
+            }
+        )
+    return entries
+
+
+def _metric_by_term(user_term: str) -> dict | None:
+    normalized = normalize_search_text(user_term)
+    for entry in _v7_metric_entries():
+        if normalize_search_text(entry["user_term"]) == normalized:
+            return entry
+    return None
+
+
+def _metric_payload(entry: dict) -> dict:
+    return json.loads(entry["business_rule"])["metric"]
+
+
+def _v7_metric_catalog_projection() -> dict[str, set[str]]:
+    catalog: dict[str, set[str]] = {}
+    for entry in _v7_metric_entries():
+        catalog.setdefault(entry["target_table"], set()).add(
+            entry["target_column"]
+        )
+    return catalog
+
+
+def test_migration_v7_deriva_de_v6_e_preserva_contexto() -> None:
+    sql = MIGRATION_V7_PATH.read_text(encoding="utf-8")
+
+    assert "semantic-operations-v6'::text" in sql
+    assert "semantic-operations-v7'::text" in sql
+    assert sql.count("source.is_active = TRUE") == 4
+    assert sql.count("source.is_allowed = TRUE") == 1
+    assert "source.entity_type" in sql
+    assert "'analytical_operation'" not in sql
+    assert "expected_sql" not in sql
+    assert "generated_sql" not in sql
+    assert "ai_ducklake_benchmarks" not in sql
+    assert "Quais centros de custo concentraram" not in sql
+
+
+def test_migration_v7_adiciona_somente_metricas_financeiras() -> None:
+    entries = _v7_metric_entries()
+
+    assert len(entries) == 11
+    assert all(entry["entity_type"] == "financial_metric" for entry in entries)
+    assert 75 + len(entries) == 86
+
+
+def test_contexto_v7_metricas_possuem_metadata_planejavel() -> None:
+    entries = _v7_metric_entries()
+
+    assert entries
+    for entry in entries:
+        metric = _metric_payload(entry)
+        assert entry["canonical_value"]
+        assert entry["target_table"]
+        assert entry["target_column"]
+        assert metric["metric_concept"] == entry["canonical_value"]
+        assert metric["target_table"] == entry["target_table"]
+        assert metric["target_column"] == entry["target_column"]
+        assert set(metric) == {
+            "metric_concept",
+            "target_table",
+            "target_column",
+        }
+        assert "aggregate" not in metric
+        assert "filter_source" not in metric
+        assert "filter_value" not in metric
+
+
+def test_contexto_v7_metricas_referenciam_catalogo_de_metricas() -> None:
+    entries = _v7_metric_entries()
+    metric_catalog = _v7_metric_catalog_projection()
+
+    assert metric_catalog
+    for entry in entries:
+        metric_columns = metric_catalog.get(entry["target_table"], set())
+        assert entry["target_column"] in metric_columns
+
+
+def test_contexto_v7_metricas_compartilham_medida_fisica_quando_presente() -> None:
+    entries = _v7_metric_entries()
+    physical_bindings = {
+        (entry["target_table"], entry["target_column"])
+        for entry in entries
+    }
+    concepts_by_binding = {
+        binding: {
+            entry["canonical_value"]
+            for entry in entries
+            if (entry["target_table"], entry["target_column"]) == binding
+        }
+        for binding in physical_bindings
+    }
+
+    assert any(
+        len(concepts) > 1
+        for concepts in concepts_by_binding.values()
+    )
+
+
+def test_contexto_v7_nao_inventa_agregacao_ou_filtro_semantico() -> None:
+    for entry in _v7_metric_entries():
+        metric = _metric_payload(entry)
+
+        assert "aggregate" not in metric
+        assert "filter_source" not in metric
+        assert "filter_ref" not in metric
+        assert "filter_value" not in metric
+
+
+def test_contexto_v7_sem_duplicatas_normalizadas_em_metricas() -> None:
+    normalized_terms = [
+        normalize_search_text(entry["user_term"])
+        for entry in _v7_metric_entries()
+    ]
+
+    assert len(normalized_terms) == len(set(normalized_terms))
+
+
+def test_contexto_v7_termo_desconhecido_nao_inventa_metrica() -> None:
+    assert _metric_by_term("metrica desconhecida") is None
+
+
+def test_contexto_v7_metadata_fisica_invalida_detectavel() -> None:
+    entry = deepcopy(_v7_metric_entries()[0])
+    catalog_columns = set().union(*_v7_metric_catalog_projection().values())
+    invalid_column = "synthetic_missing_metric_column"
+    while invalid_column in catalog_columns:
+        invalid_column = f"{invalid_column}_x"
+
+    entry["target_column"] = invalid_column
+    metric = _metric_payload(entry)
+    metric["target_column"] = invalid_column
+    entry["business_rule"] = json.dumps(
+        {"metric": metric},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    assert entry["target_column"] not in catalog_columns
+
+
 def test_business_question_examples_nao_sao_base_da_v2() -> None:
     sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
 
@@ -1899,6 +2078,42 @@ def main() -> None:
         (
             "contexto v6 termo desconhecido",
             test_contexto_v6_termo_desconhecido_nao_inventa_operacao,
+        ),
+        (
+            "migration v7 deriva v6",
+            test_migration_v7_deriva_de_v6_e_preserva_contexto,
+        ),
+        (
+            "migration v7 adiciona somente metricas",
+            test_migration_v7_adiciona_somente_metricas_financeiras,
+        ),
+        (
+            "contexto v7 metricas metadata",
+            test_contexto_v7_metricas_possuem_metadata_planejavel,
+        ),
+        (
+            "contexto v7 metricas referenciam catalogo",
+            test_contexto_v7_metricas_referenciam_catalogo_de_metricas,
+        ),
+        (
+            "contexto v7 metricas compartilham medida",
+            test_contexto_v7_metricas_compartilham_medida_fisica_quando_presente,
+        ),
+        (
+            "contexto v7 nao inventa agregacao ou filtro",
+            test_contexto_v7_nao_inventa_agregacao_ou_filtro_semantico,
+        ),
+        (
+            "contexto v7 metricas sem duplicatas",
+            test_contexto_v7_sem_duplicatas_normalizadas_em_metricas,
+        ),
+        (
+            "contexto v7 termo desconhecido",
+            test_contexto_v7_termo_desconhecido_nao_inventa_metrica,
+        ),
+        (
+            "contexto v7 metadata fisica invalida",
+            test_contexto_v7_metadata_fisica_invalida_detectavel,
         ),
     ]
 
