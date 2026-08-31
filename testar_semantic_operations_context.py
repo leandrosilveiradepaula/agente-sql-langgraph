@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from copy import deepcopy
 from pathlib import Path
 
@@ -48,6 +50,12 @@ MIGRATION_V5_DEDUP_PATH = (
     / "scripts"
     / "migrations"
     / "007_prepare_semantic_generalization_context_v5_dedup.sql"
+)
+MIGRATION_V6_PATH = (
+    Path(__file__).resolve().parent
+    / "scripts"
+    / "migrations"
+    / "008_prepare_semantic_analytical_operations_context_v6.sql"
 )
 
 
@@ -1521,6 +1529,121 @@ def test_contexto_v5_nao_tem_duplicatas_pos_normalizacao() -> None:
             assert len(normalized_terms) == len(set(normalized_terms))
 
 
+def _v6_operation_entries() -> list[dict]:
+    sql = MIGRATION_V6_PATH.read_text(encoding="utf-8")
+    values_block = sql.rsplit(
+        "INSERT INTO public.ai_ducklake_entity_aliases", 1
+    )[1].split("ON CONFLICT DO NOTHING;", 1)[0]
+    entries: list[dict] = []
+    for match in re.finditer(
+        r"\(\s*"
+        r"'(?P<agent_version>[^']+)',\s*"
+        r"'(?P<entity_type>analytical_operation)',\s*"
+        r"'(?P<user_term>[^']+)',\s*"
+        r"'(?P<canonical_value>[^']+)',\s*"
+        r"NULL,\s*NULL,\s*NULL,\s*"
+        r"'(?P<business_rule>\{[^']+\})',\s*"
+        r"(?P<priority>\d+),\s*TRUE\s*"
+        r"\)",
+        values_block,
+        re.MULTILINE,
+    ):
+        entries.append(
+            {
+                "entity_type": match.group("entity_type"),
+                "user_term": match.group("user_term"),
+                "canonical_value": match.group("canonical_value"),
+                "business_rule": match.group("business_rule"),
+            }
+        )
+    return entries
+
+
+def _operation_by_term(user_term: str) -> dict | None:
+    normalized = normalize_search_text(user_term)
+    for entry in _v6_operation_entries():
+        if normalize_search_text(entry["user_term"]) == normalized:
+            return entry
+    return None
+
+
+def test_migration_v6_deriva_de_v5_dedup_e_preserva_contexto() -> None:
+    sql = MIGRATION_V6_PATH.read_text(encoding="utf-8")
+
+    assert "semantic-operations-v5-dedup'::text" in sql
+    assert "semantic-operations-v6'::text" in sql
+    assert sql.count("source.is_active = TRUE") == 4
+    assert sql.count("source.is_allowed = TRUE") == 1
+    entity_alias_copy = sql.split(
+        "FROM public.ai_ducklake_entity_aliases source", 1
+    )[1].split("ON CONFLICT DO NOTHING;", 1)[0]
+    assert "source.entity_type = 'intent_definition'" not in (
+        entity_alias_copy
+    )
+    assert "source.canonical_value = 'metric_total_by_period'" not in (
+        entity_alias_copy
+    )
+    assert "'metric_total_by_period_generalization_v6'" not in sql
+    assert "ON CONFLICT DO NOTHING" in sql
+    assert "ROLLBACK;" not in sql
+    assert sql.rstrip().endswith("COMMIT;")
+
+
+def test_migration_v6_adiciona_operacoes_analiticas_versionadas() -> None:
+    sql = MIGRATION_V6_PATH.read_text(encoding="utf-8")
+
+    assert "'analytical_operation'" in sql
+    assert "'ranking'" in sql
+    assert '"operation_type":"ranking"' in sql
+    assert '"direction":"descending"' in sql
+    assert '"direction":"ascending"' in sql
+    assert '"requested_limit":null' in sql
+    assert "expected_sql" not in sql
+    assert "generated_sql" not in sql
+    assert "ai_ducklake_benchmarks" not in sql
+    assert "Quais centros de custo concentraram" not in sql
+
+
+def test_contexto_v6_operacoes_nao_duplicam_termos_normalizados() -> None:
+    normalized_terms = [
+        normalize_search_text(entry["user_term"])
+        for entry in _v6_operation_entries()
+    ]
+
+    assert normalized_terms
+    assert len(normalized_terms) == len(set(normalized_terms))
+
+
+def test_contexto_v6_resolve_ranking_descendente_por_metadata() -> None:
+    entries = _v6_operation_entries()
+    assert entries
+    descending_count = 0
+    for entry in entries:
+        operation = json.loads(entry["business_rule"])["operation"]
+        assert entry["canonical_value"] == "ranking"
+        assert operation["operation_type"] == "ranking"
+        assert operation["direction"] in {"ascending", "descending"}
+        assert operation["requested_limit"] is None
+        if operation["direction"] == "descending":
+            descending_count += 1
+
+    assert descending_count >= 1
+
+
+def test_contexto_v6_resolve_ranking_ascendente_por_metadata() -> None:
+    ascending_count = 0
+    for entry in _v6_operation_entries():
+        operation = json.loads(entry["business_rule"])["operation"]
+        if operation["direction"] == "ascending":
+            ascending_count += 1
+
+    assert ascending_count >= 1
+
+
+def test_contexto_v6_termo_desconhecido_nao_inventa_operacao() -> None:
+    assert _operation_by_term("operacao desconhecida") is None
+
+
 def test_business_question_examples_nao_sao_base_da_v2() -> None:
     sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
 
@@ -1752,6 +1875,30 @@ def main() -> None:
         (
             "contexto v5 sem duplicatas",
             test_contexto_v5_nao_tem_duplicatas_pos_normalizacao,
+        ),
+        (
+            "migration v6 deriva v5 dedup",
+            test_migration_v6_deriva_de_v5_dedup_e_preserva_contexto,
+        ),
+        (
+            "migration v6 analytical operations",
+            test_migration_v6_adiciona_operacoes_analiticas_versionadas,
+        ),
+        (
+            "contexto v6 operacoes sem duplicatas",
+            test_contexto_v6_operacoes_nao_duplicam_termos_normalizados,
+        ),
+        (
+            "contexto v6 ranking desc",
+            test_contexto_v6_resolve_ranking_descendente_por_metadata,
+        ),
+        (
+            "contexto v6 ranking asc",
+            test_contexto_v6_resolve_ranking_ascendente_por_metadata,
+        ),
+        (
+            "contexto v6 termo desconhecido",
+            test_contexto_v6_termo_desconhecido_nao_inventa_operacao,
         ),
     ]
 
