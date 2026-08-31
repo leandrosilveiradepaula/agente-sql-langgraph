@@ -6,6 +6,7 @@ from pathlib import Path
 from app.domain.context_normalizer import normalize_context_snapshot
 from app.domain.intent_resolver import resolve_intent
 from app.domain.planner import build_query_plan
+from app.domain.search_text import normalize_search_text
 
 
 SEMANTIC_VERSION = (
@@ -35,6 +36,18 @@ MIGRATION_V4_PATH = (
     / "scripts"
     / "migrations"
     / "005_prepare_semantic_dimensions_context_v4.sql"
+)
+MIGRATION_V5_PATH = (
+    Path(__file__).resolve().parent
+    / "scripts"
+    / "migrations"
+    / "006_prepare_semantic_generalization_context_v5.sql"
+)
+MIGRATION_V5_DEDUP_PATH = (
+    Path(__file__).resolve().parent
+    / "scripts"
+    / "migrations"
+    / "007_prepare_semantic_generalization_context_v5_dedup.sql"
 )
 
 
@@ -605,6 +618,195 @@ def _context_v4() -> dict:
     return normalize_context_snapshot(raw_context)
 
 
+def _context_v5() -> dict:
+    raw_context = _raw_context()
+    raw_context["semantic_agent_version"] = (
+        "v2.0-ducklake-query-generator-semantic-operations-v5-dedup"
+    )
+    raw_context["entidades"] = [
+        entity
+        for entity in raw_context["entidades"]
+        if not (
+            entity.get("entity_type") == "intent_definition"
+            and entity.get("canonical_value") == GENERIC_INTENT
+        )
+    ]
+    raw_context["entidades"].extend(
+        _v4_dimension_mappings()
+    )
+    raw_context["entidades"].append(_generic_metric_definition_v5())
+    return normalize_context_snapshot(raw_context)
+
+
+def _v4_dimension_mappings() -> list[dict]:
+    return [
+        {
+            "entity_type": "dimension",
+            "user_term": "unidade",
+            "canonical_value": "unidade",
+            "target_table": "main_gold.gold_unidade_negocio",
+            "target_column": "nk_unide_neg",
+            "sql_filter_hint": None,
+            "business_rule": {
+                "source": "versioned_semantic_context",
+                "dimension_mapping": {
+                    "evidence": [
+                        "gold_unidade_negocio.nk_unide_neg e chave de negocio confirmada"
+                    ],
+                },
+            },
+            "priority": 5,
+        },
+        {
+            "entity_type": "dimension",
+            "user_term": "marca",
+            "canonical_value": "marca",
+            "target_table": "main_gold.gold_unidade_negocio",
+            "target_column": "marca",
+            "sql_filter_hint": None,
+            "business_rule": {
+                "source": "versioned_semantic_context",
+                "dimension_mapping": {
+                    "evidence": [
+                        "gold_unidade_negocio.marca consta como coluna catalogada"
+                    ],
+                },
+            },
+            "priority": 5,
+        },
+        {
+            "entity_type": "dimension",
+            "user_term": "centro de custo",
+            "canonical_value": "centro_custo",
+            "target_table": "main_gold.gold_centro_custo",
+            "target_column": "nk_centro_custo",
+            "sql_filter_hint": None,
+            "business_rule": {
+                "source": "physical_metadata_confirmed_by_sql_execution_proxy",
+                "dimension_mapping": {
+                    "evidence": [
+                        "gold_centro_custo.nk_centro_custo existe fisicamente"
+                    ],
+                },
+            },
+            "priority": 5,
+        },
+        {
+            "entity_type": "dimension",
+            "user_term": "conta",
+            "canonical_value": "conta",
+            "target_table": "main_gold.gold_plano_contas",
+            "target_column": "nk_conta_contabil",
+            "sql_filter_hint": None,
+            "business_rule": {
+                "source": "physical_metadata_confirmed_by_sql_execution_proxy",
+                "dimension_mapping": {
+                    "evidence": [
+                        "gold_plano_contas.nk_conta_contabil existe fisicamente",
+                        "nivel_1_bi representa grupo DRE, nao dimensao conta",
+                    ],
+                },
+            },
+            "priority": 5,
+        },
+    ]
+
+
+def _generic_metric_definition_v5() -> dict:
+    metric_concept = _concept(
+        "financial_metric",
+        [
+            "receita",
+            "receitas",
+            "faturamento",
+            "rol",
+            "opex",
+            "despesa",
+            "despesas",
+            "despesa operacional",
+            "despesas operacionais",
+            "gasto",
+            "gastos",
+            "custo",
+            "custos",
+            "movimentado",
+            "movimentacao",
+        ],
+    )
+    operation_concept = _concept(
+        "analytical_operation",
+        [
+            "total",
+            "quanto",
+            "qual foi",
+            "quais foram",
+            "valor agregado",
+            "consolidado",
+            "soma",
+            "distribuido",
+            "distribuidos",
+            "distribuicao",
+            "concentraram",
+            "concentrado",
+            "concentracao",
+            "maiores",
+        ],
+    )
+    period_concept = _concept(
+        "period_reference",
+        [
+            "ultimo mes",
+            "ultimo mes fechado",
+            "ultimo periodo",
+            "ultimo periodo disponivel",
+            "mes passado",
+            "mes anterior",
+            "periodo anterior",
+            "periodo passado",
+            "no mes",
+        ],
+    )
+    dimension_concept = _concept(
+        "dimension_grouping",
+        [
+            "por marca",
+            "por centro de custo",
+            "centro de custo",
+            "por unidade",
+            "unidade",
+            "por conta",
+            "conta contabil",
+        ],
+    )
+
+    definition = _generic_metric_definition()
+    definition["user_term"] = "metric_total_by_period_generalization_v5"
+    definition["business_rule"]["intent_catalog"]["semantic_description"] = (
+        "Resolve perguntas analiticas genericas sobre metricas financeiras, "
+        "distribuicao, concentracao e movimentacao por periodo e dimensoes "
+        "autorizadas pelo contexto."
+    )
+    rules = definition["business_rule"]["intent_catalog"]["rules"]
+    rules[0]["concepts"] = [
+        metric_concept,
+        operation_concept,
+        period_concept,
+        dimension_concept,
+    ]
+    rules[1]["concepts"] = [
+        metric_concept,
+        operation_concept,
+        period_concept,
+    ]
+    rules[2]["concepts"] = [
+        metric_concept,
+        period_concept,
+        dimension_concept,
+    ]
+    definition["priority"] = 35
+    return definition
+
+
 def _resolve(question: str, context: dict | None = None) -> dict:
     selected_context = _context() if context is None else context
     return resolve_intent(
@@ -1122,6 +1324,203 @@ def test_planner_v4_promove_conta_por_mapping_explicito() -> None:
     assert any(column["name"] == "nk_conta_contabil" for column in columns)
 
 
+def _assert_v5_dimension(
+    question: str,
+    *,
+    canonical_value: str,
+    target_table: str,
+    target_column: str,
+) -> None:
+    context = _context_v5()
+    resolution = _resolve(question, context)
+
+    assert resolution["applied"] is True
+    assert resolution["intent"] == GENERIC_INTENT
+    assert resolution["best_candidate"]["score"] >= 100.0
+
+    plan_result = build_query_plan(
+        context=context,
+        intent_name=resolution["intent"],
+        intent_confidence=resolution["intent_confidence"],
+        normalized_question=resolution["normalized_question"],
+        intent_resolution_result=resolution,
+    )
+    projection = plan_result["query_plan"]["planning_context"]
+    dimensions = projection["detected_dimensions"]
+
+    assert plan_result["status"] == "planned"
+    assert dimensions
+    assert dimensions[0]["canonical_value"] == canonical_value
+    assert dimensions[0]["target_table"] == target_table
+    assert dimensions[0]["target_column"] == target_column
+    assert dimensions[0]["detection_source"] == "intent_semantic_evidence"
+    assert dimensions[0]["mapping_source"] == "entity_alias"
+    assert dimensions[0]["source"] == "entity_alias"
+    assert dimensions[0]["grouping_requested"] is True
+
+
+def test_contexto_v5_resolve_gap_a_gastos_distribuidos_unidades() -> None:
+    _assert_v5_dimension(
+        "Como os gastos ficaram distribuidos entre as unidades no ultimo mes fechado?",
+        canonical_value="unidade",
+        target_table="main_gold.gold_unidade_negocio",
+        target_column="nk_unide_neg",
+    )
+
+
+def test_contexto_v5_resolve_gap_c_despesas_concentracao_centro_custo() -> None:
+    _assert_v5_dimension(
+        "Quais centros de custo concentraram mais despesas no mes anterior?",
+        canonical_value="centro_custo",
+        target_table="main_gold.gold_centro_custo",
+        target_column="nk_centro_custo",
+    )
+
+
+def test_contexto_v5_c_reconhece_operacao_mas_query_plan_nao_modela_ranking() -> None:
+    context = _context_v5()
+    resolution = _resolve(
+        "Quais centros de custo concentraram mais despesas no mes anterior?",
+        context,
+    )
+    evaluation = resolution["intent_catalog"]["evaluations"][0]
+    matched = {
+        concept["concept_name"]: [
+            term["term"]
+            for rule in evaluation["rules"]
+            for concept in rule["concepts"]
+            if concept["satisfied"]
+            for term in concept["terms"]
+            if term["matched"]
+        ]
+        for rule in evaluation["rules"]
+        for concept in rule["concepts"]
+        if concept["satisfied"]
+    }
+
+    plan_result = build_query_plan(
+        context=context,
+        intent_name=resolution["intent"],
+        intent_confidence=resolution["intent_confidence"],
+        normalized_question=resolution["normalized_question"],
+        intent_resolution_result=resolution,
+    )
+    query_plan = plan_result["query_plan"]
+    projection = query_plan["planning_context"]
+
+    assert "analytical_operation" in matched
+    assert any(
+        term in matched["analytical_operation"]
+        for term in ("concentraram", "maiores")
+    )
+    assert projection["detected_dimensions"][0]["canonical_value"] == (
+        "centro_custo"
+    )
+    assert "ranking" not in query_plan
+    assert "ranking" not in projection
+    assert "ordering" not in projection
+
+
+def test_contexto_v5_resolve_gap_d_movimentado_conta_contabil() -> None:
+    _assert_v5_dimension(
+        "Mostre o total movimentado por conta contabil no ultimo periodo disponivel.",
+        canonical_value="conta",
+        target_table="main_gold.gold_plano_contas",
+        target_column="nk_conta_contabil",
+    )
+
+
+def test_contexto_v5_generaliza_sem_lookup_das_perguntas_b32() -> None:
+    cases = [
+        (
+            "Distribuicao de gasto entre unidades no mes anterior.",
+            "unidade",
+            "main_gold.gold_unidade_negocio",
+            "nk_unide_neg",
+        ),
+        (
+            "Liste as despesas concentradas por centro de custo no periodo passado.",
+            "centro_custo",
+            "main_gold.gold_centro_custo",
+            "nk_centro_custo",
+        ),
+        (
+            "Qual movimentacao consolidada por conta contabil no ultimo mes?",
+            "conta",
+            "main_gold.gold_plano_contas",
+            "nk_conta_contabil",
+        ),
+    ]
+    for question, canonical_value, target_table, target_column in cases:
+        _assert_v5_dimension(
+            question,
+            canonical_value=canonical_value,
+            target_table=target_table,
+            target_column=target_column,
+        )
+
+
+def test_migration_v5_deriva_de_v4_e_preserva_contexto_ativo() -> None:
+    sql = MIGRATION_V5_DEDUP_PATH.read_text(encoding="utf-8")
+
+    assert "semantic-operations-v4'::text" in sql
+    assert "semantic-operations-v5-dedup'::text" in sql
+    assert sql.count("source.is_active = TRUE") == 4
+    assert sql.count("source.is_allowed = TRUE") == 1
+    agent_rules_copy = sql.split(
+        "FROM public.ai_ducklake_agent_rules source", 1
+    )[1].split("ON CONFLICT DO NOTHING;", 1)[0]
+    entity_alias_copy = sql.split(
+        "FROM public.ai_ducklake_entity_aliases source", 1
+    )[1].split("ON CONFLICT DO NOTHING;", 1)[0]
+    assert "source.entity_type" not in agent_rules_copy
+    assert "source.canonical_value" not in agent_rules_copy
+    assert "source.entity_type = 'intent_definition'" in entity_alias_copy
+    assert "source.canonical_value = 'metric_total_by_period'" in (
+        entity_alias_copy
+    )
+    assert "ON CONFLICT DO NOTHING" in sql
+    assert "ROLLBACK;" not in sql
+    assert sql.rstrip().endswith("COMMIT;")
+
+
+def test_migration_v5_adiciona_vocabulario_semantico_generalizavel() -> None:
+    sql = MIGRATION_V5_DEDUP_PATH.read_text(encoding="utf-8")
+
+    assert "'metric_total_by_period_generalization_v5_dedup'" in sql
+    assert '"gastos"' in sql
+    assert '"despesas"' in sql
+    assert '"movimentado"' in sql
+    assert '"distribuicao"' in sql
+    assert '"movimentacao",' not in sql
+    assert '"distribuição"' not in sql
+    assert '"concentraram"' in sql
+    assert '"concentração"' not in sql
+    assert '"movimentação"' not in sql
+    assert '"ultimo mes fechado"' in sql
+    assert '"ultimo periodo disponivel"' in sql
+    assert "expected_sql" not in sql
+    assert "generated_sql" not in sql
+    assert "ai_ducklake_benchmarks" not in sql
+    assert "Como os gastos ficaram" not in sql
+    assert "Quais centros de custo concentraram" not in sql
+    assert "Mostre o total movimentado" not in sql
+
+
+def test_contexto_v5_nao_tem_duplicatas_pos_normalizacao() -> None:
+    context = _context_v5()
+    catalog = context["intent_resolution"]["intent_catalog"]
+    assert len(catalog) == 1
+
+    for rule in catalog[0]["rules"]:
+        for concept in rule["concepts"]:
+            normalized_terms = [
+                normalize_search_text(term)
+                for term in concept["terms"]
+            ]
+            assert len(normalized_terms) == len(set(normalized_terms))
+
+
 def test_business_question_examples_nao_sao_base_da_v2() -> None:
     sql = MIGRATION_V2_PATH.read_text(encoding="utf-8")
 
@@ -1299,6 +1698,26 @@ def main() -> None:
             test_planner_v4_promove_conta_por_mapping_explicito,
         ),
         (
+            "contexto v5 gap A",
+            test_contexto_v5_resolve_gap_a_gastos_distribuidos_unidades,
+        ),
+        (
+            "contexto v5 gap C",
+            test_contexto_v5_resolve_gap_c_despesas_concentracao_centro_custo,
+        ),
+        (
+            "contexto v5 ranking diagnostico",
+            test_contexto_v5_c_reconhece_operacao_mas_query_plan_nao_modela_ranking,
+        ),
+        (
+            "contexto v5 gap D",
+            test_contexto_v5_resolve_gap_d_movimentado_conta_contabil,
+        ),
+        (
+            "contexto v5 generalizacao",
+            test_contexto_v5_generaliza_sem_lookup_das_perguntas_b32,
+        ),
+        (
             "examples nao base v2",
             test_business_question_examples_nao_sao_base_da_v2,
         ),
@@ -1321,6 +1740,18 @@ def main() -> None:
         (
             "migration v4 dimensoes",
             test_migration_v4_adiciona_mapeamentos_explicitos_de_dimensao,
+        ),
+        (
+            "migration v5 ativa",
+            test_migration_v5_deriva_de_v4_e_preserva_contexto_ativo,
+        ),
+        (
+            "migration v5 vocabulario",
+            test_migration_v5_adiciona_vocabulario_semantico_generalizavel,
+        ),
+        (
+            "contexto v5 sem duplicatas",
+            test_contexto_v5_nao_tem_duplicatas_pos_normalizacao,
         ),
     ]
 
