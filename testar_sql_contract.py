@@ -408,6 +408,33 @@ def test_expressoes_sql_nao_coluna_aprovadas() -> None:
     assert result["status"] == "approved"
 
 
+def test_literais_de_funcoes_e_intervalos_nao_viram_colunas() -> None:
+    result = _run(
+        "SELECT DATE_TRUNC('year', event_date), "
+        "DATE_TRUNC(MONTH, event_date), "
+        "GENERIC_FUNC('literal_value', value), "
+        "event_date + INTERVAL 1 MONTH "
+        "FROM schema_test.table_test"
+    )
+
+    assert result["status"] == "approved"
+
+
+def test_coluna_real_desconhecida_continua_rejeitada_apos_literais() -> None:
+    result = _run(
+        "SELECT DATE_TRUNC('month', event_date), unknown_field "
+        "FROM schema_test.table_test"
+    )
+
+    violated = [
+        column["column"]
+        for column in result["columns"]
+        if column["status"] == "violated"
+    ]
+    assert result["status"] == "rejected"
+    assert violated == ["unknown_field"]
+
+
 def test_cte_output_alias_qualificado_aprovado() -> None:
     result = _run(
         "WITH realizado AS ("
@@ -643,6 +670,14 @@ def main() -> None:
         ("table star", test_table_star_politica_padrao),
         ("CTE subquery", test_cte_e_subquery_validas),
         ("expressoes SQL nao coluna", test_expressoes_sql_nao_coluna_aprovadas),
+        (
+            "literais funcoes intervalos",
+            test_literais_de_funcoes_e_intervalos_nao_viram_colunas,
+        ),
+        (
+            "unknown real apos literais",
+            test_coluna_real_desconhecida_continua_rejeitada_apos_literais,
+        ),
         ("CTE output qualificado", test_cte_output_alias_qualificado_aprovado),
         (
             "CTE alias colidido",

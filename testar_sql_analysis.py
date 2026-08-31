@@ -194,9 +194,34 @@ def test_expressoes_temporais_nao_viram_colunas() -> None:
     )
 
     columns = {column["column"] for column in analysis["column_references"]}
+    assert "month" not in columns
     assert "current_date" not in columns
     assert "interval" not in columns
     assert "date_trunc" in analysis["functions"]
+
+
+def test_partes_temporais_nao_viram_colunas_fisicas() -> None:
+    analysis = analyze_sql(
+        "SELECT DATE_TRUNC('year', event_date), "
+        "DATE_TRUNC(MONTH, event_date), "
+        "event_date + INTERVAL 1 MONTH "
+        "FROM schema_test.table_test"
+    )
+
+    columns = {column["column"] for column in analysis["column_references"]}
+    assert {"month", "year", "interval"}.isdisjoint(columns)
+    assert "event_date" in columns
+
+
+def test_literal_de_funcao_generica_nao_vira_coluna() -> None:
+    analysis = analyze_sql(
+        "SELECT GENERIC_FUNC('literal_value', real_column) "
+        "FROM schema_test.table_test"
+    )
+
+    columns = {column["column"] for column in analysis["column_references"]}
+    assert "literal_value" not in columns
+    assert "real_column" in columns
 
 
 def test_cte_output_alias_qualificado_nao_vira_coluna_fisica() -> None:
@@ -335,6 +360,14 @@ def main() -> None:
         ("GROUP ORDER HAVING", test_group_order_having),
         ("LIMIT e funcoes", test_limit_e_funcoes),
         ("expressoes temporais", test_expressoes_temporais_nao_viram_colunas),
+        (
+            "partes temporais",
+            test_partes_temporais_nao_viram_colunas_fisicas,
+        ),
+        (
+            "literal funcao generica",
+            test_literal_de_funcao_generica_nao_vira_coluna,
+        ),
         (
             "CTE output qualificado",
             test_cte_output_alias_qualificado_nao_vira_coluna_fisica,

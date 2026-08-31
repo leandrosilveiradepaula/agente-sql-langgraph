@@ -197,6 +197,41 @@ _TABLE_BOUNDARY_KEYWORDS = {
 
 _JOIN_PREFIX_WORDS = _JOIN_STRUCTURE_KEYWORDS - {"on", "using", "lateral"}
 
+_TEMPORAL_PART_WORDS = {
+    "microsecond",
+    "microseconds",
+    "millisecond",
+    "milliseconds",
+    "second",
+    "seconds",
+    "minute",
+    "minutes",
+    "hour",
+    "hours",
+    "day",
+    "days",
+    "week",
+    "weeks",
+    "month",
+    "months",
+    "quarter",
+    "quarters",
+    "year",
+    "years",
+}
+
+_TEMPORAL_PART_FUNCTIONS = {
+    "date_add",
+    "date_diff",
+    "date_part",
+    "date_sub",
+    "date_trunc",
+    "datediff",
+    "extract",
+    "strftime",
+    "time_bucket",
+}
+
 
 def analyze_sql(sql: str) -> SqlStatementAnalysis:
     if not isinstance(sql, str):
@@ -673,6 +708,7 @@ def _extract_columns(
             and _norm_at(tokens, index - 1) != "."
             and _norm_at(tokens, index + 1) != "."
             and norm not in relation_identifiers
+            and not _is_structural_literal_token(tokens, index)
             and not _is_cte_output_reference(
                 None,
                 norm,
@@ -1158,6 +1194,45 @@ def _first_word(tokens: list[SqlToken]) -> str | None:
 
 def _is_identifier(token: SqlToken) -> bool:
     return token["kind"] in {"word", "quoted_identifier"}
+
+
+def _is_structural_literal_token(tokens: list[SqlToken], index: int) -> bool:
+    token = tokens[index]
+    norm = token["normalized"]
+    if token["kind"] == "string":
+        return True
+    if token["kind"] != "word" or norm not in _TEMPORAL_PART_WORDS:
+        return False
+    if _is_interval_unit(tokens, index):
+        return True
+    return _is_temporal_function_part_argument(tokens, index)
+
+
+def _is_interval_unit(tokens: list[SqlToken], index: int) -> bool:
+    if tokens[index]["normalized"] not in _TEMPORAL_PART_WORDS:
+        return False
+    previous = index - 1
+    if previous >= 0 and tokens[previous]["kind"] == "number":
+        previous -= 1
+    if previous >= 0 and tokens[previous]["kind"] == "string":
+        previous -= 1
+    return previous >= 0 and tokens[previous]["normalized"] == "interval"
+
+
+def _is_temporal_function_part_argument(
+    tokens: list[SqlToken],
+    index: int,
+) -> bool:
+    if tokens[index]["normalized"] not in _TEMPORAL_PART_WORDS:
+        return False
+    if _norm_at(tokens, index - 1) != "(":
+        return False
+    function_index = index - 2
+    return (
+        function_index >= 0
+        and _is_identifier(tokens[function_index])
+        and tokens[function_index]["normalized"] in _TEMPORAL_PART_FUNCTIONS
+    )
 
 
 def _norm_at(tokens: list[SqlToken], index: int) -> str:
