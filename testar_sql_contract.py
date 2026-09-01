@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import app.domain.sql_contract as sql_contract
 from app.domain.planner import build_query_plan
 from app.domain.sql_contract import (
     build_sql_contract_policy,
@@ -102,6 +103,7 @@ def _dimension_test_plan() -> dict:
             {"name": "pk_id"},
             {"name": "business_key"},
             {"name": "label"},
+            {"name": "amount"},
         ],
     }
     projection["required_tables"] = [table]
@@ -110,6 +112,7 @@ def _dimension_test_plan() -> dict:
             {"name": "pk_id"},
             {"name": "business_key"},
             {"name": "label"},
+            {"name": "amount"},
         ]
     }
     projection["authorized_joins"] = []
@@ -125,6 +128,26 @@ def _with_grouping_dimension() -> dict:
             "target_column": "business_key",
             "grouping_requested": True,
             "source": "entity_alias",
+        }
+    ]
+    return plan
+
+
+def _with_ranking_operation(
+    *,
+    direction: str = "descending",
+    requested_limit=None,
+) -> dict:
+    plan = _with_grouping_dimension()
+    plan["planning_context"]["analytical_operations"] = [
+        {
+            "operation_type": "ranking",
+            "canonical_value": "ranking",
+            "direction": direction,
+            "requested_limit": requested_limit,
+            "metric_ref": "metric-synthetic",
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
         }
     ]
     return plan
@@ -606,6 +629,79 @@ def test_sem_dimensao_planejada_nao_exige_group_by() -> None:
     assert _check_status_by_name(result, "grouping_dimensions") == "passed"
 
 
+def test_ranking_descendente_com_order_by_desc_fica_diagnostico() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount DESC",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "warning"
+    assert result["errors"] == []
+
+
+def test_ranking_descendente_com_order_by_asc_nao_aprova_por_direcao() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount ASC",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "warning"
+    assert not any(
+        error["code"] == "SQL_CONTRACT_RULE_VIOLATED"
+        for error in result["errors"]
+    )
+
+
+def test_ranking_ascendente_com_order_by_asc_fica_diagnostico() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount ASC",
+        _with_ranking_operation(direction="ascending"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "warning"
+
+
+def test_ranking_sem_order_by_fica_diagnostico() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "warning"
+    assert result["errors"] == []
+
+
+def test_sem_ranking_order_by_nao_e_obrigatorio() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key",
+        _with_grouping_dimension(),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "passed"
+
+
+def test_order_by_direction_helper_textual_removido() -> None:
+    assert not hasattr(sql_contract, "_first_order_by_direction")
+
+
 def test_dimensao_planejada_rejeita_colisao_basename_cross_schema() -> None:
     result = _run(
         "SELECT b.business_key, COUNT(*) "
@@ -722,6 +818,30 @@ def main() -> None:
         (
             "sem dimensao planejada",
             test_sem_dimensao_planejada_nao_exige_group_by,
+        ),
+        (
+            "ranking desc order desc diagnostico",
+            test_ranking_descendente_com_order_by_desc_fica_diagnostico,
+        ),
+        (
+            "ranking desc order asc diagnostico",
+            test_ranking_descendente_com_order_by_asc_nao_aprova_por_direcao,
+        ),
+        (
+            "ranking asc order asc diagnostico",
+            test_ranking_ascendente_com_order_by_asc_fica_diagnostico,
+        ),
+        (
+            "ranking sem order by diagnostico",
+            test_ranking_sem_order_by_fica_diagnostico,
+        ),
+        (
+            "sem ranking sem order obrigatorio",
+            test_sem_ranking_order_by_nao_e_obrigatorio,
+        ),
+        (
+            "helper textual order by removido",
+            test_order_by_direction_helper_textual_removido,
         ),
         (
             "dimensao planejada colisao cross-schema",

@@ -167,6 +167,30 @@ class ProjectedDimension(TypedDict, total=False):
     confidence: float | None
 
 
+class ProjectedAnalyticalOperation(TypedDict, total=False):
+    operation_type: Literal["ranking"]
+    canonical_value: str
+    direction: Literal["ascending", "descending"]
+    requested_limit: int | None
+    metric_ref: str
+    detection_source: str
+    mapping_source: str
+    matched_user_term: str
+    priority: int | None
+
+
+class ProjectedPlannedMetric(TypedDict, total=False):
+    metric_ref: str
+    metric_concept: str
+    target_table: str
+    target_column: str
+    aggregate: None
+    detection_source: str
+    mapping_source: str
+    matched_user_term: str
+    priority: int | None
+
+
 class ProjectionDiagnostic(TypedDict):
     missing_required_rules: list[str]
     missing_required_tables: list[str]
@@ -174,6 +198,8 @@ class ProjectionDiagnostic(TypedDict):
     join_diagnostics: list[dict[str, Any]]
     dre_diagnostic: dict[str, Any]
     dimension_diagnostic: dict[str, Any]
+    analytical_operation_diagnostic: dict[str, Any]
+    planned_metric_diagnostic: dict[str, Any]
 
 
 class PlanningContextProjection(TypedDict):
@@ -189,6 +215,8 @@ class PlanningContextProjection(TypedDict):
     relevant_entities: list[ProjectedEntity]
     relevant_dre_mappings: list[ProjectedDreMapping]
     detected_dimensions: list[ProjectedDimension]
+    analytical_operations: list[ProjectedAnalyticalOperation]
+    planned_metrics: list[ProjectedPlannedMetric]
     allowed_schemas: list[str]
     component_configs: dict[str, dict[str, Any]]
     diagnostics: ProjectionDiagnostic

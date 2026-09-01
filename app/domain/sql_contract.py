@@ -232,6 +232,12 @@ def run_sql_contract_gate(
         policy,
         findings,
     )
+    analytical_operation_results = _verify_analytical_operations(
+        current_sql,
+        sql_analysis,
+        query_plan,
+        findings,
+    )
     join_results = _verify_joins(sql_analysis, query_plan, findings)
     rule_results = _verify_rules(
         sql_token_norms=sql_token_norms,
@@ -259,6 +265,11 @@ def run_sql_contract_gate(
                 "grouping_dimensions",
                 _check_status(grouping_results),
                 {"count": len(grouping_results)},
+            ),
+            _check(
+                "analytical_operations",
+                _check_status(analytical_operation_results),
+                {"count": len(analytical_operation_results)},
             ),
             _check(
                 "joins",
@@ -537,6 +548,41 @@ def _verify_joins(
     return results
 
 
+def _verify_analytical_operations(
+    current_sql: str,
+    analysis: SqlStatementAnalysis,
+    query_plan: QueryPlan,
+    findings: list[SqlContractFinding],
+) -> list[RuleVerificationResult]:
+    del current_sql, analysis, findings
+    operations = _planned_analytical_operations(query_plan)
+    if not operations:
+        return []
+
+    results: list[RuleVerificationResult] = []
+    for operation in operations:
+        operation_type = operation["operation_type"]
+        if operation_type != "ranking":
+            results.append(
+                _rule_result(
+                    operation_type,
+                    "unverifiable",
+                    "unsupported_analytical_operation",
+                    [],
+                )
+            )
+            continue
+        results.append(
+            _rule_result(
+                operation_type,
+                "unverifiable",
+                "ranking_metric_order_validation_pending",
+                ["metric_ref"] if operation.get("metric_ref") else [],
+            )
+        )
+    return results
+
+
 def _verify_rules(
     *,
     sql_token_norms: list[str],
@@ -804,6 +850,54 @@ def _planned_grouping_dimensions(
             dimension["canonical_value"].casefold(),
             dimension["target_table"].casefold(),
             dimension["target_column"].casefold(),
+        ),
+    )
+
+
+def _planned_analytical_operations(
+    query_plan: QueryPlan,
+) -> list[dict[str, Any]]:
+    planning_context = _planning_context(query_plan)
+    raw_operations = planning_context.get("analytical_operations", [])
+    if not isinstance(raw_operations, list):
+        return []
+    operations: list[dict[str, Any]] = []
+    for item in raw_operations:
+        if not isinstance(item, Mapping):
+            continue
+        operation_type = _clean_text(item.get("operation_type"))
+        direction = _clean_text(item.get("direction"))
+        canonical_value = _clean_text(item.get("canonical_value"))
+        requested_limit = item.get("requested_limit")
+        metric_ref = _clean_text(item.get("metric_ref"))
+        if operation_type != "ranking":
+            continue
+        if canonical_value != operation_type:
+            continue
+        if direction not in {"ascending", "descending"}:
+            continue
+        if requested_limit is not None and (
+            isinstance(requested_limit, bool)
+            or not isinstance(requested_limit, int)
+            or requested_limit <= 0
+        ):
+            continue
+        operations.append(
+            {
+                "operation_type": operation_type,
+                "canonical_value": canonical_value,
+                "direction": direction,
+                "requested_limit": requested_limit,
+                "metric_ref": metric_ref,
+            }
+        )
+    return sorted(
+        operations,
+        key=lambda operation: (
+            operation["operation_type"],
+            operation["direction"],
+            operation["metric_ref"],
+            operation["requested_limit"] or 0,
         ),
     )
 

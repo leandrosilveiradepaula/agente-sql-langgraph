@@ -232,6 +232,124 @@ def _intent_dimension_evidence(
     }
 
 
+def _intent_operation_evidence(
+    *,
+    term: str,
+) -> dict:
+    return {
+        "applied": True,
+        "intent": "generic_test_intent",
+        "best_candidate": {
+            "intent_name": "generic_test_intent",
+            "score": 120.0,
+            "matches": [
+                {
+                    "pattern": "generic_operation_rule",
+                    "match_details": {
+                        "concepts": [
+                            {
+                                "concept_name": "analytical_operation",
+                                "satisfied": True,
+                                "terms": [
+                                    {
+                                        "term": term,
+                                        "normalized_term": term,
+                                        "matched": True,
+                                        "match_details": {
+                                            "semantic_signal": {
+                                                "concept_name": (
+                                                    "analytical_operation"
+                                                ),
+                                                "term": term,
+                                                "normalized_term": term,
+                                                "source": (
+                                                    "intent_catalog_concept"
+                                                ),
+                                                "confidence": 1.0,
+                                                "matched_tokens": [term],
+                                            }
+                                        },
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                }
+            ],
+        },
+        "candidates": [],
+    }
+
+
+def _intent_metric_evidence(
+    *,
+    term: str,
+    operation_term: str | None = None,
+) -> dict:
+    concepts = [
+        {
+            "concept_name": "financial_metric",
+            "satisfied": True,
+            "terms": [
+                {
+                    "term": term,
+                    "normalized_term": term,
+                    "matched": True,
+                    "match_details": {
+                        "semantic_signal": {
+                            "concept_name": "financial_metric",
+                            "term": term,
+                            "normalized_term": term,
+                            "source": "intent_catalog_concept",
+                            "confidence": 1.0,
+                            "matched_tokens": [term],
+                        }
+                    },
+                }
+            ],
+        }
+    ]
+    if operation_term is not None:
+        concepts.append(
+            {
+                "concept_name": "analytical_operation",
+                "satisfied": True,
+                "terms": [
+                    {
+                        "term": operation_term,
+                        "normalized_term": operation_term,
+                        "matched": True,
+                        "match_details": {
+                            "semantic_signal": {
+                                "concept_name": "analytical_operation",
+                                "term": operation_term,
+                                "normalized_term": operation_term,
+                                "source": "intent_catalog_concept",
+                                "confidence": 1.0,
+                                "matched_tokens": [operation_term],
+                            }
+                        },
+                    }
+                ],
+            }
+        )
+    return {
+        "applied": True,
+        "intent": "generic_test_intent",
+        "best_candidate": {
+            "intent_name": "generic_test_intent",
+            "score": 120.0,
+            "matches": [
+                {
+                    "pattern": "generic_metric_rule",
+                    "match_details": {"concepts": concepts},
+                }
+            ],
+        },
+        "candidates": [],
+    }
+
+
 def _dimension_context() -> dict:
     context = _context()
     context["intent_resolution"] = {
@@ -349,6 +467,204 @@ def _dimension_context() -> dict:
         ]
     )
     return context
+
+
+def _operation_context() -> dict:
+    context = _dimension_context()
+    context["entities"].extend(
+        [
+            {
+                "entity_type": "analytical_operation",
+                "user_term": "highest",
+                "canonical_value": "ranking",
+                "target_table": None,
+                "target_column": None,
+                "sql_filter_hint": None,
+                "business_rule": {
+                    "operation": {
+                        "operation_type": "ranking",
+                        "direction": "descending",
+                        "requested_limit": None,
+                    }
+                },
+                "priority": 1,
+            },
+            {
+                "entity_type": "analytical_operation",
+                "user_term": "lowest",
+                "canonical_value": "ranking",
+                "target_table": None,
+                "target_column": None,
+                "sql_filter_hint": None,
+                "business_rule": {
+                    "operation": {
+                        "operation_type": "ranking",
+                        "direction": "ascending",
+                        "requested_limit": None,
+                    }
+                },
+                "priority": 1,
+            },
+        ]
+    )
+    return context
+
+
+def _metric_context() -> dict:
+    context = _operation_context()
+    context["entities"].extend(
+        [
+            {
+                "entity_type": "financial_metric",
+                "user_term": "amount",
+                "canonical_value": "amount",
+                "target_table": "schema_test.fact_metrics",
+                "target_column": "measure_value",
+                "sql_filter_hint": None,
+                "business_rule": {
+                    "metric": {
+                        "metric_concept": "amount",
+                        "target_table": "schema_test.fact_metrics",
+                        "target_column": "measure_value",
+                    }
+                },
+                "priority": 1,
+            },
+            {
+                "entity_type": "financial_metric",
+                "user_term": "volume",
+                "canonical_value": "volume",
+                "target_table": "schema_test.fact_metrics",
+                "target_column": "volume_value",
+                "sql_filter_hint": None,
+                "business_rule": {
+                    "metric": {
+                        "metric_concept": "volume",
+                        "target_table": "schema_test.fact_metrics",
+                        "target_column": "volume_value",
+                    }
+                },
+                "priority": 1,
+            },
+        ]
+    )
+    context["table_catalog"].append(
+        {
+            "schema_name": "schema_test",
+            "table_name": "fact_metrics",
+            "table_type": "table",
+            "description": "synthetic metrics fact",
+            "grain": None,
+            "primary_key": ["row_id"],
+            "key_columns": ["row_id"],
+            "metric_columns": ["measure_value", "volume_value"],
+            "date_columns": ["event_date"],
+            "join_rules": [],
+            "ai_hint": None,
+            "priority": 1,
+            "columns": [
+                {"name": "row_id"},
+                {"name": "measure_value"},
+                {"name": "volume_value"},
+                {"name": "event_date"},
+            ],
+        }
+    )
+    return context
+
+
+def _append_operation_alias(
+    context: dict,
+    *,
+    user_term: str,
+    canonical_value: str = "ranking",
+    operation_type: str = "ranking",
+    direction: str = "descending",
+    requested_limit=None,
+) -> None:
+    context["entities"].append(
+        {
+            "entity_type": "analytical_operation",
+            "user_term": user_term,
+            "canonical_value": canonical_value,
+            "target_table": None,
+            "target_column": None,
+            "sql_filter_hint": None,
+            "business_rule": {
+                "operation": {
+                    "operation_type": operation_type,
+                    "direction": direction,
+                    "requested_limit": requested_limit,
+                }
+            },
+            "priority": 1,
+        }
+    )
+
+
+def _append_metric_alias(
+    context: dict,
+    *,
+    user_term: str,
+    canonical_value: str = "amount",
+    metric_concept: str = "amount",
+    target_table: str = "schema_test.fact_metrics",
+    target_column: str = "measure_value",
+    aggregate=None,
+) -> None:
+    metric = {
+        "metric_concept": metric_concept,
+        "target_table": target_table,
+        "target_column": target_column,
+    }
+    if aggregate is not None:
+        metric["aggregate"] = aggregate
+    context["entities"].append(
+        {
+            "entity_type": "financial_metric",
+            "user_term": user_term,
+            "canonical_value": canonical_value,
+            "target_table": target_table,
+            "target_column": target_column,
+            "sql_filter_hint": None,
+            "business_rule": {"metric": metric},
+            "priority": 1,
+        }
+    )
+
+
+def _operation_plan_for_term(
+    *,
+    context: dict,
+    term: str,
+) -> dict:
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question=f"{term} amounts among regions last period",
+        intent_resolution_result=_intent_operation_evidence(term=term),
+    )
+    return result["query_plan"]["planning_context"]
+
+
+def _metric_plan_for_term(
+    *,
+    context: dict,
+    term: str,
+    operation_term: str | None = None,
+) -> dict:
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question=f"{operation_term or ''} {term}".strip(),
+        intent_resolution_result=_intent_metric_evidence(
+            term=term,
+            operation_term=operation_term,
+        ),
+    )
+    return result["query_plan"]["planning_context"]
 
 
 def test_seleciona_padrao_unico() -> None:
@@ -894,6 +1210,329 @@ def test_evidence_semantica_incompleta_nao_inventa_dimensao() -> None:
     )
 
 
+def test_evidence_operacional_resolve_ranking_descendente() -> None:
+    result = build_query_plan(
+        context=_operation_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="highest amounts among regions last period",
+        intent_resolution_result=_intent_operation_evidence(
+            term="highest",
+        ),
+    )
+
+    projection = result["query_plan"]["planning_context"]
+    operation = projection["analytical_operations"][0]
+    diagnostic = projection["diagnostics"][
+        "analytical_operation_diagnostic"
+    ]
+
+    assert operation["operation_type"] == "ranking"
+    assert operation["canonical_value"] == "ranking"
+    assert operation["direction"] == "descending"
+    assert operation["requested_limit"] is None
+    assert operation["detection_source"] == "intent_semantic_evidence"
+    assert operation["mapping_source"] == "entity_alias"
+    assert diagnostic["source"] == "intent_semantic_evidence"
+
+
+def test_evidence_operacional_resolve_ranking_ascendente() -> None:
+    result = build_query_plan(
+        context=_operation_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="lowest amounts among channels last period",
+        intent_resolution_result=_intent_operation_evidence(
+            term="lowest",
+        ),
+    )
+
+    operation = result["query_plan"]["planning_context"][
+        "analytical_operations"
+    ][0]
+
+    assert operation["operation_type"] == "ranking"
+    assert operation["direction"] == "ascending"
+    assert operation["requested_limit"] is None
+
+
+def test_evidence_operacional_sem_alias_nao_inventa_operacao() -> None:
+    result = build_query_plan(
+        context=_operation_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="unknown operation over regions",
+        intent_resolution_result=_intent_operation_evidence(
+            term="unmapped",
+        ),
+    )
+
+    projection = result["query_plan"]["planning_context"]
+
+    assert projection["analytical_operations"] == []
+    assert projection["diagnostics"]["analytical_operation_diagnostic"][
+        "unresolved_terms"
+    ] == ["unmapped"]
+
+
+def test_metadata_operacional_invalida_nao_inventa_operacao() -> None:
+    context = _operation_context()
+    context["entities"].append(
+        {
+            "entity_type": "analytical_operation",
+            "user_term": "invalid operation",
+            "canonical_value": "ranking",
+            "target_table": None,
+            "target_column": None,
+            "sql_filter_hint": None,
+            "business_rule": {
+                "operation": {
+                    "operation_type": "ranking",
+                    "direction": "sideways",
+                    "requested_limit": None,
+                }
+            },
+            "priority": 1,
+        }
+    )
+
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="invalid operation over regions",
+        intent_resolution_result=_intent_operation_evidence(
+            term="invalid operation",
+        ),
+    )
+
+    assert result["query_plan"]["planning_context"][
+        "analytical_operations"
+    ] == []
+
+
+def test_operacao_com_canonical_divergente_nao_e_projetada() -> None:
+    context = _operation_context()
+    _append_operation_alias(
+        context,
+        user_term="divergent operation",
+        canonical_value="different_operation",
+        operation_type="ranking",
+    )
+
+    projection = _operation_plan_for_term(
+        context=context,
+        term="divergent operation",
+    )
+
+    assert projection["analytical_operations"] == []
+
+
+def test_requested_limit_bool_nao_e_projetado() -> None:
+    for value in (True, False):
+        context = _operation_context()
+        _append_operation_alias(
+            context,
+            user_term=f"bool limit {value}",
+            requested_limit=value,
+        )
+
+        projection = _operation_plan_for_term(
+            context=context,
+            term=f"bool limit {value}",
+        )
+
+        assert projection["analytical_operations"] == []
+
+
+def test_requested_limit_inteiro_positivo_e_valido() -> None:
+    context = _operation_context()
+    _append_operation_alias(
+        context,
+        user_term="top five",
+        requested_limit=5,
+    )
+
+    projection = _operation_plan_for_term(
+        context=context,
+        term="top five",
+    )
+    operation = projection["analytical_operations"][0]
+
+    assert operation["operation_type"] == "ranking"
+    assert operation["requested_limit"] == 5
+
+
+def test_requested_limit_null_e_valido() -> None:
+    projection = _operation_plan_for_term(
+        context=_operation_context(),
+        term="highest",
+    )
+    operation = projection["analytical_operations"][0]
+
+    assert operation["operation_type"] == "ranking"
+    assert operation["requested_limit"] is None
+
+
+def test_financial_metric_evidence_resolve_planned_metric() -> None:
+    projection = _metric_plan_for_term(
+        context=_metric_context(),
+        term="amount",
+    )
+
+    metric = projection["planned_metrics"][0]
+
+    assert metric["metric_concept"] == "amount"
+    assert metric["target_table"] == "schema_test.fact_metrics"
+    assert metric["target_column"] == "measure_value"
+    assert metric["aggregate"] is None
+    assert metric["detection_source"] == "intent_semantic_evidence"
+    assert metric["mapping_source"] == "entity_alias"
+    assert metric["metric_ref"].startswith("metric-")
+
+
+def test_financial_metric_sem_mapping_nao_inventa_metrica() -> None:
+    projection = _metric_plan_for_term(
+        context=_metric_context(),
+        term="unmapped metric",
+    )
+
+    assert projection["planned_metrics"] == []
+    assert projection["diagnostics"]["planned_metric_diagnostic"][
+        "unresolved_terms"
+    ] == ["unmapped metric"]
+
+
+def test_financial_metric_canonical_inconsistente_rejeita() -> None:
+    context = _metric_context()
+    _append_metric_alias(
+        context,
+        user_term="divergent metric",
+        canonical_value="amount",
+        metric_concept="different",
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="divergent metric",
+    )
+
+    assert projection["planned_metrics"] == []
+
+
+def test_financial_metric_target_table_inexistente_rejeita() -> None:
+    context = _metric_context()
+    _append_metric_alias(
+        context,
+        user_term="missing table metric",
+        target_table="schema_test.missing_fact",
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="missing table metric",
+    )
+
+    assert projection["planned_metrics"] == []
+
+
+def test_financial_metric_target_column_fora_de_metric_columns_rejeita() -> None:
+    context = _metric_context()
+    _append_metric_alias(
+        context,
+        user_term="invalid column metric",
+        target_column="not_metric",
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="invalid column metric",
+    )
+
+    assert projection["planned_metrics"] == []
+
+
+def test_financial_metric_com_aggregate_nao_e_projetada() -> None:
+    context = _metric_context()
+    _append_metric_alias(
+        context,
+        user_term="aggregate metric",
+        aggregate="sum",
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="aggregate metric",
+    )
+
+    assert projection["planned_metrics"] == []
+
+
+def test_ranking_recebe_metric_ref_quando_ha_uma_metrica() -> None:
+    projection = _metric_plan_for_term(
+        context=_metric_context(),
+        term="amount",
+        operation_term="highest",
+    )
+
+    metric = projection["planned_metrics"][0]
+    operation = projection["analytical_operations"][0]
+
+    assert operation["metric_ref"] == metric["metric_ref"]
+    assert projection["diagnostics"]["analytical_operation_diagnostic"][
+        "metric_binding"
+    ]["status"] == "bound"
+
+
+def test_ranking_com_multiplas_metricas_nao_escolhe_arbitrariamente() -> None:
+    context = _metric_context()
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="highest amount and volume",
+        intent_resolution_result={
+            "applied": True,
+            "intent": "generic_test_intent",
+            "best_candidate": {
+                "intent_name": "generic_test_intent",
+                "score": 120.0,
+                "matches": [
+                    {
+                        "match_details": {
+                            "concepts": [
+                                _intent_metric_evidence(
+                                    term="amount"
+                                )["best_candidate"]["matches"][0][
+                                    "match_details"
+                                ]["concepts"][0],
+                                _intent_metric_evidence(
+                                    term="volume"
+                                )["best_candidate"]["matches"][0][
+                                    "match_details"
+                                ]["concepts"][0],
+                                _intent_operation_evidence(
+                                    term="highest"
+                                )["best_candidate"]["matches"][0][
+                                    "match_details"
+                                ]["concepts"][0],
+                            ]
+                        }
+                    }
+                ],
+            },
+            "candidates": [],
+        },
+    )
+    projection = result["query_plan"]["planning_context"]
+
+    assert len(projection["planned_metrics"]) == 2
+    assert "metric_ref" not in projection["analytical_operations"][0]
+    assert projection["diagnostics"]["analytical_operation_diagnostic"][
+        "metric_binding"
+    ]["status"] == "metric_ambiguous"
+
+
 def test_sem_dimensao_nao_cria_grouping() -> None:
     result = build_query_plan(
         context=_dimension_context(),
@@ -1278,6 +1917,70 @@ def main() -> None:
         (
             "evidence incompleta nao inventa dimensao",
             test_evidence_semantica_incompleta_nao_inventa_dimensao,
+        ),
+        (
+            "evidence operacional ranking desc",
+            test_evidence_operacional_resolve_ranking_descendente,
+        ),
+        (
+            "evidence operacional ranking asc",
+            test_evidence_operacional_resolve_ranking_ascendente,
+        ),
+        (
+            "evidence operacional sem alias",
+            test_evidence_operacional_sem_alias_nao_inventa_operacao,
+        ),
+        (
+            "metadata operacional invalida",
+            test_metadata_operacional_invalida_nao_inventa_operacao,
+        ),
+        (
+            "canonical operacional divergente",
+            test_operacao_com_canonical_divergente_nao_e_projetada,
+        ),
+        (
+            "requested limit bool invalido",
+            test_requested_limit_bool_nao_e_projetado,
+        ),
+        (
+            "requested limit inteiro valido",
+            test_requested_limit_inteiro_positivo_e_valido,
+        ),
+        (
+            "requested limit null valido",
+            test_requested_limit_null_e_valido,
+        ),
+        (
+            "financial metric evidence",
+            test_financial_metric_evidence_resolve_planned_metric,
+        ),
+        (
+            "financial metric sem mapping",
+            test_financial_metric_sem_mapping_nao_inventa_metrica,
+        ),
+        (
+            "financial metric canonical inconsistente",
+            test_financial_metric_canonical_inconsistente_rejeita,
+        ),
+        (
+            "financial metric target table inexistente",
+            test_financial_metric_target_table_inexistente_rejeita,
+        ),
+        (
+            "financial metric target column invalida",
+            test_financial_metric_target_column_fora_de_metric_columns_rejeita,
+        ),
+        (
+            "financial metric aggregate ausente",
+            test_financial_metric_com_aggregate_nao_e_projetada,
+        ),
+        (
+            "ranking metric ref",
+            test_ranking_recebe_metric_ref_quando_ha_uma_metrica,
+        ),
+        (
+            "ranking metric ambiguity",
+            test_ranking_com_multiplas_metricas_nao_escolhe_arbitrariamente,
         ),
         ("sem dimensao sem grouping", test_sem_dimensao_nao_cria_grouping),
         (

@@ -47,6 +47,26 @@ class GroupingDimension(TypedDict):
     source: str
 
 
+class AnalyticalOperation(TypedDict):
+    operation_type: str
+    canonical_value: str
+    direction: str
+    requested_limit: int | None
+    metric_ref: str
+    detection_source: str
+    mapping_source: str
+
+
+class PlannedMetric(TypedDict):
+    metric_ref: str
+    metric_concept: str
+    target_table: str
+    target_column: str
+    aggregate: None
+    detection_source: str
+    mapping_source: str
+
+
 class SqlGenerationContext(TypedDict):
     context_version: str
     context_fingerprint: str
@@ -62,6 +82,8 @@ class SqlGenerationContext(TypedDict):
     operational_entities: list[dict[str, Any]]
     dre_mappings: list[dict[str, Any]]
     grouping_dimensions: list[GroupingDimension]
+    analytical_operations: list[AnalyticalOperation]
+    planned_metrics: list[PlannedMetric]
     pattern_metadata: dict[str, Any]
 
 
@@ -154,6 +176,8 @@ _PLAN_FIELDS_USED = [
     "planning_context.relevant_entities",
     "planning_context.relevant_dre_mappings",
     "planning_context.detected_dimensions",
+    "planning_context.analytical_operations",
+    "planning_context.planned_metrics",
     "sql_pattern_metadata",
 ]
 
@@ -220,6 +244,55 @@ def build_sql_generation_request(
             "query_plan.selected_pattern esta ausente ou invalido."
         )
 
+    grouping_dimensions = _grouping_dimensions(
+        planning_context.get("detected_dimensions", [])
+    )
+    planned_metrics = _planned_metrics(
+        planning_context.get("planned_metrics", [])
+    )
+    analytical_operations = _analytical_operations(
+        planning_context.get("analytical_operations", []),
+        valid_metric_refs={
+            metric["metric_ref"]
+            for metric in planned_metrics
+            if metric.get("metric_ref")
+        },
+    )
+    instructions: list[SqlGenerationInstruction] = [
+        {
+            "name": "output_format",
+            "content": (
+                "Retorne somente SQL de leitura como texto puro."
+            ),
+        },
+        {
+            "name": "authorized_context",
+            "content": (
+                "Use exclusivamente os objetos e regras presentes "
+                "na requisicao."
+            ),
+        },
+    ]
+    if any(
+        operation.get("operation_type") == "ranking"
+        and operation.get("metric_ref")
+        for operation in analytical_operations
+    ):
+        instructions.append(
+            {
+                "name": "analytical_operations",
+                "content": (
+                    "Quando analytical_operations incluir ranking com "
+                    "metric_ref, gere ORDER BY na direcao solicitada para "
+                    "a planned_metric referenciada por metric_ref. Use "
+                    "DESC para descending e ASC para ascending. Quando a "
+                    "planned_metric tiver aggregate null, nao invente a "
+                    "agregacao a partir do contrato de ranking. Nao "
+                    "adicione LIMIT quando requested_limit for null."
+                ),
+            }
+        )
+
     request: SqlGenerationRequest = {
         "contract_version": SQL_GENERATION_CONTRACT_VERSION,
         "generation_context": {
@@ -276,9 +349,9 @@ def build_sql_generation_request(
                 text_fields=("dre_code", "nivel_1_bi"),
                 priority_field="sort_order",
             ),
-            "grouping_dimensions": _grouping_dimensions(
-                planning_context.get("detected_dimensions", [])
-            ),
+            "grouping_dimensions": grouping_dimensions,
+            "analytical_operations": analytical_operations,
+            "planned_metrics": planned_metrics,
             "pattern_metadata": {
                 "pattern_name": selected_pattern.get(
                     "pattern_name",
@@ -291,21 +364,7 @@ def build_sql_generation_request(
                 ),
             },
         },
-        "instructions": [
-            {
-                "name": "output_format",
-                "content": (
-                    "Retorne somente SQL de leitura como texto puro."
-                ),
-            },
-            {
-                "name": "authorized_context",
-                "content": (
-                    "Use exclusivamente os objetos e regras presentes "
-                    "na requisicao."
-                ),
-            },
-        ],
+        "instructions": instructions,
         "output_constraints": list(_OUTPUT_CONSTRAINTS),
     }
 
@@ -604,6 +663,8 @@ def _validate_request(
         "operational_entities",
         "dre_mappings",
         "grouping_dimensions",
+        "analytical_operations",
+        "planned_metrics",
     ):
         if not isinstance(context.get(field_name), list):
             raise SqlGenerationInputError(
@@ -728,6 +789,114 @@ def _grouping_dimensions(value: Any) -> list[GroupingDimension]:
     )
     return output
 
+
+def _analytical_operations(
+    value: Any,
+    *,
+    valid_metric_refs: set[str],
+) -> list[AnalyticalOperation]:
+    if not isinstance(value, list):
+        raise SqlGenerationInputError(
+            "analytical_operations deve ser lista."
+        )
+    output: list[AnalyticalOperation] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        operation_type = _optional_clean_text(item.get("operation_type"))
+        direction = _optional_clean_text(item.get("direction"))
+        if operation_type != "ranking":
+            continue
+        if direction not in {"ascending", "descending"}:
+            continue
+        requested_limit = item.get("requested_limit")
+        if requested_limit is not None and (
+            isinstance(requested_limit, bool)
+            or not isinstance(requested_limit, int)
+            or requested_limit <= 0
+        ):
+            continue
+        canonical_value = _optional_clean_text(
+            item.get("canonical_value")
+        )
+        if canonical_value != operation_type:
+            continue
+        metric_ref = _optional_clean_text(item.get("metric_ref"))
+        if metric_ref and metric_ref not in valid_metric_refs:
+            continue
+        output.append(
+            {
+                "operation_type": operation_type,
+                "canonical_value": canonical_value,
+                "direction": direction,
+                "requested_limit": requested_limit,
+                "metric_ref": metric_ref,
+                "detection_source": _optional_clean_text(
+                    item.get("detection_source")
+                ),
+                "mapping_source": _optional_clean_text(
+                    item.get("mapping_source")
+                ),
+            }
+        )
+    output.sort(
+        key=lambda operation: (
+            operation["operation_type"],
+            operation["direction"],
+            operation["canonical_value"].casefold(),
+            operation["metric_ref"].casefold(),
+            operation["requested_limit"] or 0,
+        )
+    )
+    return output
+
+
+def _planned_metrics(value: Any) -> list[PlannedMetric]:
+    if not isinstance(value, list):
+        raise SqlGenerationInputError(
+            "planned_metrics deve ser lista."
+        )
+    output: list[PlannedMetric] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        metric_ref = _optional_clean_text(item.get("metric_ref"))
+        metric_concept = _optional_clean_text(item.get("metric_concept"))
+        target_table = _optional_clean_text(item.get("target_table"))
+        target_column = _optional_clean_text(item.get("target_column"))
+        if not (
+            metric_ref
+            and metric_concept
+            and target_table
+            and target_column
+        ):
+            continue
+        if item.get("aggregate") is not None:
+            continue
+        output.append(
+            {
+                "metric_ref": metric_ref,
+                "metric_concept": metric_concept,
+                "target_table": target_table,
+                "target_column": target_column,
+                "aggregate": None,
+                "detection_source": _optional_clean_text(
+                    item.get("detection_source")
+                ),
+                "mapping_source": _optional_clean_text(
+                    item.get("mapping_source")
+                ),
+            }
+        )
+    output.sort(
+        key=lambda metric: (
+            metric["metric_ref"].casefold(),
+            metric["metric_concept"].casefold(),
+            metric["target_table"].casefold(),
+            metric["target_column"].casefold(),
+        )
+    )
+    return output
 
 def _optional_clean_text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""

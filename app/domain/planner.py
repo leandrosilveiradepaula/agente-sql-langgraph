@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from collections.abc import Mapping
 from copy import deepcopy
@@ -24,8 +25,10 @@ from app.domain.planning import (
     PlanningErrorCode,
     ProjectedDreMapping,
     ProjectedDimension,
+    ProjectedAnalyticalOperation,
     ProjectedEntity,
     ProjectedJoin,
+    ProjectedPlannedMetric,
     ProjectedRule,
     ProjectedTable,
     QueryPlan,
@@ -305,9 +308,27 @@ def project_planning_context(
         normalized_question=normalized_question,
         intent_resolution_result=intent_resolution_result,
     )
+    operation_projection, operation_diagnostic = (
+        _detect_analytical_operations(
+            context=context,
+            intent_resolution_result=intent_resolution_result,
+        )
+    )
+    planned_metrics, planned_metric_diagnostic = _detect_planned_metrics(
+        context=context,
+        intent_resolution_result=intent_resolution_result,
+    )
+    operation_projection, metric_binding_diagnostic = (
+        _bind_metrics_to_analytical_operations(
+            operations=operation_projection,
+            planned_metrics=planned_metrics,
+        )
+    )
+    operation_diagnostic["metric_binding"] = metric_binding_diagnostic
     required_table_names = _expand_required_tables_with_dimensions(
         selected_pattern.get("required_tables", []),
         dimension_projection,
+        planned_metrics,
     )
 
     required_tables, missing_tables, ambiguous_tables = (
@@ -355,6 +376,7 @@ def project_planning_context(
         for table in required_tables
     }
     _include_dimension_columns(relevant_columns, dimension_projection)
+    _include_metric_columns(relevant_columns, planned_metrics)
 
     return {
         "context_version": context.get("version", ""),
@@ -369,6 +391,8 @@ def project_planning_context(
         "relevant_entities": entity_projection,
         "relevant_dre_mappings": dre_projection,
         "detected_dimensions": dimension_projection,
+        "analytical_operations": operation_projection,
+        "planned_metrics": planned_metrics,
         "allowed_schemas": list(context.get("allowed_schemas", [])),
         "component_configs": deepcopy(
             context.get("component_configs", {})
@@ -380,6 +404,8 @@ def project_planning_context(
             "join_diagnostics": join_projection["diagnostics"],
             "dre_diagnostic": dre_diagnostic,
             "dimension_diagnostic": dimension_diagnostic,
+            "analytical_operation_diagnostic": operation_diagnostic,
+            "planned_metric_diagnostic": planned_metric_diagnostic,
         },
     }
 
@@ -825,6 +851,454 @@ def _grouping_terms_from_concept_evidence(
     return matches
 
 
+def _detect_analytical_operations(
+    *,
+    context: ContextSnapshot,
+    intent_resolution_result: Mapping[str, Any] | None = None,
+) -> tuple[list[ProjectedAnalyticalOperation], dict[str, Any]]:
+    evidence_terms = _operation_terms_from_intent_evidence(
+        intent_resolution_result,
+    )
+    operations: list[ProjectedAnalyticalOperation] = []
+    unresolved: list[str] = []
+    invalid_metadata: list[str] = []
+    for matched_user_term in evidence_terms:
+        operation = _resolve_analytical_operation(
+            context.get("entities", []),
+            matched_user_term=matched_user_term,
+        )
+        if operation is None:
+            unresolved.append(matched_user_term)
+            continue
+        if operation.get("operation_type") != "ranking":
+            invalid_metadata.append(matched_user_term)
+            continue
+        operations.append(operation)
+
+    if not operations:
+        return [], {
+            "operation_requested": bool(evidence_terms),
+            "matched_terms": sorted(set(evidence_terms), key=str.casefold),
+            "unresolved_terms": sorted(set(unresolved), key=str.casefold),
+            "invalid_metadata_terms": sorted(
+                set(invalid_metadata),
+                key=str.casefold,
+            ),
+            "source": "none" if not evidence_terms else "intent_semantic_evidence",
+        }
+
+    return _dedupe_analytical_operations(operations), {
+        "operation_requested": True,
+        "matched_terms": sorted(set(evidence_terms), key=str.casefold),
+        "unresolved_terms": sorted(set(unresolved), key=str.casefold),
+        "invalid_metadata_terms": sorted(
+            set(invalid_metadata),
+            key=str.casefold,
+        ),
+        "source": "intent_semantic_evidence",
+        "detection_source": "intent_semantic_evidence",
+    }
+
+
+def _operation_terms_from_intent_evidence(
+    intent_resolution_result: Mapping[str, Any] | None,
+) -> list[str]:
+    if not isinstance(intent_resolution_result, Mapping):
+        return []
+
+    selected_intent = intent_resolution_result.get("intent")
+    candidates = _selected_intent_candidates(
+        intent_resolution_result,
+        selected_intent=selected_intent,
+    )
+    matches: list[str] = []
+    for candidate in candidates:
+        for concept in _concepts_from_candidate(candidate):
+            if str(concept.get("concept_name", "")).casefold() != (
+                "analytical_operation"
+            ):
+                continue
+            if not concept.get("satisfied"):
+                continue
+            for term in concept.get("terms", []):
+                if not isinstance(term, Mapping) or not term.get("matched"):
+                    continue
+                signal = _semantic_signal_from_term(term)
+                matched = (
+                    signal.get("normalized_term")
+                    if isinstance(signal, Mapping)
+                    else term.get("normalized_term")
+                )
+                if isinstance(matched, str) and matched.strip():
+                    matches.append(matched.strip())
+    return sorted(set(matches), key=str.casefold)
+
+
+def _detect_planned_metrics(
+    *,
+    context: ContextSnapshot,
+    intent_resolution_result: Mapping[str, Any] | None = None,
+) -> tuple[list[ProjectedPlannedMetric], dict[str, Any]]:
+    evidence_terms = _metric_terms_from_intent_evidence(
+        intent_resolution_result,
+    )
+    metrics: list[ProjectedPlannedMetric] = []
+    unresolved: list[str] = []
+    invalid_metadata: list[str] = []
+    for matched_user_term in evidence_terms:
+        metric, reason = _resolve_planned_metric(
+            context=context,
+            matched_user_term=matched_user_term,
+        )
+        if metric is None:
+            if reason == "invalid_metadata":
+                invalid_metadata.append(matched_user_term)
+            else:
+                unresolved.append(matched_user_term)
+            continue
+        metrics.append(metric)
+
+    planned_metrics = _dedupe_planned_metrics(metrics)
+    return planned_metrics, {
+        "metric_requested": bool(evidence_terms),
+        "matched_terms": sorted(set(evidence_terms), key=str.casefold),
+        "unresolved_terms": sorted(set(unresolved), key=str.casefold),
+        "invalid_metadata_terms": sorted(
+            set(invalid_metadata),
+            key=str.casefold,
+        ),
+        "source": (
+            "none" if not evidence_terms else "intent_semantic_evidence"
+        ),
+        "detection_source": (
+            "intent_semantic_evidence" if evidence_terms else "none"
+        ),
+        "projected_count": len(planned_metrics),
+    }
+
+
+def _metric_terms_from_intent_evidence(
+    intent_resolution_result: Mapping[str, Any] | None,
+) -> list[str]:
+    if not isinstance(intent_resolution_result, Mapping):
+        return []
+
+    selected_intent = intent_resolution_result.get("intent")
+    candidates = _selected_intent_candidates(
+        intent_resolution_result,
+        selected_intent=selected_intent,
+    )
+    matches: list[str] = []
+    for candidate in candidates:
+        for concept in _concepts_from_candidate(candidate):
+            if str(concept.get("concept_name", "")).casefold() != (
+                "financial_metric"
+            ):
+                continue
+            if not concept.get("satisfied"):
+                continue
+            for term in concept.get("terms", []):
+                if not isinstance(term, Mapping) or not term.get("matched"):
+                    continue
+                signal = _semantic_signal_from_term(term)
+                matched = (
+                    signal.get("normalized_term")
+                    if isinstance(signal, Mapping)
+                    else term.get("normalized_term")
+                )
+                if isinstance(matched, str) and matched.strip():
+                    matches.append(matched.strip())
+    return sorted(set(matches), key=str.casefold)
+
+
+def _resolve_planned_metric(
+    *,
+    context: ContextSnapshot,
+    matched_user_term: str,
+) -> tuple[ProjectedPlannedMetric | None, str]:
+    entities = context.get("entities", [])
+    if not isinstance(entities, list):
+        return None, "unresolved"
+    normalized_term = normalize_search_text(matched_user_term)
+    table_catalog = context.get("table_catalog", [])
+    candidates: list[tuple[float, ProjectedPlannedMetric]] = []
+    invalid_seen = False
+    for entity in entities:
+        if not isinstance(entity, Mapping):
+            continue
+        if str(entity.get("entity_type", "")).casefold() != (
+            "financial_metric"
+        ):
+            continue
+        user_term = str(entity.get("user_term", "")).strip()
+        if normalize_search_text(user_term) != normalized_term:
+            continue
+        metric = _metric_metadata(entity.get("business_rule"))
+        if metric is None:
+            invalid_seen = True
+            continue
+        canonical_value = str(entity.get("canonical_value", "")).strip()
+        target_table = str(entity.get("target_table", "")).strip()
+        target_column = str(entity.get("target_column", "")).strip()
+        if not (
+            canonical_value
+            and metric["metric_concept"] == canonical_value
+            and target_table
+            and target_column
+            and metric["target_table"] == target_table
+            and metric["target_column"] == target_column
+            and _metric_column_allowed(
+                table_catalog,
+                target_table=target_table,
+                target_column=target_column,
+            )
+        ):
+            invalid_seen = True
+            continue
+        priority = _optional_int(entity.get("priority"))
+        candidates.append(
+            (
+                _priority_sort_value(priority),
+                {
+                    "metric_ref": _metric_ref(
+                        metric_concept=canonical_value,
+                        target_table=target_table,
+                        target_column=target_column,
+                    ),
+                    "metric_concept": canonical_value,
+                    "target_table": target_table,
+                    "target_column": target_column,
+                    "aggregate": None,
+                    "detection_source": "intent_semantic_evidence",
+                    "mapping_source": "entity_alias",
+                    "matched_user_term": matched_user_term,
+                    "priority": priority,
+                },
+            )
+        )
+    if not candidates:
+        return None, "invalid_metadata" if invalid_seen else "unresolved"
+    return sorted(
+        candidates,
+        key=lambda item: (
+            item[0],
+            item[1]["metric_concept"].casefold(),
+            item[1]["target_table"].casefold(),
+            item[1]["target_column"].casefold(),
+        ),
+    )[0][1], "resolved"
+
+
+def _metric_metadata(
+    business_rule: Any,
+) -> dict[str, str] | None:
+    if not isinstance(business_rule, Mapping):
+        return None
+    metric = business_rule.get("metric")
+    if not isinstance(metric, Mapping):
+        return None
+    if metric.get("aggregate") is not None:
+        return None
+    metric_concept = str(metric.get("metric_concept", "")).strip()
+    target_table = str(metric.get("target_table", "")).strip()
+    target_column = str(metric.get("target_column", "")).strip()
+    if not (metric_concept and target_table and target_column):
+        return None
+    return {
+        "metric_concept": metric_concept,
+        "target_table": target_table,
+        "target_column": target_column,
+    }
+
+
+def _metric_column_allowed(
+    table_catalog: Any,
+    *,
+    target_table: str,
+    target_column: str,
+) -> bool:
+    if not isinstance(table_catalog, list):
+        return False
+    for table in table_catalog:
+        if not isinstance(table, Mapping):
+            continue
+        if not _same_text(_qualified_table_name(table), target_table):
+            continue
+        return target_column in _string_list(table.get("metric_columns"))
+    return False
+
+
+def _metric_ref(
+    *,
+    metric_concept: str,
+    target_table: str,
+    target_column: str,
+) -> str:
+    payload = "|".join((metric_concept, target_table, target_column))
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return f"metric-{digest}"
+
+
+def _bind_metrics_to_analytical_operations(
+    *,
+    operations: list[ProjectedAnalyticalOperation],
+    planned_metrics: list[ProjectedPlannedMetric],
+) -> tuple[list[ProjectedAnalyticalOperation], dict[str, Any]]:
+    if not operations:
+        return operations, {
+            "binding_required": False,
+            "status": "not_applicable",
+        }
+    if len(planned_metrics) != 1:
+        return deepcopy(operations), {
+            "binding_required": True,
+            "status": (
+                "metric_absent" if not planned_metrics else "metric_ambiguous"
+            ),
+            "planned_metric_count": len(planned_metrics),
+        }
+
+    metric_ref = planned_metrics[0].get("metric_ref")
+    if not isinstance(metric_ref, str) or not metric_ref.strip():
+        return deepcopy(operations), {
+            "binding_required": True,
+            "status": "metric_ref_missing",
+            "planned_metric_count": len(planned_metrics),
+        }
+
+    bound: list[ProjectedAnalyticalOperation] = []
+    for operation in operations:
+        item = deepcopy(operation)
+        if item.get("operation_type") == "ranking":
+            item["metric_ref"] = metric_ref
+        bound.append(item)
+    return bound, {
+        "binding_required": True,
+        "status": "bound",
+        "planned_metric_count": 1,
+        "metric_ref": metric_ref,
+    }
+
+
+def _selected_intent_candidates(
+    intent_resolution_result: Mapping[str, Any],
+    *,
+    selected_intent: Any,
+) -> list[Mapping[str, Any]]:
+    candidates: list[Mapping[str, Any]] = []
+    best_candidate = intent_resolution_result.get("best_candidate")
+    if isinstance(best_candidate, Mapping):
+        candidates.append(best_candidate)
+    candidates.extend(
+        candidate
+        for candidate in intent_resolution_result.get("candidates", [])
+        if isinstance(candidate, Mapping)
+        and (
+            selected_intent is None
+            or _same_text(candidate.get("intent_name"), selected_intent)
+        )
+    )
+    return candidates
+
+
+def _concepts_from_candidate(
+    candidate: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    concepts: list[Mapping[str, Any]] = []
+    for match in candidate.get("matches", []):
+        if not isinstance(match, Mapping):
+            continue
+        details = match.get("match_details")
+        if not isinstance(details, Mapping):
+            continue
+        for concept in details.get("concepts", []):
+            if isinstance(concept, Mapping):
+                concepts.append(concept)
+    return concepts
+
+
+def _resolve_analytical_operation(
+    entities: Any,
+    *,
+    matched_user_term: str,
+) -> ProjectedAnalyticalOperation | None:
+    if not isinstance(entities, list):
+        return None
+    normalized_term = normalize_search_text(matched_user_term)
+    candidates: list[tuple[float, ProjectedAnalyticalOperation]] = []
+    for entity in entities:
+        if not isinstance(entity, Mapping):
+            continue
+        if str(entity.get("entity_type", "")).casefold() != (
+            "analytical_operation"
+        ):
+            continue
+        user_term = str(entity.get("user_term", "")).strip()
+        if normalize_search_text(user_term) != normalized_term:
+            continue
+        operation = _operation_metadata(entity.get("business_rule"))
+        if operation is None:
+            continue
+        canonical_value = str(entity.get("canonical_value", "")).strip()
+        if canonical_value != operation["operation_type"]:
+            continue
+        priority = _optional_int(entity.get("priority"))
+        candidates.append(
+            (
+                _priority_sort_value(priority),
+                {
+                    "operation_type": operation["operation_type"],
+                    "canonical_value": canonical_value,
+                    "direction": operation["direction"],
+                    "requested_limit": operation["requested_limit"],
+                    "detection_source": "intent_semantic_evidence",
+                    "mapping_source": "entity_alias",
+                    "matched_user_term": matched_user_term,
+                    "priority": priority,
+                },
+            )
+        )
+    if not candidates:
+        return None
+    return sorted(
+        candidates,
+        key=lambda item: (
+            item[0],
+            item[1]["canonical_value"].casefold(),
+            item[1]["direction"],
+        ),
+    )[0][1]
+
+
+def _operation_metadata(
+    business_rule: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(business_rule, Mapping):
+        return None
+    operation = business_rule.get("operation")
+    if not isinstance(operation, Mapping):
+        return None
+    operation_type = operation.get("operation_type")
+    direction = operation.get("direction")
+    requested_limit = operation.get("requested_limit")
+    if operation_type != "ranking":
+        return None
+    if direction not in {"ascending", "descending"}:
+        return None
+    if requested_limit is not None:
+        if (
+            isinstance(requested_limit, bool)
+            or not isinstance(requested_limit, int)
+            or requested_limit <= 0
+        ):
+            return None
+    return {
+        "operation_type": operation_type,
+        "direction": direction,
+        "requested_limit": requested_limit,
+    }
+
+
 def _semantic_signal_from_term(
     term: Mapping[str, Any],
 ) -> Mapping[str, Any] | None:
@@ -1218,6 +1692,30 @@ def _include_dimension_columns(
         table_columns.append({"name": column})
 
 
+def _include_metric_columns(
+    relevant_columns: dict[str, list[Any]],
+    planned_metrics: list[ProjectedPlannedMetric],
+) -> None:
+    for metric in planned_metrics:
+        table = metric.get("target_table")
+        column = metric.get("target_column")
+        if not (
+            isinstance(table, str)
+            and table.strip()
+            and isinstance(column, str)
+            and column.strip()
+        ):
+            continue
+        table_columns = relevant_columns.setdefault(table, [])
+        if any(
+            isinstance(item, Mapping)
+            and str(item.get("name", "")).casefold() == column.casefold()
+            for item in table_columns
+        ):
+            continue
+        table_columns.append({"name": column})
+
+
 def _dedupe_dimensions(
     dimensions: list[ProjectedDimension],
 ) -> list[ProjectedDimension]:
@@ -1242,9 +1740,56 @@ def _dedupe_dimensions(
     return output
 
 
+def _dedupe_analytical_operations(
+    operations: list[ProjectedAnalyticalOperation],
+) -> list[ProjectedAnalyticalOperation]:
+    output: list[ProjectedAnalyticalOperation] = []
+    seen: set[tuple[str, str, int | None]] = set()
+    for operation in sorted(
+        operations,
+        key=lambda item: (
+            _priority_sort_value(item.get("priority")),
+            item["operation_type"],
+            item["direction"],
+            item.get("requested_limit") or 0,
+        ),
+    ):
+        key = (
+            operation["operation_type"],
+            operation["direction"],
+            operation.get("requested_limit"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(operation)
+    return output
+
+
+def _dedupe_planned_metrics(
+    metrics: list[ProjectedPlannedMetric],
+) -> list[ProjectedPlannedMetric]:
+    output: list[ProjectedPlannedMetric] = []
+    seen: set[str] = set()
+    for metric in sorted(
+        metrics,
+        key=lambda item: (
+            _priority_sort_value(item.get("priority")),
+            item["metric_ref"].casefold(),
+        ),
+    ):
+        key = metric["metric_ref"].casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(metric)
+    return output
+
+
 def _expand_required_tables_with_dimensions(
     required_table_names: list[str],
     dimensions: list[ProjectedDimension],
+    planned_metrics: list[ProjectedPlannedMetric] | None = None,
 ) -> list[str]:
     output = [
         name
@@ -1254,6 +1799,14 @@ def _expand_required_tables_with_dimensions(
     seen = {name.casefold() for name in output}
     for dimension in dimensions:
         table = dimension.get("target_table")
+        if not isinstance(table, str) or not table.strip():
+            continue
+        if table.casefold() in seen:
+            continue
+        seen.add(table.casefold())
+        output.append(table)
+    for metric in planned_metrics or []:
+        table = metric.get("target_table")
         if not isinstance(table, str) or not table.strip():
             continue
         if table.casefold() in seen:

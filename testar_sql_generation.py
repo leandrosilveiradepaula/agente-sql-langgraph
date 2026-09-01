@@ -76,6 +76,129 @@ def test_requisicao_propaga_dimensao_de_agrupamento_planejada() -> None:
     ]
 
 
+def test_requisicao_propaga_operacoes_analiticas_planejadas() -> None:
+    query_plan = _query_plan()
+    query_plan["planning_context"]["planned_metrics"] = [
+        {
+            "metric_ref": "metric-synthetic",
+            "metric_concept": "amount",
+            "target_table": "schema_test.fact_metrics",
+            "target_column": "measure_value",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+    query_plan["planning_context"]["analytical_operations"] = [
+        {
+            "operation_type": "ranking",
+            "canonical_value": "ranking",
+            "direction": "descending",
+            "requested_limit": None,
+            "metric_ref": "metric-synthetic",
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+            "matched_user_term": "highest",
+        }
+    ]
+
+    request = build_sql_generation_request(query_plan)
+
+    assert request["generation_context"]["analytical_operations"] == [
+        {
+            "operation_type": "ranking",
+            "canonical_value": "ranking",
+            "direction": "descending",
+            "requested_limit": None,
+            "metric_ref": "metric-synthetic",
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+    assert request["generation_context"]["planned_metrics"] == [
+        {
+            "metric_ref": "metric-synthetic",
+            "metric_concept": "amount",
+            "target_table": "schema_test.fact_metrics",
+            "target_column": "measure_value",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+    assert "ORDER BY" in repr(request)
+
+
+def test_requisicao_filtra_metric_ref_sem_planned_metric() -> None:
+    query_plan = _query_plan()
+    query_plan["planning_context"]["planned_metrics"] = []
+    query_plan["planning_context"]["analytical_operations"] = [
+        {
+            "operation_type": "ranking",
+            "canonical_value": "ranking",
+            "direction": "descending",
+            "requested_limit": None,
+            "metric_ref": "metric-missing",
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+
+    request = build_sql_generation_request(query_plan)
+
+    assert request["generation_context"]["analytical_operations"] == []
+    assert "planned_metric referenciada" not in repr(request)
+
+
+def test_ranking_sem_metric_ref_nao_emite_instrucao_enganosa() -> None:
+    query_plan = _query_plan()
+    query_plan["planning_context"]["planned_metrics"] = []
+    query_plan["planning_context"]["analytical_operations"] = [
+        {
+            "operation_type": "ranking",
+            "canonical_value": "ranking",
+            "direction": "descending",
+            "requested_limit": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+
+    request = build_sql_generation_request(query_plan)
+
+    assert request["generation_context"]["analytical_operations"] == [
+        {
+            "operation_type": "ranking",
+            "canonical_value": "ranking",
+            "direction": "descending",
+            "requested_limit": None,
+            "metric_ref": "",
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+    assert "planned_metric referenciada" not in repr(request)
+
+
+def test_planned_metric_com_aggregate_nao_e_propagada() -> None:
+    query_plan = _query_plan()
+    query_plan["planning_context"]["planned_metrics"] = [
+        {
+            "metric_ref": "metric-synthetic",
+            "metric_concept": "amount",
+            "target_table": "schema_test.fact_metrics",
+            "target_column": "measure_value",
+            "aggregate": "sum",
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+
+    request = build_sql_generation_request(query_plan)
+
+    assert request["generation_context"]["planned_metrics"] == []
+
+
 def test_requisicao_ignora_dimensao_sem_agrupamento_ou_incompleta() -> None:
     query_plan = _query_plan()
     query_plan["planning_context"]["detected_dimensions"] = [
@@ -303,6 +426,22 @@ def main() -> None:
         (
             "propaga dimensao de agrupamento",
             test_requisicao_propaga_dimensao_de_agrupamento_planejada,
+        ),
+        (
+            "propaga operacoes analiticas",
+            test_requisicao_propaga_operacoes_analiticas_planejadas,
+        ),
+        (
+            "filtra metric ref invalido",
+            test_requisicao_filtra_metric_ref_sem_planned_metric,
+        ),
+        (
+            "ranking sem metric ref sem instrucao enganosa",
+            test_ranking_sem_metric_ref_nao_emite_instrucao_enganosa,
+        ),
+        (
+            "planned metric aggregate nao propagado",
+            test_planned_metric_com_aggregate_nao_e_propagada,
         ),
         (
             "ignora dimensao sem agrupamento ou incompleta",

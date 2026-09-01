@@ -41,7 +41,7 @@ def build_plan(
             intent_name=intent_name,
             intent_confidence=state.get("intent_confidence"),
             normalized_question=normalized_question,
-            intent_resolution_result=_dimension_grouping_intent_evidence(
+            intent_resolution_result=_planner_intent_evidence(
                 state.get("intent_resolution_result")
             ),
         )
@@ -159,7 +159,7 @@ def _unexpected_error_state(
     }
 
 
-def _dimension_grouping_intent_evidence(
+def _planner_intent_evidence(
     intent_resolution_result: Any,
 ) -> dict[str, Any] | None:
     if not isinstance(intent_resolution_result, Mapping):
@@ -212,16 +212,20 @@ def _project_dimension_grouping_candidate(
         concepts = details.get("concepts")
         if not isinstance(concepts, list):
             continue
-        dimension_concepts = [
+        planner_concepts = [
             deepcopy(concept)
             for concept in concepts
             if isinstance(concept, Mapping)
             and str(concept.get("concept_name", "")).casefold()
-            == "dimension_grouping"
+            in {
+                "dimension_grouping",
+                "analytical_operation",
+                "financial_metric",
+            }
         ]
-        if dimension_concepts:
+        if planner_concepts:
             projected_matches.append(
-                {"match_details": {"concepts": dimension_concepts}}
+                {"match_details": {"concepts": planner_concepts}}
             )
 
     if not projected_matches:
