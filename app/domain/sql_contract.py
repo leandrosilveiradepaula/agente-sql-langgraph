@@ -941,7 +941,11 @@ def _resolved_tables(
         by_bare.setdefault(table.split(".")[-1], []).append(table)
     output: set[str] = set()
     for item in analysis["object_references"]:
-        if item.get("is_cte") or item.get("is_function"):
+        if (
+            item.get("is_cte")
+            or item.get("is_function")
+            or item.get("is_subquery")
+        ):
             continue
         schema = item.get("schema")
         table = str(item.get("table", "")).casefold()
@@ -964,7 +968,12 @@ def _analysis_aliases(
     aliases: dict[str, str] = {}
     for item in analysis["object_references"]:
         alias = item.get("alias")
-        if not alias or item.get("is_cte") or item.get("is_function"):
+        if (
+            not alias
+            or item.get("is_cte")
+            or item.get("is_function")
+            or item.get("is_subquery")
+        ):
             continue
         schema = item.get("schema")
         table = str(item.get("table", "")).casefold()

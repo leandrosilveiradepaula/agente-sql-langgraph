@@ -311,6 +311,186 @@ def test_modificadores_de_join_nao_viram_colunas_fisicas() -> None:
     assert {"id", "other_value"} <= columns
 
 
+def _root_scope(analysis: dict) -> dict:
+    roots = [
+        scope
+        for scope in analysis["query_scopes"]
+        if scope["is_root"] is True
+    ]
+    assert len(roots) == 1
+    return roots[0]
+
+
+def test_root_order_resolve_alias_para_select_item_agregado() -> None:
+    analysis = analyze_sql(
+        "SELECT region, SUM(amount) AS total "
+        "FROM schema_test.fact "
+        "GROUP BY region "
+        "ORDER BY total DESC"
+    )
+
+    root = _root_scope(analysis)
+
+    assert root["scope_id"] == "root"
+    assert root["select_items"][1]["alias"] == "total"
+    assert root["select_items"][1]["functions"] == ["sum"]
+    assert {
+        column["column"]
+        for column in root["select_items"][1]["column_references"]
+    } == {"amount"}
+    assert root["order_by_items"] == [
+        {
+            "expression": "total",
+            "direction": "desc",
+            "direction_explicit": True,
+            "nulls": None,
+            "referenced_alias": "total",
+            "resolved_select_item_index": 1,
+        }
+    ]
+
+
+def test_cte_order_by_isolado_do_root_order_by() -> None:
+    analysis = analyze_sql(
+        "WITH x AS ("
+        "SELECT region, SUM(amount) AS total "
+        "FROM schema_test.fact "
+        "GROUP BY region "
+        "ORDER BY total ASC"
+        ") SELECT * FROM x ORDER BY total DESC"
+    )
+
+    scopes = {scope["scope_id"]: scope for scope in analysis["query_scopes"]}
+
+    assert scopes["cte:x"]["order_by_items"][0]["direction"] == "asc"
+    assert scopes["root"]["order_by_items"][0]["direction"] == "desc"
+    assert scopes["root"]["order_by_items"][0]["expression"] == "total"
+
+
+def test_subquery_order_by_isolado_e_alias_nao_vira_coluna_espuria() -> None:
+    analysis = analyze_sql(
+        "SELECT * FROM ("
+        "SELECT region, SUM(amount) AS total "
+        "FROM schema_test.fact "
+        "GROUP BY region "
+        "ORDER BY total ASC"
+        ") s ORDER BY total DESC"
+    )
+
+    scopes = {scope["scope_id"]: scope for scope in analysis["query_scopes"]}
+    columns = {column["column"] for column in analysis["column_references"]}
+
+    assert scopes["subquery:1"]["order_by_items"][0]["direction"] == "asc"
+    assert scopes["root"]["order_by_items"][0]["direction"] == "desc"
+    assert "s" not in columns
+
+
+def test_root_order_by_expressao_direta_sem_alias() -> None:
+    analysis = analyze_sql(
+        "SELECT region, amount FROM schema_test.fact ORDER BY amount DESC"
+    )
+
+    order_item = _root_scope(analysis)["order_by_items"][0]
+
+    assert order_item["expression"] == "amount"
+    assert order_item["direction"] == "desc"
+    assert order_item["referenced_alias"] is None
+    assert order_item["resolved_select_item_index"] is None
+
+
+def test_root_order_by_multiplos_itens_e_default_asc() -> None:
+    analysis = analyze_sql(
+        "SELECT region, amount FROM schema_test.fact "
+        "ORDER BY amount DESC, region"
+    )
+
+    order_items = _root_scope(analysis)["order_by_items"]
+
+    assert order_items[0]["expression"] == "amount"
+    assert order_items[0]["direction"] == "desc"
+    assert order_items[0]["direction_explicit"] is True
+    assert order_items[1]["expression"] == "region"
+    assert order_items[1]["direction"] == "asc"
+    assert order_items[1]["direction_explicit"] is False
+
+
+def test_select_item_resolve_coluna_fisica_por_alias_do_scope() -> None:
+    analysis = analyze_sql(
+        "SELECT f.region, SUM(f.amount) AS total "
+        "FROM schema_test.fact f "
+        "ORDER BY total DESC"
+    )
+
+    total_item = _root_scope(analysis)["select_items"][1]
+    columns = total_item["column_references"]
+
+    assert columns == [
+        {
+            "raw": "f.amount",
+            "qualifier": "f",
+            "schema": "schema_test",
+            "table": "fact",
+            "column": "amount",
+            "clause": "select",
+            "is_wildcard": False,
+        }
+    ]
+
+
+def test_select_item_nao_resolve_coluna_ambigua_silenciosamente() -> None:
+    analysis = analyze_sql(
+        "SELECT SUM(amount) AS total "
+        "FROM schema_test.fact_a a "
+        "JOIN schema_test.fact_b b ON b.id = a.id "
+        "ORDER BY total DESC"
+    )
+
+    total_item = _root_scope(analysis)["select_items"][0]
+    columns = total_item["column_references"]
+
+    assert columns[0]["column"] == "amount"
+    assert columns[0].get("schema") is None
+    assert columns[0].get("table") is None
+
+
+def test_order_by_nulls_last_preserva_direcao() -> None:
+    analysis = analyze_sql(
+        "SELECT amount AS total FROM schema_test.fact "
+        "ORDER BY total DESC NULLS LAST"
+    )
+
+    order_item = _root_scope(analysis)["order_by_items"][0]
+
+    assert order_item["expression"] == "total"
+    assert order_item["direction"] == "desc"
+    assert order_item["nulls"] == "last"
+
+
+def test_order_by_nulls_first_preserva_direcao() -> None:
+    analysis = analyze_sql(
+        "SELECT amount AS total FROM schema_test.fact "
+        "ORDER BY total ASC NULLS FIRST"
+    )
+
+    order_item = _root_scope(analysis)["order_by_items"][0]
+
+    assert order_item["expression"] == "total"
+    assert order_item["direction"] == "asc"
+    assert order_item["nulls"] == "first"
+
+
+def test_order_by_termina_antes_de_offset() -> None:
+    analysis = analyze_sql(
+        "SELECT amount AS total FROM schema_test.fact "
+        "ORDER BY total DESC OFFSET 10"
+    )
+
+    order_item = _root_scope(analysis)["order_by_items"][0]
+
+    assert order_item["expression"] == "total"
+    assert order_item["direction"] == "desc"
+
+
 def test_caractere_de_controle() -> None:
     try:
         analyze_sql("SELECT id FROM schema_test.table_test\x00")
@@ -383,6 +563,46 @@ def main() -> None:
         (
             "JOIN modifiers nao coluna",
             test_modificadores_de_join_nao_viram_colunas_fisicas,
+        ),
+        (
+            "root ORDER BY alias",
+            test_root_order_resolve_alias_para_select_item_agregado,
+        ),
+        (
+            "CTE ORDER BY isolado",
+            test_cte_order_by_isolado_do_root_order_by,
+        ),
+        (
+            "subquery ORDER BY isolado",
+            test_subquery_order_by_isolado_e_alias_nao_vira_coluna_espuria,
+        ),
+        (
+            "ORDER BY expressao direta",
+            test_root_order_by_expressao_direta_sem_alias,
+        ),
+        (
+            "ORDER BY multiplos itens",
+            test_root_order_by_multiplos_itens_e_default_asc,
+        ),
+        (
+            "select item coluna fisica por alias",
+            test_select_item_resolve_coluna_fisica_por_alias_do_scope,
+        ),
+        (
+            "select item coluna ambigua",
+            test_select_item_nao_resolve_coluna_ambigua_silenciosamente,
+        ),
+        (
+            "ORDER BY NULLS LAST",
+            test_order_by_nulls_last_preserva_direcao,
+        ),
+        (
+            "ORDER BY NULLS FIRST",
+            test_order_by_nulls_first_preserva_direcao,
+        ),
+        (
+            "ORDER BY termina antes OFFSET",
+            test_order_by_termina_antes_de_offset,
         ),
         ("controle", test_caractere_de_controle),
         ("SQL malformada", test_sql_malformada),
