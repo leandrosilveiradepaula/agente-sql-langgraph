@@ -554,11 +554,12 @@ def _verify_analytical_operations(
     query_plan: QueryPlan,
     findings: list[SqlContractFinding],
 ) -> list[RuleVerificationResult]:
-    del current_sql, analysis, findings
+    del current_sql
     operations = _planned_analytical_operations(query_plan)
     if not operations:
         return []
 
+    planned_metrics = _planned_metrics(query_plan)
     results: list[RuleVerificationResult] = []
     for operation in operations:
         operation_type = operation["operation_type"]
@@ -572,12 +573,187 @@ def _verify_analytical_operations(
                 )
             )
             continue
+        results.extend(
+            _verify_ranking_operation(
+                analysis,
+                operation,
+                planned_metrics,
+                findings,
+            )
+        )
+    return results
+
+
+def _verify_ranking_operation(
+    analysis: SqlStatementAnalysis,
+    operation: Mapping[str, Any],
+    planned_metrics: list[dict[str, Any]],
+    findings: list[SqlContractFinding],
+) -> list[RuleVerificationResult]:
+    metric_ref = _clean_text(operation.get("metric_ref"))
+    if not metric_ref:
+        return [
+            _rule_result(
+                "ranking",
+                "unverifiable",
+                "ranking_metric_ref_missing",
+                [],
+            )
+        ]
+    matching_metrics = [
+        metric
+        for metric in planned_metrics
+        if metric["metric_ref"] == metric_ref
+    ]
+    if not matching_metrics:
+        return [
+            _rule_result(
+                "ranking",
+                "unverifiable",
+                "ranking_planned_metric_missing",
+                ["metric_ref"],
+            )
+        ]
+    if len(matching_metrics) > 1:
+        return [
+            _rule_result(
+                "ranking",
+                "unverifiable",
+                "ranking_planned_metric_ambiguous",
+                ["metric_ref"],
+            )
+        ]
+
+    root_scope = _root_query_scope(analysis)
+    if root_scope is None:
+        return [
+            _rule_result(
+                "ranking",
+                "unverifiable",
+                "ranking_root_scope_unavailable",
+                ["metric_ref"],
+            )
+        ]
+
+    metric = matching_metrics[0]
+    select_match = _root_metric_select_item_match(root_scope, metric)
+    checked_items = [
+        "metric_ref",
+        "planned_metric",
+        "root_scope",
+        "metric_select_item",
+    ]
+    if select_match["status"] == "missing":
+        _ranking_finding(
+            findings,
+            "ranking_metric_select_item_missing",
+            operation,
+            metric,
+        )
+        return [
+            _rule_result(
+                "ranking",
+                "violated",
+                "ranking_metric_select_item_missing",
+                checked_items,
+            )
+        ]
+    if select_match["status"] == "unverifiable":
+        return [
+            _rule_result(
+                "ranking",
+                "unverifiable",
+                str(select_match["reason"]),
+                checked_items,
+            )
+        ]
+
+    order_items = root_scope.get("order_by_items")
+    if not isinstance(order_items, list) or not order_items:
+        _ranking_finding(
+            findings,
+            "ranking_root_order_by_missing",
+            operation,
+            metric,
+        )
+        return [
+            _rule_result(
+                "ranking",
+                "violated",
+                "ranking_root_order_by_missing",
+                [*checked_items, "root_order_by"],
+            )
+        ]
+
+    metric_select_index = select_match["index"]
+    order_matches = [
+        item
+        for item in order_items
+        if isinstance(item, Mapping)
+        and item.get("resolved_select_item_index") == metric_select_index
+    ]
+    if not order_matches:
+        _ranking_finding(
+            findings,
+            "ranking_order_target_mismatch",
+            operation,
+            metric,
+        )
+        return [
+            _rule_result(
+                "ranking",
+                "violated",
+                "ranking_order_target_mismatch",
+                [*checked_items, "root_order_by"],
+            )
+        ]
+    if len(order_matches) > 1:
+        return [
+            _rule_result(
+                "ranking",
+                "unverifiable",
+                "ranking_order_target_ambiguous",
+                [*checked_items, "root_order_by"],
+            )
+        ]
+
+    expected_direction = (
+        "desc" if operation["direction"] == "descending" else "asc"
+    )
+    observed_direction = _clean_text(order_matches[0].get("direction"))
+    if observed_direction != expected_direction:
+        _ranking_finding(
+            findings,
+            "ranking_order_direction_mismatch",
+            operation,
+            metric,
+            observed_direction=observed_direction,
+            expected_direction=expected_direction,
+        )
+        return [
+            _rule_result(
+                "ranking",
+                "violated",
+                "ranking_order_direction_mismatch",
+                [*checked_items, "root_order_by", "direction"],
+            )
+        ]
+
+    results = [
+        _rule_result(
+            "ranking",
+            "satisfied",
+            "ranking_metric_order_satisfied",
+            [*checked_items, "root_order_by", "direction"],
+        )
+    ]
+    if operation.get("requested_limit") is not None:
         results.append(
             _rule_result(
-                operation_type,
+                "ranking_limit",
                 "unverifiable",
-                "ranking_metric_order_validation_pending",
-                ["metric_ref"] if operation.get("metric_ref") else [],
+                "ranking_limit_validation_pending",
+                ["requested_limit"],
             )
         )
     return results
@@ -899,6 +1075,198 @@ def _planned_analytical_operations(
             operation["metric_ref"],
             operation["requested_limit"] or 0,
         ),
+    )
+
+
+def _planned_metrics(query_plan: QueryPlan) -> list[dict[str, Any]]:
+    planning_context = _planning_context(query_plan)
+    raw_metrics = planning_context.get("planned_metrics", [])
+    if not isinstance(raw_metrics, list):
+        return []
+    metrics: list[dict[str, Any]] = []
+    for item in raw_metrics:
+        if not isinstance(item, Mapping):
+            continue
+        metric_ref = _clean_text(item.get("metric_ref"))
+        metric_concept = _clean_text(item.get("metric_concept"))
+        target_table = _clean_text(item.get("target_table"))
+        target_column = _clean_text(item.get("target_column"))
+        aggregate = item.get("aggregate")
+        if (
+            not metric_ref
+            or not metric_concept
+            or not target_table
+            or not target_column
+            or aggregate is not None
+        ):
+            continue
+        metrics.append(
+            {
+                "metric_ref": metric_ref,
+                "metric_concept": metric_concept,
+                "target_table": target_table,
+                "target_column": target_column,
+            }
+        )
+    return sorted(
+        metrics,
+        key=lambda metric: (
+            metric["metric_ref"],
+            metric["metric_concept"],
+            metric["target_table"].casefold(),
+            metric["target_column"].casefold(),
+        ),
+    )
+
+
+def _root_query_scope(
+    analysis: SqlStatementAnalysis,
+) -> Mapping[str, Any] | None:
+    scopes = analysis.get("query_scopes", [])
+    if not isinstance(scopes, list):
+        return None
+    roots = [
+        scope
+        for scope in scopes
+        if isinstance(scope, Mapping) and scope.get("is_root") is True
+    ]
+    return roots[0] if len(roots) == 1 else None
+
+
+def _root_metric_select_item_match(
+    root_scope: Mapping[str, Any],
+    metric: Mapping[str, Any],
+) -> dict[str, Any]:
+    select_items = root_scope.get("select_items", [])
+    if not isinstance(select_items, list):
+        return {"status": "missing", "index": None, "reason": "no_select_items"}
+    safe_matches: list[int] = []
+    unverifiable_matches: list[int] = []
+    for index, item in enumerate(select_items):
+        if not isinstance(item, Mapping):
+            continue
+        column_references = item.get("column_references", [])
+        if not isinstance(column_references, list):
+            continue
+        identity = _select_item_metric_identity(column_references, metric)
+        if identity == "safe_match":
+            safe_matches.append(index)
+        elif identity == "unverifiable_match":
+            unverifiable_matches.append(index)
+    if len(safe_matches) == 1 and not unverifiable_matches:
+        return {
+            "status": "matched",
+            "index": safe_matches[0],
+            "reason": "exclusive_metric_reference",
+        }
+    if len(safe_matches) > 1:
+        return {
+            "status": "unverifiable",
+            "index": None,
+            "reason": "ranking_metric_select_item_ambiguous",
+        }
+    if safe_matches or unverifiable_matches:
+        return {
+            "status": "unverifiable",
+            "index": None,
+            "reason": "ranking_metric_select_item_unverifiable",
+        }
+    return {
+        "status": "missing",
+        "index": None,
+        "reason": "ranking_metric_select_item_missing",
+    }
+
+
+def _select_item_metric_identity(
+    column_references: list[Any],
+    metric: Mapping[str, Any],
+) -> Literal["safe_match", "unverifiable_match", "no_target"]:
+    target = _metric_physical_reference(metric)
+    physical_references: set[tuple[str, str, str]] = set()
+    has_unresolved_reference = False
+    for column in column_references:
+        if not isinstance(column, Mapping):
+            continue
+        physical_reference = _physical_column_reference(column)
+        if physical_reference is None:
+            has_unresolved_reference = True
+            continue
+        physical_references.add(physical_reference)
+    if target not in physical_references:
+        return "no_target"
+    if has_unresolved_reference or physical_references != {target}:
+        return "unverifiable_match"
+    return "safe_match"
+
+
+def _select_column_matches_metric(
+    column: Mapping[str, Any],
+    metric: Mapping[str, Any],
+) -> bool:
+    target_column = _clean_text(metric.get("target_column")).casefold()
+    if _clean_text(column.get("column")).casefold() != target_column:
+        return False
+    schema = _clean_text(column.get("schema"))
+    table = _clean_text(column.get("table"))
+    if not schema or not table:
+        return False
+    observed_table = f"{schema.casefold()}.{table.casefold()}"
+    return observed_table == _clean_text(metric.get("target_table")).casefold()
+
+
+def _metric_physical_reference(
+    metric: Mapping[str, Any],
+) -> tuple[str, str, str]:
+    target_table = _clean_text(metric.get("target_table")).casefold()
+    if "." in target_table:
+        schema, table = target_table.rsplit(".", 1)
+    else:
+        schema, table = "", target_table
+    return (
+        schema,
+        table,
+        _clean_text(metric.get("target_column")).casefold(),
+    )
+
+
+def _physical_column_reference(
+    column: Mapping[str, Any],
+) -> tuple[str, str, str] | None:
+    schema = _clean_text(column.get("schema"))
+    table = _clean_text(column.get("table"))
+    name = _clean_text(column.get("column"))
+    if not schema or not table or not name:
+        return None
+    return (schema.casefold(), table.casefold(), name.casefold())
+
+
+def _ranking_finding(
+    findings: list[SqlContractFinding],
+    reason: str,
+    operation: Mapping[str, Any],
+    metric: Mapping[str, Any],
+    *,
+    observed_direction: str | None = None,
+    expected_direction: str | None = None,
+) -> None:
+    details: dict[str, Any] = {
+        "reason": reason,
+        "operation_type": operation.get("operation_type"),
+        "metric_ref": operation.get("metric_ref"),
+        "target_table": metric.get("target_table"),
+        "target_column": metric.get("target_column"),
+    }
+    if observed_direction is not None:
+        details["observed_direction"] = observed_direction
+    if expected_direction is not None:
+        details["expected_direction"] = expected_direction
+    findings.append(
+        _finding(
+            "SQL_CONTRACT_RULE_VIOLATED",
+            "Operacao analitica planejada nao foi satisfeita pela SQL.",
+            details=details,
+        )
     )
 
 

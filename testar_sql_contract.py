@@ -96,7 +96,7 @@ def _dimension_test_plan() -> dict:
         "qualified_name": "schema_test.dimension_test",
         "primary_key": ["pk_id"],
         "key_columns": ["pk_id", "business_key"],
-        "metric_columns": [],
+        "metric_columns": ["amount", "other_amount"],
         "date_columns": [],
         "join_rules": [],
         "columns": [
@@ -104,6 +104,7 @@ def _dimension_test_plan() -> dict:
             {"name": "business_key"},
             {"name": "label"},
             {"name": "amount"},
+            {"name": "other_amount"},
         ],
     }
     projection["required_tables"] = [table]
@@ -113,6 +114,7 @@ def _dimension_test_plan() -> dict:
             {"name": "business_key"},
             {"name": "label"},
             {"name": "amount"},
+            {"name": "other_amount"},
         ]
     }
     projection["authorized_joins"] = []
@@ -137,6 +139,10 @@ def _with_ranking_operation(
     *,
     direction: str = "descending",
     requested_limit=None,
+    metric_ref: str = "metric-synthetic",
+    metric_table: str = "schema_test.dimension_test",
+    metric_column: str = "amount",
+    duplicate_metric: bool = False,
 ) -> dict:
     plan = _with_grouping_dimension()
     plan["planning_context"]["analytical_operations"] = [
@@ -145,11 +151,23 @@ def _with_ranking_operation(
             "canonical_value": "ranking",
             "direction": direction,
             "requested_limit": requested_limit,
-            "metric_ref": "metric-synthetic",
+            "metric_ref": metric_ref,
             "detection_source": "intent_semantic_evidence",
             "mapping_source": "entity_alias",
         }
     ]
+    metric = {
+        "metric_ref": "metric-synthetic",
+        "metric_concept": "synthetic_metric",
+        "target_table": metric_table,
+        "target_column": metric_column,
+        "aggregate": None,
+        "detection_source": "intent_semantic_evidence",
+        "mapping_source": "entity_alias",
+    }
+    plan["planning_context"]["planned_metrics"] = [metric]
+    if duplicate_metric:
+        plan["planning_context"]["planned_metrics"].append(deepcopy(metric))
     return plan
 
 
@@ -629,9 +647,78 @@ def test_sem_dimensao_planejada_nao_exige_group_by() -> None:
     assert _check_status_by_name(result, "grouping_dimensions") == "passed"
 
 
-def test_ranking_descendente_com_order_by_desc_fica_diagnostico() -> None:
+def test_ranking_descendente_com_order_by_metrica_desc_aprova() -> None:
     result = _run(
         "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount DESC",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "passed"
+    assert result["errors"] == []
+
+
+def test_ranking_select_item_coluna_direta_aprova() -> None:
+    result = _run(
+        "SELECT d.business_key, d.amount AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key, d.amount "
+        "ORDER BY total_amount DESC",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "passed"
+
+
+def test_ranking_select_item_repetindo_mesma_coluna_aprova() -> None:
+    result = _run(
+        "SELECT d.business_key, "
+        "SUM(d.amount) + SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount DESC",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "passed"
+
+
+def test_ranking_ascendente_com_order_by_metrica_asc_aprova() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount ASC",
+        _with_ranking_operation(direction="ascending"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "passed"
+
+
+def test_ranking_expressao_com_outra_coluna_fica_unverifiable() -> None:
+    result = _run(
+        "SELECT d.business_key, d.amount / d.other_amount AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key, d.amount, d.other_amount "
+        "ORDER BY total_amount DESC",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "warning"
+    assert result["errors"] == []
+
+
+def test_ranking_expressao_com_desconto_fica_unverifiable() -> None:
+    result = _run(
+        "SELECT d.business_key, "
+        "SUM(d.amount) - SUM(d.other_amount) AS total_amount "
         "FROM schema_test.dimension_test d "
         "GROUP BY d.business_key "
         "ORDER BY total_amount DESC",
@@ -643,7 +730,60 @@ def test_ranking_descendente_com_order_by_desc_fica_diagnostico() -> None:
     assert result["errors"] == []
 
 
-def test_ranking_descendente_com_order_by_asc_nao_aprova_por_direcao() -> None:
+def test_ranking_target_com_coluna_nao_resolvida_fica_unverifiable() -> None:
+    plan = _with_second_table()
+    plan["planning_context"]["detected_dimensions"] = []
+    plan["planning_context"]["planned_metrics"] = [
+        {
+            "metric_ref": "metric-synthetic",
+            "metric_concept": "synthetic_metric",
+            "target_table": "schema_test.table_test",
+            "target_column": "value",
+            "aggregate": None,
+        }
+    ]
+    plan["planning_context"]["analytical_operations"] = [
+        {
+            "operation_type": "ranking",
+            "canonical_value": "ranking",
+            "direction": "descending",
+            "requested_limit": None,
+            "metric_ref": "metric-synthetic",
+        }
+    ]
+    result = _run(
+        "SELECT SUM(t.value) + mystery_value AS total_amount "
+        "FROM schema_test.table_test t "
+        "JOIN schema_test.table_other o ON t.id = o.id "
+        "ORDER BY total_amount DESC",
+        plan,
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["code"] == "SQL_CONTRACT_UNKNOWN_COLUMN"
+        for error in result["errors"]
+    )
+    assert _check_status_by_name(result, "analytical_operations") == "warning"
+
+
+def test_ranking_somente_outra_coluna_rejeita_missing() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.other_amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount DESC",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["details"].get("reason") == "ranking_metric_select_item_missing"
+        for error in result["errors"]
+    )
+
+
+def test_ranking_descendente_com_order_by_asc_rejeita_direcao() -> None:
     result = _run(
         "SELECT d.business_key, SUM(d.amount) AS total_amount "
         "FROM schema_test.dimension_test d "
@@ -652,33 +792,218 @@ def test_ranking_descendente_com_order_by_asc_nao_aprova_por_direcao() -> None:
         _with_ranking_operation(direction="descending"),
     )
 
-    assert result["status"] == "approved"
-    assert _check_status_by_name(result, "analytical_operations") == "warning"
-    assert not any(
-        error["code"] == "SQL_CONTRACT_RULE_VIOLATED"
+    assert result["status"] == "rejected"
+    assert _check_status_by_name(result, "analytical_operations") == "failed"
+    assert any(
+        error["details"].get("reason") == "ranking_order_direction_mismatch"
         for error in result["errors"]
     )
 
 
-def test_ranking_ascendente_com_order_by_asc_fica_diagnostico() -> None:
-    result = _run(
-        "SELECT d.business_key, SUM(d.amount) AS total_amount "
-        "FROM schema_test.dimension_test d "
-        "GROUP BY d.business_key "
-        "ORDER BY total_amount ASC",
-        _with_ranking_operation(direction="ascending"),
-    )
-
-    assert result["status"] == "approved"
-    assert _check_status_by_name(result, "analytical_operations") == "warning"
-
-
-def test_ranking_sem_order_by_fica_diagnostico() -> None:
+def test_ranking_sem_order_by_rejeita() -> None:
     result = _run(
         "SELECT d.business_key, SUM(d.amount) AS total_amount "
         "FROM schema_test.dimension_test d "
         "GROUP BY d.business_key",
         _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "rejected"
+    assert _check_status_by_name(result, "analytical_operations") == "failed"
+    assert any(
+        error["details"].get("reason") == "ranking_root_order_by_missing"
+        for error in result["errors"]
+    )
+
+
+def test_ranking_order_by_dimensao_rejeita_target() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY d.business_key DESC",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["details"].get("reason") == "ranking_order_target_mismatch"
+        for error in result["errors"]
+    )
+
+
+def test_ranking_order_by_outra_metrica_rejeita_target() -> None:
+    result = _run(
+        "SELECT d.business_key, "
+        "SUM(d.amount) AS total_amount, "
+        "SUM(d.other_amount) AS other_total "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY other_total DESC",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["details"].get("reason") == "ranking_order_target_mismatch"
+        for error in result["errors"]
+    )
+
+
+def test_ranking_cte_order_by_interno_nao_satisfaz_root() -> None:
+    result = _run(
+        "WITH internal_scope AS ("
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount DESC"
+        ") "
+        "SELECT business_key, total_amount FROM internal_scope",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["details"].get("reason") == "ranking_metric_select_item_missing"
+        for error in result["errors"]
+    )
+
+
+def test_ranking_subquery_order_by_interno_nao_satisfaz_root() -> None:
+    result = _run(
+        "SELECT business_key, total_amount FROM ("
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount DESC"
+        ") scoped",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["details"].get("reason") == "ranking_metric_select_item_missing"
+        for error in result["errors"]
+    )
+
+
+def test_ranking_root_order_by_vence_order_by_interno() -> None:
+    result = _run(
+        "WITH internal_scope AS ("
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount ASC"
+        ") "
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount DESC",
+        _with_ranking_operation(direction="descending"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "passed"
+
+
+def test_ranking_tabela_da_metrica_precisa_bater_com_select_item() -> None:
+    plan = _with_second_table()
+    plan["planning_context"]["detected_dimensions"] = []
+    plan["planning_context"]["planned_metrics"] = [
+        {
+            "metric_ref": "metric-synthetic",
+            "metric_concept": "synthetic_metric",
+            "target_table": "schema_test.table_test",
+            "target_column": "value",
+            "aggregate": None,
+        }
+    ]
+    plan["planning_context"]["analytical_operations"] = [
+        {
+            "operation_type": "ranking",
+            "canonical_value": "ranking",
+            "direction": "descending",
+            "requested_limit": None,
+            "metric_ref": "metric-synthetic",
+        }
+    ]
+    result = _run(
+        "SELECT SUM(o.other_value) AS total_amount "
+        "FROM schema_test.table_test t "
+        "JOIN schema_test.table_other o ON t.id = o.id "
+        "ORDER BY total_amount DESC",
+        plan,
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        error["details"].get("reason") == "ranking_metric_select_item_missing"
+        for error in result["errors"]
+    )
+
+
+def test_ranking_sem_metric_ref_permanece_unverifiable() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount DESC",
+        _with_ranking_operation(metric_ref=""),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "warning"
+    assert result["errors"] == []
+
+
+def test_ranking_metric_ref_sem_planned_metric_permanece_unverifiable() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount DESC",
+        _with_ranking_operation(metric_ref="metric-missing"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "warning"
+    assert result["errors"] == []
+
+
+def test_ranking_metric_ref_duplicado_permanece_unverifiable() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount DESC",
+        _with_ranking_operation(duplicate_metric=True),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "warning"
+    assert result["errors"] == []
+
+
+def test_ranking_order_by_sem_direcao_normaliza_asc() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount",
+        _with_ranking_operation(direction="ascending"),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "passed"
+
+
+def test_ranking_requested_limit_positivo_deixa_limit_pending() -> None:
+    result = _run(
+        "SELECT d.business_key, SUM(d.amount) AS total_amount "
+        "FROM schema_test.dimension_test d "
+        "GROUP BY d.business_key "
+        "ORDER BY total_amount DESC",
+        _with_ranking_operation(direction="descending", requested_limit=5),
     )
 
     assert result["status"] == "approved"
@@ -820,20 +1145,88 @@ def main() -> None:
             test_sem_dimensao_planejada_nao_exige_group_by,
         ),
         (
-            "ranking desc order desc diagnostico",
-            test_ranking_descendente_com_order_by_desc_fica_diagnostico,
+            "ranking desc order desc aprovado",
+            test_ranking_descendente_com_order_by_metrica_desc_aprova,
         ),
         (
-            "ranking desc order asc diagnostico",
-            test_ranking_descendente_com_order_by_asc_nao_aprova_por_direcao,
+            "ranking coluna direta aprovado",
+            test_ranking_select_item_coluna_direta_aprova,
         ),
         (
-            "ranking asc order asc diagnostico",
-            test_ranking_ascendente_com_order_by_asc_fica_diagnostico,
+            "ranking mesma coluna repetida aprovado",
+            test_ranking_select_item_repetindo_mesma_coluna_aprova,
         ),
         (
-            "ranking sem order by diagnostico",
-            test_ranking_sem_order_by_fica_diagnostico,
+            "ranking asc order asc aprovado",
+            test_ranking_ascendente_com_order_by_metrica_asc_aprova,
+        ),
+        (
+            "ranking expressao outra coluna unverifiable",
+            test_ranking_expressao_com_outra_coluna_fica_unverifiable,
+        ),
+        (
+            "ranking expressao desconto unverifiable",
+            test_ranking_expressao_com_desconto_fica_unverifiable,
+        ),
+        (
+            "ranking coluna nao resolvida unverifiable",
+            test_ranking_target_com_coluna_nao_resolvida_fica_unverifiable,
+        ),
+        (
+            "ranking somente outra coluna missing",
+            test_ranking_somente_outra_coluna_rejeita_missing,
+        ),
+        (
+            "ranking desc order asc rejeita",
+            test_ranking_descendente_com_order_by_asc_rejeita_direcao,
+        ),
+        (
+            "ranking sem order by rejeita",
+            test_ranking_sem_order_by_rejeita,
+        ),
+        (
+            "ranking order dimensao rejeita",
+            test_ranking_order_by_dimensao_rejeita_target,
+        ),
+        (
+            "ranking order outra metrica rejeita",
+            test_ranking_order_by_outra_metrica_rejeita_target,
+        ),
+        (
+            "ranking cte order interno",
+            test_ranking_cte_order_by_interno_nao_satisfaz_root,
+        ),
+        (
+            "ranking subquery order interno",
+            test_ranking_subquery_order_by_interno_nao_satisfaz_root,
+        ),
+        (
+            "ranking root order vence interno",
+            test_ranking_root_order_by_vence_order_by_interno,
+        ),
+        (
+            "ranking tabela metrica precisa bater",
+            test_ranking_tabela_da_metrica_precisa_bater_com_select_item,
+        ),
+        (
+            "ranking sem metric ref",
+            test_ranking_sem_metric_ref_permanece_unverifiable,
+        ),
+        (
+            "ranking metric ref ausente",
+            test_ranking_metric_ref_sem_planned_metric_permanece_unverifiable,
+        ),
+        (
+            "ranking metric ref duplicado",
+            test_ranking_metric_ref_duplicado_permanece_unverifiable,
+        ),
+        (
+            "ranking order default asc",
+            test_ranking_order_by_sem_direcao_normaliza_asc,
+        ),
+        (
+            "ranking limit pending",
+            test_ranking_requested_limit_positivo_deixa_limit_pending,
         ),
         (
             "sem ranking sem order obrigatorio",
