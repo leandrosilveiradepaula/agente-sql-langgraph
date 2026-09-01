@@ -214,6 +214,7 @@ def test_factories_recebem_dependencias_corretas() -> None:
     expected_config = PostgresContextRuntimeConfig(
         dsn="postgresql://example.invalid/database",
         semantic_agent_version="semantic-test-v2",
+        context_schema="public",
         connect_timeout_seconds=5,
     )
     expected_graph = object()

@@ -195,10 +195,15 @@ class FakeConnect:
         return self.connection
 
 
-def _repository(fake_connect: FakeConnect) -> PostgresContextRepository:
+def _repository(
+    fake_connect: FakeConnect,
+    *,
+    context_schema: str = "public",
+) -> PostgresContextRepository:
     return PostgresContextRepository(
         dsn="postgresql://example.invalid/database",
         semantic_agent_version="semantic-test-v1",
+        context_schema=context_schema,
         connect_timeout_seconds=7,
         connect=fake_connect,
     )
@@ -239,6 +244,65 @@ def test_carrega_snapshot_com_query_parametrizada() -> None:
 
     assert "%(agent_version)s" in LOAD_SEMANTIC_CONTEXT_SQL
     assert "semantic-test-v1" not in LOAD_SEMANTIC_CONTEXT_SQL
+
+
+def test_schema_padrao_preserva_public() -> None:
+    fake_connect = FakeConnect(row=_physical_snapshot())
+    repository = _repository(fake_connect)
+
+    repository.load_active_context(user_profile="admin")
+
+    query = fake_connect.cursor.executed_query
+    assert query is not None
+    assert "public.ai_ducklake_agent_rules" in query
+    assert "public.ai_ducklake_entity_aliases" in query
+    assert "public.ai_ducklake_dre_mapping" in query
+    assert "public.ai_ducklake_sql_patterns" in query
+    assert "public.ai_ducklake_table_catalog" in query
+
+
+def test_schema_configurado_aplica_nas_cinco_tabelas() -> None:
+    fake_connect = FakeConnect(row=_physical_snapshot())
+    repository = _repository(
+        fake_connect,
+        context_schema="semantic_context",
+    )
+
+    repository.load_active_context(user_profile="admin")
+
+    query = fake_connect.cursor.executed_query
+    assert query is not None
+    expected_tables = [
+        "ai_ducklake_agent_rules",
+        "ai_ducklake_entity_aliases",
+        "ai_ducklake_dre_mapping",
+        "ai_ducklake_sql_patterns",
+        "ai_ducklake_table_catalog",
+    ]
+    for table_name in expected_tables:
+        assert f"semantic_context.{table_name}" in query
+        assert f"public.{table_name}" not in query
+
+    assert query.count("semantic_context.ai_ducklake_") == 5
+    assert "%(agent_version)s" in query
+    assert "semantic-test-v1" not in query
+    assert fake_connect.cursor.executed_parameters == {
+        "agent_version": "semantic-test-v1",
+    }
+
+
+def test_schema_configurado_nao_acessa_benchmark() -> None:
+    fake_connect = FakeConnect(row=_physical_snapshot())
+    repository = _repository(
+        fake_connect,
+        context_schema="semantic_context",
+    )
+
+    repository.load_active_context(user_profile="admin")
+
+    query = fake_connect.cursor.executed_query
+    assert query is not None
+    assert "benchmark" not in query.casefold()
 
 
 def test_rejeita_consulta_sem_resultado() -> None:
@@ -332,6 +396,33 @@ def test_valida_configuracao_do_adapter() -> None:
                 "connect_timeout_seconds deve ser um inteiro positivo."
             ),
         },
+        {
+            "dsn": "postgresql://example.invalid/database",
+            "semantic_agent_version": "version",
+            "context_schema": "public.foo",
+            "connect_timeout_seconds": 10,
+            "expected": (
+                "context_schema deve ser um identificador PostgreSQL simples."
+            ),
+        },
+        {
+            "dsn": "postgresql://example.invalid/database",
+            "semantic_agent_version": "version",
+            "context_schema": "public;drop table x",
+            "connect_timeout_seconds": 10,
+            "expected": (
+                "context_schema deve ser um identificador PostgreSQL simples."
+            ),
+        },
+        {
+            "dsn": "postgresql://example.invalid/database",
+            "semantic_agent_version": "version",
+            "context_schema": '"public schema"',
+            "connect_timeout_seconds": 10,
+            "expected": (
+                "context_schema deve ser um identificador PostgreSQL simples."
+            ),
+        },
     ]
 
     for case in invalid_cases:
@@ -341,6 +432,7 @@ def test_valida_configuracao_do_adapter() -> None:
                 semantic_agent_version=(
                     case["semantic_agent_version"]
                 ),
+                context_schema=case.get("context_schema", "public"),
                 connect_timeout_seconds=(
                     case["connect_timeout_seconds"]
                 ),
@@ -358,6 +450,18 @@ def main() -> None:
         (
             "carrega snapshot com query parametrizada",
             test_carrega_snapshot_com_query_parametrizada,
+        ),
+        (
+            "schema padrão preserva public",
+            test_schema_padrao_preserva_public,
+        ),
+        (
+            "schema configurado aplica nas cinco tabelas",
+            test_schema_configurado_aplica_nas_cinco_tabelas,
+        ),
+        (
+            "schema configurado não acessa benchmark",
+            test_schema_configurado_nao_acessa_benchmark,
         ),
         (
             "rejeita consulta sem resultado",

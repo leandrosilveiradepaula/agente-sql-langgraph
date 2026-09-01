@@ -4,6 +4,12 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from app.config.postgres_context import (
+    DEFAULT_POSTGRES_CONTEXT_SCHEMA,
+    POSTGRES_CONTEXT_SCHEMA_ENV,
+    validate_postgres_context_schema,
+)
+
 
 RUNTIME_MODE = "shadow_test"
 PERSISTENCE_POSTGRES = "postgres"
@@ -22,6 +28,7 @@ class ShadowTestRuntimeConfig:
     shadow_database_dsn: str = field(repr=False)
     context_postgres_dsn: str = field(repr=False)
     semantic_agent_version: str
+    context_schema: str
     context_connect_timeout_seconds: int
     s2s_token: str = field(repr=False)
     allow_real_sql_execution: bool
@@ -62,6 +69,11 @@ def load_shadow_test_runtime_config(
         shadow_database_dsn=dsn,
         context_postgres_dsn=context_dsn,
         semantic_agent_version=_required(env, SEMANTIC_AGENT_VERSION_ENV),
+        context_schema=validate_postgres_context_schema(
+            env,
+            POSTGRES_CONTEXT_SCHEMA_ENV,
+            default=DEFAULT_POSTGRES_CONTEXT_SCHEMA,
+        ),
         context_connect_timeout_seconds=_positive_int(
             _optional(
                 env,

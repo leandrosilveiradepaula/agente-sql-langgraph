@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 
 POSTGRES_DSN_ENV = "POSTGRES_DSN"
 SEMANTIC_AGENT_VERSION_ENV = "SEMANTIC_AGENT_VERSION"
+POSTGRES_CONTEXT_SCHEMA_ENV = "POSTGRES_CONTEXT_SCHEMA"
 POSTGRES_CONNECT_TIMEOUT_ENV = (
     "POSTGRES_CONNECT_TIMEOUT_SECONDS"
 )
 
+DEFAULT_POSTGRES_CONTEXT_SCHEMA = "public"
 DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS = 10
+_POSTGRES_IDENTIFIER_PATTERN = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*$"
+)
 
 
 class RuntimeConfigError(ValueError):
@@ -31,6 +37,7 @@ class PostgresContextRuntimeConfig:
 
     dsn: str
     semantic_agent_version: str
+    context_schema: str
     connect_timeout_seconds: int
 
 
@@ -54,6 +61,11 @@ def load_postgres_context_runtime_config(
         source,
         SEMANTIC_AGENT_VERSION_ENV,
     )
+    context_schema = validate_postgres_context_schema(
+        source,
+        POSTGRES_CONTEXT_SCHEMA_ENV,
+        default=DEFAULT_POSTGRES_CONTEXT_SCHEMA,
+    )
     connect_timeout_seconds = _positive_integer(
         source,
         POSTGRES_CONNECT_TIMEOUT_ENV,
@@ -63,6 +75,7 @@ def load_postgres_context_runtime_config(
     return PostgresContextRuntimeConfig(
         dsn=dsn,
         semantic_agent_version=semantic_agent_version,
+        context_schema=context_schema,
         connect_timeout_seconds=connect_timeout_seconds,
     )
 
@@ -119,3 +132,29 @@ def _positive_integer(
         )
 
     return parsed_value
+
+
+def validate_postgres_context_schema(
+    source: Mapping[str, str],
+    variable_name: str,
+    *,
+    default: str,
+) -> str:
+    raw_value = source.get(variable_name)
+
+    if raw_value is None:
+        normalized_value = default
+    else:
+        normalized_value = str(raw_value).strip()
+
+    if not normalized_value:
+        raise RuntimeConfigError(
+            f"A variável {variable_name} não pode estar vazia."
+        )
+
+    if not _POSTGRES_IDENTIFIER_PATTERN.fullmatch(normalized_value):
+        raise RuntimeConfigError(
+            f"A variável {variable_name} deve ser um identificador PostgreSQL simples."
+        )
+
+    return normalized_value

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -14,7 +15,12 @@ from app.domain.context_normalizer import (
 from app.ports.context_repository import ContextRepositoryError
 
 
-LOAD_SEMANTIC_CONTEXT_SQL = """
+_POSTGRES_IDENTIFIER_PATTERN = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*$"
+)
+
+
+LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE = """
 WITH cfg AS (
   SELECT
     %(agent_version)s::text AS agent_version
@@ -29,7 +35,7 @@ regras AS (
     r.validation_hint,
     r.severity,
     r.priority
-  FROM public.ai_ducklake_agent_rules r
+  FROM {context_schema}.ai_ducklake_agent_rules r
   JOIN cfg
     ON cfg.agent_version = r.agent_version
   WHERE r.is_active = TRUE
@@ -49,7 +55,7 @@ entidades AS (
     e.sql_filter_hint,
     e.business_rule,
     e.priority
-  FROM public.ai_ducklake_entity_aliases e
+  FROM {context_schema}.ai_ducklake_entity_aliases e
   JOIN cfg
     ON cfg.agent_version = e.agent_version
   WHERE e.is_active = TRUE
@@ -73,7 +79,7 @@ dre AS (
     d.is_financial_result,
     d.sql_filter_hint,
     d.sort_order
-  FROM public.ai_ducklake_dre_mapping d
+  FROM {context_schema}.ai_ducklake_dre_mapping d
   JOIN cfg
     ON cfg.agent_version = d.agent_version
   WHERE d.is_active = TRUE
@@ -92,7 +98,7 @@ padroes AS (
     p.sql_pattern,
     p.notes,
     p.priority
-  FROM public.ai_ducklake_sql_patterns p
+  FROM {context_schema}.ai_ducklake_sql_patterns p
   JOIN cfg
     ON cfg.agent_version = p.agent_version
   WHERE p.is_active = TRUE
@@ -116,7 +122,7 @@ catalogo AS (
     t.join_rules,
     t.ai_hint,
     t.priority
-  FROM public.ai_ducklake_table_catalog t
+  FROM {context_schema}.ai_ducklake_table_catalog t
   JOIN cfg
     ON cfg.agent_version = t.agent_version
   WHERE t.is_allowed = TRUE
@@ -219,6 +225,10 @@ SELECT
 FROM cfg
 """
 
+LOAD_SEMANTIC_CONTEXT_SQL = LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE.format(
+    context_schema="public",
+)
+
 
 ConnectCallable = Callable[..., Any]
 
@@ -237,11 +247,13 @@ class PostgresContextRepository:
         *,
         dsn: str,
         semantic_agent_version: str,
+        context_schema: str = "public",
         connect_timeout_seconds: int = 10,
         connect: ConnectCallable = psycopg.connect,
     ) -> None:
         normalized_dsn = dsn.strip()
         normalized_version = semantic_agent_version.strip()
+        normalized_schema = context_schema.strip()
 
         if not normalized_dsn:
             raise ValueError("dsn não pode estar vazio.")
@@ -249,6 +261,14 @@ class PostgresContextRepository:
         if not normalized_version:
             raise ValueError(
                 "semantic_agent_version não pode estar vazio."
+            )
+
+        if not normalized_schema:
+            raise ValueError("context_schema não pode estar vazio.")
+
+        if not _POSTGRES_IDENTIFIER_PATTERN.fullmatch(normalized_schema):
+            raise ValueError(
+                "context_schema deve ser um identificador PostgreSQL simples."
             )
 
         if (
@@ -262,6 +282,10 @@ class PostgresContextRepository:
 
         self._dsn = normalized_dsn
         self._semantic_agent_version = normalized_version
+        self._context_schema = normalized_schema
+        self._load_sql = LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE.format(
+            context_schema=normalized_schema,
+        )
         self._connect_timeout_seconds = connect_timeout_seconds
         self._connect = connect
 
@@ -287,7 +311,7 @@ class PostgresContextRepository:
             ) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        LOAD_SEMANTIC_CONTEXT_SQL,
+                        self._load_sql,
                         {
                             "agent_version": (
                                 self._semantic_agent_version

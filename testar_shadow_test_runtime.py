@@ -200,6 +200,34 @@ def test_config_shadow_test_valida() -> None:
     assert config.shadow_database_dsn == DSN_PLACEHOLDER
     assert config.context_postgres_dsn == CONTEXT_DSN_PLACEHOLDER
     assert config.semantic_agent_version == SEMANTIC_AGENT_VERSION
+    assert config.context_schema == "public"
+
+
+def test_config_shadow_test_carrega_schema_contexto() -> None:
+    config = load_shadow_test_runtime_config(
+        _env(POSTGRES_CONTEXT_SCHEMA="semantic_context")
+    )
+
+    assert config.context_schema == "semantic_context"
+
+
+def test_config_shadow_test_rejeita_schema_contexto_invalido() -> None:
+    invalid_values = [
+        "public.foo",
+        "public;drop table x",
+        '"public"',
+        "public schema",
+    ]
+
+    for invalid_value in invalid_values:
+        try:
+            load_shadow_test_runtime_config(
+                _env(POSTGRES_CONTEXT_SCHEMA=invalid_value)
+            )
+        except ValueError as error:
+            assert "POSTGRES_CONTEXT_SCHEMA" in str(error)
+        else:
+            raise AssertionError("invalid context schema should fail closed")
 
 
 def test_config_repr_nao_expoe_dsn() -> None:
@@ -326,6 +354,21 @@ def test_postgres_repository_selecionado_quando_configurado() -> None:
     assert isinstance(runtime.sql_repairer, GoogleGeminiSqlRepairerAdapter)
 
 
+def test_shadow_runtime_propaga_schema_contexto_para_repository() -> None:
+    runtime = create_shadow_test_runtime(
+        _env(POSTGRES_CONTEXT_SCHEMA="semantic_context")
+    )
+
+    assert isinstance(runtime.context_repository, PostgresContextRepository)
+    assert (
+        "semantic_context.ai_ducklake_agent_rules"
+        in runtime.context_repository._load_sql
+    )
+    assert "public.ai_ducklake_agent_rules" not in (
+        runtime.context_repository._load_sql
+    )
+
+
 def test_fake_repository_nao_e_usado_no_composition_root_test_real() -> None:
     runtime = create_shadow_test_runtime(_env())
     assert not isinstance(runtime.raw_shadow_repository, FakeShadowEvidenceRepository)
@@ -430,6 +473,8 @@ def test_postgres_wiring_execute_event_type() -> None:
 def main() -> None:
     tests = [
         test_config_shadow_test_valida,
+        test_config_shadow_test_carrega_schema_contexto,
+        test_config_shadow_test_rejeita_schema_contexto_invalido,
         test_config_repr_nao_expoe_dsn,
         test_config_ausente_falha_fechado,
         test_s2s_token_ausente_falha_startup,
@@ -441,6 +486,7 @@ def main() -> None:
         test_execute_approved_shadow_endpoint_v1_exposto,
         test_watson_e_execute_sql_real_nao_instanciados,
         test_postgres_repository_selecionado_quando_configurado,
+        test_shadow_runtime_propaga_schema_contexto_para_repository,
         test_fake_repository_nao_e_usado_no_composition_root_test_real,
         test_dsn_nao_aparece_em_logs_ou_erros,
         test_request_logging_sanitizado,

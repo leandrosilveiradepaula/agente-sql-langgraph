@@ -11,12 +11,15 @@ from app.config.engine_preflight_runtime import (
     load_engine_preflight_runtime_config,
 )
 from app.config.postgres_context import (
+    DEFAULT_POSTGRES_CONTEXT_SCHEMA,
     POSTGRES_CONNECT_TIMEOUT_ENV,
+    POSTGRES_CONTEXT_SCHEMA_ENV,
     POSTGRES_DSN_ENV,
     SEMANTIC_AGENT_VERSION_ENV,
     PostgresContextRuntimeConfig,
     RuntimeConfigError,
     load_postgres_context_runtime_config,
+    validate_postgres_context_schema,
 )
 
 __all__ = [
@@ -30,10 +33,13 @@ __all__ = [
     "EnginePreflightRuntimeConfigError",
     "evaluate_engine_preflight_capabilities",
     "load_engine_preflight_runtime_config",
+    "DEFAULT_POSTGRES_CONTEXT_SCHEMA",
     "POSTGRES_CONNECT_TIMEOUT_ENV",
+    "POSTGRES_CONTEXT_SCHEMA_ENV",
     "POSTGRES_DSN_ENV",
     "SEMANTIC_AGENT_VERSION_ENV",
     "PostgresContextRuntimeConfig",
     "RuntimeConfigError",
     "load_postgres_context_runtime_config",
+    "validate_postgres_context_schema",
 ]

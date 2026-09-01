@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.config.postgres_context import (
+    DEFAULT_POSTGRES_CONTEXT_SCHEMA,
     DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS,
     PostgresContextRuntimeConfig,
     RuntimeConfigError,
@@ -23,6 +24,7 @@ def test_carrega_configuracao_completa() -> None:
     assert config == PostgresContextRuntimeConfig(
         dsn=FAKE_DSN,
         semantic_agent_version="semantic-test-v1",
+        context_schema=DEFAULT_POSTGRES_CONTEXT_SCHEMA,
         connect_timeout_seconds=7,
     )
 
@@ -38,6 +40,50 @@ def test_aplica_timeout_padrao_quando_ausente() -> None:
     assert config.connect_timeout_seconds == (
         DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS
     )
+    assert config.context_schema == DEFAULT_POSTGRES_CONTEXT_SCHEMA
+
+
+def test_carrega_schema_de_contexto_configurado() -> None:
+    config = load_postgres_context_runtime_config(
+        {
+            "POSTGRES_DSN": FAKE_DSN,
+            "SEMANTIC_AGENT_VERSION": "semantic-test-v1",
+            "POSTGRES_CONTEXT_SCHEMA": "  semantic_context  ",
+        }
+    )
+
+    assert config.context_schema == "semantic_context"
+
+
+def test_rejeita_schema_de_contexto_invalido() -> None:
+    invalid_values = [
+        "",
+        " ",
+        "public.foo",
+        "public;drop_table_x",
+        '"public"',
+        "public schema",
+        "--comment",
+        "1public",
+    ]
+
+    for invalid_value in invalid_values:
+        try:
+            load_postgres_context_runtime_config(
+                {
+                    "POSTGRES_DSN": FAKE_DSN,
+                    "SEMANTIC_AGENT_VERSION": "semantic-test-v1",
+                    "POSTGRES_CONTEXT_SCHEMA": invalid_value,
+                }
+            )
+        except RuntimeConfigError as error:
+            message = str(error)
+            assert "POSTGRES_CONTEXT_SCHEMA" in message
+            assert FAKE_DSN not in message
+        else:
+            raise AssertionError(
+                "Era esperado RuntimeConfigError."
+            )
 
 
 def test_rejeita_variaveis_obrigatorias_ausentes() -> None:
@@ -150,6 +196,7 @@ def test_mapping_injetado_nao_depende_do_ambiente_real() -> None:
     assert config.semantic_agent_version == (
         "semantic-test-v1"
     )
+    assert config.context_schema == DEFAULT_POSTGRES_CONTEXT_SCHEMA
     assert config.connect_timeout_seconds == 3
 
 
@@ -162,6 +209,14 @@ def main() -> None:
         (
             "aplica timeout padrão quando ausente",
             test_aplica_timeout_padrao_quando_ausente,
+        ),
+        (
+            "carrega schema de contexto configurado",
+            test_carrega_schema_de_contexto_configurado,
+        ),
+        (
+            "rejeita schema de contexto inválido",
+            test_rejeita_schema_de_contexto_invalido,
         ),
         (
             "rejeita variáveis obrigatórias ausentes",
