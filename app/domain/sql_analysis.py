@@ -87,8 +87,20 @@ class SqlQueryScope(TypedDict):
     scope_id: str
     parent_scope_id: str | None
     is_root: bool
+    scope_type: Literal["root", "cte", "subquery"]
+    scope_name: str | None
+    physical_tables: list[str]
+    child_scopes: list[str]
+    object_references: list[SqlObjectReference]
     select_items: list[SqlSelectItem]
+    group_by_items: list[str]
     order_by_items: list[SqlOrderByItem]
+    has_aggregate: bool
+    has_reducing_aggregate: bool
+    joins: list[SqlJoinReference]
+    output_lineage: list[dict[str, Any]]
+    raw_table_join_count: int
+    aggregated_scope_join_count: int
 
 
 class SqlStatementAnalysis(TypedDict):
@@ -976,15 +988,22 @@ def _select_output_columns(tokens: list[SqlToken]) -> list[str]:
 
 def _extract_query_scopes(tokens: list[SqlToken]) -> list[SqlQueryScope]:
     scopes: list[SqlQueryScope] = []
-    for cte_name, body in _cte_bodies(tokens):
+    cte_bodies = _cte_bodies(tokens)
+    cte_names = [cte_name for cte_name, _body in cte_bodies]
+    visible_ctes: list[str] = []
+    for cte_name, body in cte_bodies:
         scopes.extend(
             _scope_tree(
                 body,
                 scope_id=f"cte:{cte_name}",
                 parent_scope_id="root",
                 is_root=False,
+                scope_type="cte",
+                scope_name=cte_name,
+                cte_names=visible_ctes,
             )
         )
+        visible_ctes = [*visible_ctes, cte_name]
     root_tokens = _root_query_tokens(tokens)
     scopes.append(
         _scope_from_tokens(
@@ -992,6 +1011,9 @@ def _extract_query_scopes(tokens: list[SqlToken]) -> list[SqlQueryScope]:
             scope_id="root",
             parent_scope_id=None,
             is_root=True,
+            scope_type="root",
+            scope_name=None,
+            cte_names=cte_names,
         )
     )
     for index, body in enumerate(_subquery_bodies(root_tokens), start=1):
@@ -1001,9 +1023,12 @@ def _extract_query_scopes(tokens: list[SqlToken]) -> list[SqlQueryScope]:
                 scope_id=f"subquery:{index}",
                 parent_scope_id="root",
                 is_root=False,
+                scope_type="subquery",
+                scope_name=None,
+                cte_names=cte_names,
             )
         )
-    return scopes
+    return _enrich_scope_lineage(scopes)
 
 
 def _scope_tree(
@@ -1012,12 +1037,18 @@ def _scope_tree(
     scope_id: str,
     parent_scope_id: str,
     is_root: bool,
+    scope_type: Literal["cte", "subquery"],
+    scope_name: str | None,
+    cte_names: list[str],
 ) -> list[SqlQueryScope]:
     scope = _scope_from_tokens(
         tokens,
         scope_id=scope_id,
         parent_scope_id=parent_scope_id,
         is_root=is_root,
+        scope_type=scope_type,
+        scope_name=scope_name,
+        cte_names=cte_names,
     )
     scopes = [scope]
     for index, body in enumerate(_subquery_bodies(tokens), start=1):
@@ -1027,6 +1058,9 @@ def _scope_tree(
                 scope_id=f"{scope_id}:subquery:{index}",
                 parent_scope_id=scope_id,
                 is_root=False,
+                scope_type="subquery",
+                scope_name=None,
+                cte_names=cte_names,
             )
         )
     return scopes
@@ -1038,25 +1072,367 @@ def _scope_from_tokens(
     scope_id: str,
     parent_scope_id: str | None,
     is_root: bool,
+    scope_type: Literal["root", "cte", "subquery"],
+    scope_name: str | None,
+    cte_names: list[str],
 ) -> SqlQueryScope:
-    select_items = _extract_select_items(tokens)
+    objects = _extract_scope_objects(tokens, cte_names)
+    select_items = _extract_select_items(tokens, cte_names=cte_names)
+    joins = _extract_scope_joins(tokens, objects)
+    group_by_items = _extract_group_by_items(tokens)
     return {
         "scope_id": scope_id,
         "parent_scope_id": parent_scope_id,
         "is_root": is_root,
+        "scope_type": scope_type,
+        "scope_name": scope_name,
+        "physical_tables": _scope_physical_tables(objects),
+        "child_scopes": [],
+        "object_references": objects,
         "select_items": select_items,
+        "group_by_items": group_by_items,
         "order_by_items": _extract_order_by_items(tokens, select_items),
+        "has_aggregate": _has_aggregate_function(tokens),
+        "has_reducing_aggregate": _has_reducing_aggregate(tokens),
+        "joins": joins,
+        "output_lineage": [],
+        "raw_table_join_count": _raw_table_join_count(joins, objects),
+        "aggregated_scope_join_count": 0,
     }
 
 
-def _extract_select_items(tokens: list[SqlToken]) -> list[SqlSelectItem]:
+_AGGREGATE_FUNCTIONS = {"avg", "count", "max", "min", "sum"}
+
+
+def _scope_physical_tables(
+    objects: list[SqlObjectReference],
+) -> list[str]:
+    tables = {
+        _qualified_or_table(item)
+        for item in objects
+        if not item.get("is_cte")
+        and not item.get("is_function")
+        and not item.get("is_subquery")
+    }
+    return sorted(table for table in tables if table)
+
+
+def _extract_group_by_items(tokens: list[SqlToken]) -> list[str]:
+    group_index = _top_level_keyword_pair_index(tokens, "group", "by")
+    if group_index is None:
+        return []
+    end = _top_level_clause_end(
+        tokens,
+        start=group_index + 2,
+        stop_words={"having", "order", "limit", "offset", "fetch", "union"},
+    )
+    return [
+        _tokens_expression(item)
+        for item in _split_top_level_commas(tokens[group_index + 2 : end])
+        if item
+    ]
+
+
+def _has_aggregate_function(tokens: list[SqlToken]) -> bool:
+    for item in _top_level_select_items(tokens):
+        for index, token in enumerate(item[:-1]):
+            if (
+                _is_identifier(token)
+                and token["normalized"] in _AGGREGATE_FUNCTIONS
+                and item[index + 1]["normalized"] == "("
+            ):
+                return True
+    return False
+
+
+def _has_reducing_aggregate(tokens: list[SqlToken]) -> bool:
+    if _extract_group_by_items(tokens):
+        return True
+    for item in _top_level_select_items(tokens):
+        for index, token in enumerate(item[:-1]):
+            if not (
+                _is_identifier(token)
+                and token["normalized"] in _AGGREGATE_FUNCTIONS
+                and item[index + 1]["normalized"] == "("
+            ):
+                continue
+            if _aggregate_invocation_is_window(item, index):
+                continue
+            return True
+    return False
+
+
+def _aggregate_invocation_is_window(
+    tokens: list[SqlToken],
+    function_index: int,
+) -> bool:
+    end = _matching_paren_index(tokens, function_index + 1)
+    next_index = end + 1
+    if _norm_at(tokens, next_index) == "filter" and _norm_at(tokens, next_index + 1) == "(":
+        next_index = _matching_paren_index(tokens, next_index + 1) + 1
+    return _norm_at(tokens, next_index) == "over"
+
+
+def _top_level_select_items(tokens: list[SqlToken]) -> list[list[SqlToken]]:
+    select_index = _top_level_keyword_index(tokens, "select")
+    if select_index is None:
+        return []
+    from_index = _top_level_keyword_index(tokens, "from", start=select_index + 1)
+    end = from_index if from_index is not None else len(tokens)
+    return _split_top_level_commas(tokens[select_index + 1 : end])
+
+
+def _raw_table_join_count(
+    joins: list[SqlJoinReference],
+    objects: list[SqlObjectReference],
+) -> int:
+    physical_refs = _physical_reference_names(objects)
+    total = 0
+    for join in joins:
+        left = str(join.get("left_table") or "").casefold()
+        right = str(join.get("right_table") or "").casefold()
+        if left in physical_refs and right in physical_refs:
+            total += 1
+    return total
+
+
+def _extract_scope_joins(
+    tokens: list[SqlToken],
+    objects: list[SqlObjectReference],
+) -> list[SqlJoinReference]:
+    relational = [item for item in objects if not item.get("is_function")]
+    joins: list[SqlJoinReference] = []
+    previous: SqlObjectReference | None = None
+    for item in relational:
+        if item.get("source") == "from":
+            previous = item
+            continue
+        if item.get("source") == "join":
+            joins.append(
+                {
+                    "join_type": _join_type_before(tokens, item["table"]),
+                    "left_table": (
+                        _qualified_or_table(previous) if previous else None
+                    ),
+                    "right_table": _qualified_or_table(item),
+                    "right_alias": item.get("alias"),
+                    "condition_columns": _columns_after_join(tokens, item),
+                }
+            )
+            previous = item
+    return joins
+
+
+def _enrich_scope_lineage(scopes: list[SqlQueryScope]) -> list[SqlQueryScope]:
+    output = [deepcopy(scope) for scope in scopes]
+    by_id = {scope["scope_id"]: scope for scope in output}
+    child_ids: dict[str, list[str]] = {}
+    for scope in output:
+        parent = scope.get("parent_scope_id")
+        if parent:
+            child_ids.setdefault(parent, []).append(scope["scope_id"])
+    for scope in output:
+        scope["child_scopes"] = sorted(child_ids.get(scope["scope_id"], []))
+
+    for scope in output:
+        scope_ref_map = _scope_reference_map(scope, by_id)
+        scope["output_lineage"] = _scope_output_lineage(scope, scope_ref_map, by_id)
+        scope["aggregated_scope_join_count"] = _aggregated_scope_join_count(
+            scope,
+            scope_ref_map,
+            by_id,
+        )
+    return output
+
+
+def _physical_reference_names(
+    objects: list[SqlObjectReference],
+) -> set[str]:
+    refs: set[str] = set()
+    for item in objects:
+        if item.get("is_cte") or item.get("is_function") or item.get("is_subquery"):
+            continue
+        table = str(item.get("table") or "").casefold()
+        qualified = _qualified_or_table(item).casefold()
+        alias = str(item.get("alias") or "").casefold()
+        if table:
+            refs.add(table)
+        if qualified:
+            refs.add(qualified)
+        if alias:
+            refs.add(alias)
+    return refs
+
+
+def _scope_reference_map(
+    scope: SqlQueryScope,
+    by_id: Mapping[str, SqlQueryScope],
+) -> dict[str, str]:
+    refs: dict[str, str] = {}
+    subquery_children = [
+        child_id
+        for child_id in scope.get("child_scopes", [])
+        if by_id[child_id].get("scope_type") == "subquery"
+    ]
+    subquery_index = 0
+    for item in scope.get("object_references", []):
+        if item.get("is_cte"):
+            scope_id = f"cte:{item.get('table')}"
+        elif item.get("is_subquery"):
+            if subquery_index >= len(subquery_children):
+                continue
+            scope_id = subquery_children[subquery_index]
+            subquery_index += 1
+        else:
+            continue
+        if scope_id not in by_id:
+            continue
+        table = str(item.get("table") or "").casefold()
+        alias = str(item.get("alias") or "").casefold()
+        if table:
+            refs[table] = scope_id
+        if alias:
+            refs[alias] = scope_id
+    return refs
+
+
+def _scope_output_lineage(
+    scope: SqlQueryScope,
+    scope_ref_map: Mapping[str, str],
+    by_id: Mapping[str, SqlQueryScope],
+) -> list[dict[str, Any]]:
+    lineage: list[dict[str, Any]] = []
+    child_outputs = {
+        scope_id: _scope_output_names(by_id[scope_id])
+        for scope_id in set(scope_ref_map.values())
+    }
+    for index, item in enumerate(scope.get("select_items", [])):
+        output_name = _select_output_name(item)
+        for column in item.get("column_references", []):
+            qualifier = str(column.get("qualifier") or "").casefold()
+            if not qualifier or qualifier not in scope_ref_map:
+                continue
+            source_scope_id = scope_ref_map[qualifier]
+            source_output = str(column.get("column") or "").casefold()
+            if source_output not in child_outputs.get(source_scope_id, set()):
+                continue
+            lineage.append(
+                {
+                    "select_item_index": index,
+                    "output_name": output_name,
+                    "source_scope_id": source_scope_id,
+                    "source_output": source_output,
+                }
+            )
+    return lineage
+
+
+def _scope_output_names(scope: SqlQueryScope) -> set[str]:
+    return {
+        name
+        for item in scope.get("select_items", [])
+        for name in [_select_output_name(item)]
+        if name
+    }
+
+
+def _select_output_name(item: SqlSelectItem) -> str | None:
+    alias = item.get("alias")
+    if alias:
+        return str(alias).casefold()
+    expression = str(item.get("expression") or "").casefold()
+    if expression and _is_plain_identifier_text(expression):
+        return expression
+    columns = item.get("column_references", [])
+    if len(columns) == 1:
+        return str(columns[0].get("column") or "").casefold()
+    return None
+
+
+def _is_plain_identifier_text(value: str) -> bool:
+    if not value:
+        return False
+    first = value[0]
+    if not (first == "_" or first.isalpha()):
+        return False
+    return all(character == "_" or character.isalnum() for character in value)
+
+
+def _aggregated_scope_join_count(
+    scope: SqlQueryScope,
+    scope_ref_map: Mapping[str, str],
+    by_id: Mapping[str, SqlQueryScope],
+) -> int:
+    total = 0
+    for join in scope.get("joins", []):
+        left = str(join.get("left_table") or "").casefold()
+        right = str(join.get("right_table") or "").casefold()
+        left_scope = scope_ref_map.get(left)
+        right_scope = scope_ref_map.get(right)
+        if (
+            left_scope
+            and right_scope
+            and by_id[left_scope].get("has_reducing_aggregate") is True
+            and by_id[right_scope].get("has_reducing_aggregate") is True
+        ):
+            total += 1
+    return total
+
+
+def _top_level_keyword_pair_index(
+    tokens: list[SqlToken],
+    first: str,
+    second: str,
+) -> int | None:
+    depth = 0
+    for index, token in enumerate(tokens[:-1]):
+        if token["value"] == "(":
+            depth += 1
+            continue
+        if token["value"] == ")":
+            depth = max(0, depth - 1)
+            continue
+        if (
+            depth == 0
+            and token["normalized"] == first
+            and tokens[index + 1]["normalized"] == second
+        ):
+            return index
+    return None
+
+
+def _top_level_clause_end(
+    tokens: list[SqlToken],
+    *,
+    start: int,
+    stop_words: set[str],
+) -> int:
+    depth = 0
+    for index in range(start, len(tokens)):
+        token = tokens[index]
+        if token["value"] == "(":
+            depth += 1
+            continue
+        if token["value"] == ")":
+            depth = max(0, depth - 1)
+            continue
+        if depth == 0 and token["normalized"] in stop_words:
+            return index
+    return len(tokens)
+
+
+def _extract_select_items(
+    tokens: list[SqlToken],
+    *,
+    cte_names: list[str] | None = None,
+) -> list[SqlSelectItem]:
     select_index = _top_level_keyword_index(tokens, "select")
     if select_index is None:
         return []
     from_index = _top_level_keyword_index(tokens, "from", start=select_index + 1)
     end = from_index if from_index is not None else len(tokens)
     items = _split_top_level_commas(tokens[select_index + 1 : end])
-    scope_objects = _extract_objects(tokens, _extract_ctes(tokens))
+    scope_objects = _extract_scope_objects(tokens, cte_names or _extract_ctes(tokens))
     output: list[SqlSelectItem] = []
     for item in items:
         output.append(
@@ -1107,6 +1483,85 @@ def _resolve_scope_column_references(
             item["table"] = table.get("table")
         output.append(item)
     return output
+
+
+def _extract_scope_objects(
+    tokens: list[SqlToken],
+    ctes: list[str],
+) -> list[SqlObjectReference]:
+    objects: list[SqlObjectReference] = []
+    cte_names = {name.casefold() for name in ctes}
+    depth = 0
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token["value"] == "(":
+            depth += 1
+            index += 1
+            continue
+        if token["value"] == ")":
+            depth = max(0, depth - 1)
+            index += 1
+            continue
+        if depth != 0:
+            index += 1
+            continue
+        norm = token["normalized"]
+        source: Literal["from", "join"] | None = None
+        if norm == "from":
+            source = "from"
+        elif norm == "join":
+            source = "join"
+        if source is None:
+            index += 1
+            continue
+        index += 1
+        while _norm_at(tokens, index) in {"lateral", "only"}:
+            index += 1
+        if _norm_at(tokens, index) == "(":
+            end = _matching_paren_index(tokens, index)
+            alias = _read_alias(tokens, end + 1)
+            if alias:
+                objects.append(
+                    {
+                        "raw": alias[0],
+                        "schema": None,
+                        "table": alias[0],
+                        "alias": alias[0],
+                        "source": source,
+                        "is_cte": False,
+                        "is_function": False,
+                        "is_subquery": True,
+                    }
+                )
+                index = alias[1]
+                continue
+            index = end + 1
+            continue
+        reference, index = _read_name(tokens, index)
+        if not reference:
+            continue
+        is_function = _norm_at(tokens, index) == "("
+        if is_function:
+            index = _skip_balanced(tokens, index)
+        schema, table = _schema_table(reference)
+        alias = _read_alias(tokens, index)
+        if alias:
+            index = alias[1]
+        is_cte = table.casefold() in cte_names and schema is None
+        objects.append(
+            {
+                "raw": ".".join(reference),
+                "schema": schema,
+                "table": table,
+                "alias": alias[0] if alias else None,
+                "source": source,
+                "is_cte": is_cte,
+                "is_function": is_function,
+                "is_subquery": False,
+            }
+        )
+    return _stable_objects(objects)
 
 
 def _extract_order_by_items(

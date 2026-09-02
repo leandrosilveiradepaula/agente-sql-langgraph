@@ -491,6 +491,301 @@ def test_order_by_termina_antes_de_offset() -> None:
     assert order_item["direction"] == "desc"
 
 
+def test_scope_metadata_select_simples_root() -> None:
+    analysis = analyze_sql("SELECT id FROM schema_test.table_test")
+
+    root = _root_scope(analysis)
+
+    assert root["scope_type"] == "root"
+    assert root["scope_name"] is None
+    assert root["physical_tables"] == ["schema_test.table_test"]
+    assert root["child_scopes"] == []
+    assert root["group_by_items"] == []
+    assert root["has_aggregate"] is False
+    assert root["raw_table_join_count"] == 0
+    assert root["aggregated_scope_join_count"] == 0
+
+
+def test_cte_sem_agregacao_scope_metadata() -> None:
+    analysis = analyze_sql(
+        "WITH operand_a AS ("
+        "SELECT dimension_x, metric_x FROM schema_test.fact_a"
+        ") SELECT dimension_x, metric_x FROM operand_a"
+    )
+
+    scopes = {scope["scope_id"]: scope for scope in analysis["query_scopes"]}
+
+    assert scopes["cte:operand_a"]["scope_type"] == "cte"
+    assert scopes["cte:operand_a"]["scope_name"] == "operand_a"
+    assert scopes["cte:operand_a"]["physical_tables"] == ["schema_test.fact_a"]
+    assert scopes["cte:operand_a"]["has_aggregate"] is False
+    assert scopes["cte:operand_a"]["has_reducing_aggregate"] is False
+    assert scopes["root"]["child_scopes"] == ["cte:operand_a"]
+
+
+def test_cte_com_agregacao_scope_metadata() -> None:
+    analysis = analyze_sql(
+        "WITH operand_a AS ("
+        "SELECT dimension_x, SUM(metric_x) AS metric_a "
+        "FROM schema_test.fact_a GROUP BY dimension_x"
+        ") SELECT dimension_x, metric_a FROM operand_a"
+    )
+
+    cte_scope = {
+        scope["scope_id"]: scope for scope in analysis["query_scopes"]
+    }["cte:operand_a"]
+
+    assert cte_scope["has_aggregate"] is True
+    assert cte_scope["has_reducing_aggregate"] is True
+    assert cte_scope["group_by_items"] == ["dimension_x"]
+    assert cte_scope["select_items"][1]["alias"] == "metric_a"
+
+
+def test_duas_ctes_agregadas_combinadas_no_root() -> None:
+    analysis = analyze_sql(
+        "WITH operand_a AS ("
+        "SELECT dimension_x, SUM(metric_x) AS metric_a "
+        "FROM schema_test.fact_a GROUP BY dimension_x"
+        "), operand_b AS ("
+        "SELECT dimension_x, SUM(metric_y) AS metric_b "
+        "FROM schema_test.fact_b GROUP BY dimension_x"
+        ") SELECT operand_a.dimension_x, operand_a.metric_a, operand_b.metric_b "
+        "FROM operand_a JOIN operand_b "
+        "ON operand_a.dimension_x = operand_b.dimension_x"
+    )
+
+    root = _root_scope(analysis)
+
+    assert root["physical_tables"] == []
+    assert root["child_scopes"] == ["cte:operand_a", "cte:operand_b"]
+    assert root["raw_table_join_count"] == 0
+    assert root["aggregated_scope_join_count"] == 1
+    assert {
+        (item["source_scope_id"], item["source_output"])
+        for item in root["output_lineage"]
+    } == {
+        ("cte:operand_a", "dimension_x"),
+        ("cte:operand_a", "metric_a"),
+        ("cte:operand_b", "metric_b"),
+    }
+
+
+def test_join_direto_duas_tabelas_fisicas_no_mesmo_scope() -> None:
+    analysis = analyze_sql(
+        "SELECT a.dimension_x, b.metric_y "
+        "FROM schema_test.fact_a a "
+        "JOIN schema_test.fact_b b ON a.id = b.id"
+    )
+
+    root = _root_scope(analysis)
+
+    assert root["physical_tables"] == [
+        "schema_test.fact_a",
+        "schema_test.fact_b",
+    ]
+    assert root["raw_table_join_count"] == 1
+    assert root["aggregated_scope_join_count"] == 0
+
+
+def test_root_select_lineage_para_output_de_cte() -> None:
+    analysis = analyze_sql(
+        "WITH operand_a AS ("
+        "SELECT dimension_x, SUM(metric_x) AS metric_a "
+        "FROM schema_test.fact_a GROUP BY dimension_x"
+        ") SELECT operand_a.metric_a FROM operand_a"
+    )
+
+    root = _root_scope(analysis)
+
+    assert root["output_lineage"] == [
+        {
+            "select_item_index": 0,
+            "output_name": "metric_a",
+            "source_scope_id": "cte:operand_a",
+            "source_output": "metric_a",
+        }
+    ]
+
+
+def test_subquery_agregada_scope_metadata() -> None:
+    analysis = analyze_sql(
+        "SELECT s.metric_a FROM ("
+        "SELECT dimension_x, SUM(metric_x) AS metric_a "
+        "FROM schema_test.fact_a GROUP BY dimension_x"
+        ") s"
+    )
+
+    scopes = {scope["scope_id"]: scope for scope in analysis["query_scopes"]}
+
+    assert scopes["root"]["has_aggregate"] is False
+    assert scopes["root"]["has_reducing_aggregate"] is False
+    assert scopes["root"]["physical_tables"] == []
+    assert scopes["root"]["child_scopes"] == ["subquery:1"]
+    assert scopes["subquery:1"]["scope_type"] == "subquery"
+    assert scopes["subquery:1"]["has_aggregate"] is True
+    assert scopes["subquery:1"]["has_reducing_aggregate"] is True
+    assert scopes["subquery:1"]["group_by_items"] == ["dimension_x"]
+    assert scopes["root"]["output_lineage"] == [
+        {
+            "select_item_index": 0,
+            "output_name": "metric_a",
+            "source_scope_id": "subquery:1",
+            "source_output": "metric_a",
+        }
+    ]
+
+
+def test_cte_referencia_cte_anterior_sem_virar_tabela_fisica() -> None:
+    analysis = analyze_sql(
+        "WITH operand_a AS ("
+        "SELECT id FROM schema_test.fact_a"
+        "), operand_b AS ("
+        "SELECT id FROM operand_a"
+        ") SELECT id FROM operand_b"
+    )
+
+    scopes = {scope["scope_id"]: scope for scope in analysis["query_scopes"]}
+
+    assert scopes["cte:operand_b"]["physical_tables"] == []
+    assert scopes["cte:operand_b"]["object_references"][0]["is_cte"] is True
+    assert scopes["cte:operand_b"]["object_references"][0]["table"] == "operand_a"
+
+
+def test_subquery_referencia_cte_sem_virar_tabela_fisica() -> None:
+    analysis = analyze_sql(
+        "WITH operand_a AS ("
+        "SELECT id FROM schema_test.fact_a"
+        ") SELECT s.id FROM (SELECT id FROM operand_a) s"
+    )
+
+    scopes = {scope["scope_id"]: scope for scope in analysis["query_scopes"]}
+
+    assert scopes["subquery:1"]["physical_tables"] == []
+    assert scopes["subquery:1"]["object_references"][0]["is_cte"] is True
+    assert scopes["subquery:1"]["object_references"][0]["table"] == "operand_a"
+    assert scopes["root"]["physical_tables"] == []
+
+
+def test_sum_simples_eh_reducing_aggregate() -> None:
+    analysis = analyze_sql("SELECT SUM(metric_x) AS total FROM schema_test.fact_a")
+
+    root = _root_scope(analysis)
+
+    assert root["has_aggregate"] is True
+    assert root["has_reducing_aggregate"] is True
+
+
+def test_group_by_sum_eh_reducing_aggregate() -> None:
+    analysis = analyze_sql(
+        "SELECT dimension_x, SUM(metric_x) AS total "
+        "FROM schema_test.fact_a GROUP BY dimension_x"
+    )
+
+    root = _root_scope(analysis)
+
+    assert root["has_reducing_aggregate"] is True
+    assert root["group_by_items"] == ["dimension_x"]
+
+
+def test_sum_over_nao_eh_reducing_aggregate() -> None:
+    analysis = analyze_sql(
+        "SELECT dimension_x, "
+        "SUM(metric_x) OVER (PARTITION BY dimension_x) AS total "
+        "FROM schema_test.fact_a"
+    )
+
+    root = _root_scope(analysis)
+
+    assert root["has_aggregate"] is True
+    assert root["has_reducing_aggregate"] is False
+
+
+def test_sum_filter_over_nao_eh_reducing_aggregate() -> None:
+    analysis = analyze_sql(
+        "SELECT dimension_x, "
+        "SUM(metric_x) FILTER (WHERE flag_x = 1) "
+        "OVER (PARTITION BY dimension_x) AS total "
+        "FROM schema_test.fact_a"
+    )
+
+    root = _root_scope(analysis)
+
+    assert root["has_aggregate"] is True
+    assert root["has_reducing_aggregate"] is False
+
+
+def test_sum_filter_sem_over_eh_reducing_aggregate() -> None:
+    analysis = analyze_sql(
+        "SELECT SUM(metric_x) FILTER (WHERE flag_x = 1) AS total "
+        "FROM schema_test.fact_a"
+    )
+
+    assert _root_scope(analysis)["has_reducing_aggregate"] is True
+
+
+def test_coalesce_sum_eh_reducing_aggregate() -> None:
+    analysis = analyze_sql(
+        "SELECT COALESCE(SUM(metric_x), 0) AS total FROM schema_test.fact_a"
+    )
+
+    assert _root_scope(analysis)["has_reducing_aggregate"] is True
+
+
+def test_sum_mais_max_eh_reducing_aggregate() -> None:
+    analysis = analyze_sql(
+        "SELECT SUM(metric_x) + MAX(metric_y) AS total FROM schema_test.fact_a"
+    )
+
+    assert _root_scope(analysis)["has_reducing_aggregate"] is True
+
+
+def test_reducing_aggregate_mais_window_aggregate_eh_reducing() -> None:
+    analysis = analyze_sql(
+        "SELECT SUM(metric_x) + "
+        "MAX(metric_y) OVER (PARTITION BY dimension_x) AS total "
+        "FROM schema_test.fact_a"
+    )
+
+    assert _root_scope(analysis)["has_reducing_aggregate"] is True
+
+
+def test_multiplas_window_aggregates_nao_sao_reducing() -> None:
+    analysis = analyze_sql(
+        "SELECT SUM(metric_x) OVER (PARTITION BY dimension_x) + "
+        "MAX(metric_y) OVER (PARTITION BY dimension_x) AS total "
+        "FROM schema_test.fact_a"
+    )
+
+    root = _root_scope(analysis)
+
+    assert root["has_aggregate"] is True
+    assert root["has_reducing_aggregate"] is False
+
+
+def test_join_de_scopes_com_window_nao_conta_como_agregado_seguro() -> None:
+    analysis = analyze_sql(
+        "WITH operand_a AS ("
+        "SELECT dimension_x, "
+        "SUM(metric_x) OVER (PARTITION BY dimension_x) AS metric_a "
+        "FROM schema_test.fact_a"
+        "), operand_b AS ("
+        "SELECT dimension_x, "
+        "SUM(metric_y) OVER (PARTITION BY dimension_x) AS metric_b "
+        "FROM schema_test.fact_b"
+        ") SELECT operand_a.dimension_x, operand_a.metric_a, operand_b.metric_b "
+        "FROM operand_a JOIN operand_b "
+        "ON operand_a.dimension_x = operand_b.dimension_x"
+    )
+
+    scopes = {scope["scope_id"]: scope for scope in analysis["query_scopes"]}
+
+    assert scopes["cte:operand_a"]["has_aggregate"] is True
+    assert scopes["cte:operand_a"]["has_reducing_aggregate"] is False
+    assert scopes["cte:operand_b"]["has_aggregate"] is True
+    assert scopes["cte:operand_b"]["has_reducing_aggregate"] is False
+    assert scopes["root"]["aggregated_scope_join_count"] == 0
+
+
 def test_caractere_de_controle() -> None:
     try:
         analyze_sql("SELECT id FROM schema_test.table_test\x00")
@@ -603,6 +898,82 @@ def main() -> None:
         (
             "ORDER BY termina antes OFFSET",
             test_order_by_termina_antes_de_offset,
+        ),
+        (
+            "scope root metadata",
+            test_scope_metadata_select_simples_root,
+        ),
+        (
+            "CTE sem agregacao scope metadata",
+            test_cte_sem_agregacao_scope_metadata,
+        ),
+        (
+            "CTE com agregacao scope metadata",
+            test_cte_com_agregacao_scope_metadata,
+        ),
+        (
+            "duas CTEs agregadas no root",
+            test_duas_ctes_agregadas_combinadas_no_root,
+        ),
+        (
+            "join direto fisico no mesmo scope",
+            test_join_direto_duas_tabelas_fisicas_no_mesmo_scope,
+        ),
+        (
+            "lineage root para CTE",
+            test_root_select_lineage_para_output_de_cte,
+        ),
+        (
+            "subquery agregada scope metadata",
+            test_subquery_agregada_scope_metadata,
+        ),
+        (
+            "CTE referencia CTE anterior",
+            test_cte_referencia_cte_anterior_sem_virar_tabela_fisica,
+        ),
+        (
+            "subquery referencia CTE",
+            test_subquery_referencia_cte_sem_virar_tabela_fisica,
+        ),
+        (
+            "SUM simples reducing aggregate",
+            test_sum_simples_eh_reducing_aggregate,
+        ),
+        (
+            "GROUP BY SUM reducing aggregate",
+            test_group_by_sum_eh_reducing_aggregate,
+        ),
+        (
+            "SUM OVER nao reducing aggregate",
+            test_sum_over_nao_eh_reducing_aggregate,
+        ),
+        (
+            "SUM FILTER OVER nao reducing aggregate",
+            test_sum_filter_over_nao_eh_reducing_aggregate,
+        ),
+        (
+            "SUM FILTER sem OVER reducing aggregate",
+            test_sum_filter_sem_over_eh_reducing_aggregate,
+        ),
+        (
+            "COALESCE SUM reducing aggregate",
+            test_coalesce_sum_eh_reducing_aggregate,
+        ),
+        (
+            "SUM mais MAX reducing aggregate",
+            test_sum_mais_max_eh_reducing_aggregate,
+        ),
+        (
+            "reducing aggregate mais window aggregate",
+            test_reducing_aggregate_mais_window_aggregate_eh_reducing,
+        ),
+        (
+            "multiplas window aggregates nao reducing",
+            test_multiplas_window_aggregates_nao_sao_reducing,
+        ),
+        (
+            "window scopes nao contam aggregate-before-combine",
+            test_join_de_scopes_com_window_nao_conta_como_agregado_seguro,
         ),
         ("controle", test_caractere_de_controle),
         ("SQL malformada", test_sql_malformada),
