@@ -285,6 +285,7 @@ def _intent_metric_evidence(
     *,
     term: str,
     operation_term: str | None = None,
+    context_concepts: list[str] | None = None,
 ) -> dict:
     concepts = [
         {
@@ -327,6 +328,30 @@ def _intent_metric_evidence(
                                 "source": "intent_catalog_concept",
                                 "confidence": 1.0,
                                 "matched_tokens": [operation_term],
+                            }
+                        },
+                    }
+                ],
+            }
+        )
+    for concept_name in context_concepts or []:
+        concepts.append(
+            {
+                "concept_name": concept_name,
+                "satisfied": True,
+                "terms": [
+                    {
+                        "term": concept_name,
+                        "normalized_term": concept_name,
+                        "matched": True,
+                        "match_details": {
+                            "semantic_signal": {
+                                "concept_name": concept_name,
+                                "term": concept_name,
+                                "normalized_term": concept_name,
+                                "source": "intent_catalog_concept",
+                                "confidence": 1.0,
+                                "matched_tokens": [concept_name],
                             }
                         },
                     }
@@ -581,7 +606,15 @@ def _append_operation_alias(
     operation_type: str = "ranking",
     direction: str = "descending",
     requested_limit=None,
+    binding_cardinality: dict | None = None,
 ) -> None:
+    operation = {
+        "operation_type": operation_type,
+        "direction": direction,
+        "requested_limit": requested_limit,
+    }
+    if binding_cardinality is not None:
+        operation["binding_cardinality"] = binding_cardinality
     context["entities"].append(
         {
             "entity_type": "analytical_operation",
@@ -590,13 +623,7 @@ def _append_operation_alias(
             "target_table": None,
             "target_column": None,
             "sql_filter_hint": None,
-            "business_rule": {
-                "operation": {
-                    "operation_type": operation_type,
-                    "direction": direction,
-                    "requested_limit": requested_limit,
-                }
-            },
+            "business_rule": {"operation": operation},
             "priority": 1,
         }
     )
@@ -633,6 +660,65 @@ def _append_metric_alias(
     )
 
 
+def _append_metric_binding(
+    context: dict,
+    *,
+    metric_concept: str = "amount",
+    target_table: str = "schema_test.fact_metrics",
+    target_column: str = "measure_value",
+    when_present: list[str] | None = None,
+    when_absent: list[str] | None = None,
+    priority: int = 1,
+    user_term: str = "binding",
+) -> None:
+    context["entities"].append(
+        {
+            "entity_type": "metric_binding",
+            "user_term": user_term,
+            "canonical_value": metric_concept,
+            "target_table": target_table,
+            "target_column": target_column,
+            "sql_filter_hint": None,
+            "business_rule": {
+                "metric_binding": {
+                    "metric_concept": metric_concept,
+                    "target_table": target_table,
+                    "target_column": target_column,
+                    "when_present": when_present or ["mode_a"],
+                    "when_absent": when_absent or [],
+                    "aggregate": None,
+                }
+            },
+            "priority": priority,
+        }
+    )
+
+
+def _append_metric_table(
+    context: dict,
+    *,
+    table_name: str,
+    metric_columns: list[str],
+) -> None:
+    context["table_catalog"].append(
+        {
+            "schema_name": "schema_test",
+            "table_name": table_name,
+            "table_type": "table",
+            "description": "synthetic binding fact",
+            "grain": None,
+            "primary_key": ["row_id"],
+            "key_columns": ["row_id"],
+            "metric_columns": metric_columns,
+            "date_columns": ["event_date"],
+            "join_rules": [],
+            "ai_hint": None,
+            "priority": 1,
+            "columns": [{"name": column} for column in metric_columns],
+        }
+    )
+
+
 def _operation_plan_for_term(
     *,
     context: dict,
@@ -653,6 +739,7 @@ def _metric_plan_for_term(
     context: dict,
     term: str,
     operation_term: str | None = None,
+    context_concepts: list[str] | None = None,
 ) -> dict:
     result = build_query_plan(
         context=context,
@@ -662,6 +749,7 @@ def _metric_plan_for_term(
         intent_resolution_result=_intent_metric_evidence(
             term=term,
             operation_term=operation_term,
+            context_concepts=context_concepts,
         ),
     )
     return result["query_plan"]["planning_context"]
@@ -1468,6 +1556,433 @@ def test_financial_metric_com_aggregate_nao_e_projetada() -> None:
     assert projection["planned_metrics"] == []
 
 
+def test_metric_binding_single_aplica_corretamente() -> None:
+    context = _metric_context()
+    _append_metric_binding(context, when_present=["mode_a"])
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="amount",
+        context_concepts=["mode_a"],
+    )
+
+    metric = projection["planned_metrics"][0]
+    diagnostic = projection["diagnostics"]["planned_metric_diagnostic"]
+
+    assert metric["mapping_source"] == "metric_binding"
+    assert metric["target_column"] == "measure_value"
+    assert metric["binding_ref"].startswith("binding-")
+    assert metric["binding_conditions"]["when_present"] == ["mode_a"]
+    assert diagnostic["binding_failures"] == []
+
+
+def test_metric_binding_nao_aplica_sem_when_present() -> None:
+    context = _metric_context()
+    _append_metric_binding(context, when_present=["mode_a"])
+
+    projection = _metric_plan_for_term(context=context, term="amount")
+
+    assert projection["planned_metrics"] == []
+    failure = projection["diagnostics"]["planned_metric_diagnostic"][
+        "binding_failures"
+    ][0]["binding_diagnostics"][0]
+    assert failure["status"] == "metric_binding_not_applicable"
+
+
+def test_metric_binding_nao_aplica_com_when_absent_presente() -> None:
+    context = _metric_context()
+    _append_metric_binding(
+        context,
+        when_present=["mode_a"],
+        when_absent=["mode_b"],
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="amount",
+        context_concepts=["mode_a", "mode_b"],
+    )
+
+    assert projection["planned_metrics"] == []
+    failure = projection["diagnostics"]["planned_metric_diagnostic"][
+        "binding_failures"
+    ][0]["binding_diagnostics"][0]
+    assert failure["status"] == "metric_binding_not_applicable"
+
+
+def test_metric_binding_single_multiplos_targets_falha_fechado() -> None:
+    context = _metric_context()
+    _append_metric_table(
+        context,
+        table_name="fact_alternate",
+        metric_columns=["alternate_value"],
+    )
+    _append_metric_binding(
+        context,
+        user_term="binding a",
+        target_column="measure_value",
+        when_present=["mode_a"],
+        priority=1,
+    )
+    _append_metric_binding(
+        context,
+        user_term="binding b",
+        target_table="schema_test.fact_alternate",
+        target_column="alternate_value",
+        when_present=["mode_a"],
+        priority=99,
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="amount",
+        context_concepts=["mode_a"],
+    )
+
+    assert projection["planned_metrics"] == []
+    failure = projection["diagnostics"]["planned_metric_diagnostic"][
+        "binding_failures"
+    ][0]["binding_diagnostics"][0]
+    assert failure["status"] == "metric_binding_ambiguous"
+
+
+def test_metric_binding_single_mesmo_target_conditions_diferentes_ambiguous() -> None:
+    context = _metric_context()
+    _append_metric_binding(
+        context,
+        user_term="binding a",
+        target_column="measure_value",
+        when_present=["mode_a"],
+    )
+    _append_metric_binding(
+        context,
+        user_term="binding b",
+        target_column="measure_value",
+        when_present=["mode_b"],
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="amount",
+        context_concepts=["mode_a", "mode_b"],
+    )
+
+    assert projection["planned_metrics"] == []
+    failure = projection["diagnostics"]["planned_metric_diagnostic"][
+        "binding_failures"
+    ][0]["binding_diagnostics"][0]
+    assert failure["status"] == "metric_binding_ambiguous"
+
+
+def test_metric_binding_equivalente_deduplica() -> None:
+    context = _metric_context()
+    _append_metric_binding(
+        context,
+        user_term="binding a",
+        when_present=["mode_a"],
+    )
+    _append_metric_binding(
+        context,
+        user_term="binding b",
+        when_present=["mode_a"],
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="amount",
+        context_concepts=["mode_a"],
+    )
+
+    assert len(projection["planned_metrics"]) == 1
+    diagnostic = projection["diagnostics"]["planned_metric_diagnostic"]
+    assert diagnostic["projected_count"] == 1
+
+
+def test_metric_binding_multi_min_max_resolve_duas_metricas() -> None:
+    context = _metric_context()
+    _append_metric_table(
+        context,
+        table_name="fact_alternate",
+        metric_columns=["alternate_value"],
+    )
+    _append_metric_binding(
+        context,
+        target_column="measure_value",
+        when_present=["mode_a"],
+    )
+    _append_metric_binding(
+        context,
+        target_table="schema_test.fact_alternate",
+        target_column="alternate_value",
+        when_present=["mode_b"],
+    )
+    _append_operation_alias(
+        context,
+        user_term="compare",
+        binding_cardinality={
+            "mode": "multiple",
+            "minimum": 2,
+            "maximum": 2,
+            "same_metric_concept": True,
+            "distinct_bindings": True,
+        },
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="amount",
+        operation_term="compare",
+        context_concepts=["mode_a", "mode_b"],
+    )
+
+    assert len(projection["planned_metrics"]) == 2
+    assert {
+        metric["target_column"] for metric in projection["planned_metrics"]
+    } == {"measure_value", "alternate_value"}
+    assert projection["diagnostics"]["planned_metric_diagnostic"][
+        "binding_cardinality"
+    ]["mode"] == "multiple"
+
+
+def test_metric_binding_multi_abaixo_do_minimo_falha_fechado() -> None:
+    context = _metric_context()
+    _append_metric_binding(context, when_present=["mode_a"])
+    _append_operation_alias(
+        context,
+        user_term="compare",
+        binding_cardinality={
+            "mode": "multiple",
+            "minimum": 2,
+            "maximum": 2,
+            "same_metric_concept": True,
+            "distinct_bindings": True,
+        },
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="amount",
+        operation_term="compare",
+        context_concepts=["mode_a"],
+    )
+
+    assert projection["planned_metrics"] == []
+    failure = projection["diagnostics"]["planned_metric_diagnostic"][
+        "binding_failures"
+    ][0]["binding_diagnostics"][0]
+    assert failure["status"] == "metric_binding_below_minimum"
+
+
+def test_metric_binding_multi_acima_do_maximo_falha_fechado() -> None:
+    context = _metric_context()
+    _append_metric_table(
+        context,
+        table_name="fact_alternate",
+        metric_columns=["alternate_value"],
+    )
+    _append_metric_table(
+        context,
+        table_name="fact_extra",
+        metric_columns=["extra_value"],
+    )
+    _append_metric_binding(
+        context,
+        target_column="measure_value",
+        when_present=["mode_a"],
+    )
+    _append_metric_binding(
+        context,
+        target_table="schema_test.fact_alternate",
+        target_column="alternate_value",
+        when_present=["mode_b"],
+    )
+    _append_metric_binding(
+        context,
+        target_table="schema_test.fact_extra",
+        target_column="extra_value",
+        when_present=["mode_c"],
+    )
+    _append_operation_alias(
+        context,
+        user_term="compare",
+        binding_cardinality={
+            "mode": "multiple",
+            "minimum": 1,
+            "maximum": 2,
+            "same_metric_concept": True,
+            "distinct_bindings": True,
+        },
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="amount",
+        operation_term="compare",
+        context_concepts=["mode_a", "mode_b", "mode_c"],
+    )
+
+    assert projection["planned_metrics"] == []
+    failure = projection["diagnostics"]["planned_metric_diagnostic"][
+        "binding_failures"
+    ][0]["binding_diagnostics"][0]
+    assert failure["status"] == "metric_binding_above_maximum"
+
+
+def test_metric_binding_global_acima_do_maximo_nao_entrega_metricas() -> None:
+    context = _metric_context()
+    _append_metric_table(
+        context,
+        table_name="fact_alternate",
+        metric_columns=["alternate_value"],
+    )
+    _append_metric_binding(
+        context,
+        metric_concept="amount",
+        target_column="measure_value",
+        when_present=["mode_a"],
+    )
+    _append_metric_binding(
+        context,
+        metric_concept="amount",
+        target_table="schema_test.fact_alternate",
+        target_column="alternate_value",
+        when_present=["mode_b"],
+    )
+    _append_metric_binding(
+        context,
+        metric_concept="volume",
+        target_column="volume_value",
+        when_present=["mode_c"],
+    )
+    _append_operation_alias(
+        context,
+        user_term="compare",
+        binding_cardinality={
+            "mode": "multiple",
+            "minimum": 1,
+            "maximum": 2,
+            "same_metric_concept": False,
+            "distinct_bindings": True,
+        },
+    )
+    concepts = [
+        _intent_metric_evidence(term="amount")["best_candidate"][
+            "matches"
+        ][0]["match_details"]["concepts"][0],
+        _intent_metric_evidence(term="volume")["best_candidate"][
+            "matches"
+        ][0]["match_details"]["concepts"][0],
+        _intent_operation_evidence(term="compare")["best_candidate"][
+            "matches"
+        ][0]["match_details"]["concepts"][0],
+    ]
+    concepts.extend(
+        {
+            "concept_name": concept,
+            "satisfied": True,
+            "terms": [],
+        }
+        for concept in ("mode_a", "mode_b", "mode_c")
+    )
+
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="synthetic multiple metrics",
+        intent_resolution_result={
+            "applied": True,
+            "intent": "generic_test_intent",
+            "best_candidate": {
+                "intent_name": "generic_test_intent",
+                "score": 120.0,
+                "matches": [{"match_details": {"concepts": concepts}}],
+            },
+            "candidates": [],
+        },
+    )
+    projection = result["query_plan"]["planning_context"]
+
+    assert projection["planned_metrics"] == []
+    assert projection["diagnostics"]["planned_metric_diagnostic"][
+        "binding_failures"
+    ][0]["status"] == "metric_binding_above_maximum"
+
+
+def test_metric_binding_target_invalido_rejeita() -> None:
+    context = _metric_context()
+    _append_metric_binding(
+        context,
+        target_column="missing_metric",
+        when_present=["mode_a"],
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="amount",
+        context_concepts=["mode_a"],
+    )
+
+    assert projection["planned_metrics"] == []
+    failure = projection["diagnostics"]["planned_metric_diagnostic"][
+        "binding_failures"
+    ][0]["binding_diagnostics"][0]
+    assert failure["rejected"][0]["reason"] == "invalid_physical_target"
+
+
+def test_metric_binding_ref_deterministico() -> None:
+    context = _metric_context()
+    _append_metric_binding(context, when_present=["mode_a", "mode_b"])
+
+    first = _metric_plan_for_term(
+        context=context,
+        term="amount",
+        context_concepts=["mode_a", "mode_b"],
+    )["planned_metrics"][0]
+    second = _metric_plan_for_term(
+        context=context,
+        term="amount",
+        context_concepts=["mode_b", "mode_a"],
+    )["planned_metrics"][0]
+
+    assert first["binding_ref"] == second["binding_ref"]
+
+
+def test_metric_binding_semantic_default_satisfaz_when_present() -> None:
+    context = _metric_context()
+    _append_metric_binding(context, when_present=["mode_default"])
+    evidence = _intent_metric_evidence(term="amount")
+    evidence["best_candidate"]["matches"][0]["match_details"][
+        "concepts"
+    ].append(
+        {
+            "concept_name": "mode_default",
+            "satisfied": True,
+            "terms": [],
+            "semantic_signals": [
+                {
+                    "concept_name": "mode_default",
+                    "source": "semantic_default",
+                    "rule_name": "default_rule",
+                    "priority": 1,
+                    "explicit_vs_default": "default",
+                }
+            ],
+        }
+    )
+
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="amount",
+        intent_resolution_result=evidence,
+    )
+
+    metric = result["query_plan"]["planning_context"]["planned_metrics"][0]
+    assert metric["mapping_source"] == "metric_binding"
+
+
 def test_ranking_recebe_metric_ref_quando_ha_uma_metrica() -> None:
     projection = _metric_plan_for_term(
         context=_metric_context(),
@@ -1973,6 +2488,58 @@ def main() -> None:
         (
             "financial metric aggregate ausente",
             test_financial_metric_com_aggregate_nao_e_projetada,
+        ),
+        (
+            "metric binding single",
+            test_metric_binding_single_aplica_corretamente,
+        ),
+        (
+            "metric binding sem when_present",
+            test_metric_binding_nao_aplica_sem_when_present,
+        ),
+        (
+            "metric binding bloqueado por when_absent",
+            test_metric_binding_nao_aplica_com_when_absent_presente,
+        ),
+        (
+            "metric binding single ambiguo",
+            test_metric_binding_single_multiplos_targets_falha_fechado,
+        ),
+        (
+            "metric binding single mesmo target conditions diferentes ambiguo",
+            test_metric_binding_single_mesmo_target_conditions_diferentes_ambiguous,
+        ),
+        (
+            "metric binding dedupe equivalente",
+            test_metric_binding_equivalente_deduplica,
+        ),
+        (
+            "metric binding multiple",
+            test_metric_binding_multi_min_max_resolve_duas_metricas,
+        ),
+        (
+            "metric binding multiple abaixo minimo",
+            test_metric_binding_multi_abaixo_do_minimo_falha_fechado,
+        ),
+        (
+            "metric binding multiple acima maximo",
+            test_metric_binding_multi_acima_do_maximo_falha_fechado,
+        ),
+        (
+            "metric binding global acima maximo",
+            test_metric_binding_global_acima_do_maximo_nao_entrega_metricas,
+        ),
+        (
+            "metric binding target invalido",
+            test_metric_binding_target_invalido_rejeita,
+        ),
+        (
+            "metric binding ref deterministico",
+            test_metric_binding_ref_deterministico,
+        ),
+        (
+            "metric binding semantic default",
+            test_metric_binding_semantic_default_satisfaz_when_present,
         ),
         (
             "ranking metric ref",

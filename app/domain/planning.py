@@ -173,6 +173,7 @@ class ProjectedAnalyticalOperation(TypedDict, total=False):
     direction: Literal["ascending", "descending"]
     requested_limit: int | None
     metric_ref: str
+    binding_cardinality: dict[str, Any]
     detection_source: str
     mapping_source: str
     matched_user_term: str
@@ -189,6 +190,9 @@ class ProjectedPlannedMetric(TypedDict, total=False):
     mapping_source: str
     matched_user_term: str
     priority: int | None
+    binding_ref: str
+    binding_conditions: dict[str, list[str]]
+    binding_source: str
 
 
 class ProjectionDiagnostic(TypedDict):

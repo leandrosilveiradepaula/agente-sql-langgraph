@@ -171,6 +171,28 @@ def _with_ranking_operation(
     return plan
 
 
+def _with_metric_binding_plan() -> dict:
+    plan = _dimension_test_plan()
+    plan["planning_context"]["planned_metrics"] = [
+        {
+            "metric_ref": "metric-synthetic",
+            "metric_concept": "synthetic_metric",
+            "target_table": "schema_test.dimension_test",
+            "target_column": "amount",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "metric_binding",
+            "binding_ref": "binding-synthetic",
+            "binding_conditions": {
+                "when_present": ["mode_a"],
+                "when_absent": [],
+            },
+            "binding_source": "entity_alias",
+        }
+    ]
+    return plan
+
+
 def _with_cross_schema_grouping_dimension() -> dict:
     plan = deepcopy(_query_plan())
     projection = plan["planning_context"]
@@ -1023,6 +1045,71 @@ def test_sem_ranking_order_by_nao_e_obrigatorio() -> None:
     assert _check_status_by_name(result, "analytical_operations") == "passed"
 
 
+def test_metric_binding_planejado_estruturalmente_valido_aprova() -> None:
+    result = _run(
+        "SELECT amount FROM schema_test.dimension_test",
+        _with_metric_binding_plan(),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "passed"
+
+
+def test_metric_binding_planejado_incompleto_rejeita() -> None:
+    plan = _with_metric_binding_plan()
+    del plan["planning_context"]["planned_metrics"][0]["binding_ref"]
+
+    result = _run(
+        "SELECT amount FROM schema_test.dimension_test",
+        plan,
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        finding["details"]["reason"] == "metric_binding_incomplete"
+        for finding in result["findings"]
+    )
+
+
+def test_metric_binding_ref_duplicado_rejeita() -> None:
+    plan = _with_metric_binding_plan()
+    plan["planning_context"]["planned_metrics"].append(
+        deepcopy(plan["planning_context"]["planned_metrics"][0])
+    )
+    plan["planning_context"]["planned_metrics"][1][
+        "metric_ref"
+    ] = "metric-other"
+
+    result = _run(
+        "SELECT amount FROM schema_test.dimension_test",
+        plan,
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        finding["details"]["reason"] == "metric_binding_duplicate_ref"
+        for finding in result["findings"]
+    )
+
+
+def test_metric_binding_target_nao_autorizado_rejeita() -> None:
+    plan = _with_metric_binding_plan()
+    plan["planning_context"]["planned_metrics"][0][
+        "target_column"
+    ] = "not_metric_column"
+
+    result = _run(
+        "SELECT amount FROM schema_test.dimension_test",
+        plan,
+    )
+
+    assert result["status"] == "rejected"
+    assert any(
+        finding["details"]["reason"] == "metric_binding_target_not_authorized"
+        for finding in result["findings"]
+    )
+
+
 def test_order_by_direction_helper_textual_removido() -> None:
     assert not hasattr(sql_contract, "_first_order_by_direction")
 
@@ -1231,6 +1318,22 @@ def main() -> None:
         (
             "sem ranking sem order obrigatorio",
             test_sem_ranking_order_by_nao_e_obrigatorio,
+        ),
+        (
+            "metric binding valido",
+            test_metric_binding_planejado_estruturalmente_valido_aprova,
+        ),
+        (
+            "metric binding incompleto",
+            test_metric_binding_planejado_incompleto_rejeita,
+        ),
+        (
+            "metric binding ref duplicado",
+            test_metric_binding_ref_duplicado_rejeita,
+        ),
+        (
+            "metric binding target nao autorizado",
+            test_metric_binding_target_nao_autorizado_rejeita,
         ),
         (
             "helper textual order by removido",

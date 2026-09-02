@@ -942,23 +942,54 @@ def _detect_planned_metrics(
     evidence_terms = _metric_terms_from_intent_evidence(
         intent_resolution_result,
     )
+    binding_context_concepts = _binding_context_concepts_from_intent_evidence(
+        intent_resolution_result,
+    )
+    operation_cardinality = _metric_binding_cardinality_from_operations(
+        context=context,
+        intent_resolution_result=intent_resolution_result,
+    )
     metrics: list[ProjectedPlannedMetric] = []
     unresolved: list[str] = []
     invalid_metadata: list[str] = []
+    failed_bindings: list[dict[str, Any]] = []
     for matched_user_term in evidence_terms:
-        metric, reason = _resolve_planned_metric(
+        resolved_metrics, reason, diagnostic = _resolve_planned_metrics(
             context=context,
             matched_user_term=matched_user_term,
+            binding_context_concepts=binding_context_concepts,
+            cardinality=operation_cardinality,
         )
-        if metric is None:
+        if not resolved_metrics:
             if reason == "invalid_metadata":
                 invalid_metadata.append(matched_user_term)
             else:
                 unresolved.append(matched_user_term)
+            if diagnostic:
+                failed_bindings.append(diagnostic)
             continue
-        metrics.append(metric)
+        metrics.extend(resolved_metrics)
 
     planned_metrics = _dedupe_planned_metrics(metrics)
+    global_binding_status = "not_applicable"
+    if any(
+        metric.get("mapping_source") == "metric_binding"
+        for metric in planned_metrics
+    ):
+        global_binding_status = _metric_binding_cardinality_status(
+            planned_metrics,
+            cardinality=operation_cardinality,
+        )
+        if global_binding_status != "resolved":
+            failed_bindings.append(
+                {
+                    "status": global_binding_status,
+                    "scope": "global",
+                    "planned_metric_count": len(planned_metrics),
+                    "cardinality": operation_cardinality,
+                }
+            )
+            planned_metrics = []
     return planned_metrics, {
         "metric_requested": bool(evidence_terms),
         "matched_terms": sorted(set(evidence_terms), key=str.casefold),
@@ -974,6 +1005,10 @@ def _detect_planned_metrics(
             "intent_semantic_evidence" if evidence_terms else "none"
         ),
         "projected_count": len(planned_metrics),
+        "binding_context_concepts": binding_context_concepts,
+        "binding_cardinality": operation_cardinality,
+        "global_binding_status": global_binding_status,
+        "binding_failures": failed_bindings,
     }
 
 
@@ -1011,18 +1046,121 @@ def _metric_terms_from_intent_evidence(
     return sorted(set(matches), key=str.casefold)
 
 
-def _resolve_planned_metric(
+def _binding_context_concepts_from_intent_evidence(
+    intent_resolution_result: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(intent_resolution_result, Mapping):
+        return []
+
+    selected_intent = intent_resolution_result.get("intent")
+    candidates = _selected_intent_candidates(
+        intent_resolution_result,
+        selected_intent=selected_intent,
+    )
+    concepts: dict[str, dict[str, Any]] = {}
+    for candidate in candidates:
+        for concept in _concepts_from_candidate(candidate):
+            if not concept.get("satisfied"):
+                continue
+            concept_name = str(concept.get("concept_name", "")).strip()
+            if not concept_name:
+                continue
+            key = concept_name.casefold()
+            if key in concepts:
+                continue
+            sources = _semantic_sources_from_concept(concept)
+            concepts[key] = {
+                "concept_name": concept_name,
+                "sources": sources,
+            }
+    return [
+        concepts[key]
+        for key in sorted(concepts, key=str.casefold)
+    ]
+
+
+def _semantic_sources_from_concept(
+    concept: Mapping[str, Any],
+) -> list[str]:
+    sources: set[str] = set()
+    for signal in concept.get("semantic_signals", []):
+        if not isinstance(signal, Mapping):
+            continue
+        source = signal.get("source")
+        if isinstance(source, str) and source.strip():
+            sources.add(source.strip())
+    return sorted(sources, key=str.casefold)
+
+
+def _metric_binding_cardinality_from_operations(
+    *,
+    context: ContextSnapshot,
+    intent_resolution_result: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    evidence_terms = _operation_terms_from_intent_evidence(
+        intent_resolution_result,
+    )
+    cardinalities: list[dict[str, Any]] = []
+    for matched_user_term in evidence_terms:
+        operation = _resolve_analytical_operation(
+            context.get("entities", []),
+            matched_user_term=matched_user_term,
+        )
+        if operation is None:
+            continue
+        cardinality = operation.get("binding_cardinality")
+        if isinstance(cardinality, Mapping):
+            cardinalities.append(dict(cardinality))
+    if not cardinalities:
+        return _default_binding_cardinality()
+    deduped = _dedupe_cardinalities(cardinalities)
+    if len(deduped) == 1:
+        return deduped[0]
+    return {
+        "mode": "single",
+        "minimum": 1,
+        "maximum": 1,
+        "same_metric_concept": True,
+        "distinct_bindings": True,
+        "status": "conflicting_operation_cardinality",
+    }
+
+
+def _dedupe_cardinalities(
+    cardinalities: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for item in cardinalities:
+        key = (
+            item.get("mode"),
+            item.get("minimum"),
+            item.get("maximum"),
+            item.get("same_metric_concept"),
+            item.get("distinct_bindings"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(item)
+    return output
+
+
+def _resolve_planned_metrics(
     *,
     context: ContextSnapshot,
     matched_user_term: str,
-) -> tuple[ProjectedPlannedMetric | None, str]:
+    binding_context_concepts: list[dict[str, Any]],
+    cardinality: dict[str, Any],
+) -> tuple[list[ProjectedPlannedMetric], str, dict[str, Any]]:
     entities = context.get("entities", [])
     if not isinstance(entities, list):
-        return None, "unresolved"
+        return [], "unresolved", {}
     normalized_term = normalize_search_text(matched_user_term)
     table_catalog = context.get("table_catalog", [])
-    candidates: list[tuple[float, ProjectedPlannedMetric]] = []
+    legacy_candidates: list[tuple[float, ProjectedPlannedMetric]] = []
     invalid_seen = False
+    metric_concepts: set[str] = set()
     for entity in entities:
         if not isinstance(entity, Mapping):
             continue
@@ -1038,6 +1176,8 @@ def _resolve_planned_metric(
             invalid_seen = True
             continue
         canonical_value = str(entity.get("canonical_value", "")).strip()
+        if canonical_value:
+            metric_concepts.add(canonical_value)
         target_table = str(entity.get("target_table", "")).strip()
         target_column = str(entity.get("target_column", "")).strip()
         if not (
@@ -1056,7 +1196,7 @@ def _resolve_planned_metric(
             invalid_seen = True
             continue
         priority = _optional_int(entity.get("priority"))
-        candidates.append(
+        legacy_candidates.append(
             (
                 _priority_sort_value(priority),
                 {
@@ -1076,17 +1216,361 @@ def _resolve_planned_metric(
                 },
             )
         )
-    if not candidates:
-        return None, "invalid_metadata" if invalid_seen else "unresolved"
+    if not metric_concepts:
+        return [], "invalid_metadata" if invalid_seen else "unresolved", {}
+
+    binding_metrics: list[ProjectedPlannedMetric] = []
+    binding_diagnostics: list[dict[str, Any]] = []
+    for metric_concept in sorted(metric_concepts, key=str.casefold):
+        resolved, diagnostic = _resolve_metric_bindings(
+            context=context,
+            metric_concept=metric_concept,
+            matched_user_term=matched_user_term,
+            binding_context_concepts=binding_context_concepts,
+            cardinality=cardinality,
+        )
+        binding_diagnostics.append(diagnostic)
+        binding_metrics.extend(resolved)
+
+    if any(
+        diagnostic.get("configured_count", 0) > 0
+        for diagnostic in binding_diagnostics
+    ):
+        if binding_metrics:
+            return binding_metrics, "resolved", {
+                "matched_user_term": matched_user_term,
+                "binding_diagnostics": binding_diagnostics,
+            }
+        return [], "invalid_metadata", {
+            "matched_user_term": matched_user_term,
+            "binding_diagnostics": binding_diagnostics,
+        }
+
+    if not legacy_candidates:
+        return [], "invalid_metadata" if invalid_seen else "unresolved", {}
+    return [
+        sorted(
+            legacy_candidates,
+            key=lambda item: (
+                item[0],
+                item[1]["metric_concept"].casefold(),
+                item[1]["target_table"].casefold(),
+                item[1]["target_column"].casefold(),
+            ),
+        )[0][1]
+    ], "resolved", {}
+
+
+def _resolve_metric_bindings(
+    *,
+    context: ContextSnapshot,
+    metric_concept: str,
+    matched_user_term: str,
+    binding_context_concepts: list[dict[str, Any]],
+    cardinality: dict[str, Any],
+) -> tuple[list[ProjectedPlannedMetric], dict[str, Any]]:
+    concepts_present = {
+        item["concept_name"].casefold()
+        for item in binding_context_concepts
+        if isinstance(item.get("concept_name"), str)
+    }
+    configured: list[dict[str, Any]] = []
+    configured_count = 0
+    applicable: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for entity in context.get("entities", []):
+        if not isinstance(entity, Mapping):
+            continue
+        if str(entity.get("entity_type", "")).casefold() == "metric_binding":
+            canonical_value = str(entity.get("canonical_value", "")).strip()
+            if _same_text(canonical_value, metric_concept):
+                configured_count += 1
+        binding, reason = _metric_binding_metadata(
+            entity,
+            table_catalog=context.get("table_catalog", []),
+        )
+        if binding is None:
+            if (
+                str(entity.get("entity_type", "")).casefold()
+                == "metric_binding"
+            ):
+                rejected.append(
+                    {
+                        "binding_ref": None,
+                        "reason": reason,
+                        "user_term": entity.get("user_term"),
+                    }
+                )
+            continue
+        if not _same_text(binding["metric_concept"], metric_concept):
+            continue
+        configured.append(binding)
+        missing_present = sorted(
+            set(binding["when_present"]) - concepts_present,
+            key=str.casefold,
+        )
+        blocked_absent = sorted(
+            set(binding["when_absent"]) & concepts_present,
+            key=str.casefold,
+        )
+        if missing_present or blocked_absent:
+            rejected.append(
+                {
+                    "binding_ref": binding["binding_ref"],
+                    "reason": (
+                        "when_present_missing"
+                        if missing_present
+                        else "when_absent_present"
+                    ),
+                    "missing_present": missing_present,
+                    "blocked_absent": blocked_absent,
+                }
+            )
+            continue
+        applicable.append(binding)
+
+    deduped_applicable = _dedupe_metric_bindings(applicable)
+    metrics: list[ProjectedPlannedMetric] = []
+    status = _metric_binding_cardinality_status(
+        deduped_applicable,
+        cardinality=cardinality,
+    )
+    if status == "resolved":
+        metrics = [
+            _planned_metric_from_binding(
+                binding,
+                matched_user_term=matched_user_term,
+            )
+            for binding in _sort_metric_bindings(deduped_applicable)
+        ]
+    return metrics, {
+        "metric_concept": metric_concept,
+        "configured_count": configured_count,
+        "applicable_count": len(deduped_applicable),
+        "status": status,
+        "cardinality": deepcopy(cardinality),
+        "applicable": [
+            _metric_binding_diagnostic(binding)
+            for binding in _sort_metric_bindings(deduped_applicable)
+        ],
+        "rejected": rejected,
+    }
+
+
+def _metric_binding_metadata(
+    entity: Mapping[str, Any],
+    *,
+    table_catalog: Any,
+) -> tuple[dict[str, Any] | None, str]:
+    if str(entity.get("entity_type", "")).casefold() != "metric_binding":
+        return None, "not_metric_binding"
+    canonical_value = str(entity.get("canonical_value", "")).strip()
+    target_table = str(entity.get("target_table", "")).strip()
+    target_column = str(entity.get("target_column", "")).strip()
+    metric_binding = _metric_binding_rule(entity.get("business_rule"))
+    if metric_binding is None:
+        return None, "invalid_metadata"
+    if not (
+        canonical_value
+        and metric_binding["metric_concept"] == canonical_value
+        and target_table
+        and target_column
+        and metric_binding["target_table"] == target_table
+        and metric_binding["target_column"] == target_column
+        and _metric_column_allowed(
+            table_catalog,
+            target_table=target_table,
+            target_column=target_column,
+        )
+    ):
+        return None, "invalid_physical_target"
+    priority = _optional_int(entity.get("priority"))
+    binding_ref = _binding_ref(
+        metric_concept=canonical_value,
+        target_table=target_table,
+        target_column=target_column,
+        when_present=metric_binding["when_present"],
+        when_absent=metric_binding["when_absent"],
+    )
+    return {
+        "binding_ref": binding_ref,
+        "metric_concept": canonical_value,
+        "target_table": target_table,
+        "target_column": target_column,
+        "aggregate": None,
+        "when_present": metric_binding["when_present"],
+        "when_absent": metric_binding["when_absent"],
+        "priority": priority,
+        "user_term": entity.get("user_term"),
+    }, "resolved"
+
+
+def _metric_binding_rule(
+    business_rule: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(business_rule, Mapping):
+        return None
+    binding = business_rule.get("metric_binding")
+    if not isinstance(binding, Mapping):
+        return None
+    if binding.get("aggregate") is not None:
+        return None
+    metric_concept = str(binding.get("metric_concept", "")).strip()
+    target_table = str(binding.get("target_table", "")).strip()
+    target_column = str(binding.get("target_column", "")).strip()
+    when_present = _concept_condition_list(binding.get("when_present"))
+    when_absent = _concept_condition_list(
+        binding.get("when_absent"),
+        allow_empty=True,
+    )
+    if not (
+        metric_concept
+        and target_table
+        and target_column
+        and when_present
+        and when_absent is not None
+    ):
+        return None
+    if set(when_present) & set(when_absent):
+        return None
+    return {
+        "metric_concept": metric_concept,
+        "target_table": target_table,
+        "target_column": target_column,
+        "when_present": when_present,
+        "when_absent": when_absent,
+    }
+
+
+def _concept_condition_list(
+    value: Any,
+    *,
+    allow_empty: bool = False,
+) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    output: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            return None
+        concept = item.strip()
+        key = concept.casefold()
+        if key in seen:
+            return None
+        seen.add(key)
+        output.append(concept)
+    if not output and not allow_empty:
+        return None
+    return output
+
+
+def _metric_binding_cardinality_status(
+    bindings: list[dict[str, Any]],
+    *,
+    cardinality: Mapping[str, Any],
+) -> str:
+    mode = cardinality.get("mode", "single")
+    minimum = cardinality.get("minimum", 1)
+    maximum = cardinality.get("maximum", 1)
+    if cardinality.get("status") == "conflicting_operation_cardinality":
+        return "metric_binding_cardinality_conflict"
+    if mode == "single":
+        if not bindings:
+            return "metric_binding_not_applicable"
+        if len(bindings) == 1:
+            return "resolved"
+        return "metric_binding_ambiguous"
+    if len(bindings) < minimum:
+        return "metric_binding_below_minimum"
+    if len(bindings) > maximum:
+        return "metric_binding_above_maximum"
+    if cardinality.get("distinct_bindings") is True:
+        refs = [
+            str(binding.get("binding_ref", "")).strip().casefold()
+            for binding in bindings
+        ]
+        if not all(refs):
+            return "metric_binding_ref_missing"
+        if len(refs) != len(set(refs)):
+            return "metric_binding_duplicate_ref"
+    if cardinality.get("same_metric_concept") is True:
+        concepts = {
+            binding["metric_concept"].casefold()
+            for binding in bindings
+        }
+        if len(concepts) > 1:
+            return "metric_binding_concept_mismatch"
+    return "resolved"
+
+
+def _dedupe_metric_bindings(
+    bindings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for binding in _sort_metric_bindings(bindings):
+        key = binding["binding_ref"].casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(binding)
+    return output
+
+
+def _sort_metric_bindings(
+    bindings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     return sorted(
-        candidates,
-        key=lambda item: (
-            item[0],
-            item[1]["metric_concept"].casefold(),
-            item[1]["target_table"].casefold(),
-            item[1]["target_column"].casefold(),
+        bindings,
+        key=lambda binding: (
+            _priority_sort_value(binding.get("priority")),
+            binding["binding_ref"].casefold(),
+            binding["target_table"].casefold(),
+            binding["target_column"].casefold(),
         ),
-    )[0][1], "resolved"
+    )
+
+
+def _planned_metric_from_binding(
+    binding: Mapping[str, Any],
+    *,
+    matched_user_term: str,
+) -> ProjectedPlannedMetric:
+    return {
+        "metric_ref": _metric_ref(
+            metric_concept=binding["metric_concept"],
+            target_table=binding["target_table"],
+            target_column=binding["target_column"],
+        ),
+        "metric_concept": binding["metric_concept"],
+        "target_table": binding["target_table"],
+        "target_column": binding["target_column"],
+        "aggregate": None,
+        "detection_source": "intent_semantic_evidence",
+        "mapping_source": "metric_binding",
+        "matched_user_term": matched_user_term,
+        "priority": binding.get("priority"),
+        "binding_ref": binding["binding_ref"],
+        "binding_conditions": {
+            "when_present": list(binding["when_present"]),
+            "when_absent": list(binding["when_absent"]),
+        },
+        "binding_source": "entity_alias",
+    }
+
+
+def _metric_binding_diagnostic(
+    binding: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "binding_ref": binding.get("binding_ref"),
+        "target_table": binding.get("target_table"),
+        "target_column": binding.get("target_column"),
+        "when_present": list(binding.get("when_present", [])),
+        "when_absent": list(binding.get("when_absent", [])),
+        "priority": binding.get("priority"),
+    }
 
 
 def _metric_metadata(
@@ -1139,6 +1623,27 @@ def _metric_ref(
     return f"metric-{digest}"
 
 
+def _binding_ref(
+    *,
+    metric_concept: str,
+    target_table: str,
+    target_column: str,
+    when_present: list[str],
+    when_absent: list[str],
+) -> str:
+    payload = "|".join(
+        (
+            metric_concept,
+            target_table,
+            target_column,
+            ",".join(sorted(when_present, key=str.casefold)),
+            ",".join(sorted(when_absent, key=str.casefold)),
+        )
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return f"binding-{digest}"
+
+
 def _bind_metrics_to_analytical_operations(
     *,
     operations: list[ProjectedAnalyticalOperation],
@@ -1149,7 +1654,13 @@ def _bind_metrics_to_analytical_operations(
             "binding_required": False,
             "status": "not_applicable",
         }
-    if len(planned_metrics) != 1:
+    if (
+        len(planned_metrics) != 1
+        and not any(
+            metric.get("mapping_source") == "metric_binding"
+            for metric in planned_metrics
+        )
+    ):
         return deepcopy(operations), {
             "binding_required": True,
             "status": (
@@ -1157,26 +1668,40 @@ def _bind_metrics_to_analytical_operations(
             ),
             "planned_metric_count": len(planned_metrics),
         }
-
-    metric_ref = planned_metrics[0].get("metric_ref")
-    if not isinstance(metric_ref, str) or not metric_ref.strip():
-        return deepcopy(operations), {
-            "binding_required": True,
-            "status": "metric_ref_missing",
-            "planned_metric_count": len(planned_metrics),
-        }
-
     bound: list[ProjectedAnalyticalOperation] = []
+    diagnostics: list[dict[str, Any]] = []
     for operation in operations:
         item = deepcopy(operation)
         if item.get("operation_type") == "ranking":
-            item["metric_ref"] = metric_ref
+            cardinality = operation.get("binding_cardinality")
+            if not isinstance(cardinality, Mapping):
+                cardinality = _default_binding_cardinality()
+            status = _metric_binding_cardinality_status(
+                planned_metrics,
+                cardinality=cardinality,
+            )
+            diagnostics.append(
+                {
+                    "operation_type": "ranking",
+                    "status": status,
+                    "planned_metric_count": len(planned_metrics),
+                    "cardinality": dict(cardinality),
+                }
+            )
+            if status == "resolved" and len(planned_metrics) == 1:
+                metric_ref = planned_metrics[0].get("metric_ref")
+                if isinstance(metric_ref, str) and metric_ref.strip():
+                    item["metric_ref"] = metric_ref
         bound.append(item)
     return bound, {
         "binding_required": True,
-        "status": "bound",
-        "planned_metric_count": 1,
-        "metric_ref": metric_ref,
+        "status": (
+            "bound"
+            if all(item["status"] == "resolved" for item in diagnostics)
+            else "not_bound"
+        ),
+        "planned_metric_count": len(planned_metrics),
+        "operations": diagnostics,
     }
 
 
@@ -1251,6 +1776,9 @@ def _resolve_analytical_operation(
                     "canonical_value": canonical_value,
                     "direction": operation["direction"],
                     "requested_limit": operation["requested_limit"],
+                    "binding_cardinality": operation[
+                        "binding_cardinality"
+                    ],
                     "detection_source": "intent_semantic_evidence",
                     "mapping_source": "entity_alias",
                     "matched_user_term": matched_user_term,
@@ -1292,10 +1820,62 @@ def _operation_metadata(
             or requested_limit <= 0
         ):
             return None
+    cardinality = _binding_cardinality_metadata(
+        operation.get("binding_cardinality")
+    )
+    if cardinality is None:
+        return None
     return {
         "operation_type": operation_type,
         "direction": direction,
         "requested_limit": requested_limit,
+        "binding_cardinality": cardinality,
+    }
+
+
+def _binding_cardinality_metadata(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return _default_binding_cardinality()
+    if not isinstance(value, Mapping):
+        return None
+    mode = value.get("mode", "single")
+    if mode not in {"single", "multiple"}:
+        return None
+    minimum = value.get("minimum", 1)
+    maximum = value.get("maximum", 1)
+    if (
+        isinstance(minimum, bool)
+        or isinstance(maximum, bool)
+        or not isinstance(minimum, int)
+        or not isinstance(maximum, int)
+    ):
+        return None
+    if mode == "single" and (minimum != 1 or maximum != 1):
+        return None
+    if mode == "multiple" and (minimum < 1 or maximum < minimum):
+        return None
+    same_metric_concept = value.get("same_metric_concept", True)
+    distinct_bindings = value.get("distinct_bindings", True)
+    if not isinstance(same_metric_concept, bool):
+        return None
+    if not isinstance(distinct_bindings, bool):
+        return None
+    return {
+        "mode": mode,
+        "minimum": minimum,
+        "maximum": maximum,
+        "same_metric_concept": same_metric_concept,
+        "distinct_bindings": distinct_bindings,
+    }
+
+
+def _default_binding_cardinality() -> dict[str, Any]:
+    return {
+        "mode": "single",
+        "minimum": 1,
+        "maximum": 1,
+        "same_metric_concept": True,
+        "distinct_bindings": True,
     }
 
 

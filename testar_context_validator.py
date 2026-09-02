@@ -54,6 +54,33 @@ def _intent_definition() -> dict:
                         "score": 120,
                         "priority": 2,
                     },
+                    {
+                        "rule_name": "binding_context_rule",
+                        "effect": "positive_score",
+                        "concepts": [
+                            {
+                                "concept_name": "mode_a",
+                                "terms": ["mode a"],
+                                "match_mode": "contains",
+                                "minimum_term_matches": 1,
+                            },
+                            {
+                                "concept_name": "mode_b",
+                                "terms": ["mode b"],
+                                "match_mode": "contains",
+                                "minimum_term_matches": 1,
+                            },
+                            {
+                                "concept_name": "mode_default",
+                                "terms": ["mode default"],
+                                "match_mode": "contains",
+                                "minimum_term_matches": 1,
+                            },
+                        ],
+                        "minimum_concept_matches": 1,
+                        "score": 10,
+                        "priority": 3,
+                    },
                 ],
             }
         },
@@ -166,6 +193,30 @@ def _raw_snapshot() -> dict:
 
 def _valid_snapshot() -> dict:
     return normalize_context_snapshot(_raw_snapshot())
+
+
+def _metric_binding_entity(**overrides) -> dict:
+    entity = {
+        "entity_type": "metric_binding",
+        "user_term": "generic binding",
+        "canonical_value": "metric_x",
+        "target_table": "schema_test.table_test",
+        "target_column": "value",
+        "sql_filter_hint": None,
+        "business_rule": {
+            "metric_binding": {
+                "metric_concept": "metric_x",
+                "target_table": "schema_test.table_test",
+                "target_column": "value",
+                "when_present": ["mode_a"],
+                "when_absent": [],
+                "aggregate": None,
+            }
+        },
+        "priority": 1,
+    }
+    entity.update(overrides)
+    return entity
 
 
 def _error_codes(result: dict) -> set[str]:
@@ -297,6 +348,114 @@ def test_rejeita_semantic_defaults_com_ciclo() -> None:
 
     assert result["status"] == "invalid"
     assert "SEMANTIC_DEFAULT_CYCLE" in _error_codes(result)
+
+
+def test_aceita_metric_binding_valido() -> None:
+    snapshot = _valid_snapshot()
+    snapshot["entities"].append(_metric_binding_entity())
+    snapshot["counts"]["entities"] += 1
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "valid"
+
+
+def test_rejeita_metric_binding_inconsistente() -> None:
+    snapshot = _valid_snapshot()
+    invalid = _metric_binding_entity(canonical_value="metric_y")
+    snapshot["entities"].append(invalid)
+    snapshot["counts"]["entities"] += 1
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "invalid"
+    assert "METRIC_BINDING_CONCEPT_MISMATCH" in _error_codes(result)
+
+
+def test_rejeita_metric_binding_target_fisico_invalido() -> None:
+    snapshot = _valid_snapshot()
+    invalid = _metric_binding_entity(target_column="missing_metric")
+    invalid["business_rule"]["metric_binding"][
+        "target_column"
+    ] = "missing_metric"
+    snapshot["entities"].append(invalid)
+    snapshot["counts"]["entities"] += 1
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "invalid"
+    assert "METRIC_BINDING_TARGET_COLUMN_NOT_METRIC" in _error_codes(result)
+
+
+def test_rejeita_metric_binding_condicoes_invalidas() -> None:
+    snapshot = _valid_snapshot()
+    invalid = _metric_binding_entity()
+    invalid["business_rule"]["metric_binding"]["when_absent"] = ["mode_a"]
+    invalid["priority"] = True
+    snapshot["entities"].append(invalid)
+    snapshot["counts"]["entities"] += 1
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "METRIC_BINDING_CONDITION_CONFLICT" in codes
+    assert "METRIC_BINDING_PRIORITY_INVALID" in codes
+
+
+def test_rejeita_metric_binding_condition_concept_inexistente() -> None:
+    snapshot = _valid_snapshot()
+    invalid = _metric_binding_entity()
+    invalid["business_rule"]["metric_binding"]["when_present"] = [
+        "concept_never_defined"
+    ]
+    snapshot["entities"].append(invalid)
+    snapshot["counts"]["entities"] += 1
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "invalid"
+    assert "METRIC_BINDING_CONDITION_UNKNOWN_CONCEPT" in _error_codes(
+        result
+    )
+
+
+def test_aceita_metric_binding_condition_de_semantic_default() -> None:
+    snapshot = _valid_snapshot()
+    snapshot["component_configs"]["semantic_defaults"] = {
+        "component": "semantic_defaults",
+        "rules": [
+            {
+                "rule_name": "default_mode",
+                "when_present": ["mode_a"],
+                "when_absent": [],
+                "produce": ["mode_default"],
+                "priority": 1,
+            }
+        ],
+    }
+    binding = _metric_binding_entity()
+    binding["business_rule"]["metric_binding"]["when_present"] = [
+        "mode_default"
+    ]
+    snapshot["entities"].append(binding)
+    snapshot["counts"]["entities"] += 1
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "valid"
+
+
+def test_rejeita_metric_binding_duplicado() -> None:
+    snapshot = _valid_snapshot()
+    snapshot["entities"].append(_metric_binding_entity(user_term="binding a"))
+    snapshot["entities"].append(_metric_binding_entity(user_term="binding b"))
+    snapshot["counts"]["entities"] += 2
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "invalid"
+    assert "METRIC_BINDING_DUPLICATE" in _error_codes(result)
 
 
 def test_rejeita_catalogo_vazio() -> None:
@@ -732,6 +891,31 @@ def main() -> None:
         (
             "rejeita semantic defaults com ciclo",
             test_rejeita_semantic_defaults_com_ciclo,
+        ),
+        ("aceita metric binding válido", test_aceita_metric_binding_valido),
+        (
+            "rejeita metric binding inconsistente",
+            test_rejeita_metric_binding_inconsistente,
+        ),
+        (
+            "rejeita metric binding target físico inválido",
+            test_rejeita_metric_binding_target_fisico_invalido,
+        ),
+        (
+            "rejeita metric binding condições inválidas",
+            test_rejeita_metric_binding_condicoes_invalidas,
+        ),
+        (
+            "rejeita metric binding condition inexistente",
+            test_rejeita_metric_binding_condition_concept_inexistente,
+        ),
+        (
+            "aceita metric binding condition de semantic default",
+            test_aceita_metric_binding_condition_de_semantic_default,
+        ),
+        (
+            "rejeita metric binding duplicado",
+            test_rejeita_metric_binding_duplicado,
         ),
         ("rejeita catálogo vazio", test_rejeita_catalogo_vazio),
         ("rejeita tabela duplicada", test_rejeita_tabela_duplicada),

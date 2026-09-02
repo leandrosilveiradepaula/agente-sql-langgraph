@@ -111,6 +111,13 @@ def test_requisicao_propaga_operacoes_analiticas_planejadas() -> None:
             "direction": "descending",
             "requested_limit": None,
             "metric_ref": "metric-synthetic",
+            "binding_cardinality": {
+                "mode": "single",
+                "minimum": 1,
+                "maximum": 1,
+                "same_metric_concept": True,
+                "distinct_bindings": True,
+            },
             "detection_source": "intent_semantic_evidence",
             "mapping_source": "entity_alias",
         }
@@ -127,6 +134,38 @@ def test_requisicao_propaga_operacoes_analiticas_planejadas() -> None:
         }
     ]
     assert "ORDER BY" in repr(request)
+
+
+def test_requisicao_propaga_metric_binding_planejado() -> None:
+    query_plan = _query_plan()
+    query_plan["planning_context"]["planned_metrics"] = [
+        {
+            "metric_ref": "metric-synthetic",
+            "metric_concept": "amount",
+            "target_table": "schema_test.fact_metrics",
+            "target_column": "measure_value",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "metric_binding",
+            "binding_ref": "binding-synthetic",
+            "binding_conditions": {
+                "when_present": ["mode_a"],
+                "when_absent": ["mode_b"],
+            },
+            "binding_source": "entity_alias",
+        }
+    ]
+
+    request = build_sql_generation_request(query_plan)
+    metric = request["generation_context"]["planned_metrics"][0]
+
+    assert metric["mapping_source"] == "metric_binding"
+    assert metric["binding_ref"] == "binding-synthetic"
+    assert metric["binding_conditions"] == {
+        "when_present": ["mode_a"],
+        "when_absent": ["mode_b"],
+    }
+    assert metric["binding_source"] == "entity_alias"
 
 
 def test_requisicao_filtra_metric_ref_sem_planned_metric() -> None:
@@ -173,6 +212,13 @@ def test_ranking_sem_metric_ref_nao_emite_instrucao_enganosa() -> None:
             "direction": "descending",
             "requested_limit": None,
             "metric_ref": "",
+            "binding_cardinality": {
+                "mode": "single",
+                "minimum": 1,
+                "maximum": 1,
+                "same_metric_concept": True,
+                "distinct_bindings": True,
+            },
             "detection_source": "intent_semantic_evidence",
             "mapping_source": "entity_alias",
         }
@@ -430,6 +476,10 @@ def main() -> None:
         (
             "propaga operacoes analiticas",
             test_requisicao_propaga_operacoes_analiticas_planejadas,
+        ),
+        (
+            "propaga metric binding planejado",
+            test_requisicao_propaga_metric_binding_planejado,
         ),
         (
             "filtra metric ref invalido",

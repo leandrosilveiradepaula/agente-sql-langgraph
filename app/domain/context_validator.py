@@ -114,6 +114,9 @@ def validate_context_snapshot(
     intent_definitions = _validate_entities(
         collections["entities"],
         intent_names,
+        table_index,
+        collections["table_catalog"],
+        _semantic_concept_universe(snapshot),
         errors,
     )
 
@@ -220,15 +223,34 @@ def _validate_collections(
 def _validate_entities(
     entities: list[Any],
     intent_names: set[str],
+    table_index: dict[str, Any],
+    table_catalog: list[Any],
+    known_concepts: set[str],
     errors: list[ContextValidationIssue],
 ) -> dict[str, dict[str, Any]]:
     definitions: dict[str, dict[str, Any]] = {}
+    metric_bindings: dict[str, str] = {}
 
     for index, entity in enumerate(entities):
         if not isinstance(entity, Mapping):
             continue
 
         entity_type = entity.get("entity_type")
+        if (
+            _is_non_empty_text(entity_type)
+            and entity_type.strip().casefold() == "metric_binding"
+        ):
+            _validate_metric_binding_entity(
+                entity,
+                path=f"entities[{index}]",
+                table_index=table_index,
+                table_catalog=table_catalog,
+                known_concepts=known_concepts,
+                seen=metric_bindings,
+                errors=errors,
+            )
+            continue
+
         if not (
             _is_non_empty_text(entity_type)
             and entity_type.strip().casefold() == "intent_definition"
@@ -361,6 +383,344 @@ def _validate_entities(
                 }
 
     return definitions
+
+
+def _validate_metric_binding_entity(
+    entity: Mapping[str, Any],
+    *,
+    path: str,
+    table_index: dict[str, Any],
+    table_catalog: list[Any],
+    known_concepts: set[str],
+    seen: dict[str, str],
+    errors: list[ContextValidationIssue],
+) -> None:
+    metric_concept = entity.get("canonical_value")
+    target_table = entity.get("target_table")
+    target_column = entity.get("target_column")
+    if not _is_non_empty_text(metric_concept):
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_CONCEPT_REQUIRED",
+            message="metric_binding.canonical_value deve ser texto não vazio.",
+            path=f"{path}.canonical_value",
+            details={"received_value": metric_concept},
+        )
+    if not _is_non_empty_text(target_table):
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_TARGET_TABLE_REQUIRED",
+            message="metric_binding.target_table deve ser texto não vazio.",
+            path=f"{path}.target_table",
+            details={"received_value": target_table},
+        )
+    if not _is_non_empty_text(target_column):
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_TARGET_COLUMN_REQUIRED",
+            message="metric_binding.target_column deve ser texto não vazio.",
+            path=f"{path}.target_column",
+            details={"received_value": target_column},
+        )
+
+    business_rule = entity.get("business_rule")
+    if not isinstance(business_rule, Mapping):
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_BUSINESS_RULE_INVALID",
+            message="metric_binding.business_rule deve ser objeto.",
+            path=f"{path}.business_rule",
+            details={"received_type": type(business_rule).__name__},
+        )
+        return
+    binding = business_rule.get("metric_binding")
+    if not isinstance(binding, Mapping):
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_PAYLOAD_INVALID",
+            message="business_rule.metric_binding deve ser objeto.",
+            path=f"{path}.business_rule.metric_binding",
+            details={"received_type": type(binding).__name__},
+        )
+        return
+
+    declared_concept = binding.get("metric_concept")
+    if declared_concept != metric_concept:
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_CONCEPT_MISMATCH",
+            message="canonical_value deve coincidir com metric_concept.",
+            path=f"{path}.business_rule.metric_binding.metric_concept",
+            details={
+                "canonical_value": metric_concept,
+                "metric_concept": declared_concept,
+            },
+        )
+
+    for field_name, outer_value in (
+        ("target_table", target_table),
+        ("target_column", target_column),
+    ):
+        inner_value = binding.get(field_name)
+        if inner_value != outer_value:
+            _add_issue(
+                errors,
+                code="METRIC_BINDING_TARGET_MISMATCH",
+                message=(
+                    f"business_rule.metric_binding.{field_name} deve "
+                    f"coincidir com {field_name}."
+                ),
+                path=f"{path}.business_rule.metric_binding.{field_name}",
+                details={
+                    "outer_value": outer_value,
+                    "inner_value": inner_value,
+                },
+            )
+
+    if binding.get("aggregate") is not None:
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_AGGREGATE_UNSUPPORTED",
+            message="metric_binding.aggregate deve ser null nesta versão.",
+            path=f"{path}.business_rule.metric_binding.aggregate",
+            details={"received_value": binding.get("aggregate")},
+        )
+
+    present = _validate_metric_binding_concepts(
+        binding.get("when_present"),
+        path=f"{path}.business_rule.metric_binding.when_present",
+        known_concepts=known_concepts,
+        errors=errors,
+        allow_empty=False,
+    )
+    absent = _validate_metric_binding_concepts(
+        binding.get("when_absent", []),
+        path=f"{path}.business_rule.metric_binding.when_absent",
+        known_concepts=known_concepts,
+        errors=errors,
+        allow_empty=True,
+    )
+    if present is not None and absent is not None and present & absent:
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_CONDITION_CONFLICT",
+            message="when_present e when_absent não podem se sobrepor.",
+            path=f"{path}.business_rule.metric_binding",
+            details={"overlap": sorted(present & absent)},
+        )
+
+    if _is_non_empty_text(target_table):
+        table_key = str(target_table).strip().casefold()
+        if table_key not in table_index.get("full_names", set()):
+            _add_issue(
+                errors,
+                code="METRIC_BINDING_TARGET_TABLE_UNKNOWN",
+                message="metric_binding aponta para tabela desconhecida.",
+                path=f"{path}.target_table",
+                details={"target_table": target_table},
+            )
+        elif _is_non_empty_text(target_column):
+            table = _find_table_catalog_entry(table_catalog, table_key)
+            metric_columns = (
+                table.get("metric_columns")
+                if isinstance(table, Mapping)
+                else None
+            )
+            if not (
+                isinstance(metric_columns, list)
+                and str(target_column).strip() in metric_columns
+            ):
+                _add_issue(
+                    errors,
+                    code="METRIC_BINDING_TARGET_COLUMN_NOT_METRIC",
+                    message=(
+                        "metric_binding.target_column deve existir em "
+                        "table_catalog.metric_columns."
+                    ),
+                    path=f"{path}.target_column",
+                    details={
+                        "target_table": target_table,
+                        "target_column": target_column,
+                    },
+                )
+
+    priority = entity.get("priority")
+    if (
+        priority is not None
+        and (
+            isinstance(priority, bool)
+            or not isinstance(priority, int)
+            or priority < 0
+        )
+    ):
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_PRIORITY_INVALID",
+            message="metric_binding.priority deve ser inteiro >= 0.",
+            path=f"{path}.priority",
+            details={"received_value": priority},
+        )
+
+    if (
+        _is_non_empty_text(metric_concept)
+        and _is_non_empty_text(target_table)
+        and _is_non_empty_text(target_column)
+        and present is not None
+        and absent is not None
+    ):
+        binding_key = "|".join(
+            (
+                str(metric_concept).strip().casefold(),
+                str(target_table).strip().casefold(),
+                str(target_column).strip().casefold(),
+                ",".join(sorted(present)),
+                ",".join(sorted(absent)),
+            )
+        )
+        if binding_key in seen:
+            _add_issue(
+                errors,
+                code="METRIC_BINDING_DUPLICATE",
+                message="metric_binding estrutural duplicado.",
+                path=path,
+                details={"first_occurrence": seen[binding_key]},
+            )
+        else:
+            seen[binding_key] = path
+
+
+def _find_table_catalog_entry(
+    table_catalog: list[Any],
+    qualified_key: str,
+) -> Mapping[str, Any] | None:
+    for item in table_catalog:
+        if not isinstance(item, Mapping):
+            continue
+        schema_name = item.get("schema_name")
+        table_name = item.get("table_name")
+        if not (
+            _is_non_empty_text(schema_name)
+            and _is_non_empty_text(table_name)
+        ):
+            continue
+        candidate = f"{schema_name.strip()}.{table_name.strip()}".casefold()
+        if candidate == qualified_key:
+            return item
+    return None
+
+
+def _validate_metric_binding_concepts(
+    value: Any,
+    *,
+    path: str,
+    known_concepts: set[str],
+    errors: list[ContextValidationIssue],
+    allow_empty: bool,
+) -> set[str] | None:
+    if not isinstance(value, list):
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_CONDITION_INVALID",
+            message="Condições de metric_binding devem ser listas.",
+            path=path,
+            details={"received_type": type(value).__name__},
+        )
+        return None
+    if not value and not allow_empty:
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_CONDITION_EMPTY",
+            message="when_present deve possuir ao menos um conceito.",
+            path=path,
+            details={},
+        )
+        return None
+    output: set[str] = set()
+    for index, item in enumerate(value):
+        if not _is_non_empty_text(item):
+            _add_issue(
+                errors,
+                code="METRIC_BINDING_CONDITION_ITEM_INVALID",
+                message="Cada conceito de condição deve ser texto não vazio.",
+                path=f"{path}[{index}]",
+                details={"received_value": item},
+            )
+            return None
+        key = str(item).strip().casefold()
+        if key not in known_concepts:
+            _add_issue(
+                errors,
+                code="METRIC_BINDING_CONDITION_UNKNOWN_CONCEPT",
+                message=(
+                    "Condição de metric_binding deve referenciar conceito "
+                    "projetável pelo contexto semântico."
+                ),
+                path=f"{path}[{index}]",
+                details={"concept": item},
+            )
+            return None
+        if key in output:
+            _add_issue(
+                errors,
+                code="METRIC_BINDING_CONDITION_DUPLICATE",
+                message="Condição duplicada em metric_binding.",
+                path=f"{path}[{index}]",
+                details={"concept": item},
+            )
+            return None
+        output.add(key)
+    return output
+
+
+def _semantic_concept_universe(snapshot: Mapping[str, Any]) -> set[str]:
+    concepts: set[str] = set()
+    intent_resolution = snapshot.get("intent_resolution")
+    if isinstance(intent_resolution, Mapping):
+        catalog = intent_resolution.get("intent_catalog", [])
+        if isinstance(catalog, list):
+            for entry in catalog:
+                if not isinstance(entry, Mapping):
+                    continue
+                rules = entry.get("rules", [])
+                if not isinstance(rules, list):
+                    continue
+                for rule in rules:
+                    if not isinstance(rule, Mapping):
+                        continue
+                    rule_concepts = rule.get("concepts", [])
+                    if not isinstance(rule_concepts, list):
+                        continue
+                    for concept in rule_concepts:
+                        if not isinstance(concept, Mapping):
+                            continue
+                        concept_name = concept.get("concept_name")
+                        if _is_non_empty_text(concept_name):
+                            concepts.add(
+                                str(concept_name).strip().casefold()
+                            )
+    component_configs = snapshot.get("component_configs", {})
+    if isinstance(component_configs, Mapping):
+        semantic_defaults = component_configs.get("semantic_defaults", {})
+        if isinstance(semantic_defaults, Mapping):
+            rules = semantic_defaults.get("rules", [])
+            if isinstance(rules, list):
+                for rule in rules:
+                    if not isinstance(rule, Mapping):
+                        continue
+                    for field_name in (
+                        "when_present",
+                        "when_absent",
+                        "produce",
+                    ):
+                        values = rule.get(field_name, [])
+                        if not isinstance(values, list):
+                            continue
+                        for value in values:
+                            if _is_non_empty_text(value):
+                                concepts.add(
+                                    str(value).strip().casefold()
+                                )
+    return concepts
 
 
 def _validate_table_catalog(

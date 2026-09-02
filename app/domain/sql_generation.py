@@ -53,11 +53,12 @@ class AnalyticalOperation(TypedDict):
     direction: str
     requested_limit: int | None
     metric_ref: str
+    binding_cardinality: dict[str, Any]
     detection_source: str
     mapping_source: str
 
 
-class PlannedMetric(TypedDict):
+class PlannedMetric(TypedDict, total=False):
     metric_ref: str
     metric_concept: str
     target_table: str
@@ -65,6 +66,9 @@ class PlannedMetric(TypedDict):
     aggregate: None
     detection_source: str
     mapping_source: str
+    binding_ref: str
+    binding_conditions: dict[str, list[str]]
+    binding_source: str
 
 
 class SqlGenerationContext(TypedDict):
@@ -831,6 +835,9 @@ def _analytical_operations(
                 "direction": direction,
                 "requested_limit": requested_limit,
                 "metric_ref": metric_ref,
+                "binding_cardinality": _binding_cardinality(
+                    item.get("binding_cardinality")
+                ),
                 "detection_source": _optional_clean_text(
                     item.get("detection_source")
                 ),
@@ -886,6 +893,7 @@ def _planned_metrics(value: Any) -> list[PlannedMetric]:
                 "mapping_source": _optional_clean_text(
                     item.get("mapping_source")
                 ),
+                **_planned_metric_binding_fields(item),
             }
         )
     output.sort(
@@ -897,6 +905,55 @@ def _planned_metrics(value: Any) -> list[PlannedMetric]:
         )
     )
     return output
+
+
+def _binding_cardinality(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {
+            "mode": "single",
+            "minimum": 1,
+            "maximum": 1,
+            "same_metric_concept": True,
+            "distinct_bindings": True,
+        }
+    return {
+        "mode": _optional_clean_text(value.get("mode")) or "single",
+        "minimum": value.get("minimum", 1),
+        "maximum": value.get("maximum", 1),
+        "same_metric_concept": value.get("same_metric_concept", True),
+        "distinct_bindings": value.get("distinct_bindings", True),
+    }
+
+
+def _planned_metric_binding_fields(
+    item: Mapping[str, Any],
+) -> dict[str, Any]:
+    if item.get("mapping_source") != "metric_binding":
+        return {}
+    binding_ref = _optional_clean_text(item.get("binding_ref"))
+    conditions = item.get("binding_conditions")
+    binding_source = _optional_clean_text(item.get("binding_source"))
+    if not binding_ref or not isinstance(conditions, Mapping):
+        return {}
+    return {
+        "binding_ref": binding_ref,
+        "binding_conditions": {
+            "when_present": _string_list(conditions.get("when_present")),
+            "when_absent": _string_list(conditions.get("when_absent")),
+        },
+        "binding_source": binding_source,
+    }
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [
+        item.strip()
+        for item in value
+        if isinstance(item, str) and item.strip()
+    ]
+
 
 def _optional_clean_text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""

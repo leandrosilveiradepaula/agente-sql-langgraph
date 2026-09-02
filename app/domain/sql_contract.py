@@ -556,11 +556,12 @@ def _verify_analytical_operations(
 ) -> list[RuleVerificationResult]:
     del current_sql
     operations = _planned_analytical_operations(query_plan)
+    metric_binding_results = _verify_metric_bindings(query_plan, findings)
     if not operations:
-        return []
+        return metric_binding_results
 
     planned_metrics = _planned_metrics(query_plan)
-    results: list[RuleVerificationResult] = []
+    results: list[RuleVerificationResult] = list(metric_binding_results)
     for operation in operations:
         operation_type = operation["operation_type"]
         if operation_type != "ranking":
@@ -1106,6 +1107,8 @@ def _planned_metrics(query_plan: QueryPlan) -> list[dict[str, Any]]:
                 "metric_concept": metric_concept,
                 "target_table": target_table,
                 "target_column": target_column,
+                "mapping_source": _clean_text(item.get("mapping_source")),
+                "binding_ref": _clean_text(item.get("binding_ref")),
             }
         )
     return sorted(
@@ -1116,6 +1119,155 @@ def _planned_metrics(query_plan: QueryPlan) -> list[dict[str, Any]]:
             metric["target_table"].casefold(),
             metric["target_column"].casefold(),
         ),
+    )
+
+
+def _verify_metric_bindings(
+    query_plan: QueryPlan,
+    findings: list[SqlContractFinding],
+) -> list[RuleVerificationResult]:
+    planning_context = _planning_context(query_plan)
+    raw_metrics = planning_context.get("planned_metrics", [])
+    if not isinstance(raw_metrics, list):
+        return []
+    bound_metrics = [
+        item
+        for item in raw_metrics
+        if isinstance(item, Mapping)
+        and _clean_text(item.get("mapping_source")) == "metric_binding"
+    ]
+    if not bound_metrics:
+        return []
+    results: list[RuleVerificationResult] = []
+    seen_refs: set[str] = set()
+    for metric in bound_metrics:
+        metric_ref = _clean_text(metric.get("metric_ref"))
+        binding_ref = _clean_text(metric.get("binding_ref"))
+        metric_concept = _clean_text(metric.get("metric_concept"))
+        target_table = _clean_text(metric.get("target_table"))
+        target_column = _clean_text(metric.get("target_column"))
+        checked = [
+            "metric_ref",
+            "binding_ref",
+            "metric_concept",
+            "target_table",
+            "target_column",
+        ]
+        if not (
+            metric_ref
+            and binding_ref
+            and metric_concept
+            and target_table
+            and target_column
+        ):
+            _metric_binding_finding(
+                findings,
+                "metric_binding_incomplete",
+                metric,
+            )
+            results.append(
+                _rule_result(
+                    "metric_binding",
+                    "violated",
+                    "metric_binding_incomplete",
+                    checked,
+                )
+            )
+            continue
+        if binding_ref in seen_refs:
+            _metric_binding_finding(
+                findings,
+                "metric_binding_duplicate_ref",
+                metric,
+            )
+            results.append(
+                _rule_result(
+                    "metric_binding",
+                    "violated",
+                    "metric_binding_duplicate_ref",
+                    ["binding_ref"],
+                )
+            )
+            continue
+        seen_refs.add(binding_ref)
+        if not _metric_binding_target_is_authorized(
+            planning_context,
+            target_table=target_table,
+            target_column=target_column,
+        ):
+            _metric_binding_finding(
+                findings,
+                "metric_binding_target_not_authorized",
+                metric,
+            )
+            results.append(
+                _rule_result(
+                    "metric_binding",
+                    "violated",
+                    "metric_binding_target_not_authorized",
+                    ["target_table", "target_column"],
+                )
+            )
+            continue
+        results.append(
+            _rule_result(
+                "metric_binding",
+                "passed",
+                "metric_binding_structurally_valid",
+                checked,
+            )
+        )
+    return results
+
+
+def _metric_binding_target_is_authorized(
+    planning_context: Mapping[str, Any],
+    *,
+    target_table: str,
+    target_column: str,
+) -> bool:
+    target_table_key = target_table.casefold()
+    target_column_key = target_column.casefold()
+    for table in planning_context.get("required_tables", []):
+        if not isinstance(table, Mapping):
+            continue
+        qualified = _clean_text(table.get("qualified_name"))
+        schema_name = _clean_text(table.get("schema_name"))
+        table_name = _clean_text(table.get("table_name"))
+        if not qualified and schema_name and table_name:
+            qualified = f"{schema_name}.{table_name}"
+        if qualified.casefold() != target_table_key:
+            continue
+        metric_columns = table.get("metric_columns")
+        if isinstance(metric_columns, list):
+            return any(
+                isinstance(column, str)
+                and column.strip().casefold() == target_column_key
+                for column in metric_columns
+            )
+        if isinstance(metric_columns, str):
+            return metric_columns.strip().casefold() == target_column_key
+        return False
+    return False
+
+
+def _metric_binding_finding(
+    findings: list[SqlContractFinding],
+    reason: str,
+    metric: Mapping[str, Any],
+) -> None:
+    findings.append(
+        _finding(
+            "SQL_CONTRACT_RULE_VIOLATED",
+            "Metric binding planejado é estruturalmente inválido.",
+            details={
+                "reason": reason,
+                "metric_ref": metric.get("metric_ref"),
+                "binding_ref": metric.get("binding_ref"),
+                "target_table": metric.get("target_table"),
+                "target_column": metric.get("target_column"),
+            },
+        )
     )
 
 

@@ -213,15 +213,12 @@ def _project_dimension_grouping_candidate(
         if not isinstance(concepts, list):
             continue
         planner_concepts = [
-            deepcopy(concept)
-            for concept in concepts
-            if isinstance(concept, Mapping)
-            and str(concept.get("concept_name", "")).casefold()
-            in {
-                "dimension_grouping",
-                "analytical_operation",
-                "financial_metric",
-            }
+            projected
+            for projected in (
+                _project_planner_concept(concept)
+                for concept in concepts
+            )
+            if projected is not None
         ]
         if planner_concepts:
             projected_matches.append(
@@ -233,4 +230,65 @@ def _project_dimension_grouping_candidate(
     return {
         "intent_name": candidate.get("intent_name"),
         "matches": projected_matches,
+    }
+
+
+def _project_planner_concept(concept: Any) -> dict[str, Any] | None:
+    if not isinstance(concept, Mapping):
+        return None
+    concept_name = str(concept.get("concept_name", "")).strip()
+    if not concept_name:
+        return None
+    projected: dict[str, Any] = {
+        "concept_name": concept_name,
+        "satisfied": concept.get("satisfied") is True,
+    }
+    semantic_signals = _project_semantic_signals(concept)
+    if semantic_signals:
+        projected["semantic_signals"] = semantic_signals
+    return projected
+
+
+def _project_semantic_signals(
+    concept: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    signals: list[dict[str, Any]] = []
+    for signal in concept.get("semantic_signals", []):
+        projected = _project_semantic_signal(signal)
+        if projected is not None:
+            signals.append(projected)
+    for term in concept.get("terms", []):
+        if not isinstance(term, Mapping):
+            continue
+        details = term.get("match_details")
+        if not isinstance(details, Mapping):
+            continue
+        for signal in details.get("semantic_signals", []):
+            projected = _project_semantic_signal(signal)
+            if projected is not None:
+                signals.append(projected)
+    output: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for signal in signals:
+        key = (
+            str(signal.get("concept_name", "")).casefold(),
+            str(signal.get("source", "")).casefold(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(signal)
+    return output
+
+
+def _project_semantic_signal(signal: Any) -> dict[str, Any] | None:
+    if not isinstance(signal, Mapping):
+        return None
+    concept_name = str(signal.get("concept_name", "")).strip()
+    source = str(signal.get("source", "")).strip()
+    if not concept_name or not source:
+        return None
+    return {
+        "concept_name": concept_name,
+        "source": source,
     }
