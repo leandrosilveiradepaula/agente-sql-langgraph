@@ -375,6 +375,51 @@ def _intent_metric_evidence(
     }
 
 
+def _intent_metric_operation_dimension_evidence(
+    *,
+    metric_term: str,
+    operation_term: str,
+    dimension_term: str | None = None,
+    dimension_tokens: list[str] | None = None,
+    context_concepts: list[str] | None = None,
+) -> dict:
+    evidence = _intent_metric_evidence(
+        term=metric_term,
+        operation_term=operation_term,
+        context_concepts=context_concepts,
+    )
+    if dimension_term is not None:
+        concepts = evidence["best_candidate"]["matches"][0]["match_details"][
+            "concepts"
+        ]
+        concepts.append(
+            {
+                "concept_name": "dimension_grouping",
+                "satisfied": True,
+                "terms": [
+                    {
+                        "term": dimension_term,
+                        "normalized_term": dimension_term,
+                        "matched": True,
+                        "match_details": {
+                            "semantic_signal": {
+                                "concept_name": "dimension_grouping",
+                                "term": dimension_term,
+                                "normalized_term": dimension_term,
+                                "source": "intent_catalog_concept",
+                                "confidence": 1.0,
+                                "matched_tokens": (
+                                    dimension_tokens or [dimension_term]
+                                ),
+                            }
+                        },
+                    }
+                ],
+            }
+        )
+    return evidence
+
+
 def _dimension_context() -> dict:
     context = _context()
     context["intent_resolution"] = {
@@ -607,12 +652,20 @@ def _append_operation_alias(
     direction: str = "descending",
     requested_limit=None,
     binding_cardinality: dict | None = None,
+    output_behavior: str | None = None,
+    combination_strategy: str | None = None,
+    join_semantics: str | None = None,
 ) -> None:
-    operation = {
-        "operation_type": operation_type,
-        "direction": direction,
-        "requested_limit": requested_limit,
-    }
+    operation = {"operation_type": operation_type}
+    if operation_type == "ranking":
+        operation["direction"] = direction
+        operation["requested_limit"] = requested_limit
+    if output_behavior is not None:
+        operation["output_behavior"] = output_behavior
+    if combination_strategy is not None:
+        operation["combination_strategy"] = combination_strategy
+    if join_semantics is not None:
+        operation["join_semantics"] = join_semantics
     if binding_cardinality is not None:
         operation["binding_cardinality"] = binding_cardinality
     context["entities"].append(
@@ -699,6 +752,7 @@ def _append_metric_table(
     *,
     table_name: str,
     metric_columns: list[str],
+    join_rules: list[dict] | None = None,
 ) -> None:
     context["table_catalog"].append(
         {
@@ -711,12 +765,151 @@ def _append_metric_table(
             "key_columns": ["row_id"],
             "metric_columns": metric_columns,
             "date_columns": ["event_date"],
-            "join_rules": [],
+            "join_rules": join_rules or [],
             "ai_hint": None,
             "priority": 1,
             "columns": [{"name": column} for column in metric_columns],
         }
     )
+
+
+def _comparison_cardinality() -> dict:
+    return {
+        "mode": "multiple",
+        "minimum": 2,
+        "maximum": 2,
+        "same_metric_concept": True,
+        "distinct_bindings": True,
+    }
+
+
+def _comparison_context(
+    *,
+    same_target: bool = False,
+    reachable_dimension: bool = False,
+    join_semantics: str | None = None,
+) -> dict:
+    context = _metric_context()
+    _append_operation_alias(
+        context,
+        user_term="compare",
+        canonical_value="comparison",
+        operation_type="comparison",
+        binding_cardinality=_comparison_cardinality(),
+        output_behavior="side_by_side",
+        combination_strategy="aggregate_then_combine",
+        join_semantics=join_semantics,
+    )
+    table_a = "schema_test.fact_a"
+    table_b = table_a if same_target else "schema_test.fact_b"
+    column_a = "metric_x"
+    column_b = "metric_y"
+    join_rules = (
+        [{"target_table": "schema_test.dim_region"}]
+        if reachable_dimension
+        else []
+    )
+    _append_metric_table(
+        context,
+        table_name="fact_a",
+        metric_columns=["metric_x", "metric_y"] if same_target else ["metric_x"],
+        join_rules=join_rules,
+    )
+    if not same_target:
+        _append_metric_table(
+            context,
+            table_name="fact_b",
+            metric_columns=["metric_y"],
+            join_rules=join_rules,
+        )
+    _append_metric_binding(
+        context,
+        metric_concept="amount",
+        target_table=table_a,
+        target_column=column_a,
+        when_present=["mode_a"],
+        user_term="binding mode a",
+        priority=20,
+    )
+    _append_metric_binding(
+        context,
+        metric_concept="amount",
+        target_table=table_b,
+        target_column=column_b,
+        when_present=["mode_b"],
+        user_term="binding mode b",
+        priority=1,
+    )
+    return context
+
+
+def _comparison_projection(
+    context: dict,
+    *,
+    context_concepts: list[str] | None = None,
+    dimension: bool = False,
+) -> dict:
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="compare amount",
+        intent_resolution_result=_intent_metric_operation_dimension_evidence(
+            metric_term="amount",
+            operation_term="compare",
+            dimension_term="region" if dimension else None,
+            dimension_tokens=["region"] if dimension else None,
+            context_concepts=context_concepts or ["mode_a", "mode_b"],
+        ),
+    )
+    return result["query_plan"]["planning_context"]
+
+
+def _comparison_projection_for_operation_terms(
+    context: dict,
+    *,
+    operation_terms: list[str],
+) -> dict:
+    evidence = _intent_metric_evidence(
+        term="amount",
+        operation_term=operation_terms[0],
+        context_concepts=["mode_a", "mode_b"],
+    )
+    concepts = evidence["best_candidate"]["matches"][0]["match_details"][
+        "concepts"
+    ]
+    operation_concept = next(
+        concept
+        for concept in concepts
+        if concept.get("concept_name") == "analytical_operation"
+    )
+    operation_concept["terms"] = [
+        {
+            "term": term,
+            "normalized_term": term,
+            "matched": True,
+            "match_details": {
+                "semantic_signal": {
+                    "concept_name": "analytical_operation",
+                    "term": term,
+                    "normalized_term": term,
+                    "source": "intent_catalog_concept",
+                    "confidence": 1.0,
+                    "matched_tokens": [term],
+                }
+            },
+        }
+        for term in operation_terms
+    ]
+
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="compare amount",
+        intent_resolution_result=evidence,
+    )
+    return result["query_plan"]["planning_context"]
 
 
 def _operation_plan_for_term(
@@ -2048,6 +2241,270 @@ def test_ranking_com_multiplas_metricas_nao_escolhe_arbitrariamente() -> None:
     ]["status"] == "metric_ambiguous"
 
 
+def test_comparison_metadata_e_aceita_pelo_planner() -> None:
+    projection = _comparison_projection(_comparison_context())
+
+    operation = projection["analytical_operations"][0]
+
+    assert operation["operation_type"] == "comparison"
+    assert operation["canonical_value"] == "comparison"
+    assert operation["output_behavior"] == "side_by_side"
+    assert operation["combination_strategy"] == "aggregate_then_combine"
+    assert operation["binding_cardinality"] == _comparison_cardinality()
+
+
+def test_comparison_preserva_join_semantics_string_versionada() -> None:
+    projection = _comparison_projection(
+        _comparison_context(
+            join_semantics="preserve_all_operand_categories",
+        )
+    )
+
+    operation = projection["analytical_operations"][0]
+
+    assert operation["join_semantics"] == "preserve_all_operand_categories"
+
+
+def test_comparison_sem_join_semantics_nao_inventa_default() -> None:
+    projection = _comparison_projection(_comparison_context())
+
+    assert "join_semantics" not in projection["analytical_operations"][0]
+
+
+def test_comparison_join_semantics_participa_do_dedupe() -> None:
+    context = _comparison_context(
+        join_semantics="preserve_all_operand_categories",
+    )
+    _append_operation_alias(
+        context,
+        user_term="compare differently",
+        canonical_value="comparison",
+        operation_type="comparison",
+        binding_cardinality=_comparison_cardinality(),
+        output_behavior="side_by_side",
+        combination_strategy="aggregate_then_combine",
+        join_semantics="preserve_intersection_only",
+    )
+
+    projection = _comparison_projection_for_operation_terms(
+        context,
+        operation_terms=["compare", "compare differently"],
+    )
+
+    join_semantics = {
+        operation.get("join_semantics")
+        for operation in projection["analytical_operations"]
+    }
+    assert join_semantics == {
+        "preserve_all_operand_categories",
+        "preserve_intersection_only",
+    }
+
+
+def test_comparison_join_semantics_tipo_invalido_falha_fechado() -> None:
+    context = _comparison_context()
+    for entity in context["entities"]:
+        if entity.get("user_term") == "compare":
+            entity["business_rule"]["operation"]["join_semantics"] = {
+                "mode": "preserve_all_operand_categories"
+            }
+
+    projection = _comparison_projection(context)
+
+    assert projection["analytical_operations"] == []
+    assert projection["diagnostics"]["analytical_operation_diagnostic"][
+        "unresolved_terms"
+    ] == ["compare"]
+
+
+def test_comparison_cardinality_multiple_min_max_resolve() -> None:
+    projection = _comparison_projection(_comparison_context())
+
+    assert len(projection["planned_metrics"]) == 2
+    assert projection["diagnostics"]["planned_metric_diagnostic"][
+        "global_binding_status"
+    ] == "resolved"
+    assert projection["diagnostics"]["analytical_operation_diagnostic"][
+        "metric_binding"
+    ]["status"] == "bound"
+
+
+def test_comparison_duas_bindings_distintas_mesmo_metric_concept_passam() -> None:
+    projection = _comparison_projection(_comparison_context())
+
+    concepts = {
+        metric["metric_concept"] for metric in projection["planned_metrics"]
+    }
+    binding_refs = {
+        metric["binding_ref"] for metric in projection["planned_metrics"]
+    }
+
+    assert concepts == {"amount"}
+    assert len(binding_refs) == 2
+
+
+def test_comparison_binding_duplicada_distinct_bindings_falha_fechado() -> None:
+    context = _comparison_context()
+    for entity in context["entities"]:
+        if entity.get("user_term") == "binding mode b":
+            metric = entity["business_rule"]["metric_binding"]
+            metric["target_table"] = "schema_test.fact_a"
+            metric["target_column"] = "metric_x"
+            entity["target_table"] = "schema_test.fact_a"
+            entity["target_column"] = "metric_x"
+
+    projection = _comparison_projection(context)
+
+    assert projection["planned_metrics"] == []
+    assert projection["analytical_operations"][0].get("operand_metric_refs") is None
+    assert projection["diagnostics"]["planned_metric_diagnostic"][
+        "global_binding_status"
+    ] in {
+        "metric_binding_ambiguous",
+        "metric_binding_below_minimum",
+    }
+
+
+def test_comparison_menos_operandos_que_minimo_falha_fechado() -> None:
+    projection = _comparison_projection(
+        _comparison_context(),
+        context_concepts=["mode_a"],
+    )
+
+    assert projection["planned_metrics"] == []
+    assert projection["analytical_operations"][0].get("operand_metric_refs") is None
+    assert projection["diagnostics"]["planned_metric_diagnostic"][
+        "global_binding_status"
+    ] == "not_applicable"
+    assert projection["diagnostics"]["planned_metric_diagnostic"][
+        "invalid_metadata_terms"
+    ] == ["amount"]
+
+
+def test_comparison_mais_operandos_que_maximo_falha_fechado() -> None:
+    context = _comparison_context()
+    _append_metric_table(context, table_name="fact_c", metric_columns=["metric_z"])
+    _append_metric_binding(
+        context,
+        metric_concept="amount",
+        target_table="schema_test.fact_c",
+        target_column="metric_z",
+        when_present=["mode_c"],
+        user_term="binding mode c",
+        priority=5,
+    )
+
+    projection = _comparison_projection(
+        context,
+        context_concepts=["mode_a", "mode_b", "mode_c"],
+    )
+
+    assert projection["planned_metrics"] == []
+    assert projection["analytical_operations"][0].get("operand_metric_refs") is None
+    assert projection["diagnostics"]["planned_metric_diagnostic"][
+        "global_binding_status"
+    ] == "not_applicable"
+    assert projection["diagnostics"]["planned_metric_diagnostic"][
+        "invalid_metadata_terms"
+    ] == ["amount"]
+
+
+def test_comparison_operand_metric_refs_correspondem_as_metricas_validas() -> None:
+    projection = _comparison_projection(_comparison_context())
+    operation = projection["analytical_operations"][0]
+
+    metric_refs = {
+        metric["metric_ref"] for metric in projection["planned_metrics"]
+    }
+
+    assert set(operation["operand_metric_refs"]) == metric_refs
+    assert len(operation["operand_metric_refs"]) == len(metric_refs)
+
+
+def test_comparison_ordem_deterministica_sem_semantica_de_priority() -> None:
+    projection = _comparison_projection(_comparison_context())
+    operation = projection["analytical_operations"][0]
+
+    assert operation["operand_metric_refs"] == sorted(
+        operation["operand_metric_refs"]
+    )
+    assert [
+        metric["metric_ref"] for metric in projection["planned_metrics"]
+    ] == sorted(metric["metric_ref"] for metric in projection["planned_metrics"])
+
+
+def test_comparison_sem_dimensao_e_valida() -> None:
+    projection = _comparison_projection(_comparison_context())
+
+    assert projection["detected_dimensions"] == []
+    assert projection["analytical_operations"][0]["operand_metric_refs"]
+    assert projection["diagnostics"]["analytical_operation_diagnostic"][
+        "dimension_compatibility"
+    ]["status"] == "passed"
+
+
+def test_comparison_com_dimensao_alcancavel_por_todos_operandos_e_valida() -> None:
+    context = _comparison_context(reachable_dimension=True)
+    projection = _comparison_projection(context, dimension=True)
+
+    dimension = projection["detected_dimensions"][0]
+
+    assert dimension["canonical_value"] == "region"
+    assert projection["analytical_operations"][0]["operand_metric_refs"]
+    assert projection["diagnostics"]["analytical_operation_diagnostic"][
+        "dimension_compatibility"
+    ]["status"] == "passed"
+
+
+def test_comparison_com_dimensao_inalcancavel_falha_fechado() -> None:
+    projection = _comparison_projection(_comparison_context(), dimension=True)
+
+    assert projection["planned_metrics"] == []
+    assert projection["analytical_operations"][0].get("operand_metric_refs") is None
+    assert projection["diagnostics"]["analytical_operation_diagnostic"][
+        "dimension_compatibility"
+    ]["status"] == "failed"
+
+
+def test_comparison_multiplas_fontes_metricas_true() -> None:
+    projection = _comparison_projection(_comparison_context())
+
+    assert projection["analytical_operations"][0][
+        "multiple_metric_sources"
+    ] is True
+
+
+def test_comparison_mesma_fonte_metrica_false() -> None:
+    projection = _comparison_projection(_comparison_context(same_target=True))
+
+    assert projection["analytical_operations"][0][
+        "multiple_metric_sources"
+    ] is False
+
+
+def test_comparison_preserva_regressao_de_ranking() -> None:
+    projection = _metric_plan_for_term(
+        context=_metric_context(),
+        term="amount",
+        operation_term="highest",
+    )
+
+    operation = projection["analytical_operations"][0]
+
+    assert operation["operation_type"] == "ranking"
+    assert operation["direction"] == "descending"
+    assert operation["metric_ref"] == projection["planned_metrics"][0][
+        "metric_ref"
+    ]
+
+
+def test_contexto_sem_comparison_preserva_fluxo_antigo() -> None:
+    projection = _metric_plan_for_term(context=_metric_context(), term="amount")
+
+    assert projection["planned_metrics"]
+    assert projection["analytical_operations"] == []
+
+
 def test_sem_dimensao_nao_cria_grouping() -> None:
     result = build_query_plan(
         context=_dimension_context(),
@@ -2548,6 +3005,82 @@ def main() -> None:
         (
             "ranking metric ambiguity",
             test_ranking_com_multiplas_metricas_nao_escolhe_arbitrariamente,
+        ),
+        (
+            "comparison metadata",
+            test_comparison_metadata_e_aceita_pelo_planner,
+        ),
+        (
+            "comparison join semantics string",
+            test_comparison_preserva_join_semantics_string_versionada,
+        ),
+        (
+            "comparison sem join semantics default",
+            test_comparison_sem_join_semantics_nao_inventa_default,
+        ),
+        (
+            "comparison join semantics dedupe",
+            test_comparison_join_semantics_participa_do_dedupe,
+        ),
+        (
+            "comparison join semantics invalido",
+            test_comparison_join_semantics_tipo_invalido_falha_fechado,
+        ),
+        (
+            "comparison cardinality multiple",
+            test_comparison_cardinality_multiple_min_max_resolve,
+        ),
+        (
+            "comparison metric concept compartilhado",
+            test_comparison_duas_bindings_distintas_mesmo_metric_concept_passam,
+        ),
+        (
+            "comparison binding duplicada fail closed",
+            test_comparison_binding_duplicada_distinct_bindings_falha_fechado,
+        ),
+        (
+            "comparison abaixo minimo",
+            test_comparison_menos_operandos_que_minimo_falha_fechado,
+        ),
+        (
+            "comparison acima maximo",
+            test_comparison_mais_operandos_que_maximo_falha_fechado,
+        ),
+        (
+            "comparison operand refs",
+            test_comparison_operand_metric_refs_correspondem_as_metricas_validas,
+        ),
+        (
+            "comparison ordem deterministica",
+            test_comparison_ordem_deterministica_sem_semantica_de_priority,
+        ),
+        (
+            "comparison sem dimensao",
+            test_comparison_sem_dimensao_e_valida,
+        ),
+        (
+            "comparison dimensao alcancavel",
+            test_comparison_com_dimensao_alcancavel_por_todos_operandos_e_valida,
+        ),
+        (
+            "comparison dimensao inalcancavel",
+            test_comparison_com_dimensao_inalcancavel_falha_fechado,
+        ),
+        (
+            "comparison multiplas fontes",
+            test_comparison_multiplas_fontes_metricas_true,
+        ),
+        (
+            "comparison mesma fonte",
+            test_comparison_mesma_fonte_metrica_false,
+        ),
+        (
+            "comparison regressao ranking",
+            test_comparison_preserva_regressao_de_ranking,
+        ),
+        (
+            "comparison ausente regressao",
+            test_contexto_sem_comparison_preserva_fluxo_antigo,
         ),
         ("sem dimensao sem grouping", test_sem_dimensao_nao_cria_grouping),
         (

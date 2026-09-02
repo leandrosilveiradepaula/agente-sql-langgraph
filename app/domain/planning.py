@@ -168,11 +168,16 @@ class ProjectedDimension(TypedDict, total=False):
 
 
 class ProjectedAnalyticalOperation(TypedDict, total=False):
-    operation_type: Literal["ranking"]
+    operation_type: Literal["ranking", "comparison"]
     canonical_value: str
     direction: Literal["ascending", "descending"]
     requested_limit: int | None
     metric_ref: str
+    operand_metric_refs: list[str]
+    output_behavior: Literal["side_by_side"]
+    combination_strategy: Literal["aggregate_then_combine"]
+    multiple_metric_sources: bool
+    join_semantics: str
     binding_cardinality: dict[str, Any]
     detection_source: str
     mapping_source: str

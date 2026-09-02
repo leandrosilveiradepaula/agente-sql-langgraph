@@ -354,6 +354,24 @@ def project_planning_context(
     selected_columns = _selected_column_names(required_tables)
 
     join_projection = _project_joins(required_tables, table_names)
+    operation_projection, comparison_dimension_diagnostic = (
+        _validate_comparison_dimension_compatibility(
+            operations=operation_projection,
+            planned_metrics=planned_metrics,
+            dimensions=dimension_projection,
+            required_tables=required_tables,
+            authorized_joins=join_projection["joins"],
+        )
+    )
+    if comparison_dimension_diagnostic["status"] != "not_applicable":
+        operation_diagnostic["dimension_compatibility"] = (
+            comparison_dimension_diagnostic
+        )
+        if comparison_dimension_diagnostic["status"] != "passed":
+            planned_metrics = []
+            operation_projection = _drop_comparison_operand_refs(
+                operation_projection
+            )
     entity_projection = _project_entities(
         context.get("entities", []),
         intent_name=intent_name,
@@ -869,9 +887,6 @@ def _detect_analytical_operations(
         )
         if operation is None:
             unresolved.append(matched_user_term)
-            continue
-        if operation.get("operation_type") != "ranking":
-            invalid_metadata.append(matched_user_term)
             continue
         operations.append(operation)
 
@@ -1692,6 +1707,29 @@ def _bind_metrics_to_analytical_operations(
                 metric_ref = planned_metrics[0].get("metric_ref")
                 if isinstance(metric_ref, str) and metric_ref.strip():
                     item["metric_ref"] = metric_ref
+        elif item.get("operation_type") == "comparison":
+            cardinality = operation.get("binding_cardinality")
+            if not isinstance(cardinality, Mapping):
+                cardinality = _default_binding_cardinality()
+            status = _metric_binding_cardinality_status(
+                planned_metrics,
+                cardinality=cardinality,
+            )
+            diagnostics.append(
+                {
+                    "operation_type": "comparison",
+                    "status": status,
+                    "planned_metric_count": len(planned_metrics),
+                    "cardinality": dict(cardinality),
+                }
+            )
+            if status == "resolved":
+                metric_refs = _operand_metric_refs(planned_metrics)
+                if len(metric_refs) == len(planned_metrics):
+                    item["operand_metric_refs"] = metric_refs
+                    item["multiple_metric_sources"] = (
+                        len(_metric_source_tables(planned_metrics)) > 1
+                    )
         bound.append(item)
     return bound, {
         "binding_required": True,
@@ -1702,6 +1740,182 @@ def _bind_metrics_to_analytical_operations(
         ),
         "planned_metric_count": len(planned_metrics),
         "operations": diagnostics,
+    }
+
+
+def _operand_metric_refs(
+    planned_metrics: list[ProjectedPlannedMetric],
+) -> list[str]:
+    refs = [
+        metric["metric_ref"]
+        for metric in planned_metrics
+        if isinstance(metric.get("metric_ref"), str)
+        and metric["metric_ref"].strip()
+    ]
+    return sorted(set(refs), key=str.casefold)
+
+
+def _validate_comparison_dimension_compatibility(
+    *,
+    operations: list[ProjectedAnalyticalOperation],
+    planned_metrics: list[ProjectedPlannedMetric],
+    dimensions: list[ProjectedDimension],
+    required_tables: list[ProjectedTable],
+    authorized_joins: list[ProjectedJoin],
+) -> tuple[list[ProjectedAnalyticalOperation], dict[str, Any]]:
+    comparison_operations = [
+        operation
+        for operation in operations
+        if operation.get("operation_type") == "comparison"
+    ]
+    if not comparison_operations:
+        return operations, {"status": "not_applicable"}
+    if not dimensions:
+        return operations, {
+            "status": "passed",
+            "reason": "no_grouping_dimensions",
+        }
+
+    graph = _authorized_join_graph(required_tables, authorized_joins)
+    failures: list[dict[str, Any]] = []
+    for metric in planned_metrics:
+        metric_table = str(metric.get("target_table", "")).strip()
+        metric_ref = str(metric.get("metric_ref", "")).strip()
+        if not metric_table or not metric_ref:
+            failures.append(
+                {
+                    "metric_ref": metric_ref,
+                    "target_table": metric_table,
+                    "reason": "metric_target_incomplete",
+                }
+            )
+            continue
+        for dimension in dimensions:
+            dimension_table = str(dimension.get("target_table", "")).strip()
+            if not dimension_table:
+                failures.append(
+                    {
+                        "metric_ref": metric_ref,
+                        "dimension": dimension.get("canonical_value"),
+                        "reason": "dimension_target_incomplete",
+                    }
+                )
+                continue
+            if not _tables_connected(
+                graph,
+                source=metric_table,
+                target=dimension_table,
+            ):
+                failures.append(
+                    {
+                        "metric_ref": metric_ref,
+                        "metric_table": metric_table,
+                        "dimension": dimension.get("canonical_value"),
+                        "dimension_table": dimension_table,
+                        "reason": "dimension_unreachable",
+                    }
+                )
+
+    if failures:
+        return _drop_comparison_operand_refs(operations), {
+            "status": "failed",
+            "failures": failures,
+        }
+    return operations, {
+        "status": "passed",
+        "checked_metric_count": len(planned_metrics),
+        "checked_dimension_count": len(dimensions),
+    }
+
+
+def _drop_comparison_operand_refs(
+    operations: list[ProjectedAnalyticalOperation],
+) -> list[ProjectedAnalyticalOperation]:
+    output: list[ProjectedAnalyticalOperation] = []
+    for operation in operations:
+        item = deepcopy(operation)
+        if item.get("operation_type") == "comparison":
+            item.pop("operand_metric_refs", None)
+            item.pop("multiple_metric_sources", None)
+        output.append(item)
+    return output
+
+
+def _authorized_join_graph(
+    required_tables: list[ProjectedTable],
+    authorized_joins: list[ProjectedJoin],
+) -> dict[str, set[str]]:
+    graph: dict[str, set[str]] = {}
+    table_lookup = _table_reference_lookup(required_tables)
+    for table in required_tables:
+        qualified = table["qualified_name"].casefold()
+        graph.setdefault(qualified, set())
+    for join in authorized_joins:
+        source = str(join.get("source_table", "")).strip().casefold()
+        if not source:
+            continue
+        graph.setdefault(source, set())
+        raw_rules = join.get("join_rules")
+        if not isinstance(raw_rules, list):
+            continue
+        for rule in raw_rules:
+            if not isinstance(rule, Mapping):
+                continue
+            for reference in _extract_table_references(rule):
+                target = table_lookup.get(reference.casefold())
+                if not target:
+                    continue
+                graph.setdefault(target, set())
+                graph[source].add(target)
+                graph[target].add(source)
+    return graph
+
+
+def _table_reference_lookup(
+    tables: list[ProjectedTable],
+) -> dict[str, str]:
+    output: dict[str, str] = {}
+    for table in tables:
+        qualified = table["qualified_name"].casefold()
+        bare = table["table_name"].casefold()
+        output[qualified] = qualified
+        output[bare] = qualified
+    return output
+
+
+def _tables_connected(
+    graph: Mapping[str, set[str]],
+    *,
+    source: str,
+    target: str,
+) -> bool:
+    source_key = source.casefold()
+    target_key = target.casefold()
+    if source_key == target_key:
+        return True
+    if source_key not in graph or target_key not in graph:
+        return False
+    visited: set[str] = set()
+    pending = [source_key]
+    while pending:
+        current = pending.pop()
+        if current == target_key:
+            return True
+        if current in visited:
+            continue
+        visited.add(current)
+        pending.extend(sorted(graph.get(current, set()) - visited))
+    return False
+
+
+def _metric_source_tables(
+    planned_metrics: list[ProjectedPlannedMetric],
+) -> set[str]:
+    return {
+        metric["target_table"].casefold()
+        for metric in planned_metrics
+        if isinstance(metric.get("target_table"), str)
+        and metric["target_table"].strip()
     }
 
 
@@ -1768,22 +1982,16 @@ def _resolve_analytical_operation(
         if canonical_value != operation["operation_type"]:
             continue
         priority = _optional_int(entity.get("priority"))
+        projected_operation = _project_analytical_operation(
+            operation,
+            canonical_value=canonical_value,
+            matched_user_term=matched_user_term,
+            priority=priority,
+        )
         candidates.append(
             (
                 _priority_sort_value(priority),
-                {
-                    "operation_type": operation["operation_type"],
-                    "canonical_value": canonical_value,
-                    "direction": operation["direction"],
-                    "requested_limit": operation["requested_limit"],
-                    "binding_cardinality": operation[
-                        "binding_cardinality"
-                    ],
-                    "detection_source": "intent_semantic_evidence",
-                    "mapping_source": "entity_alias",
-                    "matched_user_term": matched_user_term,
-                    "priority": priority,
-                },
+                projected_operation,
             )
         )
     if not candidates:
@@ -1793,9 +2001,38 @@ def _resolve_analytical_operation(
         key=lambda item: (
             item[0],
             item[1]["canonical_value"].casefold(),
-            item[1]["direction"],
+            item[1]["operation_type"],
+            item[1].get("direction", ""),
         ),
     )[0][1]
+
+
+def _project_analytical_operation(
+    operation: Mapping[str, Any],
+    *,
+    canonical_value: str,
+    matched_user_term: str,
+    priority: int | None,
+) -> ProjectedAnalyticalOperation:
+    output: ProjectedAnalyticalOperation = {
+        "operation_type": operation["operation_type"],
+        "canonical_value": canonical_value,
+        "binding_cardinality": operation["binding_cardinality"],
+        "detection_source": "intent_semantic_evidence",
+        "mapping_source": "entity_alias",
+        "matched_user_term": matched_user_term,
+        "priority": priority,
+    }
+    if operation["operation_type"] == "ranking":
+        output["direction"] = operation["direction"]
+        output["requested_limit"] = operation["requested_limit"]
+    if operation["operation_type"] == "comparison":
+        output["output_behavior"] = operation["output_behavior"]
+        output["combination_strategy"] = operation["combination_strategy"]
+        join_semantics = operation.get("join_semantics")
+        if isinstance(join_semantics, str) and join_semantics.strip():
+            output["join_semantics"] = join_semantics.strip()
+    return output
 
 
 def _operation_metadata(
@@ -1807,10 +2044,18 @@ def _operation_metadata(
     if not isinstance(operation, Mapping):
         return None
     operation_type = operation.get("operation_type")
+    if operation_type == "ranking":
+        return _ranking_operation_metadata(operation)
+    if operation_type == "comparison":
+        return _comparison_operation_metadata(operation)
+    return None
+
+
+def _ranking_operation_metadata(
+    operation: Mapping[str, Any],
+) -> dict[str, Any] | None:
     direction = operation.get("direction")
     requested_limit = operation.get("requested_limit")
-    if operation_type != "ranking":
-        return None
     if direction not in {"ascending", "descending"}:
         return None
     if requested_limit is not None:
@@ -1826,11 +2071,37 @@ def _operation_metadata(
     if cardinality is None:
         return None
     return {
-        "operation_type": operation_type,
+        "operation_type": "ranking",
         "direction": direction,
         "requested_limit": requested_limit,
         "binding_cardinality": cardinality,
     }
+
+
+def _comparison_operation_metadata(
+    operation: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if operation.get("output_behavior") != "side_by_side":
+        return None
+    if operation.get("combination_strategy") != "aggregate_then_combine":
+        return None
+    cardinality = _binding_cardinality_metadata(
+        operation.get("binding_cardinality")
+    )
+    if cardinality is None:
+        return None
+    output: dict[str, Any] = {
+        "operation_type": "comparison",
+        "output_behavior": "side_by_side",
+        "combination_strategy": "aggregate_then_combine",
+        "binding_cardinality": cardinality,
+    }
+    join_semantics = operation.get("join_semantics")
+    if join_semantics is not None:
+        if not isinstance(join_semantics, str) or not join_semantics.strip():
+            return None
+        output["join_semantics"] = join_semantics.strip()
+    return output
 
 
 def _binding_cardinality_metadata(value: Any) -> dict[str, Any] | None:
@@ -2324,26 +2595,47 @@ def _dedupe_analytical_operations(
     operations: list[ProjectedAnalyticalOperation],
 ) -> list[ProjectedAnalyticalOperation]:
     output: list[ProjectedAnalyticalOperation] = []
-    seen: set[tuple[str, str, int | None]] = set()
+    seen: set[tuple[Any, ...]] = set()
     for operation in sorted(
         operations,
         key=lambda item: (
             _priority_sort_value(item.get("priority")),
             item["operation_type"],
-            item["direction"],
+            item.get("direction", ""),
+            item.get("output_behavior", ""),
+            item.get("combination_strategy", ""),
             item.get("requested_limit") or 0,
         ),
     ):
-        key = (
-            operation["operation_type"],
-            operation["direction"],
-            operation.get("requested_limit"),
-        )
+        key = _analytical_operation_key(operation)
         if key in seen:
             continue
         seen.add(key)
         output.append(operation)
     return output
+
+
+def _analytical_operation_key(
+    operation: ProjectedAnalyticalOperation,
+) -> tuple[Any, ...]:
+    if operation["operation_type"] == "ranking":
+        return (
+            operation["operation_type"],
+            operation.get("direction"),
+            operation.get("requested_limit"),
+        )
+    return (
+        operation["operation_type"],
+        operation.get("output_behavior"),
+        operation.get("combination_strategy"),
+        operation.get("join_semantics"),
+        tuple(
+            sorted(
+                operation.get("binding_cardinality", {}).items(),
+                key=lambda item: str(item[0]),
+            )
+        ),
+    )
 
 
 def _dedupe_planned_metrics(
