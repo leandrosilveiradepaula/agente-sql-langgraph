@@ -120,6 +120,9 @@ def normalize_context_snapshot(raw_snapshot: Mapping[str, Any]) -> ContextSnapsh
         ),
         "signals": _derive_intent_resolution_signals(entities),
         "intent_catalog": _derive_intent_catalog(entities),
+        "semantic_defaults": _derive_semantic_defaults_config(
+            component_configs.get("semantic_defaults", {})
+        ),
     }
 
     counts = _normalize_counts(
@@ -648,6 +651,58 @@ def _derive_intent_resolution_config(
                 config.get("token_fallback")
             )
         )
+
+    return config
+
+
+def _derive_semantic_defaults_config(raw_config: Any) -> dict[str, Any]:
+    if not isinstance(raw_config, Mapping):
+        return {}
+
+    config = {
+        str(key): deepcopy(value)
+        for key, value in raw_config.items()
+    }
+    if "component" in config:
+        config["component"] = _normalize_text(config.get("component"))
+
+    raw_rules = config.get("rules")
+    if isinstance(raw_rules, list):
+        rules: list[Any] = []
+        for raw_rule in raw_rules:
+            if not isinstance(raw_rule, Mapping):
+                rules.append(deepcopy(raw_rule))
+                continue
+            rules.append(
+                {
+                    "rule_name": _normalize_text(
+                        raw_rule.get("rule_name")
+                    ),
+                    "when_present": _normalize_string_list(
+                        raw_rule.get("when_present"),
+                        "semantic_defaults.rules.when_present",
+                    ),
+                    "when_absent": _normalize_string_list(
+                        raw_rule.get("when_absent"),
+                        "semantic_defaults.rules.when_absent",
+                    ),
+                    "produce": _normalize_string_list(
+                        raw_rule.get("produce"),
+                        "semantic_defaults.rules.produce",
+                    ),
+                    "priority": _normalize_integer(
+                        raw_rule.get("priority")
+                    ),
+                }
+            )
+        if all(isinstance(item, Mapping) for item in rules):
+            rules.sort(
+                key=lambda item: (
+                    _numeric_sort_value(item.get("priority")),
+                    _normalize_text(item.get("rule_name")).casefold(),
+                )
+            )
+        config["rules"] = rules
 
     return config
 

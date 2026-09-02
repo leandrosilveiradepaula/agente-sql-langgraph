@@ -276,6 +276,7 @@ class IntentResolutionContext(TypedDict, total=False):
     config: IntentResolverConfig
     signals: list[IntentResolutionSignal]
     intent_catalog: list[IntentCatalogEntry]
+    semantic_defaults: dict[str, Any]
 
 
 class ContextSnapshot(TypedDict, total=False):

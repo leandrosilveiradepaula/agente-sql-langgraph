@@ -821,6 +821,9 @@ def _validate_component_configs(
                 path=f"component_configs.{component_name}",
                 details={"received_type": type(config).__name__},
             )
+            continue
+        if component_name == "semantic_defaults":
+            _validate_semantic_defaults_config(config, errors)
 
 
 def _validate_intent_resolution(
@@ -1465,6 +1468,221 @@ def _validate_intent_resolver_config(
             token_fallback,
             errors,
         )
+
+
+def _validate_semantic_defaults_config(
+    config: Mapping[str, Any],
+    errors: list[ContextValidationIssue],
+) -> None:
+    path = "component_configs.semantic_defaults"
+
+    component = config.get("component")
+    if component != "semantic_defaults":
+        _add_issue(
+            errors,
+            code="SEMANTIC_DEFAULTS_COMPONENT_INVALID",
+            message=(
+                "component deve identificar o componente "
+                "semantic_defaults."
+            ),
+            path=f"{path}.component",
+            details={"received_value": component},
+        )
+
+    rules = config.get("rules")
+    if not isinstance(rules, list):
+        _add_issue(
+            errors,
+            code="SEMANTIC_DEFAULTS_RULES_INVALID",
+            message="rules deve ser uma lista.",
+            path=f"{path}.rules",
+            details={"received_type": type(rules).__name__},
+        )
+        return
+
+    names: dict[str, str] = {}
+    edges: dict[str, set[str]] = {}
+    for index, rule in enumerate(rules):
+        rule_path = f"{path}.rules[{index}]"
+        if not isinstance(rule, Mapping):
+            _add_issue(
+                errors,
+                code="SEMANTIC_DEFAULTS_RULE_INVALID",
+                message="Cada regra de default deve ser um objeto.",
+                path=rule_path,
+                details={"received_type": type(rule).__name__},
+            )
+            continue
+
+        rule_name = rule.get("rule_name")
+        if not _is_non_empty_text(rule_name):
+            _add_issue(
+                errors,
+                code="SEMANTIC_DEFAULT_RULE_NAME_REQUIRED",
+                message="rule_name deve ser um texto não vazio.",
+                path=f"{rule_path}.rule_name",
+                details={"received_value": rule_name},
+            )
+            normalized_name = f"__invalid_{index}"
+        else:
+            normalized_name = str(rule_name).strip()
+            name_key = normalized_name.casefold()
+            if name_key in names:
+                _add_issue(
+                    errors,
+                    code="SEMANTIC_DEFAULT_RULE_DUPLICATE",
+                    message="rule_name deve ser único.",
+                    path=f"{rule_path}.rule_name",
+                    details={
+                        "rule_name": normalized_name,
+                        "first_occurrence": names[name_key],
+                    },
+                )
+            else:
+                names[name_key] = f"{rule_path}.rule_name"
+
+        present = _semantic_default_concepts(
+            rule,
+            field_name="when_present",
+            path=rule_path,
+            errors=errors,
+            allow_empty=False,
+        )
+        absent = _semantic_default_concepts(
+            rule,
+            field_name="when_absent",
+            path=rule_path,
+            errors=errors,
+            allow_empty=True,
+        )
+        produce = _semantic_default_concepts(
+            rule,
+            field_name="produce",
+            path=rule_path,
+            errors=errors,
+            allow_empty=False,
+        )
+
+        overlap = present & absent
+        if overlap:
+            _add_issue(
+                errors,
+                code="SEMANTIC_DEFAULT_PRESENT_ABSENT_CONFLICT",
+                message=(
+                    "Um conceito não pode aparecer simultaneamente em "
+                    "when_present e when_absent."
+                ),
+                path=rule_path,
+                details={"concepts": sorted(overlap)},
+            )
+
+        priority = rule.get("priority")
+        if (
+            not isinstance(priority, int)
+            or isinstance(priority, bool)
+            or priority < 0
+        ):
+            _add_issue(
+                errors,
+                code="SEMANTIC_DEFAULT_PRIORITY_INVALID",
+                message="priority deve ser inteiro não negativo.",
+                path=f"{rule_path}.priority",
+                details={"received_value": priority},
+            )
+
+        for produced in produce:
+            edges.setdefault(produced, set()).update(present)
+
+    cycle = _semantic_default_cycle(edges)
+    if cycle:
+        _add_issue(
+            errors,
+            code="SEMANTIC_DEFAULT_CYCLE",
+            message="semantic_defaults não pode conter ciclos.",
+            path=f"{path}.rules",
+            details={"cycle": cycle},
+        )
+
+
+def _semantic_default_concepts(
+    rule: Mapping[str, Any],
+    *,
+    field_name: str,
+    path: str,
+    errors: list[ContextValidationIssue],
+    allow_empty: bool,
+) -> set[str]:
+    value = rule.get(field_name)
+    if not isinstance(value, list):
+        _add_issue(
+            errors,
+            code=f"SEMANTIC_DEFAULT_{field_name.upper()}_INVALID",
+            message=f"{field_name} deve ser uma lista de textos.",
+            path=f"{path}.{field_name}",
+            details={"received_type": type(value).__name__},
+        )
+        return set()
+
+    concepts: set[str] = set()
+    invalid_values = [
+        item for item in value if not _is_non_empty_text(item)
+    ]
+    if (not allow_empty and not value) or invalid_values:
+        _add_issue(
+            errors,
+            code=f"SEMANTIC_DEFAULT_{field_name.upper()}_INVALID",
+            message=f"{field_name} deve conter textos não vazios.",
+            path=f"{path}.{field_name}",
+            details={
+                "received_value": value,
+                "invalid_values": invalid_values,
+            },
+        )
+    for item in value:
+        if _is_non_empty_text(item):
+            concepts.add(str(item).strip().casefold())
+    if len(concepts) != len(
+        [item for item in value if _is_non_empty_text(item)]
+    ):
+        _add_issue(
+            errors,
+            code=f"SEMANTIC_DEFAULT_{field_name.upper()}_DUPLICATE",
+            message=f"{field_name} não pode conter conceitos duplicados.",
+            path=f"{path}.{field_name}",
+            details={"received_value": value},
+        )
+    return concepts
+
+
+def _semantic_default_cycle(
+    edges: Mapping[str, set[str]],
+) -> list[str] | None:
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    stack: list[str] = []
+
+    def visit(node: str) -> list[str] | None:
+        if node in visiting:
+            start = stack.index(node)
+            return stack[start:] + [node]
+        if node in visited:
+            return None
+        visiting.add(node)
+        stack.append(node)
+        for dependency in sorted(edges.get(node, set())):
+            cycle = visit(dependency)
+            if cycle:
+                return cycle
+        stack.pop()
+        visiting.remove(node)
+        visited.add(node)
+        return None
+
+    for node in sorted(edges):
+        cycle = visit(node)
+        if cycle:
+            return cycle
+    return None
 
 
 def _validate_token_fallback_config(

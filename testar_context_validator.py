@@ -204,6 +204,101 @@ def test_aceita_token_fallback_desabilitado() -> None:
     assert result["errors"] == []
 
 
+def test_aceita_semantic_defaults_validos() -> None:
+    raw = _raw_snapshot()
+    raw["regras"].append(
+        {
+            "rule_group": "config",
+            "rule_name": "semantic_defaults",
+            "rule_content": {
+                "component": "semantic_defaults",
+                "rules": [
+                    {
+                        "rule_name": "default_alpha",
+                        "when_present": ["first_concept"],
+                        "when_absent": ["second_concept"],
+                        "produce": ["default_concept"],
+                        "priority": 1,
+                    }
+                ],
+            },
+            "applies_to_intents": [],
+            "validation_hint": None,
+            "severity": "info",
+            "priority": 3,
+        }
+    )
+    raw["context_counts"]["regras"] = 3
+    snapshot = normalize_context_snapshot(raw)
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "valid"
+    assert snapshot["intent_resolution"]["semantic_defaults"] == {
+        "component": "semantic_defaults",
+        "rules": [
+            {
+                "rule_name": "default_alpha",
+                "when_present": ["first_concept"],
+                "when_absent": ["second_concept"],
+                "produce": ["default_concept"],
+                "priority": 1,
+            }
+        ],
+    }
+
+
+def test_rejeita_semantic_defaults_invalidos() -> None:
+    snapshot = _valid_snapshot()
+    snapshot["component_configs"]["semantic_defaults"] = {
+        "component": "semantic_defaults",
+        "rules": [
+            {
+                "rule_name": "invalid_default",
+                "when_present": ["first_concept"],
+                "when_absent": ["first_concept"],
+                "produce": ["default_concept"],
+                "priority": True,
+            }
+        ],
+    }
+
+    result = validate_context_snapshot(snapshot)
+
+    codes = _error_codes(result)
+    assert result["status"] == "invalid"
+    assert "SEMANTIC_DEFAULT_PRESENT_ABSENT_CONFLICT" in codes
+    assert "SEMANTIC_DEFAULT_PRIORITY_INVALID" in codes
+
+
+def test_rejeita_semantic_defaults_com_ciclo() -> None:
+    snapshot = _valid_snapshot()
+    snapshot["component_configs"]["semantic_defaults"] = {
+        "component": "semantic_defaults",
+        "rules": [
+            {
+                "rule_name": "a_to_b",
+                "when_present": ["concept_a"],
+                "when_absent": [],
+                "produce": ["concept_b"],
+                "priority": 1,
+            },
+            {
+                "rule_name": "b_to_a",
+                "when_present": ["concept_b"],
+                "when_absent": [],
+                "produce": ["concept_a"],
+                "priority": 2,
+            },
+        ],
+    }
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "invalid"
+    assert "SEMANTIC_DEFAULT_CYCLE" in _error_codes(result)
+
+
 def test_rejeita_catalogo_vazio() -> None:
     snapshot = _valid_snapshot()
     snapshot["table_catalog"] = []
@@ -625,6 +720,18 @@ def main() -> None:
         (
             "aceita token fallback desabilitado",
             test_aceita_token_fallback_desabilitado,
+        ),
+        (
+            "aceita semantic defaults válidos",
+            test_aceita_semantic_defaults_validos,
+        ),
+        (
+            "rejeita semantic defaults inválidos",
+            test_rejeita_semantic_defaults_invalidos,
+        ),
+        (
+            "rejeita semantic defaults com ciclo",
+            test_rejeita_semantic_defaults_com_ciclo,
         ),
         ("rejeita catálogo vazio", test_rejeita_catalogo_vazio),
         ("rejeita tabela duplicada", test_rejeita_tabela_duplicada),

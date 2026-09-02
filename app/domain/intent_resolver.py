@@ -116,6 +116,25 @@ class IntentTokenFallbackDiagnostic(TypedDict):
     used_for_selected_intent: bool
 
 
+class SemanticDefaultRule(TypedDict):
+    rule_name: str
+    when_present: list[str]
+    when_absent: list[str]
+    produce: list[str]
+    priority: int
+
+
+class SemanticDefaultsConfig(TypedDict):
+    component: str
+    rules: list[SemanticDefaultRule]
+
+
+class SemanticDefaultsDiagnostic(TypedDict):
+    requested: bool
+    applied: list[dict[str, Any]]
+    suppressed: list[dict[str, Any]]
+
+
 class IntentCatalogTermEvaluation(TypedDict):
     """
     Resultado da avaliação de um termo configurado do catálogo.
@@ -215,6 +234,7 @@ class IntentResolutionResult(TypedDict):
     candidates: list[IntentCandidate]
     resolver_configuration: IntentResolverConfig
     token_fallback: IntentTokenFallbackDiagnostic
+    semantic_defaults: SemanticDefaultsDiagnostic
     intent_catalog: IntentCatalogDiagnostic
     resolver_version: str
 
@@ -294,6 +314,9 @@ def resolve_intent(
         )
 
     config = _validated_config(raw_config)
+    semantic_defaults_config = _validated_semantic_defaults_config(
+        intent_resolution.get("semantic_defaults", {})
+    )
     signals = [
         _validated_signal(signal, index=index)
         for index, signal in enumerate(raw_signals)
@@ -366,6 +389,10 @@ def resolve_intent(
         )
         for entry in catalog
     ]
+    semantic_defaults = _apply_semantic_defaults(
+        catalog_evaluations,
+        semantic_defaults_config,
+    )
 
     blocked_intents: set[str] = set()
     for evaluation in catalog_evaluations:
@@ -463,6 +490,7 @@ def resolve_intent(
             "configuration": deepcopy(token_fallback_config),
             "used_for_selected_intent": used_token_fallback,
         },
+        "semantic_defaults": semantic_defaults,
         "intent_catalog": {
             "available": bool(catalog),
             "entries_evaluated": len(catalog_evaluations),
@@ -533,6 +561,158 @@ def _validated_config(
         )
 
     return deepcopy(dict(value))
+
+
+def _validated_semantic_defaults_config(
+    value: Any,
+) -> SemanticDefaultsConfig | None:
+    if value in ({}, None):
+        return None
+    if not isinstance(value, Mapping):
+        raise IntentResolverInputError(
+            "intent_resolution.semantic_defaults deve ser um objeto."
+        )
+    if value.get("component") != "semantic_defaults":
+        raise IntentResolverInputError(
+            "semantic_defaults.component deve ser semantic_defaults."
+        )
+    rules = value.get("rules")
+    if not isinstance(rules, list):
+        raise IntentResolverInputError(
+            "semantic_defaults.rules deve ser uma lista."
+        )
+
+    names: set[str] = set()
+    edges: dict[str, set[str]] = {}
+    validated_rules: list[SemanticDefaultRule] = []
+    for index, raw_rule in enumerate(rules):
+        if not isinstance(raw_rule, Mapping):
+            raise IntentResolverInputError(
+                f"semantic_defaults.rules[{index}] deve ser objeto."
+            )
+        rule_name = raw_rule.get("rule_name")
+        if not _is_non_empty_text(rule_name):
+            raise IntentResolverInputError(
+                "semantic_defaults.rule_name deve ser texto não vazio."
+            )
+        rule_name_text = str(rule_name).strip()
+        rule_key = rule_name_text.casefold()
+        if rule_key in names:
+            raise IntentResolverInputError(
+                "semantic_defaults.rule_name deve ser único."
+            )
+        names.add(rule_key)
+
+        when_present = _validated_semantic_default_concept_list(
+            raw_rule.get("when_present"),
+            field_name="when_present",
+            allow_empty=False,
+        )
+        when_absent = _validated_semantic_default_concept_list(
+            raw_rule.get("when_absent"),
+            field_name="when_absent",
+            allow_empty=True,
+        )
+        produce = _validated_semantic_default_concept_list(
+            raw_rule.get("produce"),
+            field_name="produce",
+            allow_empty=False,
+        )
+        if set(item.casefold() for item in when_present) & set(
+            item.casefold() for item in when_absent
+        ):
+            raise IntentResolverInputError(
+                "semantic_defaults possui conflito present/absent."
+            )
+
+        priority = raw_rule.get("priority")
+        if (
+            not isinstance(priority, int)
+            or isinstance(priority, bool)
+            or priority < 0
+        ):
+            raise IntentResolverInputError(
+                "semantic_defaults.priority deve ser inteiro não negativo."
+            )
+
+        for concept in produce:
+            concept_key = concept.casefold()
+            edges.setdefault(concept_key, set()).update(
+                item.casefold() for item in when_present
+            )
+
+        validated_rules.append(
+            {
+                "rule_name": rule_name_text,
+                "when_present": when_present,
+                "when_absent": when_absent,
+                "produce": produce,
+                "priority": priority,
+            }
+        )
+
+    if _has_semantic_default_cycle(edges):
+        raise IntentResolverInputError(
+            "semantic_defaults não pode conter ciclos."
+        )
+    validated_rules.sort(
+        key=lambda rule: (rule["priority"], rule["rule_name"].casefold())
+    )
+    return {"component": "semantic_defaults", "rules": validated_rules}
+
+
+def _validated_semantic_default_concept_list(
+    value: Any,
+    *,
+    field_name: str,
+    allow_empty: bool,
+) -> list[str]:
+    if not isinstance(value, list):
+        raise IntentResolverInputError(
+            f"semantic_defaults.{field_name} deve ser lista."
+        )
+    if not allow_empty and not value:
+        raise IntentResolverInputError(
+            f"semantic_defaults.{field_name} deve ser não vazio."
+        )
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not _is_non_empty_text(item):
+            raise IntentResolverInputError(
+                f"semantic_defaults.{field_name} deve conter textos."
+            )
+        text = str(item).strip()
+        key = text.casefold()
+        if key in seen:
+            raise IntentResolverInputError(
+                f"semantic_defaults.{field_name} contém duplicatas."
+            )
+        seen.add(key)
+        result.append(text)
+    return result
+
+
+def _has_semantic_default_cycle(
+    edges: Mapping[str, set[str]],
+) -> bool:
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(node: str) -> bool:
+        if node in visiting:
+            return True
+        if node in visited:
+            return False
+        visiting.add(node)
+        for dependency in sorted(edges.get(node, set())):
+            if visit(dependency):
+                return True
+        visiting.remove(node)
+        visited.add(node)
+        return False
+
+    return any(visit(node) for node in sorted(edges))
 
 
 def _validated_signal(
@@ -1050,6 +1230,166 @@ def _evaluate_catalog_rule(
         ),
         "concepts": concept_evaluations,
     }
+
+
+def _apply_semantic_defaults(
+    catalog_evaluations: list[IntentCatalogEntryEvaluation],
+    config: SemanticDefaultsConfig | None,
+) -> SemanticDefaultsDiagnostic:
+    if config is None:
+        return {"requested": False, "applied": [], "suppressed": []}
+
+    explicit_concepts = _explicitly_satisfied_concept_names(
+        catalog_evaluations
+    )
+    applied: list[dict[str, Any]] = []
+    suppressed: list[dict[str, Any]] = []
+    produced_concepts: dict[str, dict[str, Any]] = {}
+
+    for rule in config["rules"]:
+        present = {item.casefold() for item in rule["when_present"]}
+        absent = {item.casefold() for item in rule["when_absent"]}
+        missing_present = sorted(present - explicit_concepts)
+        present_absent = sorted(absent & explicit_concepts)
+        if missing_present or present_absent:
+            suppressed.append(
+                {
+                    "rule_name": rule["rule_name"],
+                    "reason": (
+                        "when_present_missing"
+                        if missing_present
+                        else "when_absent_present"
+                    ),
+                    "missing_present": missing_present,
+                    "present_absent": present_absent,
+                    "priority": rule["priority"],
+                }
+            )
+            continue
+
+        for concept in rule["produce"]:
+            concept_key = concept.casefold()
+            if concept_key in explicit_concepts:
+                suppressed.append(
+                    {
+                        "rule_name": rule["rule_name"],
+                        "reason": "concept_already_explicit",
+                        "concept_name": concept,
+                        "priority": rule["priority"],
+                    }
+                )
+                continue
+            if concept_key in produced_concepts:
+                suppressed.append(
+                    {
+                        "rule_name": rule["rule_name"],
+                        "reason": "equivalent_default_already_produced",
+                        "concept_name": concept,
+                        "priority": rule["priority"],
+                    }
+                )
+                continue
+            produced_concepts[concept_key] = {
+                "concept_name": concept,
+                "source": "semantic_default",
+                "rule_name": rule["rule_name"],
+                "priority": rule["priority"],
+                "explicit_vs_default": "default",
+                "produced_because": {
+                    "present": list(rule["when_present"]),
+                    "absent": list(rule["when_absent"]),
+                },
+            }
+            applied.append(
+                {
+                    "rule_name": rule["rule_name"],
+                    "concept_name": concept,
+                    "priority": rule["priority"],
+                    "explicit_vs_default": "default",
+                }
+            )
+
+    if produced_concepts:
+        _apply_default_concepts_to_catalog_evaluations(
+            catalog_evaluations,
+            produced_concepts,
+        )
+
+    return {"requested": True, "applied": applied, "suppressed": suppressed}
+
+
+def _explicitly_satisfied_concept_names(
+    catalog_evaluations: list[IntentCatalogEntryEvaluation],
+) -> set[str]:
+    concepts: set[str] = set()
+    for entry in catalog_evaluations:
+        for rule in entry["rules"]:
+            for concept in rule["concepts"]:
+                if concept["satisfied"]:
+                    concepts.add(concept["concept_name"].casefold())
+    return concepts
+
+
+def _apply_default_concepts_to_catalog_evaluations(
+    catalog_evaluations: list[IntentCatalogEntryEvaluation],
+    produced_concepts: Mapping[str, dict[str, Any]],
+) -> None:
+    for entry in catalog_evaluations:
+        for rule in entry["rules"]:
+            changed = False
+            for concept in rule["concepts"]:
+                concept_key = concept["concept_name"].casefold()
+                evidence = produced_concepts.get(concept_key)
+                if evidence is None or concept["satisfied"]:
+                    continue
+                concept["satisfied"] = True
+                concept["semantic_signals"].append(deepcopy(evidence))
+                changed = True
+            if changed:
+                rule["matched_concept_count"] = sum(
+                    1
+                    for concept in rule["concepts"]
+                    if concept["satisfied"]
+                )
+                rule["satisfied"] = (
+                    rule["matched_concept_count"]
+                    >= rule["minimum_concept_matches"]
+                )
+        _refresh_catalog_entry_scores(entry)
+
+
+def _refresh_catalog_entry_scores(
+    entry: IntentCatalogEntryEvaluation,
+) -> None:
+    require_rules = [
+        rule for rule in entry["rules"] if rule["effect"] == "require"
+    ]
+    satisfied_require_rules = [
+        rule for rule in require_rules if rule["satisfied"]
+    ]
+    excluded = any(
+        rule["effect"] == "exclude" and rule["satisfied"]
+        for rule in entry["rules"]
+    )
+    positive_score = sum(
+        float(rule["score"] or 0.0)
+        for rule in entry["rules"]
+        if rule["effect"] == "positive_score" and rule["satisfied"]
+    )
+    negative_score = sum(
+        float(rule["score"] or 0.0)
+        for rule in entry["rules"]
+        if rule["effect"] == "negative_score" and rule["satisfied"]
+    )
+    entry["eligible"] = (
+        len(satisfied_require_rules) == len(require_rules)
+        and not excluded
+    )
+    entry["excluded"] = excluded
+    entry["satisfied_require_rule_count"] = len(satisfied_require_rules)
+    entry["positive_score"] = positive_score
+    entry["negative_score"] = negative_score
+    entry["score_delta"] = positive_score - negative_score
 
 
 def _evaluate_catalog_concept(

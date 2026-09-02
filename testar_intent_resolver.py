@@ -111,12 +111,75 @@ def _context(
     *,
     config: dict | None = None,
     intent_catalog: list[dict] | None = None,
+    semantic_defaults: dict | None = None,
 ) -> dict:
-    return {
+    context = {
         "config": config or _config(),
         "signals": signals,
         "intent_catalog": intent_catalog or [],
     }
+    if semantic_defaults is not None:
+        context["semantic_defaults"] = semantic_defaults
+    return context
+
+
+def _semantic_defaults(*rules: list[dict]) -> dict:
+    return {
+        "component": "semantic_defaults",
+        "rules": list(rules),
+    }
+
+
+def _default_rule(
+    *,
+    rule_name: str = "default_rule",
+    when_present: list[str] | None = None,
+    when_absent: list[str] | None = None,
+    produce: list[str] | None = None,
+    priority: int = 1,
+) -> dict:
+    return {
+        "rule_name": rule_name,
+        "when_present": when_present or ["first_concept"],
+        "when_absent": when_absent or [],
+        "produce": produce or ["default_concept"],
+        "priority": priority,
+    }
+
+
+def _first_concept_requirement() -> dict:
+    return _rule(
+        rule_name="requires_first_concept",
+        effect="require",
+        concepts=[
+            _concept(
+                concept_name="first_concept",
+                terms=["alpha"],
+            )
+        ],
+    )
+
+
+def _blocking_concept_requirement() -> dict:
+    return _rule(
+        rule_name="requires_blocking_concept",
+        effect="require",
+        concepts=[
+            _concept(
+                concept_name="blocking_concept",
+                terms=["beta"],
+            )
+        ],
+    )
+
+
+def _find_evaluated_concept(result: dict, concept_name: str) -> dict:
+    for entry in result["intent_catalog"]["evaluations"]:
+        for rule in entry["rules"]:
+            for concept in rule["concepts"]:
+                if concept["concept_name"] == concept_name:
+                    return concept
+    raise AssertionError(f"Conceito não encontrado: {concept_name}")
 
 
 def test_aplica_todos_os_modos_diretos() -> None:
@@ -490,6 +553,447 @@ def test_catalogo_ausente_preserva_comportamento() -> None:
         "contributed_score_to_selected_intent": False,
         "evaluations": [],
     }
+    assert result["semantic_defaults"] == {
+        "requested": False,
+        "applied": [],
+        "suppressed": [],
+    }
+
+
+def test_semantic_default_aplica_com_presenca_e_ausencia() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _first_concept_requirement(),
+                _rule(
+                    rule_name="requires_default",
+                    effect="require",
+                    concepts=[
+                        _concept(
+                            concept_name="default_concept",
+                            terms=["delta"],
+                        )
+                    ],
+                ),
+                _rule(
+                    rule_name="scores_default",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="default_concept",
+                            terms=["delta"],
+                        )
+                    ],
+                    score=120,
+                ),
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha",
+        _context(
+            [],
+            intent_catalog=catalog,
+            semantic_defaults=_semantic_defaults(
+                _default_rule(
+                    when_present=["first_concept"],
+                    when_absent=["blocking_concept"],
+                    produce=["default_concept"],
+                )
+            ),
+        ),
+    )
+
+    assert result["applied"] is True
+    assert result["intent"] == "generic_intent"
+    assert result["best_candidate"]["score"] == 120
+    defaults = result["semantic_defaults"]
+    assert defaults["requested"] is True
+    assert defaults["applied"][0]["concept_name"] == "default_concept"
+    default_concept = _find_evaluated_concept(result, "default_concept")
+    assert default_concept["satisfied"] is True
+    assert default_concept["terms"][0]["matched"] is False
+    assert default_concept["semantic_signals"][0]["source"] == (
+        "semantic_default"
+    )
+    assert default_concept["semantic_signals"][0][
+        "explicit_vs_default"
+    ] == "default"
+
+
+def test_semantic_default_nao_aplica_sem_presenca() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _first_concept_requirement(),
+                _rule(
+                    rule_name="scores_default",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="default_concept",
+                            terms=["delta"],
+                        )
+                    ],
+                    score=120,
+                )
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "omega",
+        _context(
+            [],
+            intent_catalog=catalog,
+            semantic_defaults=_semantic_defaults(_default_rule()),
+        ),
+    )
+
+    assert result["applied"] is False
+    assert result["semantic_defaults"]["applied"] == []
+    assert result["semantic_defaults"]["suppressed"][0]["reason"] == (
+        "when_present_missing"
+    )
+
+
+def test_semantic_default_nao_aplica_com_absencia_explicita() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _first_concept_requirement(),
+                _blocking_concept_requirement(),
+                _rule(
+                    rule_name="scores_default",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="default_concept",
+                            terms=["delta"],
+                        )
+                    ],
+                    score=120,
+                )
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha beta",
+        _context(
+            [],
+            intent_catalog=catalog,
+            semantic_defaults=_semantic_defaults(
+                _default_rule(
+                    when_present=["first_concept"],
+                    when_absent=["blocking_concept"],
+                )
+            ),
+        ),
+    )
+
+    assert result["applied"] is False
+    assert result["semantic_defaults"]["applied"] == []
+    assert result["semantic_defaults"]["suppressed"][0]["reason"] == (
+        "when_absent_present"
+    )
+
+
+def test_semantic_default_nao_duplica_conceito_explicito() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _first_concept_requirement(),
+                _rule(
+                    rule_name="scores_explicit",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="default_concept",
+                            terms=["gamma"],
+                        )
+                    ],
+                    score=120,
+                )
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha gamma",
+        _context(
+            [],
+            intent_catalog=catalog,
+            semantic_defaults=_semantic_defaults(_default_rule()),
+        ),
+    )
+
+    assert result["applied"] is True
+    assert result["semantic_defaults"]["applied"] == []
+    assert result["semantic_defaults"]["suppressed"][0]["reason"] == (
+        "concept_already_explicit"
+    )
+
+
+def test_semantic_default_participa_de_negative_score_e_exclude() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="intent_a",
+            rules=[
+                _rule(
+                    rule_name="base_score",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="first_concept",
+                            terms=["alpha"],
+                        )
+                    ],
+                    score=160,
+                ),
+                _rule(
+                    rule_name="default_penalty",
+                    effect="negative_score",
+                    concepts=[
+                        _concept(
+                            concept_name="default_concept",
+                            terms=["delta"],
+                        )
+                    ],
+                    score=40,
+                ),
+            ],
+        ),
+        _catalog_entry(
+            intent_name="intent_b",
+            rules=[
+                _rule(
+                    rule_name="base_score",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="first_concept",
+                            terms=["alpha"],
+                        )
+                    ],
+                    score=160,
+                ),
+                _rule(
+                    rule_name="default_exclude",
+                    effect="exclude",
+                    concepts=[
+                        _concept(
+                            concept_name="default_concept",
+                            terms=["delta"],
+                        )
+                    ],
+                ),
+            ],
+        ),
+    ]
+
+    result = resolve_intent(
+        "alpha",
+        _context(
+            [],
+            config=_config(ambiguity_margin=0),
+            intent_catalog=catalog,
+            semantic_defaults=_semantic_defaults(_default_rule()),
+        ),
+    )
+
+    assert result["applied"] is True
+    assert result["intent"] == "intent_a"
+    assert result["best_candidate"]["score"] == 120
+    intent_b = [
+        item
+        for item in result["intent_catalog"]["evaluations"]
+        if item["intent_name"] == "intent_b"
+    ][0]
+    assert intent_b["excluded"] is True
+
+
+def test_semantic_defaults_deterministicos_compativeis() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _first_concept_requirement(),
+                _rule(
+                    rule_name="scores_defaults",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="default_a",
+                            terms=["delta"],
+                        ),
+                        _concept(
+                            concept_name="default_b",
+                            terms=["epsilon"],
+                        ),
+                    ],
+                    minimum_concept_matches=2,
+                    score=120,
+                )
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha",
+        _context(
+            [],
+            intent_catalog=catalog,
+            semantic_defaults=_semantic_defaults(
+                _default_rule(
+                    rule_name="second_rule",
+                    produce=["default_b"],
+                    priority=2,
+                ),
+                _default_rule(
+                    rule_name="first_rule",
+                    produce=["default_a"],
+                    priority=1,
+                ),
+            ),
+        ),
+    )
+
+    assert result["applied"] is True
+    assert [
+        item["rule_name"] for item in result["semantic_defaults"]["applied"]
+    ] == ["first_rule", "second_rule"]
+
+
+def test_semantic_defaults_invalidos_falham_fechado() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _rule(
+                    rule_name="scores_default",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="default_concept",
+                            terms=["delta"],
+                        )
+                    ],
+                    score=120,
+                )
+            ],
+        )
+    ]
+
+    try:
+        resolve_intent(
+            "alpha",
+            _context(
+                [],
+                intent_catalog=catalog,
+                semantic_defaults=_semantic_defaults(
+                    _default_rule(priority=True),
+                ),
+            ),
+        )
+    except IntentResolverInputError as error:
+        assert "priority" in str(error)
+    else:
+        raise AssertionError("Era esperado IntentResolverInputError.")
+
+
+def test_semantic_defaults_equivalentes_produzem_uma_vez() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _first_concept_requirement(),
+                _rule(
+                    rule_name="scores_default",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="default_concept",
+                            terms=["delta"],
+                        )
+                    ],
+                    score=120,
+                ),
+            ],
+        )
+    ]
+
+    result = resolve_intent(
+        "alpha",
+        _context(
+            [],
+            intent_catalog=catalog,
+            semantic_defaults=_semantic_defaults(
+                _default_rule(rule_name="first_rule", priority=1),
+                _default_rule(rule_name="second_rule", priority=2),
+            ),
+        ),
+    )
+
+    assert result["applied"] is True
+    assert len(result["semantic_defaults"]["applied"]) == 1
+    assert result["semantic_defaults"]["applied"][0]["rule_name"] == (
+        "first_rule"
+    )
+    assert result["semantic_defaults"]["suppressed"][0]["reason"] == (
+        "equivalent_default_already_produced"
+    )
+
+
+def test_semantic_defaults_rejeitam_ciclo() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="generic_intent",
+            rules=[
+                _rule(
+                    rule_name="score",
+                    effect="positive_score",
+                    concepts=[
+                        _concept(
+                            concept_name="concept_a",
+                            terms=["alpha"],
+                        )
+                    ],
+                    score=120,
+                )
+            ],
+        )
+    ]
+
+    try:
+        resolve_intent(
+            "alpha",
+            _context(
+                [],
+                intent_catalog=catalog,
+                semantic_defaults=_semantic_defaults(
+                    _default_rule(
+                        rule_name="a_to_b",
+                        when_present=["concept_a"],
+                        produce=["concept_b"],
+                    ),
+                    _default_rule(
+                        rule_name="b_to_a",
+                        when_present=["concept_b"],
+                        produce=["concept_a"],
+                    ),
+                ),
+            ),
+        )
+    except IntentResolverInputError as error:
+        assert "ciclos" in str(error)
+    else:
+        raise AssertionError("Era esperado IntentResolverInputError.")
 
 
 def test_aplica_positive_score_sem_sinal_simples() -> None:
@@ -1232,6 +1736,42 @@ def main() -> None:
         (
             "catálogo ausente preserva comportamento",
             test_catalogo_ausente_preserva_comportamento,
+        ),
+        (
+            "semantic default aplica com presença e ausência",
+            test_semantic_default_aplica_com_presenca_e_ausencia,
+        ),
+        (
+            "semantic default não aplica sem presença",
+            test_semantic_default_nao_aplica_sem_presenca,
+        ),
+        (
+            "semantic default não aplica com ausência explícita",
+            test_semantic_default_nao_aplica_com_absencia_explicita,
+        ),
+        (
+            "semantic default não duplica conceito explícito",
+            test_semantic_default_nao_duplica_conceito_explicito,
+        ),
+        (
+            "semantic default participa de negative e exclude",
+            test_semantic_default_participa_de_negative_score_e_exclude,
+        ),
+        (
+            "semantic defaults compatíveis são determinísticos",
+            test_semantic_defaults_deterministicos_compativeis,
+        ),
+        (
+            "semantic defaults inválidos falham fechado",
+            test_semantic_defaults_invalidos_falham_fechado,
+        ),
+        (
+            "semantic defaults equivalentes produzem uma vez",
+            test_semantic_defaults_equivalentes_produzem_uma_vez,
+        ),
+        (
+            "semantic defaults rejeitam ciclo",
+            test_semantic_defaults_rejeitam_ciclo,
         ),
         (
             "aplica positive_score sem sinal simples",
