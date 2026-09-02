@@ -33,6 +33,81 @@ def _provider_result(output_text):
     }
 
 
+def _comparison_query_plan(
+    *,
+    grouped: bool = False,
+    same_source: bool = False,
+    join_semantics: str | None = None,
+    operand_refs: list[str] | None = None,
+    multiple_metric_sources: bool | None = None,
+) -> dict:
+    query_plan = _query_plan()
+    second_table = (
+        "schema_test.fact_a" if same_source else "schema_test.fact_b"
+    )
+    query_plan["planning_context"]["planned_metrics"] = [
+        {
+            "metric_ref": "metric-a",
+            "metric_concept": "amount",
+            "target_table": "schema_test.fact_a",
+            "target_column": "metric_a",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "metric_binding",
+            "binding_ref": "binding-a",
+            "binding_conditions": {"when_present": ["mode_a"], "when_absent": []},
+            "binding_source": "entity_alias",
+        },
+        {
+            "metric_ref": "metric-b",
+            "metric_concept": "amount",
+            "target_table": second_table,
+            "target_column": "metric_b",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "metric_binding",
+            "binding_ref": "binding-b",
+            "binding_conditions": {"when_present": ["mode_b"], "when_absent": []},
+            "binding_source": "entity_alias",
+        },
+    ]
+    if grouped:
+        query_plan["planning_context"]["detected_dimensions"] = [
+            {
+                "canonical_value": "region",
+                "target_table": "schema_test.dim_region",
+                "target_column": "region_key",
+                "grouping_requested": True,
+                "source": "entity_alias",
+            }
+        ]
+    operation = {
+        "operation_type": "comparison",
+        "canonical_value": "comparison",
+        "output_behavior": "side_by_side",
+        "combination_strategy": "aggregate_then_combine",
+        "operand_metric_refs": operand_refs or ["metric-a", "metric-b"],
+        "multiple_metric_sources": (
+            (not same_source)
+            if multiple_metric_sources is None
+            else multiple_metric_sources
+        ),
+        "binding_cardinality": {
+            "mode": "multiple",
+            "minimum": 2,
+            "maximum": 2,
+            "same_metric_concept": True,
+            "distinct_bindings": True,
+        },
+        "detection_source": "intent_semantic_evidence",
+        "mapping_source": "entity_alias",
+    }
+    if join_semantics is not None:
+        operation["join_semantics"] = join_semantics
+    query_plan["planning_context"]["analytical_operations"] = [operation]
+    return query_plan
+
+
 def test_constroi_requisicao_do_query_plan() -> None:
     request = build_sql_generation_request(_query_plan())
 
@@ -243,6 +318,268 @@ def test_planned_metric_com_aggregate_nao_e_propagada() -> None:
     request = build_sql_generation_request(query_plan)
 
     assert request["generation_context"]["planned_metrics"] == []
+
+
+def test_comparison_multi_source_sem_dimensao_entra_no_contexto() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            join_semantics="preserve_all_operand_categories",
+        )
+    )
+
+    operation = request["generation_context"]["analytical_operations"][0]
+
+    assert operation["operation_type"] == "comparison"
+    assert operation["operand_metric_refs"] == ["metric-a", "metric-b"]
+    assert operation["multiple_metric_sources"] is True
+    assert operation["combine_strategy"] == "cross_join"
+    assert request["generation_context"]["grouping_dimensions"] == []
+
+
+def test_comparison_multi_source_com_dimensao_entra_no_contexto() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            grouped=True,
+            join_semantics="preserve_all_operand_categories",
+        )
+    )
+
+    context = request["generation_context"]
+    operation = context["analytical_operations"][0]
+
+    assert context["grouping_dimensions"][0]["canonical_value"] == "region"
+    assert operation["operation_type"] == "comparison"
+    assert operation["join_semantics"] == "preserve_all_operand_categories"
+
+
+def test_comparison_operand_refs_resolvem_planned_metrics_exatamente() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            join_semantics="preserve_all_operand_categories",
+        )
+    )
+    context = request["generation_context"]
+
+    planned_refs = {
+        metric["metric_ref"] for metric in context["planned_metrics"]
+    }
+    operation_refs = set(
+        context["analytical_operations"][0]["operand_metric_refs"]
+    )
+
+    assert operation_refs == planned_refs
+
+
+def test_comparison_ref_inexistente_falha_fechado() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            join_semantics="preserve_all_operand_categories",
+            operand_refs=["metric-a", "metric-missing"],
+        )
+    )
+
+    assert request["generation_context"]["analytical_operations"] == []
+    assert "comparison_operations" not in [
+        instruction["name"] for instruction in request["instructions"]
+    ]
+
+
+def test_comparison_duas_tabelas_com_flag_false_falha_fechado() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            join_semantics="preserve_all_operand_categories",
+            multiple_metric_sources=False,
+        )
+    )
+
+    assert request["generation_context"]["analytical_operations"] == []
+
+
+def test_comparison_uma_tabela_com_flag_true_falha_fechado() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            same_source=True,
+            multiple_metric_sources=True,
+        )
+    )
+
+    assert request["generation_context"]["analytical_operations"] == []
+
+
+def test_comparison_operand_sem_target_table_falha_fechado() -> None:
+    query_plan = _comparison_query_plan(
+        same_source=True,
+        multiple_metric_sources=False,
+    )
+    query_plan["planning_context"]["planned_metrics"][1].pop(
+        "target_table",
+        None,
+    )
+
+    request = build_sql_generation_request(query_plan)
+
+    assert request["generation_context"]["analytical_operations"] == []
+
+
+def test_comparison_operand_target_table_vazio_falha_fechado() -> None:
+    query_plan = _comparison_query_plan(
+        same_source=True,
+        multiple_metric_sources=False,
+    )
+    query_plan["planning_context"]["planned_metrics"][1][
+        "target_table"
+    ] = ""
+
+    request = build_sql_generation_request(query_plan)
+
+    assert request["generation_context"]["analytical_operations"] == []
+
+
+def test_comparison_duas_tabelas_com_flag_true_e_valida() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            join_semantics="preserve_all_operand_categories",
+            multiple_metric_sources=True,
+        )
+    )
+
+    assert request["generation_context"]["analytical_operations"][0][
+        "multiple_metric_sources"
+    ] is True
+
+
+def test_comparison_uma_tabela_com_flag_false_e_valida() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            same_source=True,
+            multiple_metric_sources=False,
+        )
+    )
+
+    assert request["generation_context"]["analytical_operations"][0][
+        "multiple_metric_sources"
+    ] is False
+
+
+def test_comparison_multi_source_agrupada_sem_join_semantics_falha_fechado() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(grouped=True)
+    )
+
+    assert request["generation_context"]["analytical_operations"] == []
+
+
+def test_comparison_join_semantics_desconhecida_falha_fechado() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(join_semantics="unsupported_strategy")
+    )
+
+    assert request["generation_context"]["analytical_operations"] == []
+
+
+def test_comparison_preserve_all_orienta_preservacao_bilateral() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            grouped=True,
+            join_semantics="preserve_all_operand_categories",
+        )
+    )
+    serialized = repr(request)
+
+    assert "preserve_all_operand_categories" in serialized
+    assert "FULL OUTER JOIN" in serialized
+
+
+def test_comparison_sem_dimensao_nao_vira_full_outer_join_por_preserve_all() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            join_semantics="preserve_all_operand_categories",
+        )
+    )
+    operation = request["generation_context"]["analytical_operations"][0]
+    serialized = repr(request)
+
+    assert operation["combine_strategy"] == "cross_join"
+    assert "FULL OUTER JOIN" in serialized
+    assert "combine os operands agregados com CROSS JOIN" in serialized
+
+
+def test_comparison_common_only_orienta_intersecao() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            grouped=True,
+            join_semantics="common_operand_categories_only",
+        )
+    )
+    serialized = repr(request)
+
+    assert "common_operand_categories_only" in serialized
+    assert "INNER JOIN" in serialized
+
+
+def test_comparison_same_source_nao_forca_cte_multi_source() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(same_source=True)
+    )
+    operation = request["generation_context"]["analytical_operations"][0]
+
+    assert operation["multiple_metric_sources"] is False
+    assert operation["combine_strategy"] == ""
+
+
+def test_comparison_nao_solicita_delta_ou_percentual() -> None:
+    request = build_sql_generation_request(
+        _comparison_query_plan(
+            join_semantics="preserve_all_operand_categories",
+        )
+    )
+    serialized = repr(request).casefold()
+
+    assert "side_by_side" in serialized
+    assert "nao calcule diferenca" in serialized
+    assert "percentual" in serialized
+    assert "metrica derivada" in serialized
+
+
+def test_comparison_preserva_regressao_ranking() -> None:
+    query_plan = _query_plan()
+    query_plan["planning_context"]["planned_metrics"] = [
+        {
+            "metric_ref": "metric-synthetic",
+            "metric_concept": "amount",
+            "target_table": "schema_test.fact_metrics",
+            "target_column": "measure_value",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+    query_plan["planning_context"]["analytical_operations"] = [
+        {
+            "operation_type": "ranking",
+            "canonical_value": "ranking",
+            "direction": "descending",
+            "requested_limit": None,
+            "metric_ref": "metric-synthetic",
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+
+    request = build_sql_generation_request(query_plan)
+
+    assert request["generation_context"]["analytical_operations"][0][
+        "operation_type"
+    ] == "ranking"
+
+
+def test_contexto_sem_comparison_sem_regressao() -> None:
+    request = build_sql_generation_request(_query_plan())
+
+    assert request["generation_context"]["analytical_operations"] == []
+    assert "comparison_operations" not in [
+        instruction["name"] for instruction in request["instructions"]
+    ]
 
 
 def test_requisicao_ignora_dimensao_sem_agrupamento_ou_incompleta() -> None:
@@ -492,6 +829,82 @@ def main() -> None:
         (
             "planned metric aggregate nao propagado",
             test_planned_metric_com_aggregate_nao_e_propagada,
+        ),
+        (
+            "comparison multi-source sem dimensao",
+            test_comparison_multi_source_sem_dimensao_entra_no_contexto,
+        ),
+        (
+            "comparison multi-source com dimensao",
+            test_comparison_multi_source_com_dimensao_entra_no_contexto,
+        ),
+        (
+            "comparison operand refs",
+            test_comparison_operand_refs_resolvem_planned_metrics_exatamente,
+        ),
+        (
+            "comparison ref inexistente",
+            test_comparison_ref_inexistente_falha_fechado,
+        ),
+        (
+            "comparison duas tabelas flag false",
+            test_comparison_duas_tabelas_com_flag_false_falha_fechado,
+        ),
+        (
+            "comparison uma tabela flag true",
+            test_comparison_uma_tabela_com_flag_true_falha_fechado,
+        ),
+        (
+            "comparison operand sem target table",
+            test_comparison_operand_sem_target_table_falha_fechado,
+        ),
+        (
+            "comparison operand target table vazio",
+            test_comparison_operand_target_table_vazio_falha_fechado,
+        ),
+        (
+            "comparison duas tabelas flag true",
+            test_comparison_duas_tabelas_com_flag_true_e_valida,
+        ),
+        (
+            "comparison uma tabela flag false",
+            test_comparison_uma_tabela_com_flag_false_e_valida,
+        ),
+        (
+            "comparison agrupada sem join semantics",
+            test_comparison_multi_source_agrupada_sem_join_semantics_falha_fechado,
+        ),
+        (
+            "comparison join semantics desconhecida",
+            test_comparison_join_semantics_desconhecida_falha_fechado,
+        ),
+        (
+            "comparison preservacao bilateral",
+            test_comparison_preserve_all_orienta_preservacao_bilateral,
+        ),
+        (
+            "comparison sem dimensao cross join",
+            test_comparison_sem_dimensao_nao_vira_full_outer_join_por_preserve_all,
+        ),
+        (
+            "comparison intersecao",
+            test_comparison_common_only_orienta_intersecao,
+        ),
+        (
+            "comparison same-source",
+            test_comparison_same_source_nao_forca_cte_multi_source,
+        ),
+        (
+            "comparison sem delta percentual",
+            test_comparison_nao_solicita_delta_ou_percentual,
+        ),
+        (
+            "comparison regressao ranking",
+            test_comparison_preserva_regressao_ranking,
+        ),
+        (
+            "comparison ausente regressao",
+            test_contexto_sem_comparison_sem_regressao,
         ),
         (
             "ignora dimensao sem agrupamento ou incompleta",

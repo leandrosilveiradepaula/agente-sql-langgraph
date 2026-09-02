@@ -47,12 +47,18 @@ class GroupingDimension(TypedDict):
     source: str
 
 
-class AnalyticalOperation(TypedDict):
+class AnalyticalOperation(TypedDict, total=False):
     operation_type: str
     canonical_value: str
     direction: str
     requested_limit: int | None
     metric_ref: str
+    operand_metric_refs: list[str]
+    output_behavior: str
+    combination_strategy: str
+    multiple_metric_sources: bool
+    join_semantics: str
+    combine_strategy: str
     binding_cardinality: dict[str, Any]
     detection_source: str
     mapping_source: str
@@ -256,11 +262,8 @@ def build_sql_generation_request(
     )
     analytical_operations = _analytical_operations(
         planning_context.get("analytical_operations", []),
-        valid_metric_refs={
-            metric["metric_ref"]
-            for metric in planned_metrics
-            if metric.get("metric_ref")
-        },
+        planned_metrics=planned_metrics,
+        has_grouping_dimensions=bool(grouping_dimensions),
     )
     instructions: list[SqlGenerationInstruction] = [
         {
@@ -293,6 +296,38 @@ def build_sql_generation_request(
                     "planned_metric tiver aggregate null, nao invente a "
                     "agregacao a partir do contrato de ranking. Nao "
                     "adicione LIMIT quando requested_limit for null."
+                ),
+            }
+        )
+    if any(
+        operation.get("operation_type") == "comparison"
+        for operation in analytical_operations
+    ):
+        instructions.append(
+            {
+                "name": "comparison_operations",
+                "content": (
+                    "Quando analytical_operations incluir comparison, gere "
+                    "somente uma comparacao side_by_side entre os operands "
+                    "referenciados por operand_metric_refs. Cada operand_ref "
+                    "deve corresponder exatamente a uma planned_metric. Nao "
+                    "calcule diferenca, percentual, razao, baseline ou "
+                    "metrica derivada. Para multiple_metric_sources=true sem "
+                    "grouping_dimensions, agregue cada operand em escopo/CTE "
+                    "separado como resultado single-row e combine os operands "
+                    "agregados com CROSS JOIN; e proibido join direto entre "
+                    "source tables de metricas antes da agregacao. Para "
+                    "multiple_metric_sources=true com grouping_dimensions, "
+                    "agregue cada operand independentemente no mesmo grain "
+                    "logico, preserve todas as dimensoes planejadas e combine "
+                    "os operands agregados conforme join_semantics. "
+                    "join_semantics "
+                    "preserve_all_operand_categories exige preservacao "
+                    "bilateral das categorias, compativel com FULL OUTER "
+                    "JOIN entre operands agregados. join_semantics "
+                    "common_operand_categories_only exige somente categorias "
+                    "comuns, compativel com INNER JOIN entre operands "
+                    "agregados."
                 ),
             }
         )
@@ -797,64 +832,197 @@ def _grouping_dimensions(value: Any) -> list[GroupingDimension]:
 def _analytical_operations(
     value: Any,
     *,
-    valid_metric_refs: set[str],
+    planned_metrics: list[PlannedMetric],
+    has_grouping_dimensions: bool,
 ) -> list[AnalyticalOperation]:
     if not isinstance(value, list):
         raise SqlGenerationInputError(
             "analytical_operations deve ser lista."
         )
     output: list[AnalyticalOperation] = []
+    metrics_by_ref = _metrics_by_ref(planned_metrics)
     for item in value:
         if not isinstance(item, Mapping):
             continue
         operation_type = _optional_clean_text(item.get("operation_type"))
-        direction = _optional_clean_text(item.get("direction"))
-        if operation_type != "ranking":
-            continue
-        if direction not in {"ascending", "descending"}:
-            continue
-        requested_limit = item.get("requested_limit")
-        if requested_limit is not None and (
-            isinstance(requested_limit, bool)
-            or not isinstance(requested_limit, int)
-            or requested_limit <= 0
-        ):
-            continue
-        canonical_value = _optional_clean_text(
-            item.get("canonical_value")
-        )
-        if canonical_value != operation_type:
-            continue
-        metric_ref = _optional_clean_text(item.get("metric_ref"))
-        if metric_ref and metric_ref not in valid_metric_refs:
-            continue
-        output.append(
-            {
-                "operation_type": operation_type,
-                "canonical_value": canonical_value,
-                "direction": direction,
-                "requested_limit": requested_limit,
-                "metric_ref": metric_ref,
-                "binding_cardinality": _binding_cardinality(
-                    item.get("binding_cardinality")
-                ),
-                "detection_source": _optional_clean_text(
-                    item.get("detection_source")
-                ),
-                "mapping_source": _optional_clean_text(
-                    item.get("mapping_source")
-                ),
-            }
-        )
+        operation: AnalyticalOperation | None = None
+        if operation_type == "ranking":
+            operation = _ranking_operation(item, metrics_by_ref)
+        elif operation_type == "comparison":
+            operation = _comparison_operation(
+                item,
+                metrics_by_ref,
+                has_grouping_dimensions=has_grouping_dimensions,
+            )
+        if operation is not None:
+            output.append(operation)
     output.sort(
         key=lambda operation: (
             operation["operation_type"],
-            operation["direction"],
+            operation.get("direction", ""),
+            operation.get("output_behavior", ""),
+            operation.get("combination_strategy", ""),
             operation["canonical_value"].casefold(),
-            operation["metric_ref"].casefold(),
-            operation["requested_limit"] or 0,
+            operation.get("metric_ref", "").casefold(),
+            ",".join(operation.get("operand_metric_refs", [])),
+            operation.get("requested_limit") or 0,
         )
     )
+    return output
+
+
+def _ranking_operation(
+    item: Mapping[str, Any],
+    metrics_by_ref: Mapping[str, PlannedMetric],
+) -> AnalyticalOperation | None:
+    direction = _optional_clean_text(item.get("direction"))
+    if direction not in {"ascending", "descending"}:
+        return None
+    requested_limit = item.get("requested_limit")
+    if not _valid_requested_limit(requested_limit):
+        return None
+    canonical_value = _optional_clean_text(item.get("canonical_value"))
+    if canonical_value != "ranking":
+        return None
+    metric_ref = _optional_clean_text(item.get("metric_ref"))
+    if metric_ref and metric_ref not in metrics_by_ref:
+        return None
+    return {
+        "operation_type": "ranking",
+        "canonical_value": canonical_value,
+        "direction": direction,
+        "requested_limit": requested_limit,
+        "metric_ref": metric_ref,
+        "binding_cardinality": _binding_cardinality(
+            item.get("binding_cardinality")
+        ),
+        "detection_source": _optional_clean_text(
+            item.get("detection_source")
+        ),
+        "mapping_source": _optional_clean_text(item.get("mapping_source")),
+    }
+
+
+def _comparison_operation(
+    item: Mapping[str, Any],
+    metrics_by_ref: Mapping[str, PlannedMetric],
+    *,
+    has_grouping_dimensions: bool,
+) -> AnalyticalOperation | None:
+    canonical_value = _optional_clean_text(item.get("canonical_value"))
+    if canonical_value != "comparison":
+        return None
+    if _optional_clean_text(item.get("output_behavior")) != "side_by_side":
+        return None
+    if (
+        _optional_clean_text(item.get("combination_strategy"))
+        != "aggregate_then_combine"
+    ):
+        return None
+    operand_metric_refs = _operand_metric_refs(item.get("operand_metric_refs"))
+    if not operand_metric_refs:
+        return None
+    if len(operand_metric_refs) != len(set(operand_metric_refs)):
+        return None
+    if any(ref not in metrics_by_ref for ref in operand_metric_refs):
+        return None
+    operand_metrics = [metrics_by_ref[ref] for ref in operand_metric_refs]
+    metric_sources: list[str] = []
+    for metric in operand_metrics:
+        target_table = metric.get("target_table")
+        if not isinstance(target_table, str) or not target_table.strip():
+            return None
+        metric_sources.append(target_table.strip())
+    normalized_metric_sources = {
+        source.casefold() for source in metric_sources
+    }
+    derived_multiple_metric_sources = len(normalized_metric_sources) > 1
+    planned_multiple_metric_sources = item.get("multiple_metric_sources")
+    if not isinstance(planned_multiple_metric_sources, bool):
+        return None
+    if planned_multiple_metric_sources != derived_multiple_metric_sources:
+        return None
+    join_semantics = _optional_clean_text(item.get("join_semantics"))
+    if join_semantics and join_semantics not in {
+        "preserve_all_operand_categories",
+        "common_operand_categories_only",
+    }:
+        return None
+    if derived_multiple_metric_sources:
+        if has_grouping_dimensions and join_semantics not in {
+            "preserve_all_operand_categories",
+            "common_operand_categories_only",
+        }:
+            return None
+    combine_strategy = ""
+    if derived_multiple_metric_sources and not has_grouping_dimensions:
+        combine_strategy = "cross_join"
+    elif (
+        derived_multiple_metric_sources
+        and join_semantics == "preserve_all_operand_categories"
+    ):
+        combine_strategy = "full_outer_join"
+    elif (
+        derived_multiple_metric_sources
+        and join_semantics == "common_operand_categories_only"
+    ):
+        combine_strategy = "inner_join"
+    elif has_grouping_dimensions and derived_multiple_metric_sources:
+        return None
+    return {
+        "operation_type": "comparison",
+        "canonical_value": canonical_value,
+        "output_behavior": "side_by_side",
+        "combination_strategy": "aggregate_then_combine",
+        "operand_metric_refs": operand_metric_refs,
+        "multiple_metric_sources": derived_multiple_metric_sources,
+        "join_semantics": join_semantics,
+        "combine_strategy": combine_strategy,
+        "binding_cardinality": _binding_cardinality(
+            item.get("binding_cardinality")
+        ),
+        "detection_source": _optional_clean_text(
+            item.get("detection_source")
+        ),
+        "mapping_source": _optional_clean_text(item.get("mapping_source")),
+    }
+
+
+def _valid_requested_limit(value: Any) -> bool:
+    return value is None or (
+        not isinstance(value, bool)
+        and isinstance(value, int)
+        and value > 0
+    )
+
+
+def _operand_metric_refs(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    refs: list[str] = []
+    for item in value:
+        ref = _optional_clean_text(item)
+        if not ref:
+            return []
+        refs.append(ref)
+    return refs
+
+
+def _metrics_by_ref(
+    planned_metrics: list[PlannedMetric],
+) -> dict[str, PlannedMetric]:
+    output: dict[str, PlannedMetric] = {}
+    duplicates: set[str] = set()
+    for metric in planned_metrics:
+        metric_ref = metric.get("metric_ref")
+        if not isinstance(metric_ref, str) or not metric_ref.strip():
+            continue
+        if metric_ref in output:
+            duplicates.add(metric_ref)
+            continue
+        output[metric_ref] = metric
+    for metric_ref in duplicates:
+        output.pop(metric_ref, None)
     return output
 
 
