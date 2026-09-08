@@ -564,22 +564,33 @@ def _verify_analytical_operations(
     results: list[RuleVerificationResult] = list(metric_binding_results)
     for operation in operations:
         operation_type = operation["operation_type"]
-        if operation_type != "ranking":
-            results.append(
-                _rule_result(
-                    operation_type,
-                    "unverifiable",
-                    "unsupported_analytical_operation",
-                    [],
+        if operation_type == "ranking":
+            results.extend(
+                _verify_ranking_operation(
+                    analysis,
+                    operation,
+                    planned_metrics,
+                    findings,
                 )
             )
             continue
-        results.extend(
-            _verify_ranking_operation(
-                analysis,
-                operation,
-                planned_metrics,
-                findings,
+        if operation_type == "comparison":
+            results.extend(
+                _verify_comparison_operation(
+                    analysis,
+                    operation,
+                    planned_metrics,
+                    _planned_grouping_dimensions(query_plan),
+                    findings,
+                )
+            )
+            continue
+        results.append(
+            _rule_result(
+                operation_type,
+                "unverifiable",
+                "unsupported_analytical_operation",
+                [],
             )
         )
     return results
@@ -757,6 +768,188 @@ def _verify_ranking_operation(
                 ["requested_limit"],
             )
         )
+    return results
+
+
+def _verify_comparison_operation(
+    analysis: SqlStatementAnalysis,
+    operation: Mapping[str, Any],
+    planned_metrics: list[dict[str, Any]],
+    grouping_dimensions: list[dict[str, str]],
+    findings: list[SqlContractFinding],
+) -> list[RuleVerificationResult]:
+    evidence: dict[str, Any] = {
+        "operation_type": operation.get("operation_type"),
+        "output_behavior": operation.get("output_behavior"),
+        "combination_strategy": operation.get("combination_strategy"),
+        "operand_metric_refs": operation.get("operand_metric_refs"),
+        "multiple_metric_sources": operation.get("multiple_metric_sources"),
+        "grouping_dimensions": grouping_dimensions,
+        "join_semantics": operation.get("join_semantics"),
+        "operand_scope_mapping": [],
+        "gates": [],
+    }
+    results: list[RuleVerificationResult] = []
+
+    def gate(name: str, status: VerificationStatus, reason: str) -> None:
+        evidence["gates"].append(
+            {
+                "name": name,
+                "status": _comparison_gate_status(status),
+                "reason": reason,
+            }
+        )
+        results.append(_rule_result(f"comparison_{name}", status, reason, [name]))
+
+    def fail(name: str, reason: str) -> list[RuleVerificationResult]:
+        gate(name, "violated", reason)
+        _comparison_finding(findings, reason, evidence)
+        return results
+
+    refs = operation.get("operand_metric_refs")
+    if not isinstance(refs, list) or not refs:
+        return fail("cardinality", "comparison_cardinality_invalid")
+    operand_refs = [_clean_text(ref) for ref in refs]
+    if any(not ref for ref in operand_refs) or len(operand_refs) != len(set(operand_refs)):
+        return fail("cardinality", "comparison_cardinality_invalid")
+    cardinality_status = _comparison_cardinality_status(operation, len(operand_refs))
+    if cardinality_status != "comparison_cardinality_valid":
+        return fail("cardinality", cardinality_status)
+    gate("cardinality", "satisfied", "comparison_cardinality_valid")
+
+    metrics_by_ref: dict[str, list[dict[str, Any]]] = {}
+    for metric in planned_metrics:
+        metrics_by_ref.setdefault(metric["metric_ref"], []).append(metric)
+    operand_metrics: list[dict[str, Any]] = []
+    for ref in operand_refs:
+        matches = metrics_by_ref.get(ref, [])
+        if not matches:
+            return fail("operand_resolution", "comparison_operand_missing")
+        if len(matches) > 1:
+            return fail("operand_resolution", "comparison_operand_ambiguous")
+        operand_metrics.append(matches[0])
+    gate("operand_resolution", "satisfied", "comparison_operands_resolved")
+
+    valid_source_tables: list[str] = []
+    for metric in operand_metrics:
+        target_table = metric.get("target_table")
+        if not isinstance(target_table, str) or not target_table.strip():
+            return fail("source_authorization", "comparison_lineage_unproven")
+        valid_source_tables.append(target_table.strip().casefold())
+
+    planned_multiple_sources = operation.get("multiple_metric_sources")
+    if not isinstance(planned_multiple_sources, bool):
+        return fail(
+            "multi_source_consistency",
+            "comparison_multi_source_inconsistent",
+        )
+    source_tables = set(valid_source_tables)
+    multiple_sources = len(source_tables) > 1
+    evidence["derived_multiple_metric_sources"] = multiple_sources
+    if planned_multiple_sources != multiple_sources:
+        return fail(
+            "multi_source_consistency",
+            "comparison_multi_source_inconsistent",
+        )
+    gate(
+        "multi_source_consistency",
+        "satisfied",
+        "comparison_multi_source_consistent",
+    )
+
+    if multiple_sources and _comparison_has_raw_metric_source_join(analysis, source_tables):
+        return fail(
+            "raw_source_join_absent",
+            "comparison_raw_source_join_detected",
+        )
+
+    mappings: list[dict[str, Any]] = []
+    for metric in operand_metrics:
+        candidates = _comparison_operand_scope_candidates(
+            analysis,
+            metric,
+            grouping_dimensions,
+            allow_root=not multiple_sources,
+        )
+        if not candidates:
+            return fail("source_authorization", "comparison_lineage_unproven")
+        if len(candidates) > 1:
+            return fail("source_authorization", "comparison_lineage_unproven")
+        mapping = candidates[0]
+        mappings.append(mapping)
+        evidence["operand_scope_mapping"].append(mapping)
+    gate("source_authorization", "satisfied", "comparison_sources_authorized")
+
+    if any(mapping["reducing_aggregate"] is not True for mapping in mappings):
+        return fail("reducing_aggregate", "comparison_operand_not_aggregated")
+    gate("reducing_aggregate", "satisfied", "comparison_operands_aggregated")
+
+    missing_grain = [
+        mapping
+        for mapping in mappings
+        if not _comparison_mapping_has_expected_grain(mapping, grouping_dimensions)
+    ]
+    if missing_grain:
+        return fail("dimension_grain", "comparison_dimension_grain_missing")
+    gate(
+        "dimension_grain",
+        "satisfied" if grouping_dimensions else "not_applicable",
+        "comparison_dimension_grain_satisfied"
+        if grouping_dimensions
+        else "comparison_has_no_grouping_dimensions",
+    )
+
+    gate(
+        "raw_source_join_absent",
+        "satisfied" if multiple_sources else "not_applicable",
+        "comparison_raw_source_join_absent"
+        if multiple_sources
+        else "comparison_single_source",
+    )
+
+    if multiple_sources and not _comparison_aggregate_before_combine_proven(analysis, mappings):
+        return fail(
+            "aggregate_before_combine",
+            "comparison_aggregate_before_combine_unproven",
+        )
+    gate(
+        "aggregate_before_combine",
+        "satisfied" if multiple_sources else "not_applicable",
+        "comparison_aggregate_before_combine_satisfied"
+        if multiple_sources
+        else "comparison_single_source",
+    )
+
+    if not _comparison_root_outputs_all_operands(analysis, mappings):
+        return fail("root_operand_presence", "comparison_root_operand_missing")
+    gate("root_operand_presence", "satisfied", "comparison_root_operands_present")
+
+    if grouping_dimensions and not _comparison_root_preserves_grouping(analysis, grouping_dimensions):
+        return fail("root_grouping_presence", "comparison_dimension_grain_missing")
+    gate(
+        "root_grouping_presence",
+        "satisfied" if grouping_dimensions else "not_applicable",
+        "comparison_root_grouping_present"
+        if grouping_dimensions
+        else "comparison_has_no_grouping_dimensions",
+    )
+
+    join_status = _comparison_join_semantics_status(
+        analysis,
+        operation,
+        mappings,
+        multiple_sources=multiple_sources,
+        has_grouping_dimensions=bool(grouping_dimensions),
+    )
+    if join_status != "comparison_join_semantics_satisfied":
+        return fail("join_semantics", join_status)
+    gate(
+        "join_semantics",
+        "satisfied" if multiple_sources and grouping_dimensions else "not_applicable",
+        join_status,
+    )
+
+    gate("lineage", "satisfied", "comparison_lineage_satisfied")
     return results
 
 
@@ -1043,38 +1236,67 @@ def _planned_analytical_operations(
         if not isinstance(item, Mapping):
             continue
         operation_type = _clean_text(item.get("operation_type"))
-        direction = _clean_text(item.get("direction"))
         canonical_value = _clean_text(item.get("canonical_value"))
-        requested_limit = item.get("requested_limit")
-        metric_ref = _clean_text(item.get("metric_ref"))
-        if operation_type != "ranking":
-            continue
         if canonical_value != operation_type:
             continue
-        if direction not in {"ascending", "descending"}:
+        if operation_type == "ranking":
+            direction = _clean_text(item.get("direction"))
+            requested_limit = item.get("requested_limit")
+            metric_ref = _clean_text(item.get("metric_ref"))
+            if direction not in {"ascending", "descending"}:
+                continue
+            if requested_limit is not None and (
+                isinstance(requested_limit, bool)
+                or not isinstance(requested_limit, int)
+                or requested_limit <= 0
+            ):
+                continue
+            operations.append(
+                {
+                    "operation_type": operation_type,
+                    "canonical_value": canonical_value,
+                    "direction": direction,
+                    "requested_limit": requested_limit,
+                    "metric_ref": metric_ref,
+                }
+            )
             continue
-        if requested_limit is not None and (
-            isinstance(requested_limit, bool)
-            or not isinstance(requested_limit, int)
-            or requested_limit <= 0
-        ):
-            continue
-        operations.append(
-            {
-                "operation_type": operation_type,
-                "canonical_value": canonical_value,
-                "direction": direction,
-                "requested_limit": requested_limit,
-                "metric_ref": metric_ref,
-            }
-        )
+        if operation_type == "comparison":
+            if _clean_text(item.get("output_behavior")) != "side_by_side":
+                continue
+            if (
+                _clean_text(item.get("combination_strategy"))
+                != "aggregate_then_combine"
+            ):
+                continue
+            operand_metric_refs = item.get("operand_metric_refs")
+            if not isinstance(operand_metric_refs, list):
+                continue
+            multiple_metric_sources = item.get("multiple_metric_sources")
+            if not isinstance(multiple_metric_sources, bool):
+                continue
+            operations.append(
+                {
+                    "operation_type": operation_type,
+                    "canonical_value": canonical_value,
+                    "output_behavior": "side_by_side",
+                    "combination_strategy": "aggregate_then_combine",
+                    "operand_metric_refs": [
+                        _clean_text(ref) for ref in operand_metric_refs
+                    ],
+                    "multiple_metric_sources": multiple_metric_sources,
+                    "join_semantics": _clean_text(item.get("join_semantics")),
+                    "binding_cardinality": item.get("binding_cardinality"),
+                }
+            )
     return sorted(
         operations,
         key=lambda operation: (
             operation["operation_type"],
-            operation["direction"],
-            operation["metric_ref"],
-            operation["requested_limit"] or 0,
+            operation.get("direction", ""),
+            operation.get("metric_ref", ""),
+            ",".join(operation.get("operand_metric_refs", [])),
+            operation.get("requested_limit") or 0,
         ),
     )
 
@@ -1350,6 +1572,487 @@ def _select_item_metric_identity(
     if has_unresolved_reference or physical_references != {target}:
         return "unverifiable_match"
     return "safe_match"
+
+
+def _comparison_cardinality_status(
+    operation: Mapping[str, Any],
+    operand_count: int,
+) -> str:
+    cardinality = operation.get("binding_cardinality")
+    if not isinstance(cardinality, Mapping):
+        return "comparison_cardinality_invalid"
+    minimum = cardinality.get("minimum")
+    maximum = cardinality.get("maximum")
+    if (
+        isinstance(minimum, bool)
+        or not isinstance(minimum, int)
+        or minimum <= 0
+        or isinstance(maximum, bool)
+        or not isinstance(maximum, int)
+        or maximum < minimum
+    ):
+        return "comparison_cardinality_invalid"
+    if operand_count < minimum or operand_count > maximum:
+        return "comparison_cardinality_invalid"
+    return "comparison_cardinality_valid"
+
+
+def _comparison_operand_scope_candidates(
+    analysis: SqlStatementAnalysis,
+    metric: Mapping[str, Any],
+    grouping_dimensions: list[dict[str, str]],
+    *,
+    allow_root: bool,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for scope in _query_scopes(analysis):
+        if scope.get("is_root") is True and not allow_root:
+            continue
+        if _clean_text(metric.get("target_table")).casefold() not in {
+            str(table).casefold()
+            for table in scope.get("physical_tables", [])
+        }:
+            continue
+        metric_item = _scope_metric_select_item_match(scope, metric)
+        if metric_item is None:
+            continue
+        grain = _comparison_scope_grouping_grain(scope, grouping_dimensions)
+        candidates.append(
+            {
+                "metric_ref": metric.get("metric_ref"),
+                "scope_id": scope.get("scope_id"),
+                "source_table": metric.get("target_table"),
+                "source_column": metric.get("target_column"),
+                "reducing_aggregate": (
+                    _select_item_has_reducing_aggregate(metric_item)
+                    if scope.get("is_root") is True and allow_root
+                    else scope.get("has_reducing_aggregate") is True
+                ),
+                "grouping_grain": grain,
+                "output_name": _select_output_name_for_contract(metric_item),
+            }
+        )
+    return candidates
+
+
+def _scope_metric_select_item_match(
+    scope: Mapping[str, Any],
+    metric: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    select_items = scope.get("select_items", [])
+    if not isinstance(select_items, list):
+        return None
+    matches = [
+        item
+        for item in select_items
+        if isinstance(item, Mapping)
+        and _select_item_metric_identity(
+            item.get("column_references", [])
+            if isinstance(item.get("column_references"), list)
+            else [],
+            metric,
+        )
+        == "safe_match"
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+_CONTRACT_AGGREGATE_FUNCTIONS = {"avg", "count", "max", "min", "sum"}
+
+
+def _select_item_has_reducing_aggregate(item: Mapping[str, Any]) -> bool:
+    expression = _clean_text(item.get("expression"))
+    if not expression:
+        return False
+    tokens = _contract_expression_tokens(expression)
+    for index, token in enumerate(tokens[:-1]):
+        if (
+            token in _CONTRACT_AGGREGATE_FUNCTIONS
+            and tokens[index + 1] == "("
+            and not _contract_aggregate_invocation_is_window(tokens, index)
+        ):
+            return True
+    return False
+
+
+def _contract_aggregate_invocation_is_window(
+    tokens: list[str],
+    function_index: int,
+) -> bool:
+    end = _contract_matching_paren_index(tokens, function_index + 1)
+    if end is None:
+        return True
+    next_index = end + 1
+    if (
+        _contract_token_at(tokens, next_index) == "filter"
+        and _contract_token_at(tokens, next_index + 1) == "("
+    ):
+        filter_end = _contract_matching_paren_index(tokens, next_index + 1)
+        if filter_end is None:
+            return True
+        next_index = filter_end + 1
+    return _contract_token_at(tokens, next_index) == "over"
+
+
+def _contract_expression_tokens(expression: str) -> list[str]:
+    tokens: list[str] = []
+    current: list[str] = []
+    for character in expression:
+        if character.isalnum() or character == "_":
+            current.append(character.casefold())
+            continue
+        if current:
+            tokens.append("".join(current))
+            current = []
+        if character in {"(", ")"}:
+            tokens.append(character)
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
+def _contract_matching_paren_index(
+    tokens: list[str],
+    open_index: int,
+) -> int | None:
+    if _contract_token_at(tokens, open_index) != "(":
+        return None
+    depth = 0
+    for index in range(open_index, len(tokens)):
+        token = tokens[index]
+        if token == "(":
+            depth += 1
+        elif token == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def _contract_token_at(tokens: list[str], index: int) -> str:
+    if index < 0 or index >= len(tokens):
+        return ""
+    return tokens[index]
+
+
+def _comparison_scope_grouping_grain(
+    scope: Mapping[str, Any],
+    grouping_dimensions: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    if not grouping_dimensions:
+        group_by_items = scope.get("group_by_items", [])
+        return [] if not group_by_items else [{"unexpected_group_by": str(group_by_items)}]
+    select_items = scope.get("select_items", [])
+    if not isinstance(select_items, list):
+        return []
+    output: list[dict[str, str]] = []
+    for dimension in grouping_dimensions:
+        for item in select_items:
+            if not isinstance(item, Mapping):
+                continue
+            if _select_item_references_dimension(item, dimension):
+                output.append(
+                    {
+                        "canonical_value": dimension["canonical_value"],
+                        "target_table": dimension["target_table"],
+                        "target_column": dimension["target_column"],
+                    }
+                )
+                break
+    return output
+
+
+def _comparison_mapping_has_expected_grain(
+    mapping: Mapping[str, Any],
+    grouping_dimensions: list[dict[str, str]],
+) -> bool:
+    grain = mapping.get("grouping_grain", [])
+    if not grouping_dimensions:
+        return grain == []
+    if not isinstance(grain, list):
+        return False
+    expected = {
+        (
+            dimension["target_table"].casefold(),
+            dimension["target_column"].casefold(),
+        )
+        for dimension in grouping_dimensions
+    }
+    observed = {
+        (
+            _clean_text(item.get("target_table")).casefold(),
+            _clean_text(item.get("target_column")).casefold(),
+        )
+        for item in grain
+        if isinstance(item, Mapping)
+    }
+    return expected <= observed
+
+
+def _select_item_references_dimension(
+    item: Mapping[str, Any],
+    dimension: Mapping[str, str],
+) -> bool:
+    target_table = dimension["target_table"].casefold()
+    target_column = dimension["target_column"].casefold()
+    columns = item.get("column_references", [])
+    if not isinstance(columns, list):
+        return False
+    for column in columns:
+        if not isinstance(column, Mapping):
+            continue
+        physical = _physical_column_reference(column)
+        if physical is None:
+            continue
+        schema, table, name = physical
+        if f"{schema}.{table}" == target_table and name == target_column:
+            return True
+    return False
+
+
+def _comparison_has_raw_metric_source_join(
+    analysis: SqlStatementAnalysis,
+    source_tables: set[str],
+) -> bool:
+    for scope in _query_scopes(analysis):
+        physical_tables = {
+            str(table).casefold()
+            for table in scope.get("physical_tables", [])
+        }
+        if len(physical_tables & source_tables) >= 2 and int(
+            scope.get("raw_table_join_count") or 0
+        ) > 0:
+            return True
+    return False
+
+
+def _comparison_aggregate_before_combine_proven(
+    analysis: SqlStatementAnalysis,
+    mappings: list[dict[str, Any]],
+) -> bool:
+    root = _root_query_scope(analysis)
+    if root is None:
+        return False
+    mapped_scopes = {
+        _clean_text(mapping.get("scope_id"))
+        for mapping in mappings
+        if _clean_text(mapping.get("scope_id"))
+    }
+    if len(mapped_scopes) != len(mappings):
+        return False
+    if int(root.get("aggregated_scope_join_count") or 0) <= 0:
+        return False
+    root_ref_map = _root_scope_reference_map(root, analysis)
+    joined_child_scopes: set[str] = set()
+    for join in root.get("joins", []):
+        if not isinstance(join, Mapping):
+            continue
+        for side in ("left_table", "right_table"):
+            scope_id = root_ref_map.get(_clean_text(join.get(side)).casefold())
+            if scope_id:
+                joined_child_scopes.add(scope_id)
+    return mapped_scopes <= joined_child_scopes
+
+
+def _comparison_root_outputs_all_operands(
+    analysis: SqlStatementAnalysis,
+    mappings: list[dict[str, Any]],
+) -> bool:
+    root = _root_query_scope(analysis)
+    if root is None:
+        return False
+    lineage = root.get("output_lineage", [])
+    if not isinstance(lineage, list):
+        return False
+    root_scope_id = _clean_text(root.get("scope_id"))
+    select_items = root.get("select_items", [])
+    if not isinstance(select_items, list):
+        return False
+    root_output_names = {
+        _select_output_name_for_contract(item)
+        for item in select_items
+        if isinstance(item, Mapping)
+    }
+    for mapping in mappings:
+        scope_id = _clean_text(mapping.get("scope_id"))
+        output_name = _clean_text(mapping.get("output_name")).casefold()
+        if not scope_id or not output_name:
+            return False
+        if scope_id == root_scope_id:
+            if output_name not in root_output_names:
+                return False
+            continue
+        if not any(
+            isinstance(item, Mapping)
+            and _clean_text(item.get("source_scope_id")) == scope_id
+            and _clean_text(item.get("source_output")).casefold() == output_name
+            for item in lineage
+        ):
+            return False
+    return True
+
+
+def _comparison_root_preserves_grouping(
+    analysis: SqlStatementAnalysis,
+    grouping_dimensions: list[dict[str, str]],
+) -> bool:
+    root = _root_query_scope(analysis)
+    if root is None:
+        return False
+    select_items = root.get("select_items", [])
+    lineage = root.get("output_lineage", [])
+    if not isinstance(select_items, list) or not isinstance(lineage, list):
+        return False
+    root_outputs = {
+        _select_output_name_for_contract(item)
+        for item in select_items
+        if isinstance(item, Mapping)
+    }
+    lineage_sources = {
+        _clean_text(item.get("source_output")).casefold()
+        for item in lineage
+        if isinstance(item, Mapping)
+    }
+    available = {item for item in root_outputs | lineage_sources if item}
+    return all(
+        dimension["target_column"].casefold() in available
+        for dimension in grouping_dimensions
+    )
+
+
+def _comparison_join_semantics_status(
+    analysis: SqlStatementAnalysis,
+    operation: Mapping[str, Any],
+    mappings: list[dict[str, Any]],
+    *,
+    multiple_sources: bool,
+    has_grouping_dimensions: bool,
+) -> str:
+    if not multiple_sources or not has_grouping_dimensions:
+        return "comparison_join_semantics_satisfied"
+    join_semantics = _clean_text(operation.get("join_semantics"))
+    if not join_semantics:
+        return "comparison_join_semantics_missing"
+    expected = {
+        "preserve_all_operand_categories": "full outer join",
+        "common_operand_categories_only": "inner join",
+    }.get(join_semantics)
+    if expected is None:
+        return "comparison_join_semantics_mismatch"
+    root = _root_query_scope(analysis)
+    if root is None:
+        return "comparison_lineage_unproven"
+    root_ref_map = _root_scope_reference_map(root, analysis)
+    mapped_scopes = {
+        _clean_text(mapping.get("scope_id"))
+        for mapping in mappings
+        if _clean_text(mapping.get("scope_id"))
+    }
+    for join in root.get("joins", []):
+        if not isinstance(join, Mapping):
+            continue
+        left = root_ref_map.get(_clean_text(join.get("left_table")).casefold())
+        right = root_ref_map.get(_clean_text(join.get("right_table")).casefold())
+        if {left, right} <= mapped_scopes and {left, right}:
+            return (
+                "comparison_join_semantics_satisfied"
+                if _clean_text(join.get("join_type")).casefold() == expected
+                else "comparison_join_semantics_mismatch"
+            )
+    return "comparison_join_semantics_mismatch"
+
+
+def _root_scope_reference_map(
+    root: Mapping[str, Any],
+    analysis: SqlStatementAnalysis,
+) -> dict[str, str]:
+    scopes = {
+        _clean_text(scope.get("scope_id")): scope
+        for scope in _query_scopes(analysis)
+    }
+    refs: dict[str, str] = {}
+    subquery_children = [
+        scope_id
+        for scope_id in root.get("child_scopes", [])
+        if isinstance(scope_id, str)
+        and isinstance(scopes.get(scope_id), Mapping)
+        and scopes[scope_id].get("scope_type") == "subquery"
+    ]
+    subquery_index = 0
+    for item in root.get("object_references", []):
+        if not isinstance(item, Mapping):
+            continue
+        scope_id = ""
+        if item.get("is_cte"):
+            scope_id = f"cte:{item.get('table')}"
+        elif item.get("is_subquery"):
+            if subquery_index >= len(subquery_children):
+                continue
+            scope_id = subquery_children[subquery_index]
+            subquery_index += 1
+        if scope_id not in scopes:
+            continue
+        for key in ("table", "alias"):
+            value = _clean_text(item.get(key)).casefold()
+            if value:
+                refs[value] = scope_id
+    return refs
+
+
+def _query_scopes(analysis: SqlStatementAnalysis) -> list[Mapping[str, Any]]:
+    scopes = analysis.get("query_scopes", [])
+    if not isinstance(scopes, list):
+        return []
+    return [scope for scope in scopes if isinstance(scope, Mapping)]
+
+
+def _select_output_name_for_contract(item: Mapping[str, Any]) -> str | None:
+    alias = _clean_text(item.get("alias"))
+    if alias:
+        return alias.casefold()
+    expression = _clean_text(item.get("expression")).casefold()
+    if expression and _is_plain_identifier(expression):
+        return expression
+    columns = item.get("column_references", [])
+    if isinstance(columns, list) and len(columns) == 1 and isinstance(columns[0], Mapping):
+        return _clean_text(columns[0].get("column")).casefold()
+    return None
+
+
+def _is_plain_identifier(value: str) -> bool:
+    if not value:
+        return False
+    first = value[0]
+    return (first == "_" or first.isalpha()) and all(
+        character == "_" or character.isalnum()
+        for character in value
+    )
+
+
+def _comparison_gate_status(status: VerificationStatus) -> str:
+    return {
+        "satisfied": "PASS",
+        "violated": "FAIL",
+        "unverifiable": "FAIL",
+        "not_applicable": "NOT_APPLICABLE",
+    }[status]
+
+
+def _comparison_finding(
+    findings: list[SqlContractFinding],
+    reason: str,
+    evidence: Mapping[str, Any],
+) -> None:
+    findings.append(
+        _finding(
+            "SQL_CONTRACT_RULE_VIOLATED",
+            "Operacao de comparison planejada nao foi satisfeita pela SQL.",
+            details={
+                "reason": reason,
+                "comparison_evidence": deepcopy(dict(evidence)),
+            },
+        )
+    )
 
 
 def _select_column_matches_metric(

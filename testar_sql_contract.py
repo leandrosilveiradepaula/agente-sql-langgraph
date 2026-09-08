@@ -193,6 +193,295 @@ def _with_metric_binding_plan() -> dict:
     return plan
 
 
+def _comparison_plan(
+    *,
+    grouped: bool = False,
+    join_semantics: str = "",
+    operand_refs: list[str] | None = None,
+    cardinality: dict | None = None,
+) -> dict:
+    plan = deepcopy(_query_plan())
+    projection = plan["planning_context"]
+    tables = [
+        {
+            "schema_name": "schema_test",
+            "table_name": "fact_left",
+            "qualified_name": "schema_test.fact_left",
+            "primary_key": ["id"],
+            "key_columns": ["id", "group_id"],
+            "metric_columns": ["amount_left"],
+            "date_columns": [],
+            "join_rules": [],
+            "columns": [
+                {"name": "id"},
+                {"name": "group_id"},
+                {"name": "amount_left"},
+            ],
+        },
+        {
+            "schema_name": "schema_test",
+            "table_name": "fact_right",
+            "qualified_name": "schema_test.fact_right",
+            "primary_key": ["id"],
+            "key_columns": ["id", "group_id"],
+            "metric_columns": ["amount_right"],
+            "date_columns": [],
+            "join_rules": [],
+            "columns": [
+                {"name": "id"},
+                {"name": "group_id"},
+                {"name": "amount_right"},
+            ],
+        },
+    ]
+    if grouped:
+        tables.append(
+            {
+                "schema_name": "schema_test",
+                "table_name": "dim_group",
+                "qualified_name": "schema_test.dim_group",
+                "primary_key": ["group_id"],
+                "key_columns": ["group_id", "group_key"],
+                "metric_columns": [],
+                "date_columns": [],
+                "join_rules": [],
+                "columns": [
+                    {"name": "group_id"},
+                    {"name": "group_key"},
+                ],
+            }
+        )
+    projection["required_tables"] = tables
+    projection["relevant_columns"] = {
+        table["qualified_name"]: table["columns"] for table in tables
+    }
+    projection["authorized_joins"] = []
+    if grouped:
+        projection["authorized_joins"] = [
+            {
+                "source_table": "schema_test.fact_left",
+                "join_rules": {"opaque": True},
+                "interpretation": "preserved_uninterpreted",
+            }
+        ]
+        projection["detected_dimensions"] = [
+            {
+                "canonical_value": "group",
+                "target_table": "schema_test.dim_group",
+                "target_column": "group_key",
+                "grouping_requested": True,
+                "source": "entity_alias",
+            }
+        ]
+    projection["planned_metrics"] = [
+        {
+            "metric_ref": "metric-left",
+            "metric_concept": "synthetic_amount",
+            "target_table": "schema_test.fact_left",
+            "target_column": "amount_left",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "metric_binding",
+            "binding_ref": "binding-left",
+        },
+        {
+            "metric_ref": "metric-right",
+            "metric_concept": "synthetic_amount",
+            "target_table": "schema_test.fact_right",
+            "target_column": "amount_right",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "metric_binding",
+            "binding_ref": "binding-right",
+        },
+    ]
+    operation = {
+        "operation_type": "comparison",
+        "canonical_value": "comparison",
+        "output_behavior": "side_by_side",
+        "combination_strategy": "aggregate_then_combine",
+        "operand_metric_refs": operand_refs or ["metric-left", "metric-right"],
+        "multiple_metric_sources": True,
+        "binding_cardinality": cardinality
+        or {
+            "mode": "multiple",
+            "minimum": 2,
+            "maximum": 2,
+            "same_metric_concept": True,
+            "distinct_bindings": True,
+        },
+        "detection_source": "intent_semantic_evidence",
+        "mapping_source": "entity_alias",
+    }
+    if join_semantics:
+        operation["join_semantics"] = join_semantics
+    projection["analytical_operations"] = [operation]
+    return plan
+
+
+def _same_source_comparison_plan(*, multiple_metric_sources=True) -> dict:
+    plan = deepcopy(_query_plan())
+    projection = plan["planning_context"]
+    table = {
+        "schema_name": "schema_test",
+        "table_name": "fact_same",
+        "qualified_name": "schema_test.fact_same",
+        "primary_key": ["id"],
+        "key_columns": ["id"],
+        "metric_columns": ["metric_a", "metric_b"],
+        "date_columns": [],
+        "join_rules": [],
+        "columns": [
+            {"name": "id"},
+            {"name": "metric_a"},
+            {"name": "metric_b"},
+        ],
+    }
+    projection["required_tables"] = [table]
+    projection["relevant_columns"] = {
+        "schema_test.fact_same": table["columns"]
+    }
+    projection["authorized_joins"] = []
+    projection["detected_dimensions"] = []
+    projection["planned_metrics"] = [
+        {
+            "metric_ref": "metric-a",
+            "metric_concept": "synthetic_amount",
+            "target_table": "schema_test.fact_same",
+            "target_column": "metric_a",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "metric_binding",
+            "binding_ref": "binding-a",
+        },
+        {
+            "metric_ref": "metric-b",
+            "metric_concept": "synthetic_amount",
+            "target_table": "schema_test.fact_same",
+            "target_column": "metric_b",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "metric_binding",
+            "binding_ref": "binding-b",
+        },
+    ]
+    projection["analytical_operations"] = [
+        {
+            "operation_type": "comparison",
+            "canonical_value": "comparison",
+            "output_behavior": "side_by_side",
+            "combination_strategy": "aggregate_then_combine",
+            "operand_metric_refs": ["metric-a", "metric-b"],
+            "multiple_metric_sources": multiple_metric_sources,
+            "binding_cardinality": {
+                "mode": "multiple",
+                "minimum": 2,
+                "maximum": 2,
+                "same_metric_concept": True,
+                "distinct_bindings": True,
+            },
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+    return plan
+
+
+def _comparison_sql(
+    *,
+    grouped: bool = False,
+    root_join: str = "CROSS JOIN",
+    raw_join: bool = False,
+    right_aggregate: str = "SUM",
+    right_projects: bool = True,
+    right_group: bool = True,
+    left_window: bool = False,
+) -> str:
+    if raw_join:
+        return (
+            "SELECT SUM(l.amount_left) AS left_total, "
+            "SUM(r.amount_right) AS right_total "
+            "FROM schema_test.fact_left l "
+            "JOIN schema_test.fact_right r ON r.id = l.id"
+        )
+    if not grouped:
+        left_expr = (
+            "SUM(l.amount_left) OVER () AS left_total"
+            if left_window
+            else "SUM(l.amount_left) AS left_total"
+        )
+        right_expr = (
+            f"{right_aggregate}(r.amount_right) AS right_total"
+            if right_projects
+            else "COUNT(*) AS row_count"
+        )
+        return (
+            f"WITH left_operand AS (SELECT {left_expr} "
+            "FROM schema_test.fact_left l), "
+            f"right_operand AS (SELECT {right_expr} "
+            "FROM schema_test.fact_right r) "
+            "SELECT left_operand.left_total, right_operand.right_total "
+            "FROM left_operand "
+            f"{root_join} right_operand"
+        )
+    right_expr = (
+        f"{right_aggregate}(r.amount_right) AS right_total"
+        if right_projects
+        else "COUNT(*) AS row_count"
+    )
+    right_group_by = "GROUP BY d.group_key" if right_group else ""
+    return (
+        "WITH left_operand AS ("
+        "SELECT d.group_key, SUM(l.amount_left) AS left_total "
+        "FROM schema_test.fact_left l "
+        "JOIN schema_test.dim_group d ON d.group_id = l.group_id "
+        "GROUP BY d.group_key"
+        "), right_operand AS ("
+        f"SELECT d.group_key, {right_expr} "
+        "FROM schema_test.fact_right r "
+        "JOIN schema_test.dim_group d ON d.group_id = r.group_id "
+        f"{right_group_by}"
+        ") "
+        "SELECT COALESCE(left_operand.group_key, right_operand.group_key) "
+        "AS group_key, left_operand.left_total, right_operand.right_total "
+        "FROM left_operand "
+        f"{root_join} right_operand "
+        "ON left_operand.group_key = right_operand.group_key"
+    )
+
+
+def _same_source_comparison_sql(
+    *,
+    raw_operand: bool = False,
+    window_operand: bool = False,
+    both_window: bool = False,
+) -> str:
+    first = (
+        "SUM(metric_a) OVER () AS operand_a"
+        if both_window
+        else "SUM(metric_a) AS operand_a"
+    )
+    if both_window or window_operand:
+        second = "SUM(metric_b) OVER () AS operand_b"
+    elif raw_operand:
+        second = "metric_b AS operand_b"
+    else:
+        second = "SUM(metric_b) AS operand_b"
+    return (
+        f"SELECT {first}, "
+        f"{second} "
+        "FROM schema_test.fact_same"
+    )
+
+
+def _comparison_reason(result: dict) -> str:
+    for error in result["errors"]:
+        reason = error["details"].get("reason")
+        if isinstance(reason, str) and reason.startswith("comparison_"):
+            return reason
+    return ""
+
+
 def _with_cross_schema_grouping_dimension() -> dict:
     plan = deepcopy(_query_plan())
     projection = plan["planning_context"]
@@ -1033,6 +1322,245 @@ def test_ranking_requested_limit_positivo_deixa_limit_pending() -> None:
     assert result["errors"] == []
 
 
+def test_comparison_multi_source_sem_dimensao_cross_join_aprova() -> None:
+    result = _run(_comparison_sql(), _comparison_plan())
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "passed"
+
+
+def test_comparison_grouped_preserve_all_full_outer_aprova() -> None:
+    result = _run(
+        _comparison_sql(grouped=True, root_join="FULL OUTER JOIN"),
+        _comparison_plan(
+            grouped=True,
+            join_semantics="preserve_all_operand_categories",
+        ),
+    )
+
+    assert result["status"] == "approved"
+
+
+def test_comparison_grouped_common_only_inner_join_aprova() -> None:
+    result = _run(
+        _comparison_sql(grouped=True, root_join="INNER JOIN"),
+        _comparison_plan(
+            grouped=True,
+            join_semantics="common_operand_categories_only",
+        ),
+    )
+
+    assert result["status"] == "approved"
+
+
+def test_comparison_raw_source_join_antes_agregacao_rejeita() -> None:
+    result = _run(_comparison_sql(raw_join=True), _comparison_plan())
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_raw_source_join_detected"
+
+
+def test_comparison_finding_inclui_gate_falho() -> None:
+    result = _run(_comparison_sql(raw_join=True), _comparison_plan())
+
+    comparison_error = next(
+        error
+        for error in result["errors"]
+        if error["details"].get("reason")
+        == "comparison_raw_source_join_detected"
+    )
+    gates = comparison_error["details"]["comparison_evidence"]["gates"]
+
+    assert {
+        "name": "raw_source_join_absent",
+        "status": "FAIL",
+        "reason": "comparison_raw_source_join_detected",
+    } in gates
+
+
+def test_comparison_operand_sem_reducing_aggregate_rejeita() -> None:
+    sql = _comparison_sql().replace(
+        "SUM(r.amount_right) AS right_total",
+        "r.amount_right AS right_total",
+    )
+
+    result = _run(sql, _comparison_plan())
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_operand_not_aggregated"
+
+
+def test_comparison_window_aggregate_apenas_rejeita() -> None:
+    result = _run(_comparison_sql(left_window=True), _comparison_plan())
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_operand_not_aggregated"
+
+
+def test_comparison_operand_nao_chega_ao_root_rejeita() -> None:
+    sql = _comparison_sql().replace(
+        "left_operand.left_total, right_operand.right_total",
+        "left_operand.left_total",
+    )
+
+    result = _run(sql, _comparison_plan())
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_root_operand_missing"
+
+
+def test_comparison_grouped_faltando_dimensao_em_operand_rejeita() -> None:
+    sql = _comparison_sql(
+        grouped=True,
+        root_join="FULL OUTER JOIN",
+    ).replace(
+        "SELECT d.group_key, SUM(r.amount_right) AS right_total ",
+        "SELECT SUM(r.amount_right) AS right_total ",
+    )
+
+    result = _run(
+        sql,
+        _comparison_plan(
+            grouped=True,
+            join_semantics="preserve_all_operand_categories",
+        ),
+    )
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) in {
+        "comparison_dimension_grain_missing",
+        "comparison_lineage_unproven",
+    }
+
+
+def test_comparison_preserve_all_com_inner_join_rejeita() -> None:
+    result = _run(
+        _comparison_sql(grouped=True, root_join="INNER JOIN"),
+        _comparison_plan(
+            grouped=True,
+            join_semantics="preserve_all_operand_categories",
+        ),
+    )
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_join_semantics_mismatch"
+
+
+def test_comparison_common_only_com_full_outer_join_rejeita() -> None:
+    result = _run(
+        _comparison_sql(grouped=True, root_join="FULL OUTER JOIN"),
+        _comparison_plan(
+            grouped=True,
+            join_semantics="common_operand_categories_only",
+        ),
+    )
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_join_semantics_mismatch"
+
+
+def test_comparison_lineage_nao_comprovavel_rejeita() -> None:
+    result = _run(
+        _comparison_sql(right_projects=False),
+        _comparison_plan(),
+    )
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_lineage_unproven"
+
+
+def test_comparison_operand_ref_inexistente_rejeita() -> None:
+    result = _run(
+        _comparison_sql(),
+        _comparison_plan(operand_refs=["metric-left", "metric-missing"]),
+    )
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_operand_missing"
+
+
+def test_comparison_operand_sem_target_table_rejeita() -> None:
+    plan = _comparison_plan()
+    plan["planning_context"]["planned_metrics"][1].pop("target_table", None)
+
+    result = _run(_comparison_sql(), plan)
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_operand_missing"
+
+
+def test_comparison_operand_target_table_vazio_rejeita() -> None:
+    plan = _comparison_plan()
+    plan["planning_context"]["planned_metrics"][1]["target_table"] = ""
+
+    result = _run(_comparison_sql(), plan)
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_operand_missing"
+
+
+def test_comparison_same_source_root_aggregates_aprova() -> None:
+    result = _run(
+        _same_source_comparison_sql(),
+        _same_source_comparison_plan(multiple_metric_sources=False),
+    )
+
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "passed"
+
+
+def test_comparison_same_source_operand_raw_rejeita() -> None:
+    result = _run(
+        _same_source_comparison_sql(raw_operand=True),
+        _same_source_comparison_plan(multiple_metric_sources=False),
+    )
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_operand_not_aggregated"
+
+
+def test_comparison_same_source_window_operand_rejeita() -> None:
+    result = _run(
+        _same_source_comparison_sql(window_operand=True),
+        _same_source_comparison_plan(multiple_metric_sources=False),
+    )
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_operand_not_aggregated"
+
+
+def test_comparison_same_source_window_operands_rejeita() -> None:
+    result = _run(
+        _same_source_comparison_sql(both_window=True),
+        _same_source_comparison_plan(multiple_metric_sources=False),
+    )
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_operand_not_aggregated"
+
+
+def test_comparison_planner_flag_true_derivado_false_rejeita() -> None:
+    result = _run(
+        _same_source_comparison_sql(),
+        _same_source_comparison_plan(multiple_metric_sources=True),
+    )
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_multi_source_inconsistent"
+
+
+def test_comparison_planner_flag_false_derivado_true_rejeita() -> None:
+    plan = _comparison_plan()
+    plan["planning_context"]["analytical_operations"][0][
+        "multiple_metric_sources"
+    ] = False
+
+    result = _run(_comparison_sql(), plan)
+
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_multi_source_inconsistent"
+
+
 def test_sem_ranking_order_by_nao_e_obrigatorio() -> None:
     result = _run(
         "SELECT d.business_key, SUM(d.amount) AS total_amount "
@@ -1314,6 +1842,90 @@ def main() -> None:
         (
             "ranking limit pending",
             test_ranking_requested_limit_positivo_deixa_limit_pending,
+        ),
+        (
+            "comparison sem dimensao cross join",
+            test_comparison_multi_source_sem_dimensao_cross_join_aprova,
+        ),
+        (
+            "comparison grouped preserve all",
+            test_comparison_grouped_preserve_all_full_outer_aprova,
+        ),
+        (
+            "comparison grouped common only",
+            test_comparison_grouped_common_only_inner_join_aprova,
+        ),
+        (
+            "comparison raw source join",
+            test_comparison_raw_source_join_antes_agregacao_rejeita,
+        ),
+        (
+            "comparison finding gate falho",
+            test_comparison_finding_inclui_gate_falho,
+        ),
+        (
+            "comparison operand sem aggregate",
+            test_comparison_operand_sem_reducing_aggregate_rejeita,
+        ),
+        (
+            "comparison window aggregate",
+            test_comparison_window_aggregate_apenas_rejeita,
+        ),
+        (
+            "comparison operand fora do root",
+            test_comparison_operand_nao_chega_ao_root_rejeita,
+        ),
+        (
+            "comparison grouped faltando dimensao",
+            test_comparison_grouped_faltando_dimensao_em_operand_rejeita,
+        ),
+        (
+            "comparison preserve all inner",
+            test_comparison_preserve_all_com_inner_join_rejeita,
+        ),
+        (
+            "comparison common only full outer",
+            test_comparison_common_only_com_full_outer_join_rejeita,
+        ),
+        (
+            "comparison lineage unproven",
+            test_comparison_lineage_nao_comprovavel_rejeita,
+        ),
+        (
+            "comparison operand ref inexistente",
+            test_comparison_operand_ref_inexistente_rejeita,
+        ),
+        (
+            "comparison operand sem target table",
+            test_comparison_operand_sem_target_table_rejeita,
+        ),
+        (
+            "comparison operand target table vazio",
+            test_comparison_operand_target_table_vazio_rejeita,
+        ),
+        (
+            "comparison same-source root",
+            test_comparison_same_source_root_aggregates_aprova,
+        ),
+        (
+            "comparison same-source raw",
+            test_comparison_same_source_operand_raw_rejeita,
+        ),
+        (
+            "comparison same-source window operand",
+            test_comparison_same_source_window_operand_rejeita,
+        ),
+        (
+            "comparison same-source window operands",
+            test_comparison_same_source_window_operands_rejeita,
+        ),
+        (
+            "comparison flag true derivado false",
+            test_comparison_planner_flag_true_derivado_false_rejeita,
+        ),
+        (
+            "comparison flag false derivado true",
+            test_comparison_planner_flag_false_derivado_true_rejeita,
         ),
         (
             "sem ranking sem order obrigatorio",
