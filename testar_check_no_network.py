@@ -19,7 +19,17 @@ def main() -> None:
     assert _guarded("import http.client; c=http.client.HTTPSConnection('example.invalid'); c.connect()").returncode != 0
     assert _guarded("import urllib.request; urllib.request.urlopen('https://example.invalid')").returncode != 0
     assert _guarded("import app.bootstrap; print('imports-ok')").returncode == 0
-    assert _guarded("from pathlib import Path; Path('tmp_network_guard_test.txt').write_text('x'); Path('tmp_network_guard_test.txt').unlink()").returncode == 0
+    assert _guarded(
+        "from pathlib import Path; "
+        "import shutil, tempfile; "
+        "tmp = Path(tempfile.mkdtemp()); "
+        "p = tmp / 'network_guard_test.txt'; "
+        "p.write_text('x'); "
+        "p.unlink(); "
+        "ok = not p.exists(); "
+        "shutil.rmtree(tmp); "
+        "assert ok and not tmp.exists()"
+    ).returncode == 0
     assert _guarded("from app.adapters.testing.fake_http_transport import FakeHttpTransport; print(FakeHttpTransport(result={'status':'timeout'}))").returncode == 0
     assert _guarded("import http.client; http.client.HTTPSConnection = object; print('mock-ok')").returncode == 0
     assert "NETWORK_BLOCKED_OFFLINE_TEST" in result.stderr
