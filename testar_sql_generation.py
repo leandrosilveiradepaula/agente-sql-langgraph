@@ -960,11 +960,6 @@ def main() -> None:
         print(f"TESTE {index} - {name}: OK")
 
 
-if __name__ == "__main__":
-    main()
-
-
-
 def _plan_with_required_filter() -> dict:
     query_plan = _query_plan()
     query_plan["planning_context"]["planned_filters"] = [
@@ -1067,3 +1062,17 @@ def test_planned_filter_nao_aceita_campos_fisicos() -> None:
         assert "detalhes fisicos" in str(exc)
     else:
         raise AssertionError("planned_filter fisico deveria falhar")
+
+
+if __name__ == "__main__":
+    main()
+    extra_tests = [
+        ("required filter separado do binding", test_required_filter_e_binding_fisico_sao_separados),
+        ("required filter sem binding fail closed", test_required_filter_sem_binding_falha_fechada),
+        ("binding ambiguo fail closed", test_binding_ambiguo_falha_fechada),
+        ("filtros deterministicos", test_filtros_sao_deterministicos_e_ignoram_nao_referenciados),
+        ("planned filter sem campos fisicos", test_planned_filter_nao_aceita_campos_fisicos),
+    ]
+    for index, (name, test_function) in enumerate(extra_tests, start=44):
+        test_function()
+        print(f"TESTE {index} - {name}: OK")
