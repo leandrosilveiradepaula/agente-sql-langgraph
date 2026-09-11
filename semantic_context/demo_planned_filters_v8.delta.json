@@ -1,0 +1,74 @@
+{
+  "contract": "semantic-context-delta/v1",
+  "source_context_version": "v7-planned-metrics",
+  "target_context_version": "v8-planned-filters",
+  "environment": "DEMO",
+  "automatic_apply": false,
+  "filter_concepts": [
+    {
+      "filter_concept": "dre_receita_operacional_liquida",
+      "aliases": ["receita operacional liquida", "receitas operacionais liquidas"],
+      "provenance": {
+        "source": "scripts/migrations/003_prepare_semantic_operations_context_v2.sql",
+        "classification": "TRANSITIONAL",
+        "evidence": "existing versioned DRE mapping metadata"
+      }
+    },
+    {
+      "filter_concept": "dre_despesas_operacionais",
+      "aliases": ["despesa operacional", "despesas operacionais"],
+      "provenance": {
+        "source": "scripts/migrations/003_prepare_semantic_operations_context_v2.sql",
+        "classification": "TRANSITIONAL",
+        "evidence": "existing versioned DRE mapping metadata"
+      }
+    },
+    {
+      "filter_concept": "dre_custos",
+      "aliases": ["custo", "custos"],
+      "provenance": {
+        "source": "scripts/migrations/003_prepare_semantic_operations_context_v2.sql",
+        "classification": "TRANSITIONAL",
+        "evidence": "existing versioned DRE mapping metadata"
+      }
+    }
+  ],
+  "filter_bindings": [],
+  "transitional_inventory": [
+    {
+      "field": "sql_filter_hint",
+      "allowed_use": "migration_inventory_only",
+      "forbidden_use": "filter_binding_contract"
+    },
+    {
+      "field": "nivel_1_bi",
+      "allowed_use": "historical_grouping_evidence_only",
+      "forbidden_use": "inferred_target_column"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "DEMO-PF-001",
+      "status": "BLOCKING_FAIL_CLOSED",
+      "scope": "all_filter_concepts",
+      "missing_evidence": [
+        "target_table",
+        "target_column",
+        "operator",
+        "value",
+        "scope",
+        "join_path"
+      ],
+      "required_resolution": "Provide one complete, versioned and auditable physical binding per concept before activation.",
+      "activation_allowed": false
+    }
+  ],
+  "activation": {
+    "allowed": false,
+    "condition": "All BLOCKING_FAIL_CLOSED gaps must be resolved with versioned evidence."
+  },
+  "rollback": {
+    "action": "Restore SEMANTIC_AGENT_VERSION to v7-planned-metrics.",
+    "delete_data": false
+  }
+}

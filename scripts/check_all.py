@@ -79,6 +79,10 @@ STEPS = [
         [sys.executable, "testar_planned_filters_e2e.py"],
     ),
     (
+        "testar_demo_planned_filters_context.py",
+        [sys.executable, "testar_demo_planned_filters_context.py"],
+    ),
+    (
         "testar_build_plan.py",
         [sys.executable, "testar_build_plan.py"],
     ),
