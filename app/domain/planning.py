@@ -12,7 +12,7 @@ from app.domain.context import (
 )
 
 
-PLANNER_VERSION = "v1.0.0-deterministic-context-planner"
+PLANNER_VERSION = "v1.1.0-planned-filter-contract"
 
 PlanningDecisionReason = Literal[
     "single_pattern_selected",
@@ -200,6 +200,18 @@ class ProjectedPlannedMetric(TypedDict, total=False):
     binding_source: str
 
 
+class ProjectedPlannedFilter(TypedDict, total=False):
+    filter_ref: str
+    filter_concept: str
+    binding_ref: str
+    required: bool
+    scope: str
+    detection_source: str
+    mapping_source: str
+    matched_user_term: str
+    provenance: dict[str, Any]
+
+
 class ProjectionDiagnostic(TypedDict):
     missing_required_rules: list[str]
     missing_required_tables: list[str]
@@ -209,6 +221,7 @@ class ProjectionDiagnostic(TypedDict):
     dimension_diagnostic: dict[str, Any]
     analytical_operation_diagnostic: dict[str, Any]
     planned_metric_diagnostic: dict[str, Any]
+    planned_filter_diagnostic: dict[str, Any]
 
 
 class PlanningContextProjection(TypedDict):
@@ -226,6 +239,7 @@ class PlanningContextProjection(TypedDict):
     detected_dimensions: list[ProjectedDimension]
     analytical_operations: list[ProjectedAnalyticalOperation]
     planned_metrics: list[ProjectedPlannedMetric]
+    planned_filters: list[ProjectedPlannedFilter]
     allowed_schemas: list[str]
     component_configs: dict[str, dict[str, Any]]
     diagnostics: ProjectionDiagnostic
