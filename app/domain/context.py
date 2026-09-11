@@ -24,6 +24,44 @@ IntentCatalogRuleEffect = Literal[
 ]
 
 
+class FilterBindingDefinition(TypedDict):
+    """Binding fisico versionado de uma obrigacao semantica de filtro."""
+
+    binding_ref: str
+    filter_concept: str
+    required: bool
+    scope: Literal["row", "where"]
+    target_table: str
+    target_column: str
+    operator: str
+    value: Any
+    join_path: list[Any]
+
+
+class FilterBindingBusinessRule(TypedDict):
+    """Envelope canonico do binding mantido na entidade semantica."""
+
+    filter_binding: FilterBindingDefinition
+
+
+class FilterConceptEntity(TypedDict, total=False):
+    """Alias versionado que associa evidencia textual a um conceito."""
+
+    entity_type: Literal["filter_concept"]
+    user_term: str
+    canonical_value: str
+    priority: int
+
+
+class FilterBindingEntity(TypedDict, total=False):
+    """Entidade versionada que separa o binding fisico do conceito."""
+
+    entity_type: Literal["filter_binding"]
+    canonical_value: str
+    business_rule: FilterBindingBusinessRule
+    priority: int
+
+
 class ContextVersions(TypedDict, total=False):
     """
     Estrutura legada mantida temporariamente para compatibilidade.
@@ -299,7 +337,7 @@ class ContextSnapshot(TypedDict, total=False):
     # Contagens e coleções canônicas
     counts: ContextCounts
     rules: list[AgentRule]
-    entities: list[EntityAlias]
+    entities: list[EntityAlias | FilterConceptEntity | FilterBindingEntity]
     dre_mappings: list[DreMapping]
     query_patterns: list[QueryPattern]
     table_catalog: list[TableCatalogEntry]
