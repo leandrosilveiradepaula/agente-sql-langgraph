@@ -37,6 +37,68 @@ nao invocam o grafo diretamente. O service sempre retorna `ApplicationResponse`,
 request invalida nao chama o grafo, exception de runtime e fail-closed, e
 `GraphState` nunca e retornado.
 
+## Principios permanentes do Agente Financeiro
+
+- A arquitetura e hibrida: n8n permanece responsavel por orquestracao operacional,
+  webhooks, integracoes e etapas deterministicas; LangGraph fica com semantica,
+  classificacao, selecao de contexto, planejamento, geracao/validacao de SQL,
+  repair como proposta e evidence/governanca. Nao migrar tarefas para LangGraph
+  apenas porque ele existe.
+- Nunca implementar pergunta -> SQL, frase -> resposta ou benchmark -> comportamento.
+  Perguntas, SQLs historicas e golden answers servem apenas para avaliacao e
+  documentacao, nunca para geracao.
+- Migrar comportamento, nao hardcode. Classificar conhecimento encontrado como:
+  `STRUCTURAL` (motor/plataforma), `TRANSITIONAL` (divida herdada) ou `FORBIDDEN`
+  (regra de negocio, tabela/coluna cliente-especifica, DRE, marca, conta, centro
+  de custo, alias, intencao especifica, excecao, SQL pronta, pergunta/resposta ou
+  threshold de caso). Nenhum `FORBIDDEN` entra em codigo novo.
+- O codigo conhece o PROCESSO; conhecimento de negocio deve vir de contexto/configuracao
+  versionada e auditavel. Preferir fontes como regras, aliases, mappings, patterns
+  e catalogo semantico versionados.
+- `business_question_examples` sao apenas sinais semanticos auxiliares; nunca lookup.
+- Campos de benchmark (`tabelas_obrigatorias`, `filtros_obrigatorios`,
+  `deve_conter_sql`, `nao_deve_conter_sql`, `criterio_semantico`, SQL esperada,
+  resposta esperada, golden answer) nunca podem chegar ao generator/prompt.
+- Antes de aceitar uma mudanca, validar se ela melhora capacidade geral ou apenas
+  um caso. Nunca reduzir threshold, criar `if` por frase ou SQL especial para benchmark.
+- `SEMANTIC_AGENT_VERSION` deve permitir trocar regras, aliases, mappings, patterns
+  e catalogo preferencialmente sem alterar Python/TypeScript.
+- Durante shadow: OFFICIAL = n8n, SHADOW = LangGraph, `real_sql_execution=false` e
+  nenhum cutover implicito.
+- Generate, Repair e Execute sao etapas distintas. SQL alterada perde aprovacao,
+  exige `requires_reapproval=true` e nunca e executada silenciosamente.
+- Preservar observabilidade e correlation metadata; nunca expor secrets, DSN,
+  Authorization, cookies, API keys ou raw provider responses desnecessarias.
+- Nunca afirmar que arquivo, codigo, SQL, log ou configuracao foi revisado sem
+  realmente acessar o conteudo.
+- Testar generalizacao com perguntas novas e equivalentes semanticamente, nao apenas
+  benchmark conhecido.
+
+## Protocolo Codex
+
+O Codex deve tratar este repositorio como fonte de verdade operacional.
+Antes de qualquer implementacao, ler este `AGENTS.md` e
+`docs/codex/CURRENT_TASK.md` quando existir.
+
+Para cada tarefa:
+1. confirmar HEAD/branch e working tree antes de editar;
+2. respeitar estritamente o escopo de `CURRENT_TASK.md`;
+3. nao alterar arquivos ou subsistemas fora do escopo sem necessidade comprovada;
+4. executar os testes novos e a regressao relevante indicada;
+5. executar `python scripts/check_all.py` antes de commit quando a tarefa exigir
+   regressao consolidada;
+6. produzir inventario de hardcodes `STRUCTURAL / TRANSITIONAL / FORBIDDEN`;
+7. nunca introduzir `FORBIDDEN` em codigo de producao;
+8. registrar no resultado: arquivos alterados, diff resumido, testes, riscos e
+   `git status`;
+9. somente fazer commit quando `CURRENT_TASK.md` autorizar explicitamente;
+10. nunca fazer deploy, alterar Supabase, n8n, PROD ou servico externo sem autorizacao
+    explicita na tarefa corrente.
+
+`docs/codex/CURRENT_TASK.md` e o control plane da tarefa corrente. Ele nao deve
+conter secrets nem golden answers de benchmark. Ao concluir uma tarefa, nao inventar
+a proxima: aguardar que a tarefa corrente seja atualizada.
+
 ## Comandos principais
 
 - `python -m compileall app`
