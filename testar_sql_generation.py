@@ -960,5 +960,119 @@ def main() -> None:
         print(f"TESTE {index} - {name}: OK")
 
 
+def _plan_with_required_filter() -> dict:
+    query_plan = _query_plan()
+    query_plan["planning_context"]["planned_filters"] = [
+        {
+            "filter_ref": "filter-synthetic",
+            "filter_concept": "synthetic_category",
+            "binding_ref": "binding-synthetic",
+            "required": True,
+            "scope": "row",
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "filter_binding",
+            "matched_user_term": "synthetic",
+            "provenance": {"context_version": "context-test-v1"},
+        }
+    ]
+    query_plan["planning_context"]["resolved_filter_bindings"] = [
+        {
+            "binding_ref": "binding-synthetic",
+            "filter_concept": "synthetic_category",
+            "target_table": "schema_test.table_test",
+            "target_column": "category_key",
+            "operator": "=",
+            "value": "synthetic_value",
+            "join_path": [],
+            "required": True,
+            "scope": "row",
+        }
+    ]
+    return query_plan
+
+
+def test_required_filter_e_binding_fisico_sao_separados() -> None:
+    request = build_sql_generation_request(_plan_with_required_filter())
+    context = request["generation_context"]
+    assert context["planned_filters"][0]["binding_ref"] == "binding-synthetic"
+    assert "target_table" not in context["planned_filters"][0]
+    assert context["filter_bindings"] == [
+        {
+            "binding_ref": "binding-synthetic",
+            "filter_concept": "synthetic_category",
+            "target_table": "schema_test.table_test",
+            "target_column": "category_key",
+            "operator": "=",
+            "value": "synthetic_value",
+            "join_path": [],
+            "required": True,
+            "scope": "row",
+        }
+    ]
+    instruction = next(item for item in request["instructions"] if item["name"] == "required_filters")
+    assert "required=true" in instruction["content"]
+    assert "nao adicione filtros extras" in instruction["content"].lower()
+
+
+def test_required_filter_sem_binding_falha_fechada() -> None:
+    query_plan = _plan_with_required_filter()
+    query_plan["planning_context"]["resolved_filter_bindings"] = []
+    try:
+        build_sql_generation_request(query_plan)
+    except SqlGenerationInputError as exc:
+        assert "obrigatorio ausente" in str(exc)
+    else:
+        raise AssertionError("binding obrigatorio ausente deveria falhar")
+
+
+def test_binding_ambiguo_falha_fechada() -> None:
+    query_plan = _plan_with_required_filter()
+    query_plan["planning_context"]["resolved_filter_bindings"].append(
+        deepcopy(query_plan["planning_context"]["resolved_filter_bindings"][0])
+    )
+    try:
+        build_sql_generation_request(query_plan)
+    except SqlGenerationInputError as exc:
+        assert "ambiguo" in str(exc)
+    else:
+        raise AssertionError("binding ambiguo deveria falhar")
+
+
+def test_filtros_sao_deterministicos_e_ignoram_nao_referenciados() -> None:
+    query_plan = _plan_with_required_filter()
+    second_filter = deepcopy(query_plan["planning_context"]["planned_filters"][0])
+    second_filter.update({"filter_ref": "filter-a", "filter_concept": "alpha", "binding_ref": "binding-a"})
+    second_binding = deepcopy(query_plan["planning_context"]["resolved_filter_bindings"][0])
+    second_binding.update({"filter_concept": "alpha", "binding_ref": "binding-a", "value": "alpha-value"})
+    extra_binding = deepcopy(second_binding)
+    extra_binding["binding_ref"] = "binding-unreferenced"
+    query_plan["planning_context"]["planned_filters"] = [query_plan["planning_context"]["planned_filters"][0], second_filter]
+    query_plan["planning_context"]["resolved_filter_bindings"] = [extra_binding, query_plan["planning_context"]["resolved_filter_bindings"][0], second_binding]
+    request = build_sql_generation_request(query_plan)
+    assert [item["binding_ref"] for item in request["generation_context"]["planned_filters"]] == ["binding-a", "binding-synthetic"]
+    assert [item["binding_ref"] for item in request["generation_context"]["filter_bindings"]] == ["binding-a", "binding-synthetic"]
+
+
+def test_planned_filter_nao_aceita_campos_fisicos() -> None:
+    query_plan = _plan_with_required_filter()
+    query_plan["planning_context"]["planned_filters"][0]["target_column"] = "forbidden"
+    try:
+        build_sql_generation_request(query_plan)
+    except SqlGenerationInputError as exc:
+        assert "detalhes fisicos" in str(exc)
+    else:
+        raise AssertionError("planned_filter fisico deveria falhar")
+
+
 if __name__ == "__main__":
     main()
+    extra_tests = [
+        ("required filter separado do binding", test_required_filter_e_binding_fisico_sao_separados),
+        ("required filter sem binding fail closed", test_required_filter_sem_binding_falha_fechada),
+        ("binding ambiguo fail closed", test_binding_ambiguo_falha_fechada),
+        ("filtros deterministicos", test_filtros_sao_deterministicos_e_ignoram_nao_referenciados),
+        ("planned filter sem campos fisicos", test_planned_filter_nao_aceita_campos_fisicos),
+    ]
+    for index, (name, test_function) in enumerate(extra_tests, start=44):
+        test_function()
+        print(f"TESTE {index} - {name}: OK")

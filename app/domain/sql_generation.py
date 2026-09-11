@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Literal, TypedDict
@@ -10,7 +11,7 @@ from app.domain.planning import QueryPlan
 
 
 SQL_GENERATION_CONTRACT_VERSION = (
-    "v1.0.0-query-plan-sql-generation"
+    "v1.1.0-planned-filter-generation"
 )
 MAX_SQL_RESPONSE_LENGTH = 20000
 
@@ -77,6 +78,30 @@ class PlannedMetric(TypedDict, total=False):
     binding_source: str
 
 
+class PlannedFilter(TypedDict, total=False):
+    filter_ref: str
+    filter_concept: str
+    binding_ref: str
+    required: bool
+    scope: str
+    detection_source: str
+    mapping_source: str
+    matched_user_term: str
+    provenance: dict[str, Any]
+
+
+class FilterBinding(TypedDict):
+    binding_ref: str
+    filter_concept: str
+    target_table: str
+    target_column: str
+    operator: str
+    value: Any
+    join_path: list[dict[str, Any]]
+    required: bool
+    scope: str
+
+
 class SqlGenerationContext(TypedDict):
     context_version: str
     context_fingerprint: str
@@ -94,6 +119,8 @@ class SqlGenerationContext(TypedDict):
     grouping_dimensions: list[GroupingDimension]
     analytical_operations: list[AnalyticalOperation]
     planned_metrics: list[PlannedMetric]
+    planned_filters: list[PlannedFilter]
+    filter_bindings: list[FilterBinding]
     pattern_metadata: dict[str, Any]
 
 
@@ -188,6 +215,8 @@ _PLAN_FIELDS_USED = [
     "planning_context.detected_dimensions",
     "planning_context.analytical_operations",
     "planning_context.planned_metrics",
+    "planning_context.planned_filters",
+    "planning_context.resolved_filter_bindings",
     "sql_pattern_metadata",
 ]
 
@@ -260,6 +289,13 @@ def build_sql_generation_request(
     planned_metrics = _planned_metrics(
         planning_context.get("planned_metrics", [])
     )
+    planned_filters = _planned_filters(
+        planning_context.get("planned_filters", [])
+    )
+    filter_bindings = _filter_bindings(
+        planning_context.get("resolved_filter_bindings", []),
+        planned_filters=planned_filters,
+    )
     analytical_operations = _analytical_operations(
         planning_context.get("analytical_operations", []),
         planned_metrics=planned_metrics,
@@ -280,6 +316,19 @@ def build_sql_generation_request(
             ),
         },
     ]
+    if any(item.get("required") is True for item in planned_filters):
+        instructions.append(
+            {
+                "name": "required_filters",
+                "content": (
+                    "Aplique todos os planned_filters com required=true no WHERE "
+                    "usando exclusivamente o filter_binding correlacionado por "
+                    "binding_ref. Nao infira tabela, coluna, operador ou valor a "
+                    "partir de normalized_question e nao adicione filtros extras "
+                    "deduzidos do texto."
+                ),
+            }
+        )
     if any(
         operation.get("operation_type") == "ranking"
         and operation.get("metric_ref")
@@ -391,6 +440,8 @@ def build_sql_generation_request(
             "grouping_dimensions": grouping_dimensions,
             "analytical_operations": analytical_operations,
             "planned_metrics": planned_metrics,
+            "planned_filters": planned_filters,
+            "filter_bindings": filter_bindings,
             "pattern_metadata": {
                 "pattern_name": selected_pattern.get(
                     "pattern_name",
@@ -704,6 +755,8 @@ def _validate_request(
         "grouping_dimensions",
         "analytical_operations",
         "planned_metrics",
+        "planned_filters",
+        "filter_bindings",
     ):
         if not isinstance(context.get(field_name), list):
             raise SqlGenerationInputError(
@@ -1073,6 +1126,149 @@ def _planned_metrics(value: Any) -> list[PlannedMetric]:
         )
     )
     return output
+
+
+def _planned_filters(value: Any) -> list[PlannedFilter]:
+    if not isinstance(value, list):
+        raise SqlGenerationInputError("planned_filters deve ser lista.")
+    physical_fields = {
+        "target_table", "target_column", "operator", "value", "join_path"
+    }
+    output: list[PlannedFilter] = []
+    seen_refs: set[str] = set()
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise SqlGenerationInputError("planned_filters contem item invalido.")
+        if physical_fields & set(item):
+            raise SqlGenerationInputError(
+                "planned_filter nao pode conter detalhes fisicos."
+            )
+        filter_ref = _optional_clean_text(item.get("filter_ref"))
+        filter_concept = _optional_clean_text(item.get("filter_concept"))
+        binding_ref = _optional_clean_text(item.get("binding_ref"))
+        scope = _optional_clean_text(item.get("scope"))
+        required = item.get("required")
+        if not (filter_ref and filter_concept and binding_ref and scope):
+            raise SqlGenerationInputError("planned_filter esta incompleto.")
+        if not isinstance(required, bool):
+            raise SqlGenerationInputError("planned_filter.required deve ser booleano.")
+        key = binding_ref.casefold()
+        if key in seen_refs:
+            raise SqlGenerationInputError("planned_filter.binding_ref duplicado.")
+        seen_refs.add(key)
+        output.append(
+            {
+                "filter_ref": filter_ref,
+                "filter_concept": filter_concept,
+                "binding_ref": binding_ref,
+                "required": required,
+                "scope": scope,
+                "detection_source": _optional_clean_text(item.get("detection_source")),
+                "mapping_source": _optional_clean_text(item.get("mapping_source")),
+                "matched_user_term": _optional_clean_text(item.get("matched_user_term")),
+                "provenance": _stable_mapping_copy(item.get("provenance", {}))
+                if isinstance(item.get("provenance", {}), Mapping)
+                else {},
+            }
+        )
+    output.sort(key=lambda item: (item["binding_ref"].casefold(), item["filter_ref"].casefold()))
+    return output
+
+
+def _filter_bindings(
+    value: Any,
+    *,
+    planned_filters: list[PlannedFilter],
+) -> list[FilterBinding]:
+    if not isinstance(value, list):
+        raise SqlGenerationInputError("resolved_filter_bindings deve ser lista.")
+    referenced = {item["binding_ref"].casefold(): item for item in planned_filters}
+    grouped: dict[str, list[FilterBinding]] = {key: [] for key in referenced}
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise SqlGenerationInputError("resolved_filter_bindings contem item invalido.")
+        binding_ref = _optional_clean_text(item.get("binding_ref"))
+        if not binding_ref or binding_ref.casefold() not in referenced:
+            continue
+        target_table = _optional_clean_text(item.get("target_table"))
+        target_column = _optional_clean_text(item.get("target_column"))
+        operator = _optional_clean_text(item.get("operator"))
+        filter_concept = _optional_clean_text(item.get("filter_concept"))
+        scope = _optional_clean_text(item.get("scope"))
+        required = item.get("required")
+        raw_value = item.get("value")
+        join_path = item.get("join_path")
+        planned = referenced[binding_ref.casefold()]
+        if not (
+            target_table and target_column and operator and filter_concept and scope
+            and isinstance(required, bool)
+            and _is_filled_json_value(raw_value)
+            and _is_valid_join_path(join_path)
+        ):
+            raise SqlGenerationInputError("filter_binding esta incompleto ou invalido.")
+        if (
+            filter_concept.casefold() != planned["filter_concept"].casefold()
+            or scope.casefold() != planned["scope"].casefold()
+            or required is not planned["required"]
+        ):
+            raise SqlGenerationInputError("filter_binding diverge da obrigacao semantica.")
+        grouped[binding_ref.casefold()].append(
+            {
+                "binding_ref": binding_ref,
+                "filter_concept": filter_concept,
+                "target_table": target_table,
+                "target_column": target_column,
+                "operator": operator,
+                "value": deepcopy(raw_value),
+                "join_path": deepcopy(join_path),
+                "required": required,
+                "scope": scope,
+            }
+        )
+    output: list[FilterBinding] = []
+    for key in sorted(grouped):
+        candidates = grouped[key]
+        planned = referenced[key]
+        if len(candidates) > 1:
+            raise SqlGenerationInputError("filter_binding ambiguo para binding_ref.")
+        if planned["required"] is True and len(candidates) != 1:
+            raise SqlGenerationInputError("filter_binding obrigatorio ausente.")
+        if candidates:
+            output.append(candidates[0])
+    return output
+
+
+def _is_filled_json_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, bool) or isinstance(value, int):
+        return True
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return bool(value) and all(_is_filled_json_value(item) for item in value)
+    if isinstance(value, Mapping):
+        return bool(value) and all(
+            isinstance(key, str) and bool(key.strip()) and _is_filled_json_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _is_valid_join_path(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    return all(
+        isinstance(step, Mapping)
+        and bool(step)
+        and all(
+            isinstance(key, str) and bool(key.strip()) and _is_filled_json_value(item)
+            for key, item in step.items()
+        )
+        for step in value
+    )
 
 
 def _binding_cardinality(value: Any) -> dict[str, Any]:

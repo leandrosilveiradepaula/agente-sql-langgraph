@@ -12,7 +12,7 @@ from app.domain.context import (
 )
 
 
-PLANNER_VERSION = "v1.1.0-planned-filter-contract"
+PLANNER_VERSION = "v1.2.0-planned-filter-generation"
 
 PlanningDecisionReason = Literal[
     "single_pattern_selected",
@@ -212,6 +212,18 @@ class ProjectedPlannedFilter(TypedDict, total=False):
     provenance: dict[str, Any]
 
 
+class ProjectedFilterBinding(TypedDict, total=False):
+    binding_ref: str
+    filter_concept: str
+    target_table: str
+    target_column: str
+    operator: str
+    value: Any
+    join_path: list[dict[str, Any]]
+    required: bool
+    scope: str
+
+
 class ProjectionDiagnostic(TypedDict):
     missing_required_rules: list[str]
     missing_required_tables: list[str]
@@ -240,6 +252,7 @@ class PlanningContextProjection(TypedDict):
     analytical_operations: list[ProjectedAnalyticalOperation]
     planned_metrics: list[ProjectedPlannedMetric]
     planned_filters: list[ProjectedPlannedFilter]
+    resolved_filter_bindings: list[ProjectedFilterBinding]
     allowed_schemas: list[str]
     component_configs: dict[str, dict[str, Any]]
     diagnostics: ProjectionDiagnostic
