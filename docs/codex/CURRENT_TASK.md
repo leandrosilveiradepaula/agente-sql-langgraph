@@ -1,131 +1,147 @@
-# CURRENT TASK — planned_filters microetapa 4
+# CURRENT TASK — planned_filters microetapa 5
 
 ## Objetivo
 
-Fechar a prontidao end-to-end offline de `planned_filters`, conectando o contexto semantico versionado ao planner, generator e Contract Gate com testes sinteticos de fluxo completo, sem deploy e sem alterar ambientes externos.
+Preparar, somente no repositorio e sem aplicar em ambiente externo, o delta de contexto semantico versionado necessario para o ambiente DEMO usar `planned_filters` de forma real, partindo do motor ja validado nas microetapas 1-4.
 
-A microetapa 3 ja esta mergeada. Hoje o motor ja possui:
-- deteccao de `filter_concept` a partir de evidencia semantica;
-- resolucao de `filter_binding` versionado em `entities`;
-- `planned_filters` semantic-only;
-- `resolved_filter_bindings` fisicos separados;
-- geracao SQL instruida por bindings estruturados;
-- Contract Gate que valida os filtros obrigatorios na SQL de forma fail-closed.
+A microetapa 4 esta concluida e mergeada. O motor ja prova offline o caminho:
 
-O proximo risco e integracao: garantir que um snapshot semantico versionado com `filter_concept` + `filter_binding` percorra o caminho completo sem atalhos textuais ou conhecimento de negocio no codigo.
+`contexto semantico -> evidence -> planner -> planned_filters/resolved_filter_bindings -> generator -> Contract Gate`.
+
+O proximo risco nao e mais de motor; e de contexto. O runtime DEMO precisa ter conceitos e bindings versionados compativeis com esse contrato. Esta tarefa deve preparar esse contexto sem executar SQL em Supabase, sem alterar DEMO real e sem deploy.
+
+## Regra de ouro
+
+Migrar conhecimento para contexto/configuracao versionada, nao para Python/TypeScript.
+
+Nenhuma regra de negocio desta microetapa pode virar `if`, constante, threshold, tabela/coluna ou SQL especial no motor.
 
 ## Premissas obrigatorias
 
 - Nao criar pergunta -> SQL.
-- Nao criar if por termo de negocio.
-- Nao usar benchmark/golden/expected SQL como entrada do fluxo.
-- Nao usar `sql_filter_hint` como contrato final.
-- `planned_filter` continua sem campos fisicos.
-- detalhes fisicos permanecem apenas no binding estruturado/versionado.
-- conhecimento de negocio deve permanecer no contexto/configuracao, nunca no motor.
-- ausencia/ambiguidade/inconsistencia de binding obrigatorio deve continuar fail-closed.
-- manter arquitetura hibrida n8n + LangGraph; esta tarefa e somente semantica/agentic do LangGraph.
+- Nao criar resposta pronta.
+- Nao usar benchmark/golden/expected SQL como fonte de comportamento.
+- `business_question_examples` continuam apenas sinais auxiliares.
+- `planned_filter` permanece semantic-only.
+- detalhes fisicos ficam somente em `filter_binding` versionado.
+- `sql_filter_hint` pode ser lido apenas como evidencia TRANSITIONAL para inventario/migracao; nunca como contrato final do motor.
+- nenhuma informacao fisica deve ser inventada se nao houver evidencia versionada suficiente.
+- se um binding nao puder ser derivado com seguranca, registrar GAP/fail-closed em vez de criar valor por suposicao.
+- conhecimento de negocio DEMO e permitido somente em artefato de contexto/configuracao versionada, nunca no codigo do motor.
+
+## Fonte de verdade permitida
+
+Usar apenas artefatos ja existentes no repositorio e documentacao versionada disponivel nele para inferir o delta.
+
+Nao consultar nem modificar Supabase, n8n, Watson, PROD, credenciais ou qualquer ambiente externo nesta microetapa.
+
+Se os artefatos do repositorio nao contiverem informacao suficiente para um binding fisico seguro, produzir explicitamente uma lacuna a ser confirmada antes de qualquer futura aplicacao.
+
+## Entrega esperada
+
+Criar um pacote declarativo e auditavel de contexto DEMO, preferencialmente em arquivo novo dedicado, contendo:
+
+1. versao de contexto alvo proposta, sem substituir silenciosamente a versao atual;
+2. entidades `filter_concept` necessarias para categorias/conceitos financeiros ja existentes no contexto DEMO documentado;
+3. entidades `filter_binding` somente quando tabela, coluna, operador, valor, scope e join_path puderem ser sustentados por evidencia versionada;
+4. provenance/source para cada item;
+5. inventario de itens TRANSITIONAL reaproveitados apenas como pista de migracao;
+6. lista de gaps nao resolvidos;
+7. procedimento de validacao offline do pacote contra normalizer/validator/planner/generator/Contract Gate;
+8. rollback conceitual: trocar `SEMANTIC_AGENT_VERSION` de volta para a versao anterior, sem apagar dados.
+
+O artefato pode ser JSON, YAML, SQL declarativo nao aplicado ou formato equivalente ja coerente com o repositorio. Nao criar script que se conecte automaticamente a banco.
 
 ## Escopo permitido
 
-Alterar somente o necessario para:
-1. tornar explicito no contrato/tipos do contexto que `filter_concept` e `filter_binding` sao entidades semanticas suportadas, se isso ainda nao estiver representado adequadamente;
-2. validar/normalizar estruturalmente `filter_binding` no carregamento ou no ponto canonico mais adequado, sem introduzir regras de negocio;
-3. adicionar fixtures/contextos sinteticos versionados contendo conceitos e bindings genericos;
-4. adicionar teste end-to-end offline do caminho:
-   contexto semantico -> intent/evidence -> planner -> planned_filters/resolved_filter_bindings -> SQL generation request -> SQL gerada sintetica/provider fake -> Contract Gate;
-5. provar comportamento fail-closed quando o contexto tem conceito sem binding, binding ambiguo/invalido ou binding divergente;
-6. provar que perguntas semanticamente equivalentes e nao identicas produzem a mesma obrigacao estrutural quando a evidencia semantica configurada assim determina.
+- novos artefatos declarativos de contexto/configuracao DEMO;
+- documentacao de migracao/validacao;
+- fixtures e testes offline que carreguem esse artefato;
+- ajustes minimos e estruturais no loader/validator apenas se houver incompatibilidade generica comprovada.
 
-Arquivos candidatos, somente se necessarios:
-- `app/domain/context.py`;
-- loader/normalizador de contexto existente;
-- testes de contexto/planner/generator/contract;
-- um novo teste de integracao offline sintetico, se for a opcao mais limpa.
+Nao alterar comportamento de planner, generator ou Contract Gate para acomodar um caso de negocio.
 
-Nao alterar:
-- n8n;
-- Supabase;
-- Watson;
-- PROD;
-- credenciais/permissoes;
-- execute real;
-- repair;
-- Security Gate;
-- adapters externos;
-- dados/contexto DEMO real;
-- migrations aplicadas a ambiente;
-- deploy/cutover.
+## Escopo proibido
 
-## Contrato sintetico esperado
+- executar migrations;
+- conectar Supabase;
+- alterar n8n;
+- alterar Watson;
+- alterar PROD;
+- deploy/cutover;
+- mudar `real_sql_execution`;
+- alterar credenciais/permissoes;
+- modificar benchmark para fazer teste passar;
+- codificar Receita, Custo, Despesa, DRE, conta, marca, centro de custo, unidade ou qualquer outra regra de negocio no motor.
 
-Usar apenas nomes genericos, por exemplo conceitos como `category_alpha`/`category_beta` e tabelas/colunas sinteticas. Nenhum nome de cliente, DRE real, conta, marca, centro de custo ou SQL historica.
+## Validacao offline obrigatoria
 
-O teste de integracao deve demonstrar no minimo:
+O pacote deve ser validado sem rede e sem banco externo.
 
-1. uma pergunta sintetica contendo termo configurado como alias de `filter_concept` gera exatamente um `planned_filter` semantic-only;
-2. o `binding_ref` resolve exatamente um `resolved_filter_binding` separado;
-3. o request do generator recebe a obrigacao semantica e o binding fisico separado;
-4. a SQL sintetica correta passa no Contract Gate;
-5. a mesma SQL sem o filtro obrigatorio falha no Contract Gate;
-6. conceito conhecido sem binding falha fechado antes de inventar filtro;
-7. dois bindings para o mesmo conceito sao ambiguos e falham fechado;
-8. binding incompleto/invalido nao e aceito;
-9. duas formulacoes semanticamente equivalentes, nao iguais literalmente, chegam ao mesmo conceito/obrigacao por configuracao/evidencia semantica;
-10. `planned_filters=[]` continua retrocompativel;
-11. nenhum benchmark/golden/expected SQL participa da geracao/validacao;
-12. nenhum `sql_filter_hint` participa como contrato final;
-13. nenhum hardcode FORBIDDEN novo.
+Cobrir no minimo:
 
-## Generalizacao
+1. normalizacao e validacao do snapshot/fixture;
+2. `filter_concept` resolve para `planned_filter` sem detalhes fisicos;
+3. `binding_ref` resolve para `resolved_filter_binding` separado;
+4. generator recebe obrigacao e binding separados;
+5. SQL sintetica equivalente ao binding passa Contract Gate;
+6. SQL sem filtro obrigatorio falha;
+7. binding ausente/ambiguo/invalido permanece fail-closed;
+8. duas formulacoes semanticamente equivalentes chegam ao mesmo conceito quando configuradas assim;
+9. nenhum benchmark/golden/expected SQL entra no request;
+10. nenhum `sql_filter_hint` e consumido como contrato final;
+11. nenhum hardcode FORBIDDEN novo no motor;
+12. regressao das microetapas 1-4 permanece verde.
 
-Antes de aceitar qualquer mudanca, responder:
-"Isso melhora a capacidade geral ou apenas faz um caso especifico passar?"
-
-O teste deve provar generalizacao com pelo menos uma reformulacao semantica nao identica ao exemplo principal.
-
-## Hardcode inventory
-
-Classificar todo hardcode novo/encontrado no escopo como:
-- STRUCTURAL;
-- TRANSITIONAL;
-- FORBIDDEN.
-
-Nenhum FORBIDDEN pode ser introduzido.
-
-## Validacao obrigatoria
-
-Executar no working tree real:
+Executar:
 - `python -m compileall app`;
-- testes de contexto/loader se alterados;
+- testes de contexto afetados;
 - `python testar_planner.py`;
 - `python testar_sql_generation.py`;
 - `python testar_sql_contract.py`;
 - `python testar_contract_gate.py`;
-- novo teste de integracao offline, se criado;
-- demais testes diretamente impactados;
+- `python testar_planned_filters_e2e.py`;
+- novos testes do pacote DEMO, se criados;
 - `git diff --check`;
+- `python scripts/check_hardcodes.py`;
 - `PYTHONDONTWRITEBYTECODE=1 python scripts/check_all.py`.
 
-Se `scripts/check_all.py` parar exclusivamente no teste Windows preexistente por ausencia de `SystemRoot`/`cmd.exe`, reportar exatamente. Merge somente depois do workflow GitHub Actions `Offline validation` passar no HEAD remoto do PR.
+Se `check_all.py` parar apenas no bloqueio Windows preexistente por ausencia de `SystemRoot`/`cmd.exe`, reportar sem alterar esse teste. Merge continua dependendo do `Offline validation` no GitHub Actions no HEAD remoto.
+
+## Hardcode inventory
+
+Classificar tudo encontrado/adicionado como:
+- STRUCTURAL;
+- TRANSITIONAL;
+- FORBIDDEN.
+
+Nesta microetapa, conhecimento financeiro especifico pode existir somente no artefato de contexto/configuracao versionada. Nenhum FORBIDDEN pode ser introduzido no codigo do motor.
+
+## Anti-overfitting
+
+Responder explicitamente antes de concluir:
+"Isso melhora a capacidade geral ou apenas faz um caso especifico passar?"
+
+A entrega deve demonstrar que o mecanismo continua generico e que a mudanca e de contexto, nao de logica especial por pergunta.
 
 ## Publicacao
 
 Ao concluir:
 - tente publicar branch/PR;
-- se o workspace nao puder publicar, inclua NA MESMA EXECUCAO o unified diff completo de todos os arquivos alterados para permitir materializacao pelo GitHub Connector;
+- se o workspace nao puder publicar, inclua NA MESMA EXECUCAO o unified diff completo de todos os arquivos alterados;
 - reporte `base_sha`, `local_commit_sha`, `publication_status`, `remote_branch`, `remote_head_sha`, `pr_number`, `publication_blocker`;
 - nao peca ao usuario para copiar patch, SHA, log ou comando.
 
-## Commit
+## Commit sugerido
 
-Mensagem sugerida:
-`test: prove planned filters end to end`
+`feat: prepare versioned demo filter context`
 
 ## Merge
 
-Codex nao faz merge. O ChatGPT/revisor tecnico decide e pode executar merge conforme `docs/codex/MERGE_POLICY.md` quando todos os gates estiverem satisfeitos.
+Codex nao faz merge. O ChatGPT/revisor tecnico pode revisar e mergear conforme `docs/codex/MERGE_POLICY.md` se todos os gates passarem.
 
 ## Deploy / ambientes externos
 
-Nao autorizado. Esta microetapa termina com codigo/testes prontos na `main`, sem aplicar nada em Supabase, n8n, Watson, DEMO real, PROD ou qualquer ambiente externo.
+Nao autorizado.
+
+Esta microetapa termina com artefato versionado e testes na `main`, sem aplicar nada em Supabase, n8n, Watson, DEMO real, PROD ou qualquer ambiente externo.
