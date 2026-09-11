@@ -29,6 +29,7 @@ from app.domain.planning import (
     ProjectedEntity,
     ProjectedJoin,
     ProjectedPlannedFilter,
+    ProjectedFilterBinding,
     ProjectedPlannedMetric,
     ProjectedRule,
     ProjectedTable,
@@ -323,6 +324,10 @@ def project_planning_context(
         context=context,
         intent_resolution_result=intent_resolution_result,
     )
+    resolved_filter_bindings = _project_resolved_filter_bindings(
+        entities=context.get("entities", []),
+        planned_filters=planned_filters,
+    )
     operation_projection, metric_binding_diagnostic = (
         _bind_metrics_to_analytical_operations(
             operations=operation_projection,
@@ -417,6 +422,7 @@ def project_planning_context(
         "analytical_operations": operation_projection,
         "planned_metrics": planned_metrics,
         "planned_filters": planned_filters,
+        "resolved_filter_bindings": resolved_filter_bindings,
         "allowed_schemas": list(context.get("allowed_schemas", [])),
         "component_configs": deepcopy(
             context.get("component_configs", {})
@@ -1277,6 +1283,81 @@ def _filter_bindings_for_concept(
             binding["binding_ref"],
         ),
     )
+
+
+def _project_resolved_filter_bindings(
+    *,
+    entities: Any,
+    planned_filters: list[ProjectedPlannedFilter],
+) -> list[ProjectedFilterBinding]:
+    if not isinstance(entities, list):
+        return []
+    referenced = {
+        str(item.get("binding_ref", "")).strip().casefold(): item
+        for item in planned_filters
+        if isinstance(item, Mapping)
+        and isinstance(item.get("binding_ref"), str)
+        and item["binding_ref"].strip()
+    }
+    candidates: dict[str, list[ProjectedFilterBinding]] = {
+        key: [] for key in referenced
+    }
+    for entity in entities:
+        if not isinstance(entity, Mapping) or str(
+            entity.get("entity_type", "")
+        ).casefold() != "filter_binding":
+            continue
+        rule = entity.get("business_rule")
+        raw = rule.get("filter_binding") if isinstance(rule, Mapping) else None
+        if not isinstance(raw, Mapping):
+            continue
+        binding_ref = _non_empty_text(raw.get("binding_ref"))
+        if binding_ref is None or binding_ref.casefold() not in referenced:
+            continue
+        filter_concept = _non_empty_text(raw.get("filter_concept"))
+        target_table = _non_empty_text(raw.get("target_table"))
+        target_column = _non_empty_text(raw.get("target_column"))
+        operator = _non_empty_text(raw.get("operator"))
+        scope = _non_empty_text(raw.get("scope"))
+        required = raw.get("required")
+        value = raw.get("value")
+        join_path = raw.get("join_path")
+        if not (
+            filter_concept
+            and target_table
+            and target_column
+            and operator
+            and scope
+            and isinstance(required, bool)
+            and _is_filled_json_value(value)
+            and _is_valid_join_path(join_path)
+        ):
+            continue
+        planned = referenced[binding_ref.casefold()]
+        if not (
+            _same_text(planned.get("filter_concept"), filter_concept)
+            and _same_text(planned.get("scope"), scope)
+            and planned.get("required") is required
+        ):
+            continue
+        candidates[binding_ref.casefold()].append(
+            {
+                "binding_ref": binding_ref,
+                "filter_concept": filter_concept,
+                "target_table": target_table,
+                "target_column": target_column,
+                "operator": operator,
+                "value": deepcopy(value),
+                "join_path": deepcopy(join_path),
+                "required": required,
+                "scope": scope,
+            }
+        )
+    output: list[ProjectedFilterBinding] = []
+    for key in sorted(candidates):
+        if len(candidates[key]) == 1:
+            output.append(candidates[key][0])
+    return output
 
 
 def _non_empty_text(value: Any) -> str | None:
