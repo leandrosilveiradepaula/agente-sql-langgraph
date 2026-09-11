@@ -95,6 +95,38 @@ Para cada tarefa:
 10. nunca fazer deploy, alterar Supabase, n8n, PROD ou servico externo sem autorizacao
     explicita na tarefa corrente.
 
+### Protocolo de publicacao remota
+
+A tarefa nao e considerada entregue apenas porque existe um commit no workspace do
+Codex. O estado remoto do GitHub e a fonte de verdade para entrega.
+
+Ao finalizar uma tarefa que autoriza commit/PR, o Codex deve reportar explicitamente:
+- `local_commit_sha`;
+- `publication_status`: `published` ou `not_published`;
+- `remote_branch`, quando publicada;
+- `remote_head_sha`, quando publicada;
+- `pr_number`, quando houver PR;
+- `publication_blocker`, quando `not_published`.
+
+Regras de publicacao:
+1. nunca escrever "PR criado", "PR atualizado", "publicado" ou equivalente sem
+   confirmar que o commit esta visivel no GitHub remoto;
+2. commit existente apenas no workspace deve ser reportado como `not_published`;
+3. quando a tarefa tiver sido iniciada a partir de issue/PR do GitHub, preservar a
+   mesma linha de trabalho para correcoes subsequentes; nao criar nova tarefa apenas
+   para transportar um commit local;
+4. quando houver PR remoto, toda correcao deve terminar no mesmo PR, salvo instrucao
+   explicita em contrario;
+5. se o ambiente nao tiver `git remote`, credencial ou capacidade de publicar, nao
+   tentar contornar com segredo, token, provider externo ou configuracao ad hoc;
+   registrar `publication_blocker` e preservar o patch/commit no workspace;
+6. nunca pedir ao usuario que transporte codigo, SHA, logs ou screenshots entre
+   ChatGPT, Codex e GitHub;
+7. a verificacao de entrega sera feita pelo ChatGPT diretamente no GitHub por
+   comentarios completos, branch/HEAD, commits, diff e checks; screenshots nao sao
+   parte do protocolo de verificacao;
+8. merge e deploy permanecem proibidos sem autorizacao explicita do usuario.
+
 `docs/codex/CURRENT_TASK.md` e o control plane da tarefa corrente. Ele nao deve
 conter secrets nem golden answers de benchmark. Ao concluir uma tarefa, nao inventar
 a proxima: aguardar que a tarefa corrente seja atualizada.
