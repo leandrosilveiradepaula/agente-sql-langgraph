@@ -18,7 +18,7 @@ from app.domain.sql_analysis import (
 )
 
 
-SQL_CONTRACT_GATE_VERSION = "v1.0.0-query-plan-contract-gate"
+SQL_CONTRACT_GATE_VERSION = "v1.1.0-planned-filter-contract-gate"
 
 SqlContractStatus = Literal["approved", "rejected", "error"]
 VerificationStatus = Literal[
@@ -41,6 +41,9 @@ SqlContractErrorCode = Literal[
     "SQL_CONTRACT_LIMIT_VIOLATED",
     "SQL_CONTRACT_WILDCARD_VIOLATED",
     "SQL_CONTRACT_GROUPING_DIMENSION_MISMATCH",
+    "SQL_CONTRACT_REQUIRED_FILTER_VIOLATED",
+    "SQL_CONTRACT_FILTER_BINDING_INVALID",
+    "SQL_CONTRACT_FILTER_UNVERIFIABLE",
 ]
 
 
@@ -95,6 +98,17 @@ class JoinVerificationResult(TypedDict):
     reason: str
 
 
+class FilterVerificationResult(TypedDict):
+    filter_ref: str
+    binding_ref: str
+    filter_concept: str
+    scope: str
+    status: VerificationStatus
+    reason: str
+    expected: dict[str, Any]
+    matched_predicate_count: int
+
+
 class SqlContractResult(TypedDict):
     status: SqlContractStatus
     gate_version: str
@@ -109,6 +123,7 @@ class SqlContractResult(TypedDict):
     referenced_tables: list[TableVerificationResult]
     columns: list[ColumnVerificationResult]
     joins: list[JoinVerificationResult]
+    filters: list[FilterVerificationResult]
     rules: list[RuleVerificationResult]
     unverifiable_rules: list[RuleVerificationResult]
     errors: list[SqlContractFinding]
@@ -171,7 +186,13 @@ def run_sql_contract_gate(
     findings: list[SqlContractFinding] = []
     try:
         policy = build_sql_contract_policy(query_plan)
-        sql_analysis = analysis or analyze_sql(current_sql)
+        # Persisted analyses intentionally omit raw tokens and string literals.
+        # Re-analyze current_sql locally when full structural evidence is needed.
+        sql_analysis = (
+            analysis
+            if analysis is not None and analysis.get("tokens")
+            else analyze_sql(current_sql)
+        )
         sql_token_norms = normalized_sql_tokens(
             current_sql,
             include_string_values=True,
@@ -197,6 +218,7 @@ def run_sql_contract_gate(
                 referenced=[],
                 columns=[],
                 joins=[],
+                filters=[],
                 rules=[],
                 duration_ms=_duration(start),
             ),
@@ -218,6 +240,7 @@ def run_sql_contract_gate(
                 referenced=[],
                 columns=[],
                 joins=[],
+                filters=[],
                 rules=[],
                 duration_ms=_duration(start),
             ),
@@ -239,6 +262,7 @@ def run_sql_contract_gate(
         findings,
     )
     join_results = _verify_joins(sql_analysis, query_plan, findings)
+    filter_results = _verify_planned_filters(sql_analysis, query_plan, policy, findings)
     rule_results = _verify_rules(
         sql_token_norms=sql_token_norms,
         analysis=sql_analysis,
@@ -276,6 +300,7 @@ def run_sql_contract_gate(
                 _check_status(join_results),
                 {"count": len(join_results)},
             ),
+            _check("filters", _check_status(filter_results), {"count": len(filter_results)}),
             _check(
                 "rules",
                 _check_status(rule_results),
@@ -303,6 +328,7 @@ def run_sql_contract_gate(
             referenced=table_results,
             columns=column_results,
             joins=join_results,
+            filters=filter_results,
             rules=rule_results,
             duration_ms=_duration(start),
         ),
@@ -423,6 +449,143 @@ def _verify_columns(
             item["reason"],
         ),
     )
+
+
+def _verify_planned_filters(
+    analysis: SqlStatementAnalysis,
+    query_plan: QueryPlan,
+    policy: SqlContractPolicy,
+    findings: list[SqlContractFinding],
+) -> list[FilterVerificationResult]:
+    context = _planning_context(query_plan)
+    planned = context.get("planned_filters", [])
+    bindings = context.get("resolved_filter_bindings", [])
+    if not isinstance(planned, list) or not isinstance(bindings, list):
+        raise SqlContractInputError("planned_filters e resolved_filter_bindings devem ser listas.")
+    aliases = _analysis_aliases(analysis, policy)
+    allowed = {table: set(columns) for table, columns in policy["allowed_columns"].items()}
+    results: list[FilterVerificationResult] = []
+    for obligation in planned:
+        if not isinstance(obligation, Mapping) or obligation.get("required") is not True:
+            continue
+        filter_ref = _clean_text(obligation.get("filter_ref"))
+        binding_ref = _clean_text(obligation.get("binding_ref"))
+        concept = _clean_text(obligation.get("filter_concept"))
+        scope = _clean_text(obligation.get("scope"))
+        matches = [
+            item for item in bindings
+            if isinstance(item, Mapping) and _clean_text(item.get("binding_ref")) == binding_ref
+        ]
+        reason = ""
+        status: VerificationStatus = "violated"
+        expected: dict[str, Any] = {}
+        matched_count = 0
+        binding = matches[0] if len(matches) == 1 else None
+        if not filter_ref or not binding_ref or not concept or scope not in {"row", "where"}:
+            reason = "planned_filter_invalid"
+        elif len(matches) != 1:
+            reason = "binding_missing" if not matches else "binding_ambiguous"
+        elif not _valid_filter_binding(binding, obligation, allowed):
+            reason = "binding_invalid_or_incoherent"
+        else:
+            assert binding is not None
+            target_table = _clean_text(binding.get("target_table")).casefold()
+            target_column = _clean_text(binding.get("target_column")).casefold()
+            operator = _clean_text(binding.get("operator"))
+            expected = {
+                "target_table": target_table,
+                "target_column": target_column,
+                "operator": operator,
+                "literal_type": _value_type(binding.get("value")),
+            }
+            relevant = []
+            unverifiable = False
+            for predicate in analysis.get("predicates", []):
+                resolved = _resolve_column_table(
+                    {
+                        "column": str(predicate.get("column") or ""),
+                        "qualifier": predicate.get("qualifier"),
+                        "schema": None,
+                        "table": predicate.get("qualifier"),
+                        "raw": "", "clause": "where", "is_wildcard": False,
+                    },
+                    allowed,
+                    aliases,
+                )
+                if resolved.get("table") != target_table or predicate.get("column") != target_column:
+                    continue
+                relevant.append(predicate)
+                if not predicate.get("supported"):
+                    unverifiable = True
+                    continue
+                if predicate.get("operator") == operator and _same_literal(
+                    predicate.get("value"), binding.get("value")
+                ):
+                    matched_count += 1
+            if matched_count == 1:
+                status, reason = "satisfied", "required_filter_present"
+            elif matched_count > 1:
+                status, reason = "unverifiable", "predicate_ambiguous"
+            elif unverifiable:
+                status, reason = "unverifiable", "predicate_not_verifiable"
+            elif relevant:
+                reason = "predicate_value_or_operator_mismatch"
+            else:
+                reason = "required_filter_missing"
+        result: FilterVerificationResult = {
+            "filter_ref": filter_ref, "binding_ref": binding_ref,
+            "filter_concept": concept, "scope": scope,
+            "status": status, "reason": reason, "expected": expected,
+            "matched_predicate_count": matched_count,
+        }
+        results.append(result)
+        if status != "satisfied":
+            code: SqlContractErrorCode = (
+                "SQL_CONTRACT_FILTER_BINDING_INVALID"
+                if reason.startswith("binding_") or reason.endswith("invalid") or reason == "planned_filter_invalid"
+                else "SQL_CONTRACT_FILTER_UNVERIFIABLE"
+                if status == "unverifiable"
+                else "SQL_CONTRACT_REQUIRED_FILTER_VIOLATED"
+            )
+            findings.append(_finding(code, "Filtro obrigatorio nao foi comprovado pela SQL.", details={
+                "filter_ref": filter_ref, "binding_ref": binding_ref, "reason": reason,
+            }))
+    return sorted(results, key=lambda item: (item["filter_ref"], item["binding_ref"]))
+
+
+def _valid_filter_binding(
+    binding: Mapping[str, Any] | None,
+    obligation: Mapping[str, Any],
+    allowed: Mapping[str, set[str]],
+) -> bool:
+    if binding is None:
+        return False
+    table = _clean_text(binding.get("target_table")).casefold()
+    column = _clean_text(binding.get("target_column")).casefold()
+    return bool(
+        table in allowed and column in allowed[table]
+        and _clean_text(binding.get("operator")) in {"=", "<>", "<", "<=", ">", ">="}
+        and _clean_text(binding.get("filter_concept")) == _clean_text(obligation.get("filter_concept"))
+        and _clean_text(binding.get("scope")) == _clean_text(obligation.get("scope"))
+        and binding.get("required") is True
+        and _value_type(binding.get("value")) in {"string", "number", "boolean"}
+    )
+
+
+def _value_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, (int, float)):
+        return "number"
+    return "unsupported"
+
+
+def _same_literal(observed: Any, expected: Any) -> bool:
+    return _value_type(observed) == _value_type(expected) and observed == expected
 
 
 def _verify_grouping_dimensions(
@@ -2465,6 +2628,7 @@ def _result(
     referenced: list[TableVerificationResult],
     columns: list[ColumnVerificationResult],
     joins: list[JoinVerificationResult],
+    filters: list[FilterVerificationResult],
     rules: list[RuleVerificationResult],
     duration_ms: int,
 ) -> SqlContractResult:
@@ -2499,6 +2663,7 @@ def _result(
         "referenced_tables": deepcopy(referenced),
         "columns": deepcopy(columns),
         "joins": deepcopy(joins),
+        "filters": deepcopy(filters),
         "rules": deepcopy(rules),
         "unverifiable_rules": [
             deepcopy(rule)

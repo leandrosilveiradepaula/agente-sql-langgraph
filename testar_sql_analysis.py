@@ -815,8 +815,37 @@ def test_determinismo_e_ausencia_de_mutacao() -> None:
     assert analysis_fingerprint(first) == analysis_fingerprint(second)
 
 
+def test_predicados_where_estruturados_preservam_literal() -> None:
+    analysis = analyze_sql(
+        "SELECT t.id FROM schema_test.table_test t "
+        "WHERE t.value = 'Case Sensitive' AND t.id >= 10"
+    )
+    assert analysis["predicates"] == [
+        {
+            "clause": "where", "qualifier": "t", "column": "value",
+            "operator": "=", "literal_type": "string", "value": "Case Sensitive",
+            "supported": True, "reason": "simple_comparison",
+        },
+        {
+            "clause": "where", "qualifier": "t", "column": "id",
+            "operator": ">=", "literal_type": "number", "value": 10,
+            "supported": True, "reason": "simple_comparison",
+        },
+    ]
+
+
+def test_predicado_where_nao_suportado_e_explicito() -> None:
+    predicate = analyze_sql(
+        "SELECT id FROM schema_test.table_test WHERE value LIKE 'x%'"
+    )["predicates"][0]
+    assert predicate["supported"] is False
+    assert predicate["reason"] == "operator_not_supported"
+
+
 def main() -> None:
     tests = [
+        ("predicados WHERE estruturados", test_predicados_where_estruturados_preservam_literal),
+        ("predicado WHERE nao suportado", test_predicado_where_nao_suportado_e_explicito),
         ("SELECT simples", test_select_simples),
         ("WITH CTE", test_with_cte),
         ("subquery", test_subquery),

@@ -7,7 +7,7 @@ from copy import deepcopy
 from typing import Any, Literal, TypedDict
 
 
-SQL_ANALYZER_VERSION = "v1.0.0-conservative-sql-analysis"
+SQL_ANALYZER_VERSION = "v1.1.0-structured-where-predicates"
 
 TokenKind = Literal[
     "word",
@@ -83,6 +83,17 @@ class SqlOrderByItem(TypedDict, total=False):
     resolved_select_item_index: int | None
 
 
+class SqlPredicate(TypedDict, total=False):
+    clause: str
+    qualifier: str | None
+    column: str | None
+    operator: str | None
+    literal_type: str | None
+    value: Any
+    supported: bool
+    reason: str
+
+
 class SqlQueryScope(TypedDict):
     scope_id: str
     parent_scope_id: str | None
@@ -116,6 +127,7 @@ class SqlStatementAnalysis(TypedDict):
     object_references: list[SqlObjectReference]
     column_references: list[SqlColumnReference]
     joins: list[SqlJoinReference]
+    predicates: list[SqlPredicate]
     query_scopes: list[SqlQueryScope]
     ctes: list[str]
     cte_output_columns: dict[str, list[str]]
@@ -303,6 +315,7 @@ def analyze_sql(sql: str) -> SqlStatementAnalysis:
         cte_output_columns,
     )
     joins = _extract_joins(statement_tokens, object_references)
+    predicates = _extract_predicates(statement_tokens)
     query_scopes = _extract_query_scopes(statement_tokens)
     aliases = {
         item["alias"].casefold(): _qualified_or_table(item)
@@ -343,6 +356,7 @@ def analyze_sql(sql: str) -> SqlStatementAnalysis:
         "object_references": object_references,
         "column_references": column_references,
         "joins": joins,
+        "predicates": predicates,
         "query_scopes": query_scopes,
         "ctes": ctes,
         "cte_output_columns": cte_output_columns,
@@ -382,6 +396,7 @@ def analysis_fingerprint(analysis: SqlStatementAnalysis) -> str:
             "objects": analysis.get("object_references", []),
             "columns": analysis.get("column_references", []),
             "joins": analysis.get("joins", []),
+            "predicates": analysis.get("predicates", []),
             "query_scopes": analysis.get("query_scopes", []),
         }
     )
@@ -401,6 +416,9 @@ def safe_sql_analysis(
         for token in analysis.get("tokens", [])
         if token.get("kind") != "string"
     ]
+    for predicate in safe.get("predicates", []):
+        if predicate.get("literal_type") == "string":
+            predicate["value"] = "<string>"
     return safe
 
 
@@ -808,6 +826,132 @@ def _extract_columns(
             )
         index += 1
     return _stable_columns(columns)
+
+
+def _extract_predicates(tokens: list[SqlToken]) -> list[SqlPredicate]:
+    """Extract only simple, independently verifiable WHERE predicates."""
+    predicates: list[SqlPredicate] = []
+    clause_by_depth: dict[int, str] = {}
+    depth = 0
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        norm = token["normalized"]
+        if token["value"] == "(":
+            parent_clause = clause_by_depth.get(depth)
+            depth += 1
+            if parent_clause:
+                clause_by_depth[depth] = parent_clause
+            index += 1
+            continue
+        if token["value"] == ")":
+            clause_by_depth.pop(depth, None)
+            depth = max(0, depth - 1)
+            index += 1
+            continue
+        if norm in _CLAUSE_KEYWORDS:
+            clause_by_depth[depth] = norm
+            index += 1
+            continue
+        if (
+            clause_by_depth.get(depth) != "where"
+            or not _is_identifier(token)
+            or norm in _RESERVED_WORDS
+        ):
+            index += 1
+            continue
+        qualifier: str | None = None
+        column = norm
+        cursor = index + 1
+        if _norm_at(tokens, cursor) == "." and cursor + 1 < len(tokens):
+            if not _is_identifier(tokens[cursor + 1]):
+                index += 1
+                continue
+            qualifier = norm
+            column = tokens[cursor + 1]["normalized"]
+            cursor += 2
+        if _norm_at(tokens, index - 1) == ".":
+            index += 1
+            continue
+        operator, cursor = _comparison_operator(tokens, cursor)
+        if operator is None:
+            boundaries = {"", "and", "or", "group", "order", "having", "limit"}
+            if _norm_at(tokens, cursor) not in boundaries:
+                predicates.append(
+                    {
+                        "clause": "where",
+                        "qualifier": qualifier,
+                        "column": column,
+                        "operator": None,
+                        "literal_type": None,
+                        "value": None,
+                        "supported": False,
+                        "reason": "operator_not_supported",
+                    }
+                )
+            index += 1
+            continue
+        literal = _predicate_literal(tokens, cursor)
+        if literal is None:
+            predicates.append({
+                "clause": "where", "qualifier": qualifier, "column": column,
+                "operator": operator, "literal_type": None, "value": None,
+                "supported": False, "reason": "right_operand_not_literal",
+            })
+            index = cursor + 1
+            continue
+        literal_type, value, end = literal
+        predicates.append({
+            "clause": "where", "qualifier": qualifier, "column": column,
+            "operator": operator, "literal_type": literal_type, "value": value,
+            "supported": True, "reason": "simple_comparison",
+        })
+        index = end
+    if any(token["normalized"] == "or" for token in tokens):
+        for predicate in predicates:
+            predicate["supported"] = False
+            predicate["reason"] = "boolean_or_not_verifiable"
+    return predicates
+
+
+def _comparison_operator(
+    tokens: list[SqlToken],
+    index: int,
+) -> tuple[str | None, int]:
+    first, second = _norm_at(tokens, index), _norm_at(tokens, index + 1)
+    if first in {"<", ">"} and second == "=":
+        return first + second, index + 2
+    if first == "<" and second == ">":
+        return "<>", index + 2
+    if first in {"=", "<", ">"}:
+        return first, index + 1
+    return None, index
+
+
+def _predicate_literal(
+    tokens: list[SqlToken],
+    index: int,
+) -> tuple[str, Any, int] | None:
+    sign = 1
+    if _norm_at(tokens, index) in {"+", "-"}:
+        sign = -1 if _norm_at(tokens, index) == "-" else 1
+        index += 1
+    if index >= len(tokens):
+        return None
+    token = tokens[index]
+    if token["kind"] == "string":
+        return "string", token["value"][1:-1].replace("''", "'"), index + 1
+    if token["kind"] == "number":
+        raw = token["value"]
+        value: int | float = float(raw) if "." in raw else int(raw)
+        return "number", sign * value, index + 1
+    if sign != 1:
+        return None
+    if token["kind"] == "word" and token["normalized"] in {"true", "false"}:
+        return "boolean", token["normalized"] == "true", index + 1
+    if token["kind"] == "word" and token["normalized"] == "null":
+        return "null", None, index + 1
+    return None
 
 
 def _extract_joins(

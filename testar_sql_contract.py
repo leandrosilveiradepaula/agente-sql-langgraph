@@ -1683,8 +1683,106 @@ def test_diagnostico_determinismo_e_sem_mutacao() -> None:
     assert sql not in repr(first)
 
 
+def _with_required_filter() -> dict:
+    plan = deepcopy(_query_plan())
+    plan["planning_context"]["planned_filters"] = [{
+        "filter_ref": "filter-a", "filter_concept": "synthetic_class",
+        "binding_ref": "binding-a", "required": True, "scope": "row",
+    }]
+    plan["planning_context"]["resolved_filter_bindings"] = [{
+        "binding_ref": "binding-a", "filter_concept": "synthetic_class",
+        "target_table": "schema_test.table_test", "target_column": "value",
+        "operator": "=", "value": "ExactValue", "required": True, "scope": "row",
+        "join_path": [],
+    }]
+    return plan
+
+
+def test_required_filter_valido_com_alias_aprova() -> None:
+    result = _run(
+        "SELECT t.id FROM schema_test.table_test t WHERE t.value = 'ExactValue'",
+        _with_required_filter(),
+    )
+    assert result["status"] == "approved"
+    assert result["filters"][0]["status"] == "satisfied"
+
+
+def test_required_filter_ausente_divergente_e_case_sensitive_rejeita() -> None:
+    plan = _with_required_filter()
+    for sql in (
+        "SELECT id FROM schema_test.table_test",
+        "SELECT id FROM schema_test.table_test WHERE value <> 'ExactValue'",
+        "SELECT id FROM schema_test.table_test WHERE value = 'exactvalue'",
+    ):
+        result = _run(sql, plan)
+        assert result["status"] == "rejected"
+        assert result["filters"][0]["status"] == "violated"
+
+
+def test_required_filter_binding_ausente_duplicado_e_nao_verificavel() -> None:
+    missing = _with_required_filter()
+    missing["planning_context"]["resolved_filter_bindings"] = []
+    assert _run("SELECT id FROM schema_test.table_test", missing)["filters"][0]["reason"] == "binding_missing"
+    duplicate = _with_required_filter()
+    duplicate["planning_context"]["resolved_filter_bindings"] *= 2
+    assert _run("SELECT id FROM schema_test.table_test", duplicate)["filters"][0]["reason"] == "binding_ambiguous"
+    unsupported = _run(
+        "SELECT id FROM schema_test.table_test WHERE value LIKE 'ExactValue'",
+        _with_required_filter(),
+    )
+    assert unsupported["filters"][0]["status"] == "unverifiable"
+
+
+def test_planned_filters_vazio_preserva_comportamento() -> None:
+    result = _run("SELECT id FROM schema_test.table_test")
+    assert result["status"] == "approved"
+    assert result["filters"] == []
+
+
+def test_dois_filtros_em_ordem_inversa_e_um_ausente() -> None:
+    plan = _with_required_filter()
+    plan["planning_context"]["planned_filters"].append({
+        "filter_ref": "filter-b", "filter_concept": "synthetic_id",
+        "binding_ref": "binding-b", "required": True, "scope": "row",
+    })
+    plan["planning_context"]["resolved_filter_bindings"].append({
+        "binding_ref": "binding-b", "filter_concept": "synthetic_id",
+        "target_table": "schema_test.table_test", "target_column": "id",
+        "operator": ">=", "value": 7, "required": True, "scope": "row",
+    })
+    approved = _run(
+        "SELECT id FROM schema_test.table_test WHERE id >= 7 AND value = 'ExactValue'",
+        plan,
+    )
+    assert approved["status"] == "approved"
+    assert [item["status"] for item in approved["filters"]] == ["satisfied", "satisfied"]
+    rejected = _run("SELECT id FROM schema_test.table_test WHERE id >= 7", plan)
+    assert rejected["status"] == "rejected"
+    assert [item["status"] for item in rejected["filters"]] == ["violated", "satisfied"]
+
+
+def test_join_having_e_binding_invalido_nao_satisfazem_where() -> None:
+    plan = _with_required_filter()
+    for sql in (
+        "SELECT t.id FROM schema_test.table_test t JOIN schema_test.table_test x "
+        "ON t.value = 'ExactValue'",
+        "SELECT value FROM schema_test.table_test GROUP BY value "
+        "HAVING value = 'ExactValue'",
+    ):
+        assert _run(sql, plan)["filters"][0]["reason"] == "required_filter_missing"
+    invalid = _with_required_filter()
+    invalid["planning_context"]["resolved_filter_bindings"][0]["target_column"] = "unknown_key"
+    assert _run("SELECT id FROM schema_test.table_test", invalid)["filters"][0]["reason"] == "binding_invalid_or_incoherent"
+
+
 def main() -> None:
     tests = [
+        ("required filter valido", test_required_filter_valido_com_alias_aprova),
+        ("required filter divergencias", test_required_filter_ausente_divergente_e_case_sensitive_rejeita),
+        ("required filter bindings fail closed", test_required_filter_binding_ausente_duplicado_e_nao_verificavel),
+        ("planned filters vazio", test_planned_filters_vazio_preserva_comportamento),
+        ("dois required filters", test_dois_filtros_em_ordem_inversa_e_um_ausente),
+        ("scope e binding invalidos", test_join_having_e_binding_invalido_nao_satisfazem_where),
         ("contrato valido", test_contrato_valido_aprovado),
         ("required_table ausente", test_required_table_ausente),
         ("tabela adicional", test_tabela_adicional),
