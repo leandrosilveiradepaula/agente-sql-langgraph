@@ -2850,23 +2850,30 @@ def _append_filter_alias(context: dict, term: str, concept: str) -> None:
     )
 
 
-def _append_filter_binding(context: dict, concept: str, ref: str) -> None:
+def _append_filter_binding(
+    context: dict,
+    concept: str,
+    ref: str,
+    **binding_overrides: object,
+) -> None:
+    binding = {
+        "binding_ref": ref,
+        "filter_concept": concept,
+        "required": True,
+        "scope": "query",
+        "target_table": "schema_test.table_test",
+        "target_column": "value",
+        "operator": "equals",
+        "value": f"synthetic-{concept}",
+        "join_path": [],
+    }
+    binding.update(binding_overrides)
     context["entities"].append(
         {
             "entity_type": "filter_binding",
             "canonical_value": concept,
             "business_rule": {
-                "filter_binding": {
-                    "binding_ref": ref,
-                    "filter_concept": concept,
-                    "required": True,
-                    "scope": "query",
-                    "target_table": "schema_test.table_test",
-                    "target_column": "value",
-                    "operator": "equals",
-                    "value": f"synthetic-{concept}",
-                    "join_path": [],
-                }
+                "filter_binding": binding,
             },
         }
     )
@@ -2953,6 +2960,58 @@ def test_planned_filter_conceito_sem_binding_falha_fechado() -> None:
     ]
 
 
+def test_planned_filter_binding_invalido_falha_fechado() -> None:
+    invalid_fields = {
+        "target_table": None,
+        "target_column": " ",
+        "operator": 7,
+        "required": "true",
+        "value": float("inf"),
+        "join_path": "schema_test.table_test",
+    }
+    for field, invalid_value in invalid_fields.items():
+        context = _context()
+        _append_filter_alias(context, "class alpha", "concept_alpha")
+        _append_filter_binding(
+            context,
+            "concept_alpha",
+            "binding-alpha-v1",
+            **{field: invalid_value},
+        )
+
+        filters, diagnostic = _planned_filters(context, "class alpha")
+
+        assert filters == [], field
+        assert diagnostic["unresolved"][0]["reason"] == "binding_not_found"
+
+    context = _context()
+    _append_filter_alias(context, "class alpha", "concept_alpha")
+    _append_filter_binding(context, "concept_alpha", "binding-alpha-v1")
+    del context["entities"][-1]["business_rule"]["filter_binding"]["value"]
+
+    filters, diagnostic = _planned_filters(context, "class alpha")
+
+    assert filters == []
+    assert diagnostic["unresolved"][0]["reason"] == "binding_not_found"
+
+
+def test_planned_filter_binding_ref_duplicado_e_ambiguo() -> None:
+    context = _context()
+    _append_filter_alias(context, "class alpha", "concept_alpha")
+    _append_filter_binding(context, "concept_alpha", "binding-alpha-v1")
+    _append_filter_binding(
+        context,
+        "concept_alpha",
+        "BINDING-ALPHA-V1",
+        value="synthetic-conflict",
+    )
+
+    filters, diagnostic = _planned_filters(context, "class alpha")
+
+    assert filters == []
+    assert diagnostic["unresolved"][0]["reason"] == "binding_ambiguous"
+
+
 def test_planned_filters_duas_categorias_ordem_deterministica() -> None:
     context = _context()
     _append_filter_alias(context, "class beta", "concept_beta")
@@ -2987,6 +3046,8 @@ def main() -> None:
         ("planned filter categoria B", test_planned_filter_categoria_b_vem_do_contexto),
         ("planned filter termo generico", test_planned_filter_termo_generico_nao_inventa_filtro),
         ("planned filter unresolved", test_planned_filter_conceito_sem_binding_falha_fechado),
+        ("planned filter binding invalido", test_planned_filter_binding_invalido_falha_fechado),
+        ("planned filter binding ambiguo", test_planned_filter_binding_ref_duplicado_e_ambiguo),
         ("planned filters deterministicos", test_planned_filters_duas_categorias_ordem_deterministica),
         ("planned filters vazio", test_planned_filters_vazio_preserva_compatibilidade),
         ("seleciona padrao unico", test_seleciona_padrao_unico),

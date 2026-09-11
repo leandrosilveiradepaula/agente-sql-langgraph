@@ -1230,7 +1230,7 @@ def _filter_bindings_for_concept(
 ) -> list[dict[str, Any]]:
     if not isinstance(entities, list):
         return []
-    bindings: dict[str, dict[str, Any]] = {}
+    bindings: list[dict[str, Any]] = []
     for entity in entities:
         if not isinstance(entity, Mapping) or str(
             entity.get("entity_type", "")
@@ -1240,35 +1240,82 @@ def _filter_bindings_for_concept(
         raw = rule.get("filter_binding") if isinstance(rule, Mapping) else None
         if not isinstance(raw, Mapping):
             continue
-        concept = str(raw.get("filter_concept", "")).strip()
-        canonical_value = str(entity.get("canonical_value", "")).strip()
-        binding_ref = str(raw.get("binding_ref", "")).strip()
-        scope = str(raw.get("scope", "")).strip()
+        concept = _non_empty_text(raw.get("filter_concept"))
+        canonical_value = _non_empty_text(entity.get("canonical_value"))
+        binding_ref = _non_empty_text(raw.get("binding_ref"))
+        scope = _non_empty_text(raw.get("scope"))
         if not (
-            _same_text(concept, filter_concept)
+            concept is not None
+            and canonical_value is not None
+            and binding_ref is not None
+            and scope is not None
+            and _same_text(concept, filter_concept)
             and _same_text(canonical_value, concept)
-            and binding_ref
-            and scope
         ):
             continue
         # A obrigacao so referencia bindings fisicos completos e versionados.
-        if not all(
-            field in raw
-            for field in (
-                "target_table",
-                "target_column",
-                "operator",
-                "value",
-                "join_path",
-            )
+        if not (
+            _non_empty_text(raw.get("target_table")) is not None
+            and _non_empty_text(raw.get("target_column")) is not None
+            and _non_empty_text(raw.get("operator")) is not None
+            and isinstance(raw.get("required"), bool)
+            and _is_filled_json_value(raw.get("value"))
+            and _is_valid_join_path(raw.get("join_path"))
         ):
             continue
-        bindings[binding_ref.casefold()] = {
-            "binding_ref": binding_ref,
-            "required": raw.get("required") is True,
-            "scope": scope,
-        }
-    return [bindings[key] for key in sorted(bindings)]
+        bindings.append(
+            {
+                "binding_ref": binding_ref,
+                "required": raw["required"],
+                "scope": scope,
+            }
+        )
+    return sorted(
+        bindings,
+        key=lambda binding: (
+            binding["binding_ref"].casefold(),
+            binding["binding_ref"],
+        ),
+    )
+
+
+def _non_empty_text(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
+def _is_filled_json_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, bool) or isinstance(value, int):
+        return True
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return bool(value) and all(_is_filled_json_value(item) for item in value)
+    if isinstance(value, Mapping):
+        return bool(value) and all(
+            _non_empty_text(key) is not None and _is_filled_json_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _is_valid_join_path(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    return all(
+        isinstance(step, Mapping)
+        and bool(step)
+        and all(
+            _non_empty_text(key) is not None and _is_filled_json_value(item)
+            for key, item in step.items()
+        )
+        for step in value
+    )
 
 
 def _semantic_sources_from_concept(
