@@ -28,6 +28,7 @@ from app.domain.planning import (
     ProjectedAnalyticalOperation,
     ProjectedEntity,
     ProjectedJoin,
+    ProjectedPlannedFilter,
     ProjectedPlannedMetric,
     ProjectedRule,
     ProjectedTable,
@@ -318,6 +319,10 @@ def project_planning_context(
         context=context,
         intent_resolution_result=intent_resolution_result,
     )
+    planned_filters, planned_filter_diagnostic = _detect_planned_filters(
+        context=context,
+        intent_resolution_result=intent_resolution_result,
+    )
     operation_projection, metric_binding_diagnostic = (
         _bind_metrics_to_analytical_operations(
             operations=operation_projection,
@@ -411,6 +416,7 @@ def project_planning_context(
         "detected_dimensions": dimension_projection,
         "analytical_operations": operation_projection,
         "planned_metrics": planned_metrics,
+        "planned_filters": planned_filters,
         "allowed_schemas": list(context.get("allowed_schemas", [])),
         "component_configs": deepcopy(
             context.get("component_configs", {})
@@ -424,6 +430,7 @@ def project_planning_context(
             "dimension_diagnostic": dimension_diagnostic,
             "analytical_operation_diagnostic": operation_diagnostic,
             "planned_metric_diagnostic": planned_metric_diagnostic,
+            "planned_filter_diagnostic": planned_filter_diagnostic,
         },
     }
 
@@ -1092,6 +1099,223 @@ def _binding_context_concepts_from_intent_evidence(
         concepts[key]
         for key in sorted(concepts, key=str.casefold)
     ]
+
+
+def _detect_planned_filters(
+    *,
+    context: ContextSnapshot,
+    intent_resolution_result: Mapping[str, Any] | None,
+) -> tuple[list[ProjectedPlannedFilter], dict[str, Any]]:
+    """Resolve obrigacoes de filtro sem copiar detalhes fisicos ao plano."""
+
+    evidence_terms = _matched_semantic_terms(intent_resolution_result)
+    aliases = _filter_concept_aliases(context.get("entities", []))
+    detected: dict[str, tuple[str, str]] = {}
+    for term in evidence_terms:
+        concept = aliases.get(normalize_search_text(term))
+        if concept is not None:
+            detected.setdefault(concept.casefold(), (concept, term))
+
+    planned: list[ProjectedPlannedFilter] = []
+    unresolved: list[dict[str, str]] = []
+    for concept, matched_term in sorted(
+        detected.values(),
+        key=lambda item: (item[0].casefold(), item[1].casefold()),
+    ):
+        bindings = _filter_bindings_for_concept(
+            context.get("entities", []),
+            filter_concept=concept,
+        )
+        if len(bindings) != 1:
+            unresolved.append(
+                {
+                    "filter_concept": concept,
+                    "matched_user_term": matched_term,
+                    "reason": (
+                        "binding_not_found"
+                        if not bindings
+                        else "binding_ambiguous"
+                    ),
+                }
+            )
+            continue
+        binding = bindings[0]
+        binding_ref = binding["binding_ref"]
+        planned.append(
+            {
+                "filter_ref": f"filter-{binding_ref}",
+                "filter_concept": concept,
+                "binding_ref": binding_ref,
+                "required": binding["required"],
+                "scope": binding["scope"],
+                "detection_source": "intent_semantic_evidence",
+                "mapping_source": "filter_binding",
+                "matched_user_term": matched_term,
+                "provenance": {
+                    "context_version": str(context.get("version", "")),
+                    "binding_source": "entity_alias",
+                },
+            }
+        )
+
+    return planned, {
+        "status": "resolved" if planned and not unresolved else (
+            "unresolved" if unresolved else "not_applicable"
+        ),
+        "detected_concepts": sorted(
+            (item[0] for item in detected.values()),
+            key=str.casefold,
+        ),
+        "unresolved": unresolved,
+    }
+
+
+def _matched_semantic_terms(
+    intent_resolution_result: Mapping[str, Any] | None,
+) -> list[str]:
+    if not isinstance(intent_resolution_result, Mapping):
+        return []
+    candidates = _selected_intent_candidates(
+        intent_resolution_result,
+        selected_intent=intent_resolution_result.get("intent"),
+    )
+    terms: set[str] = set()
+    for candidate in candidates:
+        for concept in _concepts_from_candidate(candidate):
+            if not concept.get("satisfied"):
+                continue
+            for term in concept.get("terms", []):
+                if not isinstance(term, Mapping) or not term.get("matched"):
+                    continue
+                signal = _semantic_signal_from_term(term)
+                value = (
+                    signal.get("normalized_term")
+                    if isinstance(signal, Mapping)
+                    else term.get("normalized_term")
+                )
+                if isinstance(value, str) and value.strip():
+                    terms.add(value.strip())
+    return sorted(terms, key=lambda item: normalize_search_text(item))
+
+
+def _filter_concept_aliases(entities: Any) -> dict[str, str]:
+    if not isinstance(entities, list):
+        return {}
+    aliases: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for entity in entities:
+        if not isinstance(entity, Mapping) or str(
+            entity.get("entity_type", "")
+        ).casefold() != "filter_concept":
+            continue
+        term = str(entity.get("user_term", "")).strip()
+        concept = str(entity.get("canonical_value", "")).strip()
+        key = normalize_search_text(term)
+        if not key or not concept:
+            continue
+        previous = aliases.get(key)
+        if previous is not None and not _same_text(previous, concept):
+            ambiguous.add(key)
+        else:
+            aliases[key] = concept
+    for key in ambiguous:
+        aliases.pop(key, None)
+    return aliases
+
+
+def _filter_bindings_for_concept(
+    entities: Any,
+    *,
+    filter_concept: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(entities, list):
+        return []
+    bindings: list[dict[str, Any]] = []
+    for entity in entities:
+        if not isinstance(entity, Mapping) or str(
+            entity.get("entity_type", "")
+        ).casefold() != "filter_binding":
+            continue
+        rule = entity.get("business_rule")
+        raw = rule.get("filter_binding") if isinstance(rule, Mapping) else None
+        if not isinstance(raw, Mapping):
+            continue
+        concept = _non_empty_text(raw.get("filter_concept"))
+        canonical_value = _non_empty_text(entity.get("canonical_value"))
+        binding_ref = _non_empty_text(raw.get("binding_ref"))
+        scope = _non_empty_text(raw.get("scope"))
+        if not (
+            concept is not None
+            and canonical_value is not None
+            and binding_ref is not None
+            and scope is not None
+            and _same_text(concept, filter_concept)
+            and _same_text(canonical_value, concept)
+        ):
+            continue
+        # A obrigacao so referencia bindings fisicos completos e versionados.
+        if not (
+            _non_empty_text(raw.get("target_table")) is not None
+            and _non_empty_text(raw.get("target_column")) is not None
+            and _non_empty_text(raw.get("operator")) is not None
+            and isinstance(raw.get("required"), bool)
+            and _is_filled_json_value(raw.get("value"))
+            and _is_valid_join_path(raw.get("join_path"))
+        ):
+            continue
+        bindings.append(
+            {
+                "binding_ref": binding_ref,
+                "required": raw["required"],
+                "scope": scope,
+            }
+        )
+    return sorted(
+        bindings,
+        key=lambda binding: (
+            binding["binding_ref"].casefold(),
+            binding["binding_ref"],
+        ),
+    )
+
+
+def _non_empty_text(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
+def _is_filled_json_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, bool) or isinstance(value, int):
+        return True
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return bool(value) and all(_is_filled_json_value(item) for item in value)
+    if isinstance(value, Mapping):
+        return bool(value) and all(
+            _non_empty_text(key) is not None and _is_filled_json_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _is_valid_join_path(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    return all(
+        isinstance(step, Mapping)
+        and bool(step)
+        and all(
+            _non_empty_text(key) is not None and _is_filled_json_value(item)
+            for key, item in step.items()
+        )
+        for step in value
+    )
 
 
 def _semantic_sources_from_concept(

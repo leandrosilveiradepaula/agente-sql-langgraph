@@ -2809,8 +2809,247 @@ def test_dimension_explicita_sem_match_nao_bloqueia_fallback_legado() -> None:
     assert dimension["target_column"] == "segment_name"
 
 
+def _planned_filter_evidence(*terms: str) -> dict:
+    return {
+        "applied": True,
+        "intent": "generic_test_intent",
+        "best_candidate": {
+            "intent_name": "generic_test_intent",
+            "matches": [
+                {
+                    "match_details": {
+                        "concepts": [
+                            {
+                                "concept_name": "synthetic_filter_category",
+                                "satisfied": True,
+                                "terms": [
+                                    {
+                                        "normalized_term": term,
+                                        "matched": True,
+                                    }
+                                    for term in terms
+                                ],
+                            }
+                        ]
+                    }
+                }
+            ],
+        },
+        "candidates": [],
+    }
+
+
+def _append_filter_alias(context: dict, term: str, concept: str) -> None:
+    context["entities"].append(
+        {
+            "entity_type": "filter_concept",
+            "user_term": term,
+            "canonical_value": concept,
+            "priority": 1,
+        }
+    )
+
+
+def _append_filter_binding(
+    context: dict,
+    concept: str,
+    ref: str,
+    **binding_overrides: object,
+) -> None:
+    binding = {
+        "binding_ref": ref,
+        "filter_concept": concept,
+        "required": True,
+        "scope": "query",
+        "target_table": "schema_test.table_test",
+        "target_column": "value",
+        "operator": "equals",
+        "value": f"synthetic-{concept}",
+        "join_path": [],
+    }
+    binding.update(binding_overrides)
+    context["entities"].append(
+        {
+            "entity_type": "filter_binding",
+            "canonical_value": concept,
+            "business_rule": {
+                "filter_binding": binding,
+            },
+        }
+    )
+
+
+def _planned_filters(context: dict, *terms: str) -> tuple[list[dict], dict]:
+    projection = project_planning_context(
+        context=context,
+        intent_name="generic_test_intent",
+        normalized_question="synthetic request",
+        selected_pattern=_pattern(),
+        intent_resolution_result=_planned_filter_evidence(*terms),
+    )
+    return (
+        projection["planned_filters"],
+        projection["diagnostics"]["planned_filter_diagnostic"],
+    )
+
+
+def test_planned_filter_categoria_sintetica_a() -> None:
+    context = _context()
+    _append_filter_alias(context, "class alpha", "concept_alpha")
+    _append_filter_binding(context, "concept_alpha", "binding-alpha-v1")
+
+    filters, diagnostic = _planned_filters(context, "class alpha")
+
+    assert filters == [
+        {
+            "filter_ref": "filter-binding-alpha-v1",
+            "filter_concept": "concept_alpha",
+            "binding_ref": "binding-alpha-v1",
+            "required": True,
+            "scope": "query",
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "filter_binding",
+            "matched_user_term": "class alpha",
+            "provenance": {
+                "context_version": "context-test-v1",
+                "binding_source": "entity_alias",
+            },
+        }
+    ]
+    assert diagnostic["status"] == "resolved"
+    for physical_field in (
+        "target_table", "target_column", "operator", "value", "join_path"
+    ):
+        assert physical_field not in filters[0]
+
+
+def test_planned_filter_sinonimo_preserva_conceito() -> None:
+    context = _context()
+    _append_filter_alias(context, "class alpha", "concept_alpha")
+    _append_filter_alias(context, "alpha synonym", "concept_alpha")
+    _append_filter_binding(context, "concept_alpha", "binding-alpha-v1")
+    filters, _ = _planned_filters(context, "alpha synonym")
+    assert filters[0]["filter_concept"] == "concept_alpha"
+
+
+def test_planned_filter_categoria_b_vem_do_contexto() -> None:
+    context = _context()
+    _append_filter_alias(context, "class beta", "concept_beta")
+    _append_filter_binding(context, "concept_beta", "binding-beta-v1")
+    filters, _ = _planned_filters(context, "class beta")
+    assert filters[0]["binding_ref"] == "binding-beta-v1"
+
+
+def test_planned_filter_termo_generico_nao_inventa_filtro() -> None:
+    filters, diagnostic = _planned_filters(_context(), "aggregate amount")
+    assert filters == []
+    assert diagnostic["status"] == "not_applicable"
+
+
+def test_planned_filter_conceito_sem_binding_falha_fechado() -> None:
+    context = _context()
+    _append_filter_alias(context, "class alpha", "concept_alpha")
+    filters, diagnostic = _planned_filters(context, "class alpha")
+    assert filters == []
+    assert diagnostic["unresolved"] == [
+        {
+            "filter_concept": "concept_alpha",
+            "matched_user_term": "class alpha",
+            "reason": "binding_not_found",
+        }
+    ]
+
+
+def test_planned_filter_binding_invalido_falha_fechado() -> None:
+    invalid_fields = {
+        "target_table": None,
+        "target_column": " ",
+        "operator": 7,
+        "required": "true",
+        "value": float("inf"),
+        "join_path": "schema_test.table_test",
+    }
+    for field, invalid_value in invalid_fields.items():
+        context = _context()
+        _append_filter_alias(context, "class alpha", "concept_alpha")
+        _append_filter_binding(
+            context,
+            "concept_alpha",
+            "binding-alpha-v1",
+            **{field: invalid_value},
+        )
+
+        filters, diagnostic = _planned_filters(context, "class alpha")
+
+        assert filters == [], field
+        assert diagnostic["unresolved"][0]["reason"] == "binding_not_found"
+
+    context = _context()
+    _append_filter_alias(context, "class alpha", "concept_alpha")
+    _append_filter_binding(context, "concept_alpha", "binding-alpha-v1")
+    del context["entities"][-1]["business_rule"]["filter_binding"]["value"]
+
+    filters, diagnostic = _planned_filters(context, "class alpha")
+
+    assert filters == []
+    assert diagnostic["unresolved"][0]["reason"] == "binding_not_found"
+
+
+def test_planned_filter_binding_ref_duplicado_e_ambiguo() -> None:
+    context = _context()
+    _append_filter_alias(context, "class alpha", "concept_alpha")
+    _append_filter_binding(context, "concept_alpha", "binding-alpha-v1")
+    _append_filter_binding(
+        context,
+        "concept_alpha",
+        "BINDING-ALPHA-V1",
+        value="synthetic-conflict",
+    )
+
+    filters, diagnostic = _planned_filters(context, "class alpha")
+
+    assert filters == []
+    assert diagnostic["unresolved"][0]["reason"] == "binding_ambiguous"
+
+
+def test_planned_filters_duas_categorias_ordem_deterministica() -> None:
+    context = _context()
+    _append_filter_alias(context, "class beta", "concept_beta")
+    _append_filter_binding(context, "concept_beta", "binding-beta-v1")
+    _append_filter_alias(context, "class alpha", "concept_alpha")
+    _append_filter_binding(context, "concept_alpha", "binding-alpha-v1")
+    first, _ = _planned_filters(context, "class beta", "class alpha")
+    second, _ = _planned_filters(context, "class alpha", "class beta")
+    assert first == second
+    assert [item["filter_concept"] for item in first] == [
+        "concept_alpha", "concept_beta"
+    ]
+
+
+def test_planned_filters_vazio_preserva_compatibilidade() -> None:
+    projection = project_planning_context(
+        context=_context(),
+        intent_name="generic_test_intent",
+        normalized_question="generic analysis",
+        selected_pattern=_pattern(),
+    )
+    assert projection["planned_filters"] == []
+    assert projection["diagnostics"]["planned_filter_diagnostic"][
+        "status"
+    ] == "not_applicable"
+
+
 def main() -> None:
     tests = [
+        ("planned filter categoria A", test_planned_filter_categoria_sintetica_a),
+        ("planned filter sinonimo", test_planned_filter_sinonimo_preserva_conceito),
+        ("planned filter categoria B", test_planned_filter_categoria_b_vem_do_contexto),
+        ("planned filter termo generico", test_planned_filter_termo_generico_nao_inventa_filtro),
+        ("planned filter unresolved", test_planned_filter_conceito_sem_binding_falha_fechado),
+        ("planned filter binding invalido", test_planned_filter_binding_invalido_falha_fechado),
+        ("planned filter binding ambiguo", test_planned_filter_binding_ref_duplicado_e_ambiguo),
+        ("planned filters deterministicos", test_planned_filters_duas_categorias_ordem_deterministica),
+        ("planned filters vazio", test_planned_filters_vazio_preserva_compatibilidade),
         ("seleciona padrao unico", test_seleciona_padrao_unico),
         ("seleciona exemplo exato", test_seleciona_exemplo_exato),
         (
