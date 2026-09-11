@@ -1,122 +1,163 @@
-# CURRENT TASK — planned_filters microetapa 1
+# CURRENT TASK — planned_filters microetapa 2
 
 ## Objetivo
 
-Implementar somente a primeira microetapa de `planned_filters` no planner, mantendo a arquitetura atual e sem tocar generator, Contract Gate, Supabase, n8n ou deploy.
+Conectar o contrato de `planned_filters` ja incorporado ao planner ao contrato de geracao SQL, de forma generica, versionada e fail-closed.
+
+Esta microetapa deve fazer o generator receber obrigacoes de filtro estruturadas e os bindings fisicos correspondentes, sem implementar ainda validacao no Contract Gate e sem alterar Supabase, n8n ou deploy.
+
+## Premissas obrigatorias
+
+- `planned_filter` continua sendo somente obrigacao semantica.
+- Detalhes fisicos de filtro nao podem ser copiados para `planned_filter`.
+- Detalhes fisicos devem permanecer em binding estruturado/versionado separado.
+- O generator nao pode inferir tabela/coluna/operador/valor a partir do texto da pergunta.
+- Nao usar `sql_filter_hint` como contrato final.
+- Nao criar `if` para receita, custo, despesa, DRE, marca, conta, centro de custo, pergunta, benchmark ou qualquer termo de negocio.
+- Benchmark/golden/SQL esperada nunca entram no request/prompt do generator.
 
 ## Escopo permitido
 
-Alterar apenas o necessario em:
-- `app/domain/planning.py`
-- `app/domain/planner.py`
-- testes sintéticos relacionados ao planner
+Alterar somente o necessario em:
+- `app/domain/planning.py`, se for indispensavel para projetar bindings fisicos separados do `planned_filter`;
+- `app/domain/planner.py`, se for indispensavel para projetar exclusivamente os bindings referenciados por `planned_filters`;
+- `app/domain/sql_generation.py`;
+- `app/graph/nodes/generate_sql.py`, somente se o contrato atual exigir;
+- testes sinteticos diretamente relacionados (`testar_sql_generation.py`, `testar_generate_sql.py` e, se necessario, testes do planner).
 
-Nao alterar generator, Contract Gate, adapters, Supabase, migrations, n8n ou qualquer ambiente externo.
+Nao alterar:
+- Contract Gate / `app/domain/sql_contract.py` / `app/graph/nodes/contract_gate.py`;
+- Security Gate;
+- repair;
+- execute;
+- adapters de provider, salvo necessidade estritamente estrutural comprovada;
+- Supabase;
+- migrations;
+- n8n;
+- Watson;
+- deploy;
+- dados/contexto DEMO.
 
 ## Contrato esperado
 
-`planned_filter` representa somente a obrigacao semantica e deve referenciar `binding_ref`.
+O `SqlGenerationContext` deve passar a carregar separadamente:
 
-Preferir os campos:
-- `filter_ref`
-- `filter_concept`
-- `binding_ref`
-- `required`
-- `scope`
-- `detection_source`
-- `mapping_source`
-- `matched_user_term`
-- `provenance`
+1. `planned_filters`
+   - obrigacoes semanticas vindas do planner;
+   - campos como `filter_ref`, `filter_concept`, `binding_ref`, `required`, `scope`, `detection_source`, `mapping_source`, `matched_user_term`, `provenance`;
+   - sem `target_table`, `target_column`, `operator`, `value`, `join_path`.
 
-Os detalhes fisicos permanecem exclusivamente no binding estruturado:
-- `target_table`
-- `target_column`
-- `operator`
-- `value`
-- `join_path`
+2. bindings fisicos resolvidos, preferencialmente em campo separado como `filter_bindings`
+   - somente bindings efetivamente referenciados por `planned_filters`;
+   - `binding_ref`;
+   - `target_table`;
+   - `target_column`;
+   - `operator`;
+   - `value`;
+   - `join_path`;
+   - demais metadados estruturais necessarios.
 
-`planned_filter` nao deve carregar esses detalhes fisicos.
+Se o `planning_context` atual nao transportar esses detalhes de forma segura, adicionar uma projecao fisica separada (por exemplo `resolved_filter_bindings`) sem poluir `planned_filter`.
 
-## Resolucao esperada
+## Resolucao e seguranca
 
-Fluxo geral:
+Fluxo esperado:
 
 semantic evidence
--> canonical concept
--> structured/versioned filter binding
--> planned_filter obligation
+-> filter_concept
+-> filter_binding estruturado/versionado
+-> planned_filter (obrigacao semantica)
+-> binding fisico correspondente no generation context
+-> generator instrucao estruturada de WHERE
 
-A resolucao deve ser generica e orientada por contexto. Nao usar `if` por termo, pergunta, categoria ou benchmark.
+Regras:
 
-Nao usar `sql_filter_hint` como contrato final de `planned_filter`. Pode permanecer como legado/transitional, mas o novo caminho deve usar binding estruturado.
-
-Quando houver categoria/conceito conhecido sem binding resolvivel, falhar fechado:
-- registrar unresolved em diagnostico;
-- nao inventar filtro;
-- nao inventar tabela/coluna/operador/valor.
-
-Duas categorias na mesma pergunta devem produzir comportamento deterministico e nao depender da ordem da evidencia.
-
-`planned_filters=[]` deve preservar compatibilidade atual.
+- cada `planned_filter.required=true` deve possuir exatamente um binding fisico correspondente por `binding_ref`;
+- binding ausente, incompleto ou ambiguo deve causar falha fechada na construcao da requisicao de geracao, antes de chamar provider;
+- nao inventar filtro quando nao houver binding;
+- `planned_filters=[]` deve manter o comportamento anterior;
+- multiplos filtros devem ser ordenados deterministicamente;
+- o generator deve ser instruido a aplicar todas as obrigacoes `required=true` usando apenas os bindings correspondentes;
+- nao deduzir filtros adicionais a partir de `normalized_question`;
+- nenhum benchmark field pode ser propagado.
 
 ## Testes obrigatorios
 
-1. categoria sintetica A -> `planned_filter` correto;
-2. sinonimo de A -> mesmo `filter_concept`;
-3. categoria sintetica B -> `planned_filter` distinto sem mudanca de codigo;
-4. termo generico `valor total` -> nenhum filtro DRE;
-5. categoria conhecida sem binding -> unresolved, sem filtro inventado;
-6. duas categorias na mesma pergunta -> comportamento deterministico;
-7. `planned_filters` vazio mantem compatibilidade atual.
+Usar apenas fixtures/contexto sintetico, sem nomes reais de cliente ou negocio.
 
-Todos os testes devem usar apenas fixtures/contexto sintetico. Nao usar nomes reais de cliente, DRE, marcas, contas, centros de custo, tabelas de negocio reais, perguntas de benchmark, SQL esperada ou golden answer.
+Cobrir no minimo:
+
+1. um `planned_filter` + binding valido aparece corretamente no `SqlGenerationRequest`;
+2. `planned_filter` continua sem campos fisicos;
+3. binding fisico correspondente aparece separadamente e somente por `binding_ref` referenciado;
+4. `planned_filters=[]` preserva compatibilidade do request anterior;
+5. `planned_filter.required=true` sem binding correspondente -> rejeicao/falha fechada antes do provider;
+6. binding ambiguo para o mesmo `binding_ref` -> rejeicao/falha fechada;
+7. binding incompleto/invalido -> rejeicao/falha fechada;
+8. dois filtros -> ordem deterministica independente da ordem de entrada;
+9. `sql_filter_hint` nao e usado como fonte final do contrato;
+10. nenhum detalhe de benchmark/golden entra no generation context/instructions;
+11. instrucao ao generator deixa explicito que filtros obrigatorios devem ser aplicados e que nao pode inferir filtros extras do texto.
+
+## Anti-overfitting
+
+Antes de aceitar qualquer alteracao, validar:
+
+"Isso melhora a capacidade geral ou apenas faz um caso especifico passar?"
+
+Nao usar perguntas conhecidas, frases especificas ou regras de negocio nos testes de producao.
 
 ## Hardcode inventory
 
-Classificar qualquer hardcode encontrado ou introduzido como:
+Classificar todo hardcode novo/encontrado no escopo como:
 - `STRUCTURAL`
 - `TRANSITIONAL`
 - `FORBIDDEN`
 
-Nenhum `FORBIDDEN` pode ser introduzido em codigo de producao.
+Nenhum `FORBIDDEN` pode ser introduzido.
 
 ## Validacao obrigatoria
 
 Executar no working tree real:
 - `python -m compileall app`
-- `python testar_planner.py`
-- `python testar_build_plan.py`
-- novos testes de `planned_filters`
-- demais testes de planner diretamente impactados, se houver
-- `python scripts/check_all.py`
+- `python testar_planner.py` se planner/planning forem alterados
+- `python testar_sql_generation.py`
+- `python testar_generate_sql.py`
+- demais testes diretamente impactados
+- `git diff --check`
+- `PYTHONDONTWRITEBYTECODE=1 python scripts/check_all.py`
 
-Nao afirmar sucesso de teste sem ter executado o comando correspondente.
+Se `scripts/check_all.py` nao puder concluir no ambiente Linux exclusivamente por teste Windows preexistente, reportar exatamente o ponto de bloqueio; nao modificar o teste Windows para contornar. O PR so podera ser mergeado depois do workflow GitHub Actions `Offline validation on Windows` passar.
 
 ## Entrega esperada
 
-Ao concluir, reportar:
+Reportar:
 - arquivos alterados;
 - diff resumido;
-- modelo final de `planned_filter`;
-- algoritmo de resolucao;
-- resultados de todos os testes executados;
+- modelo final de `planned_filters` no generation context;
+- modelo do binding fisico separado;
+- algoritmo de correlacao por `binding_ref`;
+- resultado de cada teste executado;
 - hardcode inventory;
 - riscos restantes;
 - `git status`;
-- commit SHA, se houver commit.
+- commit SHA local;
+- PR preparado para publicacao/atualizacao.
 
 ## Commit
 
-Commit autorizado apos todos os testes obrigatorios e `scripts/check_all.py` passarem.
+Commit autorizado apos os testes locais obrigatorios diretamente impactados passarem e a regressao disponivel ser executada/reportada.
 
 Mensagem sugerida:
 
-`feat: add planned filter planning contract`
+`feat: pass planned filters to sql generation`
 
-## Deploy
+## Merge
+
+Nao autorizado automaticamente. O merge sera feito somente apos revisao do diff e sucesso do workflow Windows no GitHub.
+
+## Deploy / ambientes externos
 
 Nao autorizado.
 
-## Supabase / n8n / ambientes externos
-
-Nao alterar.
+Nao alterar Supabase, n8n, Watson, migrations, dados DEMO ou qualquer ambiente externo.
