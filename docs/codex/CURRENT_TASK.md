@@ -1,140 +1,168 @@
-# CURRENT TASK — planned_filters microetapa 5
+# CURRENT TASK — planned_filters microetapa 6
 
 ## Objetivo
 
-Preparar, somente no repositorio e sem aplicar em ambiente externo, o delta de contexto semantico versionado necessario para o ambiente DEMO usar `planned_filters` de forma real, partindo do motor ja validado nas microetapas 1-4.
+Resolver de forma auditavel e ainda sem deploy a parte comprovavel do GAP `DEMO-PF-001`, reconciliando o delta `v8-planned-filters` com evidencia real obtida por leitura somente do ambiente DEMO e com o contrato generico de `planned_filters` ja validado.
 
-A microetapa 4 esta concluida e mergeada. O motor ja prova offline o caminho:
+A microetapa 5 esta concluida e mergeada. O artefato `semantic_context/demo_planned_filters_v8.delta.json` existe, mas manteve `filter_bindings` vazio por falta de evidencia fisica suficiente no repositorio.
 
-`contexto semantico -> evidence -> planner -> planned_filters/resolved_filter_bindings -> generator -> Contract Gate`.
+Nesta microetapa, a evidencia faltante para o conceito de Receita foi coletada por inspeção somente leitura do projeto Supabase `Demo`. Nenhuma escrita, migration ou deploy foi executado.
 
-O proximo risco nao e mais de motor; e de contexto. O runtime DEMO precisa ter conceitos e bindings versionados compativeis com esse contrato. Esta tarefa deve preparar esse contexto sem executar SQL em Supabase, sem alterar DEMO real e sem deploy.
+## Evidencia confirmada por leitura somente
+
+### Contexto semantico DEMO atual
+
+Versao ativa observada: `demo-finance-v1`.
+
+`semantic_context.ai_ducklake_entity_aliases` contem:
+- `entity_type = dre_group`
+- `user_term = Receita`
+- `canonical_value = Receita`
+- `target_table = gold_plano_contas`
+- `target_column = grupo_contabil`
+- `sql_filter_hint = grupo_contabil = 'Receita'`
+
+`semantic_context.ai_ducklake_dre_mapping` contem para Receita:
+- `dre_code = RECEITA`
+- `nivel_1_bi = Receita`
+- `category = revenue`
+- `is_revenue = true`
+- `sql_filter_hint = grupo_contabil = 'Receita'`
+
+IMPORTANTE: `sql_filter_hint` continua sendo apenas evidencia TRANSITIONAL. Ele nao deve ser copiado como contrato final nem consumido pelo motor.
+
+### Catalogo versionado DEMO
+
+`semantic_context.ai_ducklake_table_catalog` confirma:
+- `demo_lakehouse.gold_lancamentos_contabeis` como fonte principal de realizado;
+- metrica `valor`;
+- chave `nk_conta`;
+- join versionado de `gold_lancamentos_contabeis.nk_conta` para `gold_plano_contas.nk_conta`;
+- `demo_lakehouse.gold_plano_contas` como tabela de classificacao por grupo contabil.
+
+### Schema fisico DEMO
+
+Leitura de `information_schema.columns` confirmou:
+- `demo_lakehouse.gold_lancamentos_contabeis.nk_conta` existe;
+- `demo_lakehouse.gold_lancamentos_contabeis.valor` existe;
+- `demo_lakehouse.gold_plano_contas.nk_conta` existe;
+- `demo_lakehouse.gold_plano_contas.grupo_contabil` existe.
+
+Leitura de dados confirmou que `gold_plano_contas.grupo_contabil` possui o valor exato `Receita`, e que existem lancamentos associados via `nk_conta`.
+
+## Decisao semantica obrigatoria
+
+Nao promover o conceito atual `dre_receita_operacional_liquida` como equivalente a `Receita`. A evidencia DEMO confirma o grupo `Receita`, mas nao comprova que ele represente "receita operacional liquida". Misturar esses conceitos seria um erro semantico.
+
+Portanto:
+- criar/ajustar um conceito canonico de filtro para Receita compatível com a evidencia real, por exemplo `dre_receita`;
+- aliases devem representar somente termos semanticamente sustentados pela evidencia, como `receita` e `receitas`;
+- nao usar `receita operacional liquida` como alias de `dre_receita` sem evidencia adicional;
+- nao criar formula de ROL, lucro, margem ou composicao Receita - Deducoes nesta microetapa.
+
+## Binding fisico permitido para Receita
+
+A microetapa pode criar um `filter_binding` versionado para o conceito de Receita porque agora ha evidencia independente e convergente para todos os elementos necessarios.
+
+O binding deve ser expresso no formato generico ja suportado pelo motor e deve representar, sem depender de `sql_filter_hint`:
+- conceito semantico: Receita;
+- tabela de classificacao: `demo_lakehouse.gold_plano_contas`;
+- coluna: `grupo_contabil`;
+- operador estrutural: `=`;
+- valor: `Receita`;
+- scope compativel com filtro de linha/WHERE;
+- join path estruturado a partir da fonte de realizado `demo_lakehouse.gold_lancamentos_contabeis` via `nk_conta` para `demo_lakehouse.gold_plano_contas.nk_conta`.
+
+Usar `binding_ref` estavel e versionado. O `planned_filter` deve continuar semantic-only e nunca carregar tabela/coluna/operador/valor/join_path.
+
+## Conceitos ainda nao resolvidos
+
+Nao inventar bindings para `dre_custos` ou `dre_despesas_operacionais` nesta microetapa.
+
+Motivos:
+- `category = cost` aparece associado a CMV, mas a palavra generica "custos" pode ter escopo semantico mais amplo; nao assumir equivalencia sem regra versionada explicita;
+- `category = opex` cobre multiplos grupos (`Despesas Comerciais`, `Marketing`, `Logistica`, `Pessoal`, `Administrativas`, `Tecnologia`, `Outras Despesas Operacionais`), enquanto o contrato atual de filtro simples nao deve ser estendido ad hoc para satisfazer este caso.
+
+Atualizar o inventario de GAPs para refletir que Receita possui evidencia suficiente e que os demais conceitos continuam fail-closed. Pode preservar `DEMO-PF-001` com escopo refinado ou criar GAPs derivados, desde que a rastreabilidade fique explicita.
 
 ## Regra de ouro
 
 Migrar conhecimento para contexto/configuracao versionada, nao para Python/TypeScript.
 
-Nenhuma regra de negocio desta microetapa pode virar `if`, constante, threshold, tabela/coluna ou SQL especial no motor.
-
-## Premissas obrigatorias
-
-- Nao criar pergunta -> SQL.
-- Nao criar resposta pronta.
-- Nao usar benchmark/golden/expected SQL como fonte de comportamento.
-- `business_question_examples` continuam apenas sinais auxiliares.
-- `planned_filter` permanece semantic-only.
-- detalhes fisicos ficam somente em `filter_binding` versionado.
-- `sql_filter_hint` pode ser lido apenas como evidencia TRANSITIONAL para inventario/migracao; nunca como contrato final do motor.
-- nenhuma informacao fisica deve ser inventada se nao houver evidencia versionada suficiente.
-- se um binding nao puder ser derivado com seguranca, registrar GAP/fail-closed em vez de criar valor por suposicao.
-- conhecimento de negocio DEMO e permitido somente em artefato de contexto/configuracao versionada, nunca no codigo do motor.
-
-## Fonte de verdade permitida
-
-Usar apenas artefatos ja existentes no repositorio e documentacao versionada disponivel nele para inferir o delta.
-
-Nao consultar nem modificar Supabase, n8n, Watson, PROD, credenciais ou qualquer ambiente externo nesta microetapa.
-
-Se os artefatos do repositorio nao contiverem informacao suficiente para um binding fisico seguro, produzir explicitamente uma lacuna a ser confirmada antes de qualquer futura aplicacao.
-
-## Entrega esperada
-
-Criar um pacote declarativo e auditavel de contexto DEMO, preferencialmente em arquivo novo dedicado, contendo:
-
-1. versao de contexto alvo proposta, sem substituir silenciosamente a versao atual;
-2. entidades `filter_concept` necessarias para categorias/conceitos financeiros ja existentes no contexto DEMO documentado;
-3. entidades `filter_binding` somente quando tabela, coluna, operador, valor, scope e join_path puderem ser sustentados por evidencia versionada;
-4. provenance/source para cada item;
-5. inventario de itens TRANSITIONAL reaproveitados apenas como pista de migracao;
-6. lista de gaps nao resolvidos;
-7. procedimento de validacao offline do pacote contra normalizer/validator/planner/generator/Contract Gate;
-8. rollback conceitual: trocar `SEMANTIC_AGENT_VERSION` de volta para a versao anterior, sem apagar dados.
-
-O artefato pode ser JSON, YAML, SQL declarativo nao aplicado ou formato equivalente ja coerente com o repositorio. Nao criar script que se conecte automaticamente a banco.
+Nenhuma regra de Receita, DRE, tabela, coluna ou valor pode virar `if`, constante de negocio, threshold ou excecao no motor.
 
 ## Escopo permitido
 
-- novos artefatos declarativos de contexto/configuracao DEMO;
-- documentacao de migracao/validacao;
-- fixtures e testes offline que carreguem esse artefato;
-- ajustes minimos e estruturais no loader/validator apenas se houver incompatibilidade generica comprovada.
-
-Nao alterar comportamento de planner, generator ou Contract Gate para acomodar um caso de negocio.
+- atualizar `semantic_context/demo_planned_filters_v8.delta.json`;
+- atualizar documentacao da migracao/contexto;
+- adicionar um manifesto de evidencia versionado no repositorio, se util;
+- ajustar testes offline especificos do artefato DEMO;
+- ajustes estruturais minimos de loader/validator somente se uma incompatibilidade generica real do contrato for comprovada.
 
 ## Escopo proibido
 
-- executar migrations;
-- conectar Supabase;
+- qualquer escrita no Supabase;
+- executar migration;
 - alterar n8n;
 - alterar Watson;
 - alterar PROD;
 - deploy/cutover;
 - mudar `real_sql_execution`;
 - alterar credenciais/permissoes;
-- modificar benchmark para fazer teste passar;
-- codificar Receita, Custo, Despesa, DRE, conta, marca, centro de custo, unidade ou qualquer outra regra de negocio no motor.
+- usar benchmark/golden/expected SQL como fonte de comportamento;
+- criar pergunta -> SQL;
+- criar SQL especial para Receita;
+- adicionar `if receita`, `if custo`, `if despesa` ou equivalente no motor;
+- promover `sql_filter_hint` a contrato final;
+- resolver custos/opex por suposicao.
 
 ## Validacao offline obrigatoria
 
-O pacote deve ser validado sem rede e sem banco externo.
-
 Cobrir no minimo:
+1. conceito Receita resolve semanticamente para `planned_filter` com `binding_ref` e sem detalhes fisicos;
+2. `binding_ref` resolve separadamente para um unico `resolved_filter_binding` completo;
+3. generator recebe obrigacao semantica e binding fisico separados;
+4. SQL sintetica estruturalmente equivalente ao binding passa Contract Gate;
+5. SQL sem filtro Receita falha Contract Gate;
+6. coluna, operador ou valor divergente falham;
+7. join/path incoerente ou binding incompleto falham fechado;
+8. duas formulacoes semanticamente equivalentes de Receita chegam ao mesmo conceito quando configuradas;
+9. termos nao sustentados, como `receita operacional liquida`, nao devem ser silenciosamente tratados como Receita apenas para fazer teste passar;
+10. conceitos de custos/opex permanecem sem binding e fail-closed;
+11. nenhum `sql_filter_hint` e consumido como contrato final;
+12. nenhum benchmark/golden/expected SQL entra no request;
+13. nenhum hardcode FORBIDDEN entra no motor;
+14. regressao das microetapas 1-5 permanece verde.
 
-1. normalizacao e validacao do snapshot/fixture;
-2. `filter_concept` resolve para `planned_filter` sem detalhes fisicos;
-3. `binding_ref` resolve para `resolved_filter_binding` separado;
-4. generator recebe obrigacao e binding separados;
-5. SQL sintetica equivalente ao binding passa Contract Gate;
-6. SQL sem filtro obrigatorio falha;
-7. binding ausente/ambiguo/invalido permanece fail-closed;
-8. duas formulacoes semanticamente equivalentes chegam ao mesmo conceito quando configuradas assim;
-9. nenhum benchmark/golden/expected SQL entra no request;
-10. nenhum `sql_filter_hint` e consumido como contrato final;
-11. nenhum hardcode FORBIDDEN novo no motor;
-12. regressao das microetapas 1-4 permanece verde.
+Executar os testes afetados, `python scripts/check_hardcodes.py`, `git diff --check` e `PYTHONDONTWRITEBYTECODE=1 python scripts/check_all.py`.
 
-Executar:
-- `python -m compileall app`;
-- testes de contexto afetados;
-- `python testar_planner.py`;
-- `python testar_sql_generation.py`;
-- `python testar_sql_contract.py`;
-- `python testar_contract_gate.py`;
-- `python testar_planned_filters_e2e.py`;
-- novos testes do pacote DEMO, se criados;
-- `git diff --check`;
-- `python scripts/check_hardcodes.py`;
-- `PYTHONDONTWRITEBYTECODE=1 python scripts/check_all.py`.
-
-Se `check_all.py` parar apenas no bloqueio Windows preexistente por ausencia de `SystemRoot`/`cmd.exe`, reportar sem alterar esse teste. Merge continua dependendo do `Offline validation` no GitHub Actions no HEAD remoto.
+Se o `check_all.py` parar apenas no bloqueio Windows preexistente por ausencia de `SystemRoot`/`cmd.exe`, reportar sem alterar esse teste. Merge continua dependendo do `Offline validation` do GitHub Actions no HEAD remoto.
 
 ## Hardcode inventory
 
-Classificar tudo encontrado/adicionado como:
-- STRUCTURAL;
-- TRANSITIONAL;
-- FORBIDDEN.
+Classificar tudo encontrado/adicionado como STRUCTURAL, TRANSITIONAL ou FORBIDDEN.
 
-Nesta microetapa, conhecimento financeiro especifico pode existir somente no artefato de contexto/configuracao versionada. Nenhum FORBIDDEN pode ser introduzido no codigo do motor.
+Conhecimento financeiro DEMO e permitido apenas no artefato de contexto/evidence versionado e em testes especificos desse artefato. Nenhum FORBIDDEN pode entrar no motor.
 
 ## Anti-overfitting
 
-Responder explicitamente antes de concluir:
+Responder explicitamente:
 "Isso melhora a capacidade geral ou apenas faz um caso especifico passar?"
 
-A entrega deve demonstrar que o mecanismo continua generico e que a mudanca e de contexto, nao de logica especial por pergunta.
+A resposta aceitavel deve demonstrar que o motor continua generico e que Receita funciona porque o contexto versionado fornece uma obrigacao e um binding, nao porque existe logica especial para a palavra.
 
 ## Publicacao
 
 Ao concluir:
 - tente publicar branch/PR;
-- se o workspace nao puder publicar, inclua NA MESMA EXECUCAO o unified diff completo de todos os arquivos alterados;
-- reporte `base_sha`, `local_commit_sha`, `publication_status`, `remote_branch`, `remote_head_sha`, `pr_number`, `publication_blocker`;
-- nao peca ao usuario para copiar patch, SHA, log ou comando.
+- se o workspace nao puder publicar, inclua NA MESMA EXECUCAO o unified diff completo de todos os arquivos alterados em comentario visivel da Issue;
+- nao use `make_pr` como unico destino do patch se nao houver PR remoto;
+- reporte `base_sha`, `local_commit_sha`, `publication_status`, `remote_branch`, `remote_head_sha`, `pr_number`, arquivos, testes, hardcode inventory e gaps;
+- nao peca ao usuario para transportar comandos, patches, SHAs ou logs.
 
 ## Commit sugerido
 
-`feat: prepare versioned demo filter context`
+`feat: add evidence-backed demo revenue filter binding`
 
 ## Merge
 
@@ -144,4 +172,4 @@ Codex nao faz merge. O ChatGPT/revisor tecnico pode revisar e mergear conforme `
 
 Nao autorizado.
 
-Esta microetapa termina com artefato versionado e testes na `main`, sem aplicar nada em Supabase, n8n, Watson, DEMO real, PROD ou qualquer ambiente externo.
+Esta microetapa termina com contexto e binding de Receita preparados e testados na `main`, mas sem aplicar o delta ao Supabase e sem alterar o runtime DEMO.
