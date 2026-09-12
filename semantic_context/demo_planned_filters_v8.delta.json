@@ -38,7 +38,7 @@
       "binding_ref": "demo-dre-receita-v1",
       "filter_concept": "dre_receita",
       "required": true,
-      "scope": "row",
+      "scope": "where",
       "target_table": "demo_lakehouse.gold_plano_contas",
       "target_column": "grupo_contabil",
       "operator": "=",
@@ -70,11 +70,10 @@
   "gaps": [
     {
       "id": "DEMO-PF-001",
-      "status": "BLOCKING_FAIL_CLOSED",
+      "status": "RESOLVED_WITH_VERSIONED_EVIDENCE",
       "scope": "dre_receita",
-      "resolution": "RESOLVED_WITH_VERSIONED_EVIDENCE",
       "binding_ref": "demo-dre-receita-v1",
-      "activation_allowed": true
+      "activation_allowed": false
     },
     {
       "id": "DEMO-PF-002",
@@ -101,7 +100,7 @@
   ],
   "activation": {
     "allowed": false,
-    "condition": "All BLOCKING_FAIL_CLOSED gaps must be resolved with versioned evidence."
+    "condition": "Runtime activation remains separately prohibited until all blocking gaps are resolved and an explicit activation decision is approved."
   },
   "rollback": {
     "action": "Restore SEMANTIC_AGENT_VERSION to v7-planned-metrics.",
