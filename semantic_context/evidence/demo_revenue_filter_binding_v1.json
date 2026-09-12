@@ -11,7 +11,7 @@
     "target_column": "grupo_contabil",
     "operator": "=",
     "value": "Receita",
-    "scope": "row",
+    "scope": "where",
     "join_path": [
       {
         "source_table": "demo_lakehouse.gold_lancamentos_contabeis",
@@ -22,6 +22,10 @@
       }
     ]
   },
+  "unsupported_aliases": [
+    "receita operacional liquida",
+    "receita operacional líquida"
+  ],
   "observations": [
     "The versioned DEMO catalog identifies gold_lancamentos_contabeis as the realized source and valor as its metric.",
     "The versioned DEMO catalog declares the nk_conta join to gold_plano_contas.",
