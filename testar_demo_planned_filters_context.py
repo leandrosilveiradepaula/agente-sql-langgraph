@@ -75,7 +75,7 @@ def test_binding_receita_e_completo_e_separado() -> None:
             "target_column": "nk_conta",
             "operator": "=",
         }],
-        "evidence_ref": str(EVIDENCE_PATH),
+        "evidence_ref": EVIDENCE_PATH.as_posix(),
     }]
     concept = next(
         item for item in delta["filter_concepts"]
