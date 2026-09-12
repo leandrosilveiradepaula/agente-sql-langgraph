@@ -233,22 +233,32 @@ def _plan(question: str, raw_context: dict[str, Any]) -> dict[str, Any]:
     return result["query_plan"]
 
 
-def _assert_forbidden_request_keys_absent(value: Any) -> None:
+def _assert_benchmark_and_golden_absent(value: Any) -> None:
     forbidden = {
-        "sql_filter_hint",
         "benchmark",
         "benchmark_id",
         "benchmark_mode",
+        "benchmark_target",
         "golden_answer",
         "expected_sql",
     }
     if isinstance(value, dict):
         assert not forbidden.intersection(value.keys()), value
         for child in value.values():
-            _assert_forbidden_request_keys_absent(child)
+            _assert_benchmark_and_golden_absent(child)
     elif isinstance(value, list):
         for child in value:
-            _assert_forbidden_request_keys_absent(child)
+            _assert_benchmark_and_golden_absent(child)
+
+
+def _assert_transitional_hint_not_used_as_filter_contract(request: dict[str, Any]) -> None:
+    generation_context = request["generation_context"]
+    for item in (
+        generation_context["planned_filters"]
+        + generation_context["filter_bindings"]
+    ):
+        assert "sql_filter_hint" not in item, item
+        assert "nivel_1_bi" not in item, item
 
 
 def test_delta_e_versionado_e_nao_aplicavel_automaticamente() -> None:
@@ -317,7 +327,8 @@ def test_pipeline_real_do_delta_resolve_aliases_e_separa_binding() -> None:
         request = build_sql_generation_request(plan)
         assert request["generation_context"]["planned_filters"] == [obligation]
         assert request["generation_context"]["filter_bindings"] == [expected_binding]
-        _assert_forbidden_request_keys_absent(request)
+        _assert_benchmark_and_golden_absent(request)
+        _assert_transitional_hint_not_used_as_filter_contract(request)
 
     assert plans[0]["planning_context"]["planned_filters"][0]["filter_concept"] == plans[1]["planning_context"]["planned_filters"][0]["filter_concept"]
     assert plans[0]["planning_context"]["planned_filters"][0]["binding_ref"] == plans[1]["planning_context"]["planned_filters"][0]["binding_ref"]
