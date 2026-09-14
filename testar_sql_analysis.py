@@ -50,6 +50,33 @@ def test_join() -> None:
     assert "schema_test.table_test" in analysis["tables"]
     assert "schema_test.table_other" in analysis["tables"]
     assert len(analysis["joins"]) == 1
+    assert analysis["joins"][0]["join_comparisons"] == [
+        {
+            "left_qualifier": "t",
+            "left_column": "id",
+            "operator": "=",
+            "right_qualifier": "o",
+            "right_column": "id",
+        }
+    ]
+
+
+def test_join_comparisons_ficam_isoladas_por_clause_on() -> None:
+    analysis = analyze_sql(
+        "SELECT t.id FROM schema_test.table_test t "
+        "JOIN schema_test.table_other o ON t.value = o.id "
+        "JOIN schema_test.table_extra e ON t.id = o.id"
+    )
+
+    assert len(analysis["joins"]) == 2
+    first = analysis["joins"][0]["join_comparisons"]
+    second = analysis["joins"][1]["join_comparisons"]
+    assert [(item["left_column"], item["right_column"]) for item in first] == [
+        ("value", "id")
+    ]
+    assert [(item["left_column"], item["right_column"]) for item in second] == [
+        ("id", "id")
+    ]
 
 
 def test_union() -> None:
@@ -850,6 +877,10 @@ def main() -> None:
         ("WITH CTE", test_with_cte),
         ("subquery", test_subquery),
         ("JOIN", test_join),
+        (
+            "JOIN comparacoes isoladas",
+            test_join_comparisons_ficam_isoladas_por_clause_on,
+        ),
         ("UNION", test_union),
         ("aliases", test_aliases),
         ("string perigosa", test_string_com_palavra_perigosa),

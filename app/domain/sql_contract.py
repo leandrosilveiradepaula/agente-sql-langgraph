@@ -498,6 +498,9 @@ def _verify_planned_filters(
                 "operator": operator,
                 "literal_type": _value_type(binding.get("value")),
             }
+            join_path_steps = binding.get("join_path")
+            if join_path_steps:
+                expected["join_path_steps"] = len(join_path_steps)
             relevant = []
             unverifiable = False
             for predicate in analysis.get("predicates", []):
@@ -523,7 +526,15 @@ def _verify_planned_filters(
                 ):
                     matched_count += 1
             if matched_count == 1:
-                status, reason = "satisfied", "required_filter_present"
+                if join_path_steps and not _join_path_satisfied(
+                    analysis,
+                    join_path_steps,
+                    allowed,
+                    aliases,
+                ):
+                    reason = "required_join_path_missing_or_incoherent"
+                else:
+                    status, reason = "satisfied", "required_filter_present"
             elif matched_count > 1:
                 status, reason = "unverifiable", "predicate_ambiguous"
             elif unverifiable:
@@ -569,7 +580,112 @@ def _valid_filter_binding(
         and _clean_text(binding.get("scope")) == _clean_text(obligation.get("scope"))
         and binding.get("required") is True
         and _value_type(binding.get("value")) in {"string", "number", "boolean"}
+        and _join_path_valid(binding.get("join_path"), allowed)
     )
+
+
+def _join_path_valid(
+    join_path: Any,
+    allowed: Mapping[str, set[str]],
+) -> bool:
+    if join_path is None or join_path == []:
+        return True
+    if not isinstance(join_path, list):
+        return False
+    required = {
+        "source_table",
+        "source_column",
+        "target_table",
+        "target_column",
+        "operator",
+    }
+    for step in join_path:
+        if not isinstance(step, Mapping):
+            return False
+        if not required <= set(step):
+            return False
+        source_table = _clean_text(step.get("source_table")).casefold()
+        source_column = _clean_text(step.get("source_column")).casefold()
+        target_table = _clean_text(step.get("target_table")).casefold()
+        target_column = _clean_text(step.get("target_column")).casefold()
+        operator = _clean_text(step.get("operator"))
+        if (
+            source_table not in allowed
+            or source_column not in allowed[source_table]
+            or target_table not in allowed
+            or target_column not in allowed[target_table]
+            or operator not in {"=", "<>", "<", "<=", ">", ">="}
+        ):
+            return False
+    return True
+
+
+def _join_path_satisfied(
+    analysis: SqlStatementAnalysis,
+    steps: Any,
+    allowed: dict[str, set[str]],
+    aliases: dict[str, str],
+) -> bool:
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        if not isinstance(step, Mapping):
+            return False
+        source = (
+            _clean_text(step.get("source_table")).casefold(),
+            _clean_text(step.get("source_column")).casefold(),
+        )
+        target = (
+            _clean_text(step.get("target_table")).casefold(),
+            _clean_text(step.get("target_column")).casefold(),
+        )
+        operator = _clean_text(step.get("operator"))
+        found = False
+        for join in analysis.get("joins", []):
+            if _resolve_join_table(join.get("right_table"), analysis) not in {
+                source[0],
+                target[0],
+            }:
+                continue
+            for comparison in join.get("join_comparisons", []):
+                if not isinstance(comparison, Mapping):
+                    continue
+                if _clean_text(comparison.get("operator")) != operator:
+                    continue
+                left = _join_operand_ref(comparison, "left", allowed, aliases)
+                right = _join_operand_ref(comparison, "right", allowed, aliases)
+                if (left, right) in {(source, target), (target, source)}:
+                    found = True
+                    break
+            if found:
+                break
+        if not found:
+            return False
+    return True
+
+
+def _join_operand_ref(
+    comparison: Mapping[str, Any],
+    side: Literal["left", "right"],
+    allowed: dict[str, set[str]],
+    aliases: dict[str, str],
+) -> tuple[str, str] | None:
+    column_name = _clean_text(comparison.get(f"{side}_column")).casefold()
+    if not column_name:
+        return None
+    column: SqlColumnReference = {
+        "column": column_name,
+        "qualifier": comparison.get(f"{side}_qualifier"),
+        "schema": None,
+        "table": comparison.get(f"{side}_qualifier"),
+        "raw": "",
+        "clause": "on",
+        "is_wildcard": False,
+    }
+    resolved = _resolve_column_table(column, allowed, aliases)
+    if resolved.get("status") != "satisfied" or not resolved.get("table"):
+        return None
+    return str(resolved["table"]).casefold(), column_name
 
 
 def _value_type(value: Any) -> str:
