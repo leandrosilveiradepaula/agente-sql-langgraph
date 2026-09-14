@@ -1,10 +1,10 @@
 ﻿# PROJECT-STATUS.md
 
-Date: 2026-08-07
+Date: 2026-09-14
 
-Branch: `master`
+Branch: `main`
 
-HEAD: `e535870`
+HEAD: `ff800c8bd3fae462e10dabf52c8e09e0816f730c`
 
 ## Current State
 
@@ -63,6 +63,37 @@ The separation must exist in LangGraph/backend entrypoints, not only in the Next
 
 Offline Gemini SQL Generator and Gemini SQL Repairer providers have been implemented as explicit LangGraph providers. They do not replace n8n, do not make LangGraph official, do not authorize live Watson usage, and do not create benchmark execution.
 
+## Planned Filters Status
+
+Microetapa 6 was completed and merged through PR `#12`.
+
+- `main`: `ff800c8bd3fae462e10dabf52c8e09e0816f730c`
+- Post-merge CI: `Offline validation` green
+- Scope: offline only
+- Deploy: not authorized
+- Supabase: not changed
+- n8n: not changed
+- Runtime activation: not authorized
+
+The offline `planned_filters` flow now supports semantic obligations,
+separate `resolved_filter_bindings`, generator request separation, Contract
+Gate enforcement and structural `join_path` proof. The `join_path` validation
+resolves SQL aliases, checks table/column/operator, accepts inverted operands
+and keeps comparisons isolated per `JOIN ... ON`.
+
+The DEMO v8 delta remains unapplied:
+
+- `semantic_context/demo_planned_filters_v8.delta.json` is still an offline
+  proposal;
+- `automatic_apply=false`;
+- `activation.allowed=false`.
+
+`dre_receita` has a versioned read-only evidence manifest and a complete
+binding for `demo-dre-receita-v1`. `dre_custos` remains
+`BLOCKING_FAIL_CLOSED`, and `dre_despesas_operacionais` remains
+`BLOCKING_FAIL_CLOSED`. Lucro, margem, ROL and derived concepts remain
+unresolved and must not be inferred from the completed Receita binding.
+
 ## Shadow Status
 
 Initial shadow is 100% offline:
@@ -103,6 +134,10 @@ Shadow persistence must use a separate structure, not `ai_agent_runs.metadata` a
 - Shadow persistence schema and queue/async mechanism are future implementation decisions.
 - Policy mapping from the original product into LangGraph SQL gates still needs implementation design.
 - Future live Watson TEST and real SQL execution require separate explicit authorization.
+- DEMO planned filters v8 is prepared but not applied or activated.
+- `dre_custos` remains `BLOCKING_FAIL_CLOSED` and still needs explicit evidence/versioning before any binding.
+- `dre_despesas_operacionais` remains `BLOCKING_FAIL_CLOSED` and still needs a generic multi-group filter design before any binding.
+- `sql_filter_hint` and `nivel_1_bi` remain TRANSITIONAL evidence only, not generation or binding contracts.
 
 ## Next Stage
 
@@ -111,3 +146,12 @@ Stage 1: n8n remains official while the Next.js BFF dispatches asynchronous offl
 No cutover is claimed.
 
 Benchmark remains postponed.
+
+The next planned-filters decision is not an implementation task yet. It must
+choose explicitly between:
+
+1. an evidence/versioning microstage for `dre_custos`;
+2. a generic design for multi-group filters needed by
+   `dre_despesas_operacionais`.
+
+Neither path authorizes activation, Supabase changes, deploy, or cutover.
