@@ -47,6 +47,7 @@ class SqlObjectReference(TypedDict, total=False):
     is_cte: bool
     is_function: bool
     is_subquery: bool
+    position: int
 
 
 class SqlColumnReference(TypedDict, total=False):
@@ -59,12 +60,21 @@ class SqlColumnReference(TypedDict, total=False):
     is_wildcard: bool
 
 
+class SqlJoinComparison(TypedDict, total=False):
+    left_qualifier: str | None
+    left_column: str
+    operator: str
+    right_qualifier: str | None
+    right_column: str
+
+
 class SqlJoinReference(TypedDict, total=False):
     join_type: str
     left_table: str | None
     right_table: str | None
     right_alias: str | None
     condition_columns: list[SqlColumnReference]
+    join_comparisons: list[SqlJoinComparison]
 
 
 class SqlSelectItem(TypedDict, total=False):
@@ -638,6 +648,7 @@ def _extract_objects(
         index += 1
         while _norm_at(tokens, index) in {"lateral", "only"}:
             index += 1
+        position = index
         if _norm_at(tokens, index) == "(":
             end = _matching_paren_index(tokens, index)
             alias = _read_alias(tokens, end + 1)
@@ -652,6 +663,7 @@ def _extract_objects(
                         "is_cte": False,
                         "is_function": False,
                         "is_subquery": True,
+                        "position": position,
                     }
                 )
                 index += 1
@@ -679,6 +691,7 @@ def _extract_objects(
                 "is_cte": is_cte,
                 "is_function": is_function,
                 "is_subquery": False,
+                "position": position,
             }
         )
     return _stable_objects(objects)
@@ -963,6 +976,7 @@ def _extract_joins(
         for item in objects
         if not item.get("is_cte") and not item.get("is_function")
     ]
+    physical = sorted(physical, key=lambda item: int(item.get("position") or 0))
     joins: list[SqlJoinReference] = []
     previous: SqlObjectReference | None = None
     for item in physical:
@@ -979,6 +993,7 @@ def _extract_joins(
                     "right_table": _qualified_or_table(item),
                     "right_alias": item.get("alias"),
                     "condition_columns": _columns_after_join(tokens, item),
+                    "join_comparisons": _comparisons_after_join(tokens, item),
                 }
             )
             previous = item
@@ -1062,12 +1077,120 @@ def _columns_after_join(
     tokens: list[SqlToken],
     item: SqlObjectReference,
 ) -> list[SqlColumnReference]:
-    del item
+    clause = _join_on_token_range(tokens, item)
+    if clause is None:
+        return []
+    start, end = clause
     return [
         column
-        for column in _extract_columns(tokens, [], {})
-        if column.get("clause") == "on"
+        for column in _extract_columns(tokens[start:end], [], {})
+        if column.get("clause") == "unknown"
     ]
+
+
+def _comparisons_after_join(
+    tokens: list[SqlToken],
+    item: SqlObjectReference,
+) -> list[SqlJoinComparison]:
+    clause = _join_on_token_range(tokens, item)
+    if clause is None:
+        return []
+    start, end = clause
+    comparisons: list[SqlJoinComparison] = []
+    index = start
+    while index < end:
+        left = _join_operand(tokens, index)
+        if left is None:
+            index += 1
+            continue
+        _, _, cursor = left
+        operator, cursor = _comparison_operator(tokens, cursor)
+        if operator is None:
+            index += 1
+            continue
+        right = _join_operand(tokens, cursor)
+        if right is None:
+            index += 1
+            continue
+        right_qualifier, right_column, cursor = right
+        left_qualifier, left_column, _ = left
+        comparisons.append(
+            {
+                "left_qualifier": left_qualifier,
+                "left_column": left_column,
+                "operator": operator,
+                "right_qualifier": right_qualifier,
+                "right_column": right_column,
+            }
+        )
+        index = cursor
+    return comparisons
+
+
+def _join_on_token_range(
+    tokens: list[SqlToken],
+    item: SqlObjectReference,
+) -> tuple[int, int] | None:
+    start = int(item.get("position") or 0)
+    depth = 0
+    index = start
+    on_index: int | None = None
+    while index < len(tokens):
+        token = tokens[index]
+        if token["value"] == "(":
+            depth += 1
+        elif token["value"] == ")":
+            depth = max(0, depth - 1)
+        elif depth == 0 and token["normalized"] == "on":
+            on_index = index + 1
+            break
+        elif depth == 0 and index > start and _is_join_clause_boundary(tokens, index):
+            return None
+        index += 1
+    if on_index is None:
+        return None
+    end = on_index
+    depth = 0
+    while end < len(tokens):
+        token = tokens[end]
+        if token["value"] == "(":
+            depth += 1
+        elif token["value"] == ")":
+            depth = max(0, depth - 1)
+        elif depth == 0 and _is_join_clause_boundary(tokens, end):
+            break
+        end += 1
+    return on_index, end
+
+
+def _is_join_clause_boundary(tokens: list[SqlToken], index: int) -> bool:
+    norm = tokens[index]["normalized"]
+    if norm in {
+        "join",
+        "where",
+        "group",
+        "order",
+        "having",
+        "limit",
+        "union",
+        "except",
+        "intersect",
+    }:
+        return True
+    return norm == "," and _clause_before(tokens, index) in {"from", "on"}
+
+
+def _join_operand(
+    tokens: list[SqlToken],
+    index: int,
+) -> tuple[str | None, str, int] | None:
+    if index >= len(tokens) or not _is_identifier(tokens[index]):
+        return None
+    if _norm_at(tokens, index + 1) == "." and _is_identifier(tokens[index + 2]):
+        return tokens[index]["normalized"], tokens[index + 2]["normalized"], index + 3
+    if tokens[index]["normalized"] in _RESERVED_WORDS:
+        return None
+    return None, tokens[index]["normalized"], index + 1
 
 
 def _extract_cte_output_columns(

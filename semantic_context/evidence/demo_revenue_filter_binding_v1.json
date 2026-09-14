@@ -1,0 +1,43 @@
+{
+  "evidence_contract": "semantic-context-evidence/v1",
+  "evidence_id": "demo-revenue-filter-binding-v1",
+  "environment": "DEMO",
+  "collection_mode": "read_only",
+  "supports": {
+    "filter_concept": "dre_receita",
+    "aliases": ["receita", "receitas"],
+    "binding_ref": "demo-dre-receita-v1",
+    "target_table": "demo_lakehouse.gold_plano_contas",
+    "target_column": "grupo_contabil",
+    "operator": "=",
+    "value": "Receita",
+    "scope": "where",
+    "join_path": [
+      {
+        "source_table": "demo_lakehouse.gold_lancamentos_contabeis",
+        "source_column": "nk_conta",
+        "target_table": "demo_lakehouse.gold_plano_contas",
+        "target_column": "nk_conta",
+        "operator": "="
+      }
+    ]
+  },
+  "unsupported_aliases": [
+    "receita operacional liquida",
+    "receita operacional líquida"
+  ],
+  "observations": [
+    "The versioned DEMO catalog identifies gold_lancamentos_contabeis as the realized source and valor as its metric.",
+    "The versioned DEMO catalog declares the nk_conta join to gold_plano_contas.",
+    "Read-only schema inspection confirmed all binding and join columns.",
+    "Read-only data inspection confirmed the exact grupo_contabil value Receita and associated entries through nk_conta."
+  ],
+  "transitional_evidence": ["sql_filter_hint", "nivel_1_bi"],
+  "limitations": [
+    "This evidence does not establish equivalence with receita operacional liquida.",
+    "This evidence does not establish a binding for dre_custos.",
+    "This evidence does not establish a binding for dre_despesas_operacionais."
+  ],
+  "external_write_performed": false,
+  "authorizes_apply": false
+}

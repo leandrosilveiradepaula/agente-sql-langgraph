@@ -1698,6 +1698,63 @@ def _with_required_filter() -> dict:
     return plan
 
 
+def _with_required_filter_join_path() -> dict:
+    plan = _with_second_table()
+    plan["planning_context"]["planned_filters"] = [{
+        "filter_ref": "filter-join", "filter_concept": "synthetic_joined_class",
+        "binding_ref": "binding-join", "required": True, "scope": "row",
+    }]
+    plan["planning_context"]["resolved_filter_bindings"] = [{
+        "binding_ref": "binding-join",
+        "filter_concept": "synthetic_joined_class",
+        "target_table": "schema_test.table_other",
+        "target_column": "other_value",
+        "operator": "=",
+        "value": "ExactValue",
+        "required": True,
+        "scope": "row",
+        "join_path": [
+            {
+                "source_table": "schema_test.table_test",
+                "source_column": "id",
+                "target_table": "schema_test.table_other",
+                "target_column": "id",
+                "operator": "=",
+            }
+        ],
+    }]
+    return plan
+
+
+def _with_required_filter_join_path_and_extra_table() -> dict:
+    plan = _with_required_filter_join_path()
+    projection = plan["planning_context"]
+    projection["required_tables"].append(
+        {
+            "schema_name": "schema_test",
+            "table_name": "table_extra",
+            "qualified_name": "schema_test.table_extra",
+            "primary_key": ["id"],
+            "key_columns": ["id"],
+            "metric_columns": [],
+            "date_columns": [],
+            "join_rules": [],
+            "columns": [{"name": "id"}],
+        }
+    )
+    projection["relevant_columns"]["schema_test.table_extra"] = [{"name": "id"}]
+    projection["authorized_joins"].append(
+        {
+            "source_table": "schema_test.table_other",
+            "join_rules": [
+                {"target_table": "schema_test.table_extra"}
+            ],
+            "interpretation": "preserved_selected_table_rules",
+        }
+    )
+    return plan
+
+
 def test_required_filter_valido_com_alias_aprova() -> None:
     result = _run(
         "SELECT t.id FROM schema_test.table_test t WHERE t.value = 'ExactValue'",
@@ -1705,6 +1762,55 @@ def test_required_filter_valido_com_alias_aprova() -> None:
     )
     assert result["status"] == "approved"
     assert result["filters"][0]["status"] == "satisfied"
+
+
+def test_required_filter_com_join_path_correto_aprova() -> None:
+    result = _run(
+        "SELECT t.id FROM schema_test.table_test t "
+        "JOIN schema_test.table_other o ON t.id = o.id "
+        "WHERE o.other_value = 'ExactValue'",
+        _with_required_filter_join_path(),
+    )
+
+    assert result["status"] == "approved"
+    assert result["filters"][0]["status"] == "satisfied"
+
+
+def test_required_filter_com_join_path_invertido_aprova() -> None:
+    result = _run(
+        "SELECT t.id FROM schema_test.table_test t "
+        "JOIN schema_test.table_other o ON o.id = t.id "
+        "WHERE o.other_value = 'ExactValue'",
+        _with_required_filter_join_path(),
+    )
+
+    assert result["status"] == "approved"
+    assert result["filters"][0]["status"] == "satisfied"
+
+
+def test_required_filter_com_join_path_incoerente_rejeita() -> None:
+    for join_condition in ("t.value = o.id", "t.id <> o.id", "1 = 1"):
+        result = _run(
+            "SELECT t.id FROM schema_test.table_test t "
+            f"JOIN schema_test.table_other o ON {join_condition} "
+            "WHERE o.other_value = 'ExactValue'",
+            _with_required_filter_join_path(),
+        )
+        assert result["status"] == "rejected"
+        assert result["filters"][0]["reason"] == "required_join_path_missing_or_incoherent"
+
+
+def test_required_filter_nao_compartilha_comparacao_entre_joins() -> None:
+    result = _run(
+        "SELECT t.id FROM schema_test.table_test t "
+        "JOIN schema_test.table_other o ON t.value = o.id "
+        "JOIN schema_test.table_extra e ON t.id = o.id "
+        "WHERE o.other_value = 'ExactValue'",
+        _with_required_filter_join_path_and_extra_table(),
+    )
+
+    assert result["status"] == "rejected"
+    assert result["filters"][0]["reason"] == "required_join_path_missing_or_incoherent"
 
 
 def test_required_filter_ausente_divergente_e_case_sensitive_rejeita() -> None:
@@ -1778,6 +1884,19 @@ def test_join_having_e_binding_invalido_nao_satisfazem_where() -> None:
 def main() -> None:
     tests = [
         ("required filter valido", test_required_filter_valido_com_alias_aprova),
+        (
+            "required filter join_path correto",
+            test_required_filter_com_join_path_correto_aprova,
+        ),
+        (
+            "required filter join_path invertido",
+            test_required_filter_com_join_path_invertido_aprova,
+        ),
+        ("required filter join_path incoerente", test_required_filter_com_join_path_incoerente_rejeita),
+        (
+            "required filter join_path isolado por join",
+            test_required_filter_nao_compartilha_comparacao_entre_joins,
+        ),
         ("required filter divergencias", test_required_filter_ausente_divergente_e_case_sensitive_rejeita),
         ("required filter bindings fail closed", test_required_filter_binding_ausente_duplicado_e_nao_verificavel),
         ("planned filters vazio", test_planned_filters_vazio_preserva_comportamento),

@@ -6,12 +6,12 @@
   "automatic_apply": false,
   "filter_concepts": [
     {
-      "filter_concept": "dre_receita_operacional_liquida",
-      "aliases": ["receita operacional liquida", "receitas operacionais liquidas"],
+      "filter_concept": "dre_receita",
+      "aliases": ["receita", "receitas"],
       "provenance": {
-        "source": "scripts/migrations/003_prepare_semantic_operations_context_v2.sql",
-        "classification": "TRANSITIONAL",
-        "evidence": "existing versioned DRE mapping metadata"
+        "source": "semantic_context/evidence/demo_revenue_filter_binding_v1.json",
+        "classification": "STRUCTURAL",
+        "evidence": "convergent read-only DEMO catalog, schema and data evidence"
       }
     },
     {
@@ -33,7 +33,28 @@
       }
     }
   ],
-  "filter_bindings": [],
+  "filter_bindings": [
+    {
+      "binding_ref": "demo-dre-receita-v1",
+      "filter_concept": "dre_receita",
+      "required": true,
+      "scope": "where",
+      "target_table": "demo_lakehouse.gold_plano_contas",
+      "target_column": "grupo_contabil",
+      "operator": "=",
+      "value": "Receita",
+      "join_path": [
+        {
+          "source_table": "demo_lakehouse.gold_lancamentos_contabeis",
+          "source_column": "nk_conta",
+          "target_table": "demo_lakehouse.gold_plano_contas",
+          "target_column": "nk_conta",
+          "operator": "="
+        }
+      ],
+      "evidence_ref": "semantic_context/evidence/demo_revenue_filter_binding_v1.json"
+    }
+  ],
   "transitional_inventory": [
     {
       "field": "sql_filter_hint",
@@ -49,23 +70,37 @@
   "gaps": [
     {
       "id": "DEMO-PF-001",
+      "status": "RESOLVED_WITH_VERSIONED_EVIDENCE",
+      "scope": "dre_receita",
+      "binding_ref": "demo-dre-receita-v1",
+      "activation_allowed": false
+    },
+    {
+      "id": "DEMO-PF-002",
       "status": "BLOCKING_FAIL_CLOSED",
-      "scope": "all_filter_concepts",
+      "scope": "dre_custos",
       "missing_evidence": [
-        "target_table",
-        "target_column",
-        "operator",
-        "value",
-        "scope",
-        "join_path"
+        "unambiguous_semantic_scope",
+        "complete_filter_binding"
       ],
-      "required_resolution": "Provide one complete, versioned and auditable physical binding per concept before activation.",
+      "required_resolution": "Provide an explicit versioned rule proving the intended scope of generic costs before creating a complete physical binding.",
+      "activation_allowed": false
+    },
+    {
+      "id": "DEMO-PF-003",
+      "status": "BLOCKING_FAIL_CLOSED",
+      "scope": "dre_despesas_operacionais",
+      "missing_evidence": [
+        "supported_multi_group_semantics",
+        "compatible_complete_filter_binding"
+      ],
+      "required_resolution": "Provide versioned multi-group semantics and a compatible generic binding contract before activation.",
       "activation_allowed": false
     }
   ],
   "activation": {
     "allowed": false,
-    "condition": "All BLOCKING_FAIL_CLOSED gaps must be resolved with versioned evidence."
+    "condition": "Runtime activation remains separately prohibited until all blocking gaps are resolved and an explicit activation decision is approved."
   },
   "rollback": {
     "action": "Restore SEMANTIC_AGENT_VERSION to v7-planned-metrics.",

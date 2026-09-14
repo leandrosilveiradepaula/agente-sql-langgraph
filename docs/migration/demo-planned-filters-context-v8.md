@@ -9,39 +9,56 @@ Esta microetapa nao conecta banco, nao executa SQL e nao altera DEMO ou PROD.
 
 Os aliases sao conhecimento de contexto. Cada `filter_concept` e semantic-only:
 ele identifica o conceito percebido, mas nao carrega tabela, coluna, operador,
-valor, escopo ou caminho de join. Esses campos pertencem exclusivamente a um
-`filter_binding` fisico, versionado e completo.
+valor, escopo, caminho de join ou `binding_ref`. Esses campos pertencem
+exclusivamente a um `filter_binding` fisico, versionado e completo.
 
-## Evidencia e GAP
+## Decisao semantica de Receita
 
-As migrations versionadas existentes documentam categorias e aliases, mas nao
-fornecem evidencia suficiente, conjunta e inequívoca para todos os campos de um
-binding fisico. Por isso, `filter_bindings` permanece vazio. `sql_filter_hint` e
-o metadado historico `nivel_1_bi` ficam classificados como **TRANSITIONAL** e
-servem apenas ao inventario de migracao; nenhum deles e contrato final.
+A evidencia DEMO sustenta o conceito canonico `dre_receita`, com aliases somente
+`receita` e `receitas`. Ela nao comprova que o grupo `Receita` seja equivalente a
+"receita operacional liquida"; portanto esse termo nao e alias do conceito e
+nenhuma formula de ROL, lucro, margem ou composicao foi criada.
 
-`DEMO-PF-001` e **BLOCKING_FAIL_CLOSED**. Enquanto ele estiver aberto, os
-conceitos deste pacote nao podem ser ativados nem produzir `planned_filters` no
-runtime. Uma aplicacao futura exige evidencia versionada e auditavel de tabela,
-coluna, operador, valor, escopo e `join_path`, sem inferencia por SQL historica.
+O manifesto read-only
+`semantic_context/evidence/demo_revenue_filter_binding_v1.json` registra a
+convergencia entre catalogo versionado, schema fisico e valor observado. Com essa
+evidencia, `demo-dre-receita-v1` liga separadamente `dre_receita` a
+`demo_lakehouse.gold_plano_contas.grupo_contabil = 'Receita'`, no escopo de linha,
+e declara o join desde `demo_lakehouse.gold_lancamentos_contabeis` por `nk_conta`.
+O `planned_filter` continua sendo apenas a obrigacao semantica; o binding fisico e
+resolvido por `binding_ref` e nao deriva de `sql_filter_hint`.
+
+## Evidencia e GAPs remanescentes
+
+`DEMO-PF-001` fica resolvido somente para Receita. `DEMO-PF-002` mantem
+`dre_custos` em **BLOCKING_FAIL_CLOSED**, pois a evidencia de CMV nao prova o
+escopo da palavra generica "custos". `DEMO-PF-003` mantem
+`dre_despesas_operacionais` em **BLOCKING_FAIL_CLOSED**, pois o conceito cobre
+multiplos grupos e o contrato simples atual nao deve ser estendido ad hoc.
+
+`sql_filter_hint` e `nivel_1_bi` permanecem **TRANSITIONAL**, apenas no inventario
+de migracao. Nenhum deles e contrato final. Como ainda existem GAPs bloqueantes,
+a ativacao integral do pacote permanece desabilitada.
 
 ## Validacao offline
 
-1. Validar sintaxe JSON e o contrato do pacote.
-2. Confirmar que origem e alvo sao versoes distintas e que `automatic_apply` e
-   falso.
-3. Confirmar aliases semantic-only, provenance e ausencia de campos fisicos.
-4. Confirmar `filter_bindings` vazio e o GAP bloqueante.
-5. Executar os testes de normalizer, validator, planner, generator e Contract
-   Gate. Os testes sinteticos das microetapas anteriores continuam demonstrando
-   o fluxo completo quando um binding valido e injetado.
-6. Nao usar benchmark, golden answer, expected SQL ou `sql_filter_hint` como
-   entrada do generator.
+1. Validar sintaxe JSON, contrato, provenance read-only e ausencia de aplicacao
+   automatica.
+2. Confirmar `dre_receita` e seus dois aliases exatos, sem equivalencia silenciosa
+   com receita operacional liquida.
+3. Confirmar a separacao entre conceito semantic-only e o binding fisico completo
+   `demo-dre-receita-v1`.
+4. Confirmar join estruturado por `nk_conta` e que campos TRANSITIONAL nao entram
+   no binding.
+5. Confirmar custos e opex sem binding e fail-closed.
+6. Executar as regressoes de planner, generator e Contract Gate, que validam o
+   contrato generico com dados sinteticos, sem criar comportamento DEMO no motor.
 
 Comandos locais relevantes:
 
 ```text
 python -m json.tool semantic_context/demo_planned_filters_v8.delta.json
+python -m json.tool semantic_context/evidence/demo_revenue_filter_binding_v1.json
 python testar_demo_planned_filters_context.py
 python testar_context_normalizer.py
 python testar_context_validator.py
@@ -62,16 +79,18 @@ remove dados e nao autoriza deploy ou alteracao de ambiente nesta microetapa.
 
 ## Inventario de hardcodes
 
-- **STRUCTURAL:** formato do delta, versoes, provenance, GAP, validacao e rollback.
+- **STRUCTURAL:** formato e versionamento do delta, provenance, GAPs, rollback e o
+  binding DEMO integral sustentado por evidencia read-only no contexto versionado.
 - **TRANSITIONAL:** `sql_filter_hint` e `nivel_1_bi`, somente como evidencia
-  historica para inventario.
-- **FORBIDDEN:** nenhum no motor; termos financeiros permanecem no contexto
-  declarativo, e nenhum binding incompleto foi promovido.
+  historica para inventario e nunca como contrato de binding.
+- **FORBIDDEN:** nenhum no motor; nao ha pergunta para SQL, benchmark/golden,
+  branch especial de Receita, equivalencia com ROL ou binding especulativo de
+  custos/opex.
 
 ## Anti-overfitting
 
 Isso melhora a capacidade geral ou apenas faz um caso especifico passar?
-Melhora a preparacao geral do contexto: o motor permanece generico, sem
-pergunta para SQL, condicional por frase, benchmark, golden answer ou SQL
-especial. O pacote explicita a mesma fronteira semantic-only/fisica para todos
-os conceitos e falha fechado quando a evidencia nao basta.
+Melhora a capacidade geral: o motor permanece generico e Receita funciona porque
+o contexto versionado fornece, separadamente, uma obrigacao semantica e um binding
+fisico auditavel. Nenhum comportamento do motor foi alterado para uma frase ou
+conceito financeiro especifico.
