@@ -1,0 +1,240 @@
+{
+  "evidence_contract": "semantic-context-evidence/v1",
+  "evidence_id": "demo-cost-filter-binding-v1",
+  "environment": "DEMO",
+  "collection_mode": "supabase_read_only",
+  "read_only": true,
+  "automatic_apply": false,
+  "activation_allowed": false,
+  "supports_binding": false,
+  "decision": "EVIDENCE_CANDIDATE_NEEDS_SEMANTIC_DECISION",
+  "sources_consulted": [
+    {
+      "source": "semantic_context.ai_ducklake_dre_mapping",
+      "access": "SELECT_ONLY",
+      "context_version": "demo-finance-v1",
+      "finding": "One active cost-classified DRE row was found: dre_code CMV, nivel_1_bi CMV, category cost, is_cost true, is_opex false."
+    },
+    {
+      "source": "semantic_context.ai_ducklake_entity_aliases",
+      "access": "SELECT_ONLY",
+      "context_version": "demo-finance-v1",
+      "finding": "One active dre_group alias was found for CMV, canonical_value CMV, target_table gold_plano_contas, target_column grupo_contabil."
+    },
+    {
+      "source": "semantic_context.ai_ducklake_agent_rules",
+      "access": "SELECT_ONLY",
+      "context_version": "demo-finance-v1",
+      "finding": "Only a cost_center_dimension rule matched cost-related terms; no active rule was found proving that generic custo/custos equals CMV."
+    },
+    {
+      "source": "semantic_context.ai_ducklake_table_catalog",
+      "access": "SELECT_ONLY",
+      "context_version": "demo-finance-v1",
+      "finding": "gold_lancamentos_contabeis and gold_plano_contas are allowed catalog tables, with join metadata from lancamentos.nk_conta to plano_contas.nk_conta."
+    },
+    {
+      "source": "semantic_context.ai_ducklake_sql_patterns",
+      "access": "SELECT_ONLY",
+      "context_version": "demo-finance-v1",
+      "finding": "No active SQL pattern matched custo, custos, CMV, custo de vendas, custo operacional, gasto or gastos in the reduced read-only metadata query."
+    },
+    {
+      "source": "information_schema.columns",
+      "access": "SELECT_ONLY",
+      "finding": "demo_lakehouse.gold_lancamentos_contabeis.nk_conta, demo_lakehouse.gold_lancamentos_contabeis.valor, demo_lakehouse.gold_plano_contas.nk_conta and demo_lakehouse.gold_plano_contas.grupo_contabil exist."
+    },
+    {
+      "source": "demo_lakehouse.gold_plano_contas",
+      "access": "SELECT_ONLY",
+      "finding": "The distinct matching cost-related grupo_contabil value found was CMV, associated with 16 account rows."
+    },
+    {
+      "source": "demo_lakehouse.gold_lancamentos_contabeis join demo_lakehouse.gold_plano_contas",
+      "access": "SELECT_ONLY",
+      "finding": "At least one lancamento exists through nk_conta for plano_contas rows where grupo_contabil equals CMV."
+    },
+    {
+      "source": "semantic_context/demo_planned_filters_v8.delta.json",
+      "access": "repository_read_only",
+      "finding": "dre_custos remains BLOCKING_FAIL_CLOSED and has only TRANSITIONAL provenance in the offline v8 delta."
+    }
+  ],
+  "confirmed_facts": [
+    "The active DEMO context version observed in semantic sources is demo-finance-v1.",
+    "DEMO DRE mapping contains one active row with category cost and is_cost true: CMV.",
+    "The CMV DRE row has nivel_1_bi CMV and business_description Custo das mercadorias e produtos vendidos.",
+    "DEMO entity aliases contain an active dre_group alias CMV pointing to gold_plano_contas.grupo_contabil.",
+    "DEMO table catalog allows gold_lancamentos_contabeis and gold_plano_contas.",
+    "DEMO table catalog declares a join from gold_lancamentos_contabeis.nk_conta to gold_plano_contas.nk_conta.",
+    "Physical metadata confirms nk_conta and valor on gold_lancamentos_contabeis.",
+    "Physical metadata confirms nk_conta and grupo_contabil on gold_plano_contas.",
+    "Physical data confirms grupo_contabil value CMV exists in gold_plano_contas.",
+    "Physical data confirms at least one joined lancamento exists for grupo_contabil CMV.",
+    "No active semantic rule or SQL pattern found in this pass proves generic custo/custos equals CMV."
+  ],
+  "dre_evidence": {
+    "explicit_cost_classification_exists": true,
+    "records": [
+      {
+        "context_version": "demo-finance-v1",
+        "dre_code": "CMV",
+        "nivel_1_bi": "CMV",
+        "business_description": "Custo das mercadorias e produtos vendidos.",
+        "category": "cost",
+        "is_cost": true,
+        "is_opex": false,
+        "is_revenue": false,
+        "is_deduction": false,
+        "is_financial_result": false,
+        "active": true,
+        "transitional_fields_present": ["sql_filter_hint"]
+      }
+    ],
+    "cmv_scope_assessment": "CMV is the only active is_cost DRE row found in this read-only pass, but no active rule proves that the generic terms custo or custos are semantically equivalent to CMV."
+  },
+  "physical_confirmation": {
+    "table_exists": true,
+    "column_exists": true,
+    "values_exist": true,
+    "join_path_compatible_with_catalog": true,
+    "confirmed_tables": [
+      "demo_lakehouse.gold_lancamentos_contabeis",
+      "demo_lakehouse.gold_plano_contas"
+    ],
+    "confirmed_columns": [
+      "demo_lakehouse.gold_lancamentos_contabeis.nk_conta",
+      "demo_lakehouse.gold_lancamentos_contabeis.valor",
+      "demo_lakehouse.gold_plano_contas.nk_conta",
+      "demo_lakehouse.gold_plano_contas.grupo_contabil"
+    ],
+    "confirmed_values": [
+      {
+        "table": "demo_lakehouse.gold_plano_contas",
+        "column": "grupo_contabil",
+        "value": "CMV"
+      }
+    ],
+    "joined_entries_exist": true
+  },
+  "alias_classification": [
+    {
+      "term": "custo",
+      "status": "AMBIGUOUS",
+      "evidence": "Historical repository metric aliases mention custo and the v8 delta lists it as TRANSITIONAL, but active DEMO semantic sources consulted here did not prove equivalence to CMV."
+    },
+    {
+      "term": "custos",
+      "status": "AMBIGUOUS",
+      "evidence": "Historical repository metric aliases mention custos and the v8 delta lists it as TRANSITIONAL, but active DEMO semantic sources consulted here did not prove equivalence to CMV."
+    },
+    {
+      "term": "CMV",
+      "status": "SUPPORTED",
+      "evidence": "Active DEMO DRE mapping marks CMV as category cost and is_cost true; active DEMO entity alias maps CMV to gold_plano_contas.grupo_contabil; physical data confirms value CMV and joined lancamentos."
+    },
+    {
+      "term": "custo de vendas",
+      "status": "AMBIGUOUS",
+      "evidence": "CMV description says Custo das mercadorias e produtos vendidos, but no active alias or rule explicitly supports the exact term custo de vendas."
+    },
+    {
+      "term": "custo operacional",
+      "status": "UNSUPPORTED",
+      "evidence": "No active DRE mapping, alias, rule, SQL pattern or physical value supporting this term was found in the read-only pass."
+    },
+    {
+      "term": "gasto",
+      "status": "AMBIGUOUS",
+      "evidence": "Historical repository metric aliases mention gasto, but active DEMO semantic sources consulted here did not prove it as a dre_custos alias."
+    },
+    {
+      "term": "gastos",
+      "status": "AMBIGUOUS",
+      "evidence": "Historical repository metric aliases mention gastos, but active DEMO semantic sources consulted here did not prove it as a dre_custos alias."
+    }
+  ],
+  "supported_aliases": ["CMV"],
+  "unsupported_aliases": ["custo operacional"],
+  "unresolved_aliases": [
+    "custo",
+    "custos",
+    "custo de vendas",
+    "gasto",
+    "gastos"
+  ],
+  "transitional_evidence": [
+    {
+      "field": "sql_filter_hint",
+      "observed_in": [
+        "semantic_context.ai_ducklake_dre_mapping",
+        "semantic_context.ai_ducklake_entity_aliases"
+      ],
+      "allowed_use": "migration_inventory_only",
+      "forbidden_use": "filter_binding_contract"
+    },
+    {
+      "field": "historical_metric_aliases",
+      "observed_terms": ["custo", "custos", "gasto", "gastos"],
+      "allowed_use": "semantic_evidence_input",
+      "forbidden_use": "automatic_binding_or_alias_promotion"
+    }
+  ],
+  "ambiguities": [
+    "CMV is the only active is_cost DRE row found, but the evidence does not prove that generic custo/custos should collapse to CMV.",
+    "The exact term custo de vendas is not an active alias, despite proximity to the CMV business description.",
+    "Historical gasto/gastos metric aliases are not proven as planned_filter aliases.",
+    "A product decision is still required before mapping generic dre_custos obligations to a CMV-only filter."
+  ],
+  "unsupported_claims": [
+    "custo equals CMV",
+    "custos equals CMV",
+    "CMV represents all possible meanings of dre_custos",
+    "gasto or gastos are supported aliases for dre_custos",
+    "custo operacional is supported by DEMO cost evidence"
+  ],
+  "candidate_binding": {
+    "status": "EVIDENCE_CANDIDATE",
+    "canonical_concept": "dre_custos",
+    "target_table": "demo_lakehouse.gold_plano_contas",
+    "target_column": "grupo_contabil",
+    "operator": "=",
+    "value": "CMV",
+    "values": ["CMV"],
+    "scope": "where",
+    "join_path": [
+      {
+        "source_table": "demo_lakehouse.gold_lancamentos_contabeis",
+        "source_column": "nk_conta",
+        "target_table": "demo_lakehouse.gold_plano_contas",
+        "target_column": "nk_conta",
+        "operator": "="
+      }
+    ],
+    "provenance": [
+      "semantic_context.ai_ducklake_dre_mapping demo-finance-v1 CMV is_cost true",
+      "semantic_context.ai_ducklake_entity_aliases demo-finance-v1 CMV dre_group",
+      "semantic_context.ai_ducklake_table_catalog demo-finance-v1 join metadata",
+      "information_schema.columns read-only physical metadata",
+      "demo_lakehouse.gold_plano_contas read-only value inspection"
+    ],
+    "not_active_reason": "Generic dre_custos remains BLOCKING_FAIL_CLOSED until an explicit decision approves whether CMV is the intended scope for custo/custos obligations."
+  },
+  "sql_filter_hint_usage": {
+    "used_as_contract": false,
+    "allowed_role": "migration_inventory_only",
+    "forbidden_role": "filter_binding_contract"
+  },
+  "benchmark_usage": {
+    "used_as_evidence": false
+  },
+  "remaining_gaps": [
+    "Explicit decision whether dre_custos should mean CMV-only in DEMO.",
+    "Explicit decision whether custo and custos should be promoted from AMBIGUOUS to SUPPORTED aliases.",
+    "Explicit decision whether custo de vendas should be supported, unsupported, or remain ambiguous.",
+    "If approved later, update the offline delta in a separate microstage without using sql_filter_hint as contract.",
+    "Keep activation blocked until a later explicit activation decision."
+  ],
+  "external_write_performed": false,
+  "authorizes_apply": false
+}

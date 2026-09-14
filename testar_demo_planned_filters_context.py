@@ -18,6 +18,9 @@ DELTA_PATH = Path("semantic_context/demo_planned_filters_v8.delta.json")
 EVIDENCE_PATH = Path(
     "semantic_context/evidence/demo_revenue_filter_binding_v1.json"
 )
+COST_EVIDENCE_PATH = Path(
+    "semantic_context/evidence/demo_cost_filter_binding_v1.json"
+)
 INTENT = "demo_financial_filter"
 SOURCE_TABLE = "demo_lakehouse.gold_lancamentos_contabeis"
 TARGET_TABLE = "demo_lakehouse.gold_plano_contas"
@@ -421,6 +424,51 @@ def test_evidencia_transitional_nao_vira_contrato() -> None:
     assert "nivel_1_bi" not in serialized_contract
 
 
+def test_evidencia_custos_permanece_read_only_e_insuficiente() -> None:
+    evidence = _load(COST_EVIDENCE_PATH)
+    assert evidence["environment"] == "DEMO"
+    assert evidence["read_only"] is True
+    assert evidence["automatic_apply"] is False
+    assert evidence["activation_allowed"] is False
+    assert evidence["supports_binding"] is False
+    assert evidence["decision"] == "EVIDENCE_CANDIDATE_NEEDS_SEMANTIC_DECISION"
+    assert evidence["candidate_binding"]["status"] == "EVIDENCE_CANDIDATE"
+    assert evidence["candidate_binding"]["target_table"] == "demo_lakehouse.gold_plano_contas"
+    assert evidence["candidate_binding"]["target_column"] == "grupo_contabil"
+    assert evidence["candidate_binding"]["value"] == "CMV"
+    assert evidence["candidate_binding"]["join_path"] == [
+        {
+            "source_table": "demo_lakehouse.gold_lancamentos_contabeis",
+            "source_column": "nk_conta",
+            "target_table": "demo_lakehouse.gold_plano_contas",
+            "target_column": "nk_conta",
+            "operator": "=",
+        }
+    ]
+
+    classifications = {
+        item["term"]: item["status"]
+        for item in evidence["alias_classification"]
+    }
+    assert classifications == {
+        "custo": "AMBIGUOUS",
+        "custos": "AMBIGUOUS",
+        "CMV": "SUPPORTED",
+        "custo de vendas": "AMBIGUOUS",
+        "custo operacional": "UNSUPPORTED",
+        "gasto": "AMBIGUOUS",
+        "gastos": "AMBIGUOUS",
+    }
+    assert evidence["supported_aliases"] == ["CMV"]
+    assert evidence["unsupported_aliases"] == ["custo operacional"]
+    assert "custo" in evidence["unresolved_aliases"]
+    assert evidence["physical_confirmation"]["join_path_compatible_with_catalog"] is True
+    assert evidence["benchmark_usage"]["used_as_evidence"] is False
+    assert evidence["sql_filter_hint_usage"]["used_as_contract"] is False
+    assert evidence["external_write_performed"] is False
+    assert evidence["authorizes_apply"] is False
+
+
 def test_rollback_nao_remove_dados() -> None:
     rollback = _load_delta()["rollback"]
     assert "v7-planned-metrics" in rollback["action"]
@@ -436,6 +484,7 @@ def main() -> None:
         test_binding_ausente_incompleto_ambiguo_e_outros_conceitos_falham_fechado,
         test_termo_nao_sustentado_nao_vira_receita_silenciosamente,
         test_evidencia_transitional_nao_vira_contrato,
+        test_evidencia_custos_permanece_read_only_e_insuficiente,
         test_rollback_nao_remove_dados,
     ]
     for test in tests:
