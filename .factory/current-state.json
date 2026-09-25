@@ -1,0 +1,19 @@
+{
+  "observed_at": "2026-09-25",
+  "default_branch": "main",
+  "observed_head": "1ac9e721ef64ca86a69ea6f6a8447c17a9694463",
+  "ci": {
+    "workflow": "Offline validation",
+    "latest_observed_main_result": "success"
+  },
+  "planned_filters": {
+    "microstage_6": "completed",
+    "dre_receita": "versioned read-only evidence and complete binding",
+    "dre_custos": "blocking_fail_closed",
+    "dre_despesas_operacionais": "blocking_fail_closed"
+  },
+  "benchmark": "postponed",
+  "official_path": "n8n",
+  "langgraph_mode": "offline asynchronous shadow",
+  "real_sql_execution": false
+}

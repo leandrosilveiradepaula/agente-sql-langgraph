@@ -1,0 +1,52 @@
+{
+  "factory_version": 1,
+  "project": {
+    "key": "agente-sql-financeiro",
+    "name": "Agente SQL Financeiro",
+    "repository": "leandrosilveiradepaula/agente-sql-langgraph",
+    "kind": "ai_agent"
+  },
+  "authorities": {
+    "local_instructions": "AGENTS.md",
+    "project_status": "PROJECT-STATUS.md",
+    "orchestration_strategy": "ORCHESTRATION-STRATEGY.md"
+  },
+  "commands": {
+    "compile": ["python -m compileall app"],
+    "regression": ["python scripts/check_all.py"],
+    "ci_workflow": "Offline validation"
+  },
+  "autonomy": {
+    "default_mode": "autonomous",
+    "production_requires_human": true,
+    "destructive_data_change_requires_human": true,
+    "external_write_requires_human": true,
+    "runtime_activation_requires_human": true,
+    "material_requirement_change_requires_human": true
+  },
+  "codex": {
+    "strategy": "conservative",
+    "minimum_level": 3,
+    "max_calls_per_task": 1,
+    "continue_without_codex_when_possible": true
+  },
+  "external_boundaries": {
+    "n8n": "no_change_without_explicit_authorization",
+    "supabase": "no_write_without_explicit_authorization",
+    "watson": "no_live_or_real_sql_without_explicit_authorization",
+    "production": "no_change_without_explicit_authorization"
+  },
+  "evaluation": {
+    "offline_regression": "python scripts/check_all.py",
+    "benchmark": {
+      "enabled": false,
+      "reason": "PROJECT-STATUS.md states benchmark is postponed"
+    }
+  },
+  "delivery": {
+    "branch_required": true,
+    "pull_request_required": true,
+    "ci_required": true,
+    "merge_requires_no_human_gate": true
+  }
+}
