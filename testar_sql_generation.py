@@ -1014,6 +1014,40 @@ def test_required_filter_e_binding_fisico_sao_separados() -> None:
     assert "nao adicione filtros extras" in instruction["content"].lower()
 
 
+def test_required_filter_multi_valor_e_preservado_no_request() -> None:
+    query_plan = _plan_with_required_filter()
+    binding = query_plan["planning_context"]["resolved_filter_bindings"][0]
+    binding["operator"] = "IN"
+    binding["value"] = ["synthetic-b", "synthetic-a"]
+    request = build_sql_generation_request(query_plan)
+    assert request["generation_context"]["filter_bindings"][0]["operator"] == "IN"
+    assert request["generation_context"]["filter_bindings"][0]["value"] == [
+        "synthetic-b",
+        "synthetic-a",
+    ]
+
+
+def test_required_filter_multi_valor_invalido_falha_fechada() -> None:
+    invalid_cases = (
+        ("IN", []),
+        ("IN", ["synthetic-a", 1]),
+        ("IN", ["synthetic-a", "synthetic-a"]),
+        ("IN", ["synthetic-a", None]),
+        ("=", ["synthetic-a", "synthetic-b"]),
+    )
+    for operator, value in invalid_cases:
+        query_plan = _plan_with_required_filter()
+        binding = query_plan["planning_context"]["resolved_filter_bindings"][0]
+        binding["operator"] = operator
+        binding["value"] = value
+        try:
+            build_sql_generation_request(query_plan)
+        except SqlGenerationInputError as exc:
+            assert "incompleto ou invalido" in str(exc)
+        else:
+            raise AssertionError((operator, value))
+
+
 def test_required_filter_sem_binding_falha_fechada() -> None:
     query_plan = _plan_with_required_filter()
     query_plan["planning_context"]["resolved_filter_bindings"] = []
@@ -1068,6 +1102,8 @@ if __name__ == "__main__":
     main()
     extra_tests = [
         ("required filter separado do binding", test_required_filter_e_binding_fisico_sao_separados),
+        ("required filter multi valor", test_required_filter_multi_valor_e_preservado_no_request),
+        ("required filter multi valor invalido", test_required_filter_multi_valor_invalido_falha_fechada),
         ("required filter sem binding fail closed", test_required_filter_sem_binding_falha_fechada),
         ("binding ambiguo fail closed", test_binding_ambiguo_falha_fechada),
         ("filtros deterministicos", test_filtros_sao_deterministicos_e_ignoram_nao_referenciados),
