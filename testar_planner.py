@@ -2995,6 +2995,74 @@ def test_planned_filter_binding_invalido_falha_fechado() -> None:
     assert diagnostic["unresolved"][0]["reason"] == "binding_not_found"
 
 
+def test_planned_filter_binding_multi_valor_generico() -> None:
+    context = _context()
+    _append_filter_alias(context, "class alpha", "concept_alpha")
+    _append_filter_binding(
+        context,
+        "concept_alpha",
+        "binding-alpha-v2",
+        operator="IN",
+        value=["synthetic-a", "synthetic-b"],
+    )
+    projection = project_planning_context(
+        context=context,
+        intent_name="generic_test_intent",
+        normalized_question="synthetic request",
+        selected_pattern=_pattern(),
+        intent_resolution_result=_planned_filter_evidence("class alpha"),
+    )
+    assert projection["planned_filters"][0]["binding_ref"] == "binding-alpha-v2"
+    assert projection["resolved_filter_bindings"] == [
+        {
+            "binding_ref": "binding-alpha-v2",
+            "filter_concept": "concept_alpha",
+            "target_table": "schema_test.table_test",
+            "target_column": "value",
+            "operator": "IN",
+            "value": ["synthetic-a", "synthetic-b"],
+            "join_path": [],
+            "required": True,
+            "scope": "query",
+        }
+    ]
+
+
+def test_planned_filter_binding_multi_valor_invalido_falha_fechado() -> None:
+    invalid_values = (
+        [],
+        ["synthetic-a", 1],
+        ["synthetic-a", "synthetic-a"],
+        ["synthetic-a", None],
+    )
+    for value in invalid_values:
+        context = _context()
+        _append_filter_alias(context, "class alpha", "concept_alpha")
+        _append_filter_binding(
+            context,
+            "concept_alpha",
+            "binding-alpha-v2",
+            operator="IN",
+            value=value,
+        )
+        filters, diagnostic = _planned_filters(context, "class alpha")
+        assert filters == [], value
+        assert diagnostic["unresolved"][0]["reason"] == "binding_not_found"
+
+    context = _context()
+    _append_filter_alias(context, "class alpha", "concept_alpha")
+    _append_filter_binding(
+        context,
+        "concept_alpha",
+        "binding-alpha-v2",
+        operator="=",
+        value=["synthetic-a", "synthetic-b"],
+    )
+    filters, diagnostic = _planned_filters(context, "class alpha")
+    assert filters == []
+    assert diagnostic["unresolved"][0]["reason"] == "binding_not_found"
+
+
 def test_planned_filter_binding_ref_duplicado_e_ambiguo() -> None:
     context = _context()
     _append_filter_alias(context, "class alpha", "concept_alpha")
@@ -3047,6 +3115,8 @@ def main() -> None:
         ("planned filter termo generico", test_planned_filter_termo_generico_nao_inventa_filtro),
         ("planned filter unresolved", test_planned_filter_conceito_sem_binding_falha_fechado),
         ("planned filter binding invalido", test_planned_filter_binding_invalido_falha_fechado),
+        ("planned filter multi valor", test_planned_filter_binding_multi_valor_generico),
+        ("planned filter multi valor invalido", test_planned_filter_binding_multi_valor_invalido_falha_fechado),
         ("planned filter binding ambiguo", test_planned_filter_binding_ref_duplicado_e_ambiguo),
         ("planned filters deterministicos", test_planned_filters_duas_categorias_ordem_deterministica),
         ("planned filters vazio", test_planned_filters_vazio_preserva_compatibilidade),
