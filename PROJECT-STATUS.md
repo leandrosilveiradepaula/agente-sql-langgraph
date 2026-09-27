@@ -1,10 +1,10 @@
 ﻿# PROJECT-STATUS.md
 
-Date: 2026-09-14
+Date: 2026-09-27
 
 Branch: `main`
 
-HEAD: `ff800c8bd3fae462e10dabf52c8e09e0816f730c`
+HEAD: `bed49790aa94106a846a3a1d243172f5d67a3e36`
 
 ## Current State
 
@@ -65,9 +65,9 @@ Offline Gemini SQL Generator and Gemini SQL Repairer providers have been impleme
 
 ## Planned Filters Status
 
-Microetapa 6 was completed and merged through PR `#12`.
+Microetapa 7 was completed and merged through PR `#18` after microetapa 6.
 
-- `main`: `ff800c8bd3fae462e10dabf52c8e09e0816f730c`
+- `main`: `bed49790aa94106a846a3a1d243172f5d67a3e36`
 - Post-merge CI: `Offline validation` green
 - Scope: offline only
 - Deploy: not authorized
@@ -77,9 +77,13 @@ Microetapa 6 was completed and merged through PR `#12`.
 
 The offline `planned_filters` flow now supports semantic obligations,
 separate `resolved_filter_bindings`, generator request separation, Contract
-Gate enforcement and structural `join_path` proof. The `join_path` validation
-resolves SQL aliases, checks table/column/operator, accepts inverted operands
-and keeps comparisons isolated per `JOIN ... ON`.
+Gate enforcement, structural `join_path` proof and generic multi-value `IN`
+bindings. Multi-value bindings accept only non-empty homogeneous simple literal
+collections; SQL order does not change equivalence, while subqueries,
+expressions, mixed types and `OR` remain fail-closed. Existing scalar bindings
+remain compatible. The `join_path` validation resolves SQL aliases, checks
+table/column/operator, accepts inverted operands and keeps comparisons isolated
+per `JOIN ... ON`.
 
 The DEMO v8 delta remains unapplied:
 
@@ -136,7 +140,7 @@ Shadow persistence must use a separate structure, not `ai_agent_runs.metadata` a
 - Future live Watson TEST and real SQL execution require separate explicit authorization.
 - DEMO planned filters v8 is prepared but not applied or activated.
 - `dre_custos` remains `BLOCKING_FAIL_CLOSED` and still needs explicit evidence/versioning before any binding.
-- `dre_despesas_operacionais` remains `BLOCKING_FAIL_CLOSED` and still needs a generic multi-group filter design before any binding.
+- `dre_despesas_operacionais` remains `BLOCKING_FAIL_CLOSED`. The generic multi-group mechanism now exists, but a versioned semantic rule and evidence-backed binding are still required before any DEMO binding or activation.
 - `sql_filter_hint` and `nivel_1_bi` remain TRANSITIONAL evidence only, not generation or binding contracts.
 
 ## Next Stage
@@ -147,11 +151,11 @@ No cutover is claimed.
 
 Benchmark remains postponed.
 
-The next planned-filters decision is not an implementation task yet. It must
-choose explicitly between:
+The generic multi-group design has been completed in microetapa 7 without activating any financial concept.
 
-1. an evidence/versioning microstage for `dre_custos`;
-2. a generic design for multi-group filters needed by
-   `dre_despesas_operacionais`.
+The next semantic work remains evidence/configuration, not a generic engine gap:
 
-Neither path authorizes activation, Supabase changes, deploy, or cutover.
+1. decide explicitly whether `dre_custos` should mean CMV-only for the relevant context; or
+2. create versioned semantic evidence and a concrete binding for `dre_despesas_operacionais` using the now-supported generic multi-value contract.
+
+Neither path authorizes activation, Supabase changes, deploy, benchmark execution or cutover.
