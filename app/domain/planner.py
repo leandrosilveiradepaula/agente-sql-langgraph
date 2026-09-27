@@ -1405,10 +1405,9 @@ def _valid_filter_binding_value(
             return False
         identities = [(_filter_literal_type(item), item) for item in value]
         return len(identities) == len(set(identities))
-    return (
-        normalized in {"=", "<>", "<", "<=", ">", ">="}
-        and _filter_literal_type(value) is not None
-    )
+    if isinstance(value, list):
+        return False
+    return _is_filled_json_value(value)
 
 
 def _filter_literal_type(value: Any) -> str | None:
