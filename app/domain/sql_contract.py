@@ -491,7 +491,7 @@ def _verify_planned_filters(
             assert binding is not None
             target_table = _clean_text(binding.get("target_table")).casefold()
             target_column = _clean_text(binding.get("target_column")).casefold()
-            operator = _clean_text(binding.get("operator"))
+            operator = _clean_text(binding.get("operator")).casefold()
             expected = {
                 "target_table": target_table,
                 "target_column": target_column,
@@ -521,8 +521,10 @@ def _verify_planned_filters(
                 if not predicate.get("supported"):
                     unverifiable = True
                     continue
-                if predicate.get("operator") == operator and _same_literal(
-                    predicate.get("value"), binding.get("value")
+                if predicate.get("operator") == operator and _same_filter_value(
+                    predicate.get("value"),
+                    binding.get("value"),
+                    operator=operator,
                 ):
                     matched_count += 1
             if matched_count == 1:
@@ -575,11 +577,14 @@ def _valid_filter_binding(
     column = _clean_text(binding.get("target_column")).casefold()
     return bool(
         table in allowed and column in allowed[table]
-        and _clean_text(binding.get("operator")) in {"=", "<>", "<", "<=", ">", ">="}
+        and _clean_text(binding.get("operator")).casefold() in {"=", "<>", "<", "<=", ">", ">=", "in"}
         and _clean_text(binding.get("filter_concept")) == _clean_text(obligation.get("filter_concept"))
         and _clean_text(binding.get("scope")) == _clean_text(obligation.get("scope"))
         and binding.get("required") is True
-        and _value_type(binding.get("value")) in {"string", "number", "boolean"}
+        and _filter_binding_value_valid(
+            _clean_text(binding.get("operator")).casefold(),
+            binding.get("value"),
+        )
         and _join_path_valid(binding.get("join_path"), allowed)
     )
 
@@ -695,9 +700,65 @@ def _value_type(value: Any) -> str:
         return "boolean"
     if isinstance(value, str):
         return "string"
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return "number"
+    if isinstance(value, list):
+        return "list"
     return "unsupported"
+
+
+def _filter_binding_value_valid(operator: str, value: Any) -> bool:
+    if operator == "in":
+        if not isinstance(value, list) or not value:
+            return False
+        literal_types = [_scalar_literal_type(item) for item in value]
+        if any(item is None for item in literal_types):
+            return False
+        if len(set(literal_types)) != 1:
+            return False
+        identities = [(_scalar_literal_type(item), item) for item in value]
+        return len(identities) == len(set(identities))
+    return _scalar_literal_type(value) is not None
+
+
+def _scalar_literal_type(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return "number"
+    return None
+
+
+def _same_filter_value(
+    observed: Any,
+    expected: Any,
+    *,
+    operator: str,
+) -> bool:
+    if operator != "in":
+        return _same_literal(observed, expected)
+    if not isinstance(observed, list) or not isinstance(expected, list):
+        return False
+    observed_type = _homogeneous_literal_list_type(observed)
+    expected_type = _homogeneous_literal_list_type(expected)
+    if observed_type is None or observed_type != expected_type:
+        return False
+    observed_values = {(_scalar_literal_type(item), item) for item in observed}
+    expected_values = {(_scalar_literal_type(item), item) for item in expected}
+    return observed_values == expected_values
+
+
+def _homogeneous_literal_list_type(value: list[Any]) -> str | None:
+    if not value:
+        return None
+    literal_types = [_scalar_literal_type(item) for item in value]
+    if any(item is None for item in literal_types):
+        return None
+    if len(set(literal_types)) != 1:
+        return None
+    return literal_types[0]
 
 
 def _same_literal(observed: Any, expected: Any) -> bool:

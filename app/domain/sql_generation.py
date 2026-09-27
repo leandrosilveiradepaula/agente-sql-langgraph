@@ -1202,7 +1202,7 @@ def _filter_bindings(
         if not (
             target_table and target_column and operator and filter_concept and scope
             and isinstance(required, bool)
-            and _is_filled_json_value(raw_value)
+            and _valid_filter_binding_value(operator, raw_value)
             and _is_valid_join_path(join_path)
         ):
             raise SqlGenerationInputError("filter_binding esta incompleto ou invalido.")
@@ -1236,6 +1236,38 @@ def _filter_bindings(
         if candidates:
             output.append(candidates[0])
     return output
+
+
+def _valid_filter_binding_value(
+    operator: str,
+    value: Any,
+) -> bool:
+    normalized = operator.casefold()
+    if normalized == "in":
+        if not isinstance(value, list) or not value:
+            return False
+        literal_types = [_filter_literal_type(item) for item in value]
+        if any(item is None for item in literal_types):
+            return False
+        if len(set(literal_types)) != 1:
+            return False
+        identities = [(_filter_literal_type(item), item) for item in value]
+        return len(identities) == len(set(identities))
+    if isinstance(value, list):
+        return False
+    return _is_filled_json_value(value)
+
+
+def _filter_literal_type(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, str):
+        return "string" if value.strip() else None
+    if isinstance(value, int):
+        return "number"
+    if isinstance(value, float):
+        return "number" if math.isfinite(value) else None
+    return None
 
 
 def _is_filled_json_value(value: Any) -> bool:

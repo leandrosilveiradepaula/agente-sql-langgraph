@@ -1698,6 +1698,14 @@ def _with_required_filter() -> dict:
     return plan
 
 
+def _with_required_multi_value_filter() -> dict:
+    plan = _with_required_filter()
+    binding = plan["planning_context"]["resolved_filter_bindings"][0]
+    binding["operator"] = "IN"
+    binding["value"] = ["Beta", "Alpha"]
+    return plan
+
+
 def _with_required_filter_join_path() -> dict:
     plan = _with_second_table()
     plan["planning_context"]["planned_filters"] = [{
@@ -1762,6 +1770,63 @@ def test_required_filter_valido_com_alias_aprova() -> None:
     )
     assert result["status"] == "approved"
     assert result["filters"][0]["status"] == "satisfied"
+
+
+def test_required_filter_multi_valor_aprova_independente_da_ordem() -> None:
+    plan = _with_required_multi_value_filter()
+    for sql in (
+        "SELECT id FROM schema_test.table_test WHERE value IN ('Alpha', 'Beta')",
+        "SELECT id FROM schema_test.table_test WHERE value IN ('Beta', 'Alpha')",
+        "SELECT id FROM schema_test.table_test WHERE value IN ('Beta', 'Alpha', 'Beta')",
+    ):
+        result = _run(sql, plan)
+        assert result["status"] == "approved", (sql, result)
+        assert result["filters"][0]["status"] == "satisfied"
+
+
+def test_required_filter_multi_valor_rejeita_divergencias() -> None:
+    plan = _with_required_multi_value_filter()
+    for sql in (
+        "SELECT id FROM schema_test.table_test WHERE value IN ('Alpha')",
+        "SELECT id FROM schema_test.table_test WHERE value IN ('Alpha', 'Beta', 'Gamma')",
+        "SELECT id FROM schema_test.table_test WHERE value = 'Alpha'",
+        "SELECT id FROM schema_test.table_test WHERE value IN (1, 2)",
+    ):
+        result = _run(sql, plan)
+        assert result["status"] == "rejected", (sql, result)
+        assert result["filters"][0]["status"] != "satisfied"
+
+
+def test_required_filter_multi_valor_binding_invalido_falha_fechado() -> None:
+    invalid_values = (
+        [],
+        ["Alpha", 1],
+        ["Alpha", "Alpha"],
+        ["Alpha", None],
+    )
+    for value in invalid_values:
+        plan = _with_required_multi_value_filter()
+        plan["planning_context"]["resolved_filter_bindings"][0]["value"] = value
+        result = _run(
+            "SELECT id FROM schema_test.table_test WHERE value IN ('Alpha', 'Beta')",
+            plan,
+        )
+        assert result["status"] == "rejected", (value, result)
+        assert result["filters"][0]["reason"] == "binding_invalid_or_incoherent"
+
+
+def test_required_filter_multi_valor_complexo_e_or_falham_fechado() -> None:
+    plan = _with_required_multi_value_filter()
+    sqls = (
+        "SELECT id FROM schema_test.table_test "
+        "WHERE value IN (SELECT value FROM schema_test.table_test)",
+        "SELECT id FROM schema_test.table_test "
+        "WHERE value IN ('Alpha', 'Beta') OR id = 1",
+    )
+    for sql in sqls:
+        result = _run(sql, plan)
+        assert result["status"] == "rejected", (sql, result)
+        assert result["filters"][0]["status"] == "unverifiable"
 
 
 def test_required_filter_com_join_path_correto_aprova() -> None:
@@ -1898,6 +1963,10 @@ def main() -> None:
             test_required_filter_nao_compartilha_comparacao_entre_joins,
         ),
         ("required filter divergencias", test_required_filter_ausente_divergente_e_case_sensitive_rejeita),
+        ("required filter multi valor ordem", test_required_filter_multi_valor_aprova_independente_da_ordem),
+        ("required filter multi valor divergencias", test_required_filter_multi_valor_rejeita_divergencias),
+        ("required filter multi valor binding invalido", test_required_filter_multi_valor_binding_invalido_falha_fechado),
+        ("required filter multi valor fail closed", test_required_filter_multi_valor_complexo_e_or_falham_fechado),
         ("required filter bindings fail closed", test_required_filter_binding_ausente_duplicado_e_nao_verificavel),
         ("planned filters vazio", test_planned_filters_vazio_preserva_comportamento),
         ("dois required filters", test_dois_filtros_em_ordem_inversa_e_um_ausente),

@@ -1265,7 +1265,10 @@ def _filter_bindings_for_concept(
             and _non_empty_text(raw.get("target_column")) is not None
             and _non_empty_text(raw.get("operator")) is not None
             and isinstance(raw.get("required"), bool)
-            and _is_filled_json_value(raw.get("value"))
+            and _valid_filter_binding_value(
+                _non_empty_text(raw.get("operator")),
+                raw.get("value"),
+            )
             and _is_valid_join_path(raw.get("join_path"))
         ):
             continue
@@ -1329,7 +1332,7 @@ def _project_resolved_filter_bindings(
             and operator
             and scope
             and isinstance(required, bool)
-            and _is_filled_json_value(value)
+            and _valid_filter_binding_value(operator, value)
             and _is_valid_join_path(join_path)
         ):
             continue
@@ -1383,6 +1386,40 @@ def _is_filled_json_value(value: Any) -> bool:
             for key, item in value.items()
         )
     return False
+
+
+def _valid_filter_binding_value(
+    operator: str | None,
+    value: Any,
+) -> bool:
+    if operator is None:
+        return False
+    normalized = operator.casefold()
+    if normalized == "in":
+        if not isinstance(value, list) or not value:
+            return False
+        literal_types = [_filter_literal_type(item) for item in value]
+        if any(item is None for item in literal_types):
+            return False
+        if len(set(literal_types)) != 1:
+            return False
+        identities = [(_filter_literal_type(item), item) for item in value]
+        return len(identities) == len(set(identities))
+    if isinstance(value, list):
+        return False
+    return _is_filled_json_value(value)
+
+
+def _filter_literal_type(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, str):
+        return "string" if value.strip() else None
+    if isinstance(value, int):
+        return "number"
+    if isinstance(value, float):
+        return "number" if math.isfinite(value) else None
+    return None
 
 
 def _is_valid_join_path(value: Any) -> bool:
