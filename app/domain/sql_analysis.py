@@ -7,7 +7,7 @@ from copy import deepcopy
 from typing import Any, Literal, TypedDict
 
 
-SQL_ANALYZER_VERSION = "v1.1.0-structured-where-predicates"
+SQL_ANALYZER_VERSION = "v1.2.0-structured-in-predicates"
 
 TokenKind = Literal[
     "word",
@@ -904,6 +904,24 @@ def _extract_predicates(tokens: list[SqlToken]) -> list[SqlPredicate]:
                 )
             index += 1
             continue
+        if operator == "in":
+            literal_list = _predicate_literal_list(tokens, cursor)
+            if literal_list is None:
+                predicates.append({
+                    "clause": "where", "qualifier": qualifier, "column": column,
+                    "operator": operator, "literal_type": None, "value": None,
+                    "supported": False, "reason": "in_list_not_simple_literals",
+                })
+                index = cursor + 1
+                continue
+            literal_type, value, end = literal_list
+            predicates.append({
+                "clause": "where", "qualifier": qualifier, "column": column,
+                "operator": operator, "literal_type": literal_type, "value": value,
+                "supported": True, "reason": "simple_in_list",
+            })
+            index = end
+            continue
         literal = _predicate_literal(tokens, cursor)
         if literal is None:
             predicates.append({
@@ -938,6 +956,8 @@ def _comparison_operator(
         return "<>", index + 2
     if first in {"=", "<", ">"}:
         return first, index + 1
+    if first == "in":
+        return "in", index + 1
     return None, index
 
 
@@ -964,6 +984,44 @@ def _predicate_literal(
         return "boolean", token["normalized"] == "true", index + 1
     if token["kind"] == "word" and token["normalized"] == "null":
         return "null", None, index + 1
+    return None
+
+
+def _predicate_literal_list(
+    tokens: list[SqlToken],
+    index: int,
+) -> tuple[str, list[Any], int] | None:
+    if _norm_at(tokens, index) != "(":
+        return None
+    cursor = index + 1
+    values: list[Any] = []
+    literal_types: list[str] = []
+    while cursor < len(tokens):
+        if _norm_at(tokens, cursor) == ")":
+            if not values:
+                return None
+            first_type = literal_types[0]
+            if (
+                first_type == "null"
+                or any(item != first_type for item in literal_types)
+            ):
+                return None
+            return "list", values, cursor + 1
+        literal = _predicate_literal(tokens, cursor)
+        if literal is None:
+            return None
+        literal_type, value, cursor = literal
+        if literal_type == "null":
+            return None
+        literal_types.append(literal_type)
+        values.append(value)
+        next_token = _norm_at(tokens, cursor)
+        if next_token == ",":
+            cursor += 1
+            continue
+        if next_token == ")":
+            continue
+        return None
     return None
 
 
