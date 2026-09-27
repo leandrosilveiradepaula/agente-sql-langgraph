@@ -861,6 +861,48 @@ def test_predicados_where_estruturados_preservam_literal() -> None:
     ]
 
 
+def test_predicado_in_literais_simples_e_verificavel() -> None:
+    predicate = analyze_sql(
+        "SELECT t.id FROM schema_test.table_test t "
+        "WHERE t.value IN ('Beta', 'Alpha', 'Beta')"
+    )["predicates"][0]
+    assert predicate == {
+        "clause": "where",
+        "qualifier": "t",
+        "column": "value",
+        "operator": "in",
+        "literal_type": "list",
+        "value": ["Beta", "Alpha", "Beta"],
+        "supported": True,
+        "reason": "simple_in_list",
+    }
+
+
+def test_predicado_in_complexo_falha_fechado() -> None:
+    sqls = (
+        "SELECT id FROM schema_test.table_test "
+        "WHERE value IN (SELECT value FROM schema_test.table_test)",
+        "SELECT id FROM schema_test.table_test "
+        "WHERE value IN (LOWER('x'))",
+        "SELECT id FROM schema_test.table_test "
+        "WHERE value IN ('x', 1)",
+    )
+    for sql in sqls:
+        predicate = analyze_sql(sql)["predicates"][0]
+        assert predicate["supported"] is False, (sql, predicate)
+        assert predicate["reason"] == "in_list_not_simple_literals"
+
+
+def test_predicado_in_com_or_permanece_nao_verificavel() -> None:
+    predicates = analyze_sql(
+        "SELECT id FROM schema_test.table_test "
+        "WHERE value IN ('a', 'b') OR id = 1"
+    )["predicates"]
+    assert predicates
+    assert all(item["supported"] is False for item in predicates)
+    assert all(item["reason"] == "boolean_or_not_verifiable" for item in predicates)
+
+
 def test_predicado_where_nao_suportado_e_explicito() -> None:
     predicate = analyze_sql(
         "SELECT id FROM schema_test.table_test WHERE value LIKE 'x%'"
@@ -872,6 +914,9 @@ def test_predicado_where_nao_suportado_e_explicito() -> None:
 def main() -> None:
     tests = [
         ("predicados WHERE estruturados", test_predicados_where_estruturados_preservam_literal),
+        ("predicado IN literal", test_predicado_in_literais_simples_e_verificavel),
+        ("predicado IN complexo fail closed", test_predicado_in_complexo_falha_fechado),
+        ("predicado IN com OR fail closed", test_predicado_in_com_or_permanece_nao_verificavel),
         ("predicado WHERE nao suportado", test_predicado_where_nao_suportado_e_explicito),
         ("SELECT simples", test_select_simples),
         ("WITH CTE", test_with_cte),
