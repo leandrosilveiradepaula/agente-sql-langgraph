@@ -34,10 +34,21 @@ def _load_delta() -> dict[str, Any]:
     return _load(DELTA_PATH)
 
 
-def _revenue_binding() -> dict[str, Any]:
-    binding = deepcopy(_load_delta()["filter_bindings"][0])
+def _binding_for(concept: str) -> dict[str, Any]:
+    binding = deepcopy(next(
+        item for item in _load_delta()["filter_bindings"]
+        if item["filter_concept"] == concept
+    ))
     binding.pop("evidence_ref", None)
     return binding
+
+
+def _revenue_binding() -> dict[str, Any]:
+    return _binding_for("dre_receita")
+
+
+def _cost_binding() -> dict[str, Any]:
+    return _binding_for("dre_custos")
 
 
 def _raw_context(*, binding_mode: str = "complete") -> dict[str, Any]:
@@ -115,19 +126,29 @@ def _raw_context(*, binding_mode: str = "complete") -> dict[str, Any]:
     ]
 
     if binding_mode != "missing":
-        binding = _revenue_binding()
+        revenue_binding = _revenue_binding()
         if binding_mode == "incomplete":
-            binding.pop("target_column")
+            revenue_binding.pop("target_column")
         entities.append(
             {
                 "entity_type": "filter_binding",
-                "canonical_value": binding["filter_concept"],
-                "business_rule": {"filter_binding": binding},
+                "canonical_value": revenue_binding["filter_concept"],
+                "business_rule": {"filter_binding": revenue_binding},
                 "priority": 1,
             }
         )
         if binding_mode == "ambiguous":
             entities.append(deepcopy(entities[-1]))
+
+    cost_binding = _cost_binding()
+    entities.append(
+        {
+            "entity_type": "filter_binding",
+            "canonical_value": cost_binding["filter_concept"],
+            "business_rule": {"filter_binding": cost_binding},
+            "priority": 1,
+        }
+    )
 
     return {
         "semantic_agent_version": delta["target_context_version"],
@@ -277,9 +298,13 @@ def test_delta_e_versionado_e_nao_aplicavel_automaticamente() -> None:
     gaps = {item["scope"]: item for item in delta["gaps"]}
     assert gaps["dre_receita"]["status"] == "RESOLVED_WITH_VERSIONED_EVIDENCE"
     assert gaps["dre_receita"]["activation_allowed"] is False
-    for concept in ("dre_custos", "dre_despesas_operacionais"):
-        assert gaps[concept]["status"] == "BLOCKING_FAIL_CLOSED"
-        assert gaps[concept]["activation_allowed"] is False
+    assert gaps["dre_custos"]["status"] == "RESOLVED_WITH_VERSIONED_EVIDENCE_AND_HUMAN_DECISION"
+    assert gaps["dre_custos"]["binding_ref"] == "demo-dre-custos-v1"
+    assert gaps["dre_custos"]["semantic_scope"] == "CMV_ONLY"
+    assert gaps["dre_custos"]["human_decision"]["decision"] == "approved"
+    assert gaps["dre_custos"]["activation_allowed"] is False
+    assert gaps["dre_despesas_operacionais"]["status"] == "BLOCKING_FAIL_CLOSED"
+    assert gaps["dre_despesas_operacionais"]["activation_allowed"] is False
 
 
 def test_receita_e_semantica_e_binding_e_separado() -> None:
@@ -388,18 +413,14 @@ def test_binding_ausente_incompleto_ambiguo_e_outros_conceitos_falham_fechado() 
         assert planning["resolved_filter_bindings"] == []
         assert planning["diagnostics"]["planned_filter_diagnostic"]["status"] == "unresolved"
 
-    for question, concept in (
-        ("relatorio custos", "dre_custos"),
-        ("relatorio despesas operacionais", "dre_despesas_operacionais"),
-    ):
-        plan = _plan(question, _raw_context())
-        planning = plan["planning_context"]
-        assert planning["planned_filters"] == []
-        assert planning["resolved_filter_bindings"] == []
-        diagnostic = planning["diagnostics"]["planned_filter_diagnostic"]
-        assert diagnostic["status"] == "unresolved"
-        assert diagnostic["unresolved"][0]["filter_concept"] == concept
-        assert diagnostic["unresolved"][0]["reason"] == "binding_not_found"
+    plan = _plan("relatorio despesas operacionais", _raw_context())
+    planning = plan["planning_context"]
+    assert planning["planned_filters"] == []
+    assert planning["resolved_filter_bindings"] == []
+    diagnostic = planning["diagnostics"]["planned_filter_diagnostic"]
+    assert diagnostic["status"] == "unresolved"
+    assert diagnostic["unresolved"][0]["filter_concept"] == "dre_despesas_operacionais"
+    assert diagnostic["unresolved"][0]["reason"] == "binding_not_found"
 
 
 def test_termo_nao_sustentado_nao_vira_receita_silenciosamente() -> None:
@@ -424,15 +445,51 @@ def test_evidencia_transitional_nao_vira_contrato() -> None:
     assert "nivel_1_bi" not in serialized_contract
 
 
-def test_evidencia_custos_permanece_read_only_e_insuficiente() -> None:
+def test_dre_custos_cmv_only_resolve_e_contract_gate_falha_fechado() -> None:
+    for question in ("relatorio custo", "relatorio custos"):
+        plan = _plan(question, _raw_context())
+        planning = plan["planning_context"]
+        assert len(planning["planned_filters"]) == 1
+        obligation = planning["planned_filters"][0]
+        assert obligation["filter_concept"] == "dre_custos"
+        assert obligation["binding_ref"] == "demo-dre-custos-v1"
+        assert planning["resolved_filter_bindings"] == [_cost_binding()]
+
+        request = build_sql_generation_request(plan)
+        _assert_benchmark_and_golden_absent(request)
+        _assert_transitional_hint_not_used_as_filter_contract(request)
+
+        correct_sql = (
+            "SELECT lc.valor FROM demo_lakehouse.gold_lancamentos_contabeis lc "
+            "JOIN demo_lakehouse.gold_plano_contas pc ON lc.nk_conta = pc.nk_conta "
+            "WHERE pc.grupo_contabil = 'CMV'"
+        )
+        approved, _ = run_sql_contract_gate(current_sql=correct_sql, query_plan=plan)
+        assert approved["status"] == "approved", approved
+
+        for invalid_sql in (
+            "SELECT lc.valor FROM demo_lakehouse.gold_lancamentos_contabeis lc "
+            "JOIN demo_lakehouse.gold_plano_contas pc ON lc.nk_conta = pc.nk_conta",
+            "SELECT lc.valor FROM demo_lakehouse.gold_lancamentos_contabeis lc "
+            "JOIN demo_lakehouse.gold_plano_contas pc ON lc.nk_conta = pc.nk_conta "
+            "WHERE pc.grupo_contabil = 'Receita'",
+        ):
+            rejected, _ = run_sql_contract_gate(current_sql=invalid_sql, query_plan=plan)
+            assert rejected["status"] == "rejected", (invalid_sql, rejected)
+
+
+def test_evidencia_custos_permanece_read_only_e_versionada() -> None:
     evidence = _load(COST_EVIDENCE_PATH)
     assert evidence["environment"] == "DEMO"
     assert evidence["read_only"] is True
     assert evidence["automatic_apply"] is False
     assert evidence["activation_allowed"] is False
-    assert evidence["supports_binding"] is False
-    assert evidence["decision"] == "EVIDENCE_CANDIDATE_NEEDS_SEMANTIC_DECISION"
-    assert evidence["candidate_binding"]["status"] == "EVIDENCE_CANDIDATE"
+    assert evidence["supports_binding"] is True
+    assert evidence["decision"] == "APPROVED_CMV_ONLY_BY_HUMAN_GATE"
+    assert evidence["human_decision"]["resolution"] == "approved"
+    assert evidence["human_decision"]["approved_scope"] == "dre_custos = CMV-only in this context"
+    assert evidence["candidate_binding"]["status"] == "APPROVED_VERSIONED_BINDING"
+    assert evidence["candidate_binding"]["binding_ref"] == "demo-dre-custos-v1"
     assert evidence["candidate_binding"]["target_table"] == "demo_lakehouse.gold_plano_contas"
     assert evidence["candidate_binding"]["target_column"] == "grupo_contabil"
     assert evidence["candidate_binding"]["value"] == "CMV"
@@ -451,17 +508,19 @@ def test_evidencia_custos_permanece_read_only_e_insuficiente() -> None:
         for item in evidence["alias_classification"]
     }
     assert classifications == {
-        "custo": "AMBIGUOUS",
-        "custos": "AMBIGUOUS",
+        "custo": "SUPPORTED",
+        "custos": "SUPPORTED",
         "CMV": "SUPPORTED",
         "custo de vendas": "AMBIGUOUS",
         "custo operacional": "UNSUPPORTED",
         "gasto": "AMBIGUOUS",
         "gastos": "AMBIGUOUS",
     }
-    assert evidence["supported_aliases"] == ["CMV"]
+    assert evidence["supported_aliases"] == ["CMV", "custo", "custos"]
     assert evidence["unsupported_aliases"] == ["custo operacional"]
-    assert "custo" in evidence["unresolved_aliases"]
+    assert "custo" not in evidence["unresolved_aliases"]
+    assert "custos" not in evidence["unresolved_aliases"]
+    assert "gasto" in evidence["unresolved_aliases"]
     assert evidence["physical_confirmation"]["join_path_compatible_with_catalog"] is True
     assert evidence["benchmark_usage"]["used_as_evidence"] is False
     assert evidence["sql_filter_hint_usage"]["used_as_contract"] is False
@@ -484,7 +543,8 @@ def main() -> None:
         test_binding_ausente_incompleto_ambiguo_e_outros_conceitos_falham_fechado,
         test_termo_nao_sustentado_nao_vira_receita_silenciosamente,
         test_evidencia_transitional_nao_vira_contrato,
-        test_evidencia_custos_permanece_read_only_e_insuficiente,
+        test_dre_custos_cmv_only_resolve_e_contract_gate_falha_fechado,
+        test_evidencia_custos_permanece_read_only_e_versionada,
         test_rollback_nao_remove_dados,
     ]
     for test in tests:
