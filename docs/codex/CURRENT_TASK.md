@@ -1,71 +1,49 @@
-# CURRENT TASK — planned_filters microetapa 7 encerrada
+# CURRENT TASK — dre_custos CMV-only microetapa 8
 
-## Estado final
+## Decisão humana
 
-A microetapa 7 foi concluida, publicada e mergeada na `main`.
+A AI Product Factory registrou em 2026-10-01 uma decisão humana explícita aprovando:
 
-- Issue: `#17`
-- PR: `#18`
-- Merge commit: `bed49790aa94106a846a3a1d243172f5d67a3e36`
-- CI: `Offline validation #65` verde
-- `scripts/check_all.py`: verde
-- Network guard: verde
-- Hardcode scan: verde
-- Secret scan: verde
-- Clean-room validation: verde
-- Whitespace check: verde
-- Deploy: nao executado
-- Supabase: nao alterado
-- n8n: nao alterado
-- Watson: nao alterado
-- Benchmark de 63 perguntas: nao executado
-- Delta DEMO v8: nao aplicado nem ativado
+`dre_custos = CMV-only` neste contexto versionado.
 
-## Resultado entregue
+- Gate: `59f6db12-8dfa-4ea0-8202-063a3dfa8ca7`
+- Resolução: `approved`
+- Benchmark de 63 perguntas: não executado
+- Deploy/cutover: não autorizado
+- n8n: continua caminho oficial
+- LangGraph: continua offline shadow
 
-O motor agora suporta genericamente `filter_binding` multi-valor com operador estrutural `IN`.
+## Escopo desta microetapa
 
-O contrato implementado:
-- aceita lista nao vazia de literais simples homogeneos;
-- suporta string, number ou boolean;
-- rejeita lista configurada com duplicatas, nulos ou tipos mistos;
-- o SQL analyzer reconhece somente `IN (...)` com literais simples;
-- Contract Gate compara o conjunto esperado sem depender da ordem na SQL;
-- duplicatas na SQL nao ampliam o conjunto e nao alteram equivalencia;
-- subquery, funcao, expressao ou `OR` continuam fail-closed;
-- bindings escalares anteriores permanecem compativeis;
-- planner e generator continuam separando obrigacao semantica de binding fisico.
+Versionar o binding offline de `dre_custos` usando somente a evidência read-only já existente:
 
-## Hardcode inventory
+- target: `demo_lakehouse.gold_plano_contas.grupo_contabil`
+- operador: `=`
+- valor: `CMV`
+- join: `gold_lancamentos_contabeis.nk_conta = gold_plano_contas.nk_conta`
+- binding ref: `demo-dre-custos-v1`
 
-Mudancas do motor: `STRUCTURAL`.
+A decisão promove `custo` e `custos` somente dentro do conceito `dre_custos` versionado. Não promove `gasto/gastos`, `custo operacional` nem `custo de vendas`.
 
-Nenhum hardcode `FORBIDDEN` de DRE, Receita, CMV, custos, despesas, cliente, benchmark, golden answer ou expected SQL foi adicionado.
+## Guardrails
 
-## Estado semantico
+- `automatic_apply=false`
+- `activation.allowed=false`
+- sem alteração Supabase
+- sem alteração n8n
+- sem Watson real
+- sem execução SQL real
+- sem benchmark
+- sem hardcode de pergunta/expected SQL/golden answer
+- `sql_filter_hint` e `nivel_1_bi` continuam apenas evidência transitória, nunca contrato
 
-A capacidade generica multi-grupo existe, mas nenhum conceito financeiro foi ativado por esta microetapa.
+## Validação requerida
 
-- `dre_receita`: permanece com o binding versionado anterior.
-- `dre_custos`: permanece `BLOCKING_FAIL_CLOSED`; a decisao se custo/custos significa CMV continua pendente.
-- `dre_despesas_operacionais`: permanece `BLOCKING_FAIL_CLOSED`; agora o motor consegue representar um binding multi-valor, mas ainda faltam evidencia semantica versionada e binding concreto.
-- lucro, margem, ROL e derivados continuam fora de escopo.
+- `python scripts/check_all.py`
+- `Offline validation`
+- Contract Gate deve aprovar CMV correto e rejeitar filtro ausente/divergente
+- `dre_despesas_operacionais` deve continuar fail-closed
 
-## Principios preservados
+## Estado
 
-- n8n continua caminho oficial;
-- LangGraph continua offline shadow;
-- sem deploy ou cutover implicito;
-- contexto/configuracao versionada contem conhecimento de negocio;
-- codigo contem apenas capacidade estrutural;
-- benchmark permanece postergado.
-
-## Proxima decisao
-
-Nao inventar a proxima regra semantica.
-
-As proximas linhas possiveis sao:
-1. decisao explicita sobre o escopo de `dre_custos`; ou
-2. evidencia/versionamento de `dre_despesas_operacionais` para construir um binding concreto sobre o contrato multi-valor ja implementado.
-
-Nenhuma das duas autoriza ativacao, Supabase, n8n, deploy, SQL real ou benchmark implicitamente.
+Implementação em PR da issue #20. Nenhuma ativação é autorizada por esta microetapa.
