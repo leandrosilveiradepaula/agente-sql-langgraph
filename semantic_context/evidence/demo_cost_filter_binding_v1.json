@@ -6,8 +6,8 @@
   "read_only": true,
   "automatic_apply": false,
   "activation_allowed": false,
-  "supports_binding": false,
-  "decision": "EVIDENCE_CANDIDATE_NEEDS_SEMANTIC_DECISION",
+  "supports_binding": true,
+  "decision": "APPROVED_CMV_ONLY_BY_HUMAN_GATE",
   "sources_consulted": [
     {
       "source": "semantic_context.ai_ducklake_dre_mapping",
@@ -88,7 +88,9 @@
         "is_deduction": false,
         "is_financial_result": false,
         "active": true,
-        "transitional_fields_present": ["sql_filter_hint"]
+        "transitional_fields_present": [
+          "sql_filter_hint"
+        ]
       }
     ],
     "cmv_scope_assessment": "CMV is the only active is_cost DRE row found in this read-only pass, but no active rule proves that the generic terms custo or custos are semantically equivalent to CMV."
@@ -120,13 +122,13 @@
   "alias_classification": [
     {
       "term": "custo",
-      "status": "AMBIGUOUS",
-      "evidence": "Historical repository metric aliases mention custo and the v8 delta lists it as TRANSITIONAL, but active DEMO semantic sources consulted here did not prove equivalence to CMV."
+      "status": "SUPPORTED",
+      "evidence": "Explicit human decision approved dre_custos as CMV-only for this context; the versioned CMV physical evidence remains the binding basis."
     },
     {
       "term": "custos",
-      "status": "AMBIGUOUS",
-      "evidence": "Historical repository metric aliases mention custos and the v8 delta lists it as TRANSITIONAL, but active DEMO semantic sources consulted here did not prove equivalence to CMV."
+      "status": "SUPPORTED",
+      "evidence": "Explicit human decision approved dre_custos as CMV-only for this context; the versioned CMV physical evidence remains the binding basis."
     },
     {
       "term": "CMV",
@@ -154,11 +156,15 @@
       "evidence": "Historical repository metric aliases mention gastos, but active DEMO semantic sources consulted here did not prove it as a dre_custos alias."
     }
   ],
-  "supported_aliases": ["CMV"],
-  "unsupported_aliases": ["custo operacional"],
-  "unresolved_aliases": [
+  "supported_aliases": [
+    "CMV",
     "custo",
-    "custos",
+    "custos"
+  ],
+  "unsupported_aliases": [
+    "custo operacional"
+  ],
+  "unresolved_aliases": [
     "custo de vendas",
     "gasto",
     "gastos"
@@ -175,32 +181,36 @@
     },
     {
       "field": "historical_metric_aliases",
-      "observed_terms": ["custo", "custos", "gasto", "gastos"],
+      "observed_terms": [
+        "custo",
+        "custos",
+        "gasto",
+        "gastos"
+      ],
       "allowed_use": "semantic_evidence_input",
       "forbidden_use": "automatic_binding_or_alias_promotion"
     }
   ],
   "ambiguities": [
-    "CMV is the only active is_cost DRE row found, but the evidence does not prove that generic custo/custos should collapse to CMV.",
     "The exact term custo de vendas is not an active alias, despite proximity to the CMV business description.",
     "Historical gasto/gastos metric aliases are not proven as planned_filter aliases.",
     "A product decision is still required before mapping generic dre_custos obligations to a CMV-only filter."
   ],
   "unsupported_claims": [
-    "custo equals CMV",
-    "custos equals CMV",
-    "CMV represents all possible meanings of dre_custos",
     "gasto or gastos are supported aliases for dre_custos",
-    "custo operacional is supported by DEMO cost evidence"
+    "custo operacional is supported by DEMO cost evidence",
+    "CMV-only approval applies outside this explicitly versioned context"
   ],
   "candidate_binding": {
-    "status": "EVIDENCE_CANDIDATE",
+    "status": "APPROVED_VERSIONED_BINDING",
     "canonical_concept": "dre_custos",
     "target_table": "demo_lakehouse.gold_plano_contas",
     "target_column": "grupo_contabil",
     "operator": "=",
     "value": "CMV",
-    "values": ["CMV"],
+    "values": [
+      "CMV"
+    ],
     "scope": "where",
     "join_path": [
       {
@@ -218,7 +228,8 @@
       "information_schema.columns read-only physical metadata",
       "demo_lakehouse.gold_plano_contas read-only value inspection"
     ],
-    "not_active_reason": "Generic dre_custos remains BLOCKING_FAIL_CLOSED until an explicit decision approves whether CMV is the intended scope for custo/custos obligations."
+    "not_active_reason": "Binding is versioned for offline use only. Runtime activation remains separately prohibited.",
+    "binding_ref": "demo-dre-custos-v1"
   },
   "sql_filter_hint_usage": {
     "used_as_contract": false,
@@ -229,12 +240,18 @@
     "used_as_evidence": false
   },
   "remaining_gaps": [
-    "Explicit decision whether dre_custos should mean CMV-only in DEMO.",
-    "Explicit decision whether custo and custos should be promoted from AMBIGUOUS to SUPPORTED aliases.",
-    "Explicit decision whether custo de vendas should be supported, unsupported, or remain ambiguous.",
-    "If approved later, update the offline delta in a separate microstage without using sql_filter_hint as contract.",
-    "Keep activation blocked until a later explicit activation decision."
+    "Keep activation blocked until a later explicit activation decision.",
+    "custo de vendas remains ambiguous and must not be promoted implicitly.",
+    "gasto/gastos remain unresolved and must not be promoted implicitly.",
+    "custo operacional remains unsupported."
   ],
   "external_write_performed": false,
-  "authorizes_apply": false
+  "authorizes_apply": false,
+  "human_decision": {
+    "source": "AI Product Factory Control Plane",
+    "gate_id": "59f6db12-8dfa-4ea0-8202-063a3dfa8ca7",
+    "resolved_at": "2026-10-01T14:07:58.720569+00:00",
+    "resolution": "approved",
+    "approved_scope": "dre_custos = CMV-only in this context"
+  }
 }

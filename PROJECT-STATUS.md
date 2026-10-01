@@ -143,6 +143,14 @@ Shadow persistence must use a separate structure, not `ai_agent_runs.metadata` a
 - `dre_despesas_operacionais` remains `BLOCKING_FAIL_CLOSED`. The generic multi-group mechanism now exists, but a versioned semantic rule and evidence-backed binding are still required before any DEMO binding or activation.
 - `sql_filter_hint` and `nivel_1_bi` remain TRANSITIONAL evidence only, not generation or binding contracts.
 
+## Semantic Decision Update — 2026-10-01
+
+A material requirement decision was approved through the AI Product Factory Control Plane: `dre_custos` is CMV-only in this explicitly versioned context.
+
+Microstage 8 versions the existing read-only CMV evidence into offline binding `demo-dre-custos-v1`. This does not activate the v8 delta, does not modify n8n/Supabase/Watson, does not authorize cutover and does not run the postponed 63-question benchmark.
+
+The approved scope does not promote `gasto/gastos`, `custo operacional` or `custo de vendas`. `dre_despesas_operacionais` remains `BLOCKING_FAIL_CLOSED`.
+
 ## Next Stage
 
 Stage 1: n8n remains official while the Next.js BFF dispatches asynchronous offline LangGraph shadow runs. Every official n8n SQL generation must trigger shadow, and every approved-SQL execution event must trigger its corresponding shadow event.

@@ -7,7 +7,10 @@
   "filter_concepts": [
     {
       "filter_concept": "dre_receita",
-      "aliases": ["receita", "receitas"],
+      "aliases": [
+        "receita",
+        "receitas"
+      ],
       "provenance": {
         "source": "semantic_context/evidence/demo_revenue_filter_binding_v1.json",
         "classification": "STRUCTURAL",
@@ -16,7 +19,10 @@
     },
     {
       "filter_concept": "dre_despesas_operacionais",
-      "aliases": ["despesa operacional", "despesas operacionais"],
+      "aliases": [
+        "despesa operacional",
+        "despesas operacionais"
+      ],
       "provenance": {
         "source": "scripts/migrations/003_prepare_semantic_operations_context_v2.sql",
         "classification": "TRANSITIONAL",
@@ -25,11 +31,14 @@
     },
     {
       "filter_concept": "dre_custos",
-      "aliases": ["custo", "custos"],
+      "aliases": [
+        "custo",
+        "custos"
+      ],
       "provenance": {
-        "source": "scripts/migrations/003_prepare_semantic_operations_context_v2.sql",
-        "classification": "TRANSITIONAL",
-        "evidence": "existing versioned DRE mapping metadata"
+        "source": "semantic_context/evidence/demo_cost_filter_binding_v1.json",
+        "classification": "STRUCTURAL",
+        "evidence": "read-only DEMO evidence plus explicit human decision approving CMV-only scope"
       }
     }
   ],
@@ -53,6 +62,26 @@
         }
       ],
       "evidence_ref": "semantic_context/evidence/demo_revenue_filter_binding_v1.json"
+    },
+    {
+      "binding_ref": "demo-dre-custos-v1",
+      "filter_concept": "dre_custos",
+      "required": true,
+      "scope": "where",
+      "target_table": "demo_lakehouse.gold_plano_contas",
+      "target_column": "grupo_contabil",
+      "operator": "=",
+      "value": "CMV",
+      "join_path": [
+        {
+          "source_table": "demo_lakehouse.gold_lancamentos_contabeis",
+          "source_column": "nk_conta",
+          "target_table": "demo_lakehouse.gold_plano_contas",
+          "target_column": "nk_conta",
+          "operator": "="
+        }
+      ],
+      "evidence_ref": "semantic_context/evidence/demo_cost_filter_binding_v1.json"
     }
   ],
   "transitional_inventory": [
@@ -77,14 +106,16 @@
     },
     {
       "id": "DEMO-PF-002",
-      "status": "BLOCKING_FAIL_CLOSED",
+      "status": "RESOLVED_WITH_VERSIONED_EVIDENCE_AND_HUMAN_DECISION",
       "scope": "dre_custos",
-      "missing_evidence": [
-        "unambiguous_semantic_scope",
-        "complete_filter_binding"
-      ],
-      "required_resolution": "Provide an explicit versioned rule proving the intended scope of generic costs before creating a complete physical binding.",
-      "activation_allowed": false
+      "activation_allowed": false,
+      "binding_ref": "demo-dre-custos-v1",
+      "semantic_scope": "CMV_ONLY",
+      "human_decision": {
+        "decision": "approved",
+        "decided_at": "2026-10-01T14:07:58.720569+00:00",
+        "gate_id": "59f6db12-8dfa-4ea0-8202-063a3dfa8ca7"
+      }
     },
     {
       "id": "DEMO-PF-003",
