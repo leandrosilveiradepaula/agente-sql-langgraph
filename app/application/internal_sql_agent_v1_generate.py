@@ -132,7 +132,25 @@ class GenerateSqlUseCase:
                     request,
                     created_at,
                 )
-            selected_generator = self._resolve_sql_generator(request)
+            try:
+                selected_generator = self._resolve_sql_generator(request)
+            except LookupError:
+                response = generate_response(
+                    agent_run_id=agent_run_id,
+                    run_id=run_id,
+                    status="rejected",
+                    message="Generate SQL request rejected.",
+                    state=state,
+                    errors=[
+                        error(
+                            "INTERNAL_LLM_SELECTION_UNAVAILABLE",
+                            "request",
+                            "Selected LLM is not available.",
+                        )
+                    ],
+                )
+                self._persist_shadow(request, state, response, created_at)
+                return response
             generate_sql = create_generate_sql_node(selected_generator)
             for node in (
                 self._load_context,
