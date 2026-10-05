@@ -15,7 +15,7 @@ OPENAI_COMPATIBLE_CONNECT_TIMEOUT_ENV = "OPENAI_COMPATIBLE_CONNECT_TIMEOUT_SECON
 OPENAI_COMPATIBLE_READ_TIMEOUT_ENV = "OPENAI_COMPATIBLE_READ_TIMEOUT_SECONDS"
 OPENAI_COMPATIBLE_MAX_TOKENS_ENV = "OPENAI_COMPATIBLE_MAX_TOKENS"
 
-DEFAULT_SECRET_NAME = "OPENAI_COMPATIBLE_SQL_API_KEY"
+DEFAULT_CREDENTIAL_NAME = "OPENAI_COMPATIBLE_SQL_API_KEY"
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5
 DEFAULT_READ_TIMEOUT_SECONDS = 60
 DEFAULT_MAX_TOKENS = 8192
@@ -33,7 +33,7 @@ class OpenAiCompatibleConfiguration:
     config_version: str
     api_base_url: str
     model_id: str
-    api_key_secret_name: str = DEFAULT_SECRET_NAME
+    api_key_secret_name: str = DEFAULT_CREDENTIAL_NAME
     connect_timeout_seconds: int = DEFAULT_CONNECT_TIMEOUT_SECONDS
     read_timeout_seconds: int = DEFAULT_READ_TIMEOUT_SECONDS
     max_tokens: int = DEFAULT_MAX_TOKENS
@@ -94,7 +94,7 @@ def load_openai_compatible_configuration(
         model_id=model_id or "",
         api_key_secret_name=(
             _optional(source, OPENAI_COMPATIBLE_SECRET_NAME_ENV)
-            or DEFAULT_SECRET_NAME
+            or DEFAULT_CREDENTIAL_NAME
         ),
         connect_timeout_seconds=_optional_int(
             source,
