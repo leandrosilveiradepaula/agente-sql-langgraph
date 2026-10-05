@@ -45,6 +45,7 @@ from app.ports.context_repository import ContextRepository
 from app.ports.engine_preflight import EnginePreflight
 from app.ports.shadow_evidence_repository import ShadowEvidenceRepository
 from app.ports.sql_generator import SqlGenerator
+from app.ports.sql_generator_resolver import SqlGeneratorResolver
 from app.ports.sql_repairer import SqlRepairer
 
 
@@ -55,6 +56,7 @@ class GenerateSqlUseCase:
         context_repository: ContextRepository,
         sql_generator: SqlGenerator,
         engine_preflight: EnginePreflight,
+        sql_generator_resolver: SqlGeneratorResolver | None = None,
         sql_repairer: SqlRepairer,
         id_generator: IdGenerator,
         shadow_repository: ShadowEvidenceRepository | None = None,
@@ -72,6 +74,8 @@ class GenerateSqlUseCase:
         if id_generator is None or not callable(id_generator):
             raise RuntimeError("id_generator deve ser injetado.")
         self._id_generator = id_generator
+        self._sql_generator = sql_generator
+        self._sql_generator_resolver = sql_generator_resolver
         self._shadow_repository = shadow_repository
         self._langgraph_version = langgraph_version
         self._langgraph_commit = langgraph_commit
@@ -79,7 +83,6 @@ class GenerateSqlUseCase:
         self._load_context = create_load_context_node(context_repository)
         self._classify_intent = classify_intent
         self._build_plan = build_plan
-        self._generate_sql = create_generate_sql_node(sql_generator)
         self._security_gate = security_gate
         self._contract_gate = contract_gate
         self._engine_preflight = create_engine_preflight_node(engine_preflight)
@@ -117,6 +120,7 @@ class GenerateSqlUseCase:
                 "max_repair_attempts": 2,
                 "shadow_mode": True,
             },
+            "llm_selection": deepcopy(request.get("llm_selection", {})),
         }
         try:
             state = self._apply(state, self._receive_question)
@@ -128,11 +132,31 @@ class GenerateSqlUseCase:
                     request,
                     created_at,
                 )
+            try:
+                selected_generator = self._resolve_sql_generator(request)
+            except LookupError:
+                response = generate_response(
+                    agent_run_id=agent_run_id,
+                    run_id=run_id,
+                    status="rejected",
+                    message="Generate SQL request rejected.",
+                    state=state,
+                    errors=[
+                        error(
+                            "INTERNAL_LLM_SELECTION_UNAVAILABLE",
+                            "request",
+                            "Selected LLM is not available.",
+                        )
+                    ],
+                )
+                self._persist_shadow(request, state, response, created_at)
+                return response
+            generate_sql = create_generate_sql_node(selected_generator)
             for node in (
                 self._load_context,
                 self._classify_intent,
                 self._build_plan,
-                self._generate_sql,
+                generate_sql,
             ):
                 state = self._apply(state, node)
                 if state.get("final_status") != "processing":
@@ -169,6 +193,21 @@ class GenerateSqlUseCase:
             )
             self._persist_shadow(request, state, response, created_at)
             return response
+
+    def _resolve_sql_generator(
+        self,
+        request: Mapping[str, Any],
+    ) -> SqlGenerator:
+        selection = request.get("llm_selection")
+        if not isinstance(selection, Mapping) or not selection:
+            return self._sql_generator
+        if self._sql_generator_resolver is None:
+            raise RuntimeError("LLM selection resolver is not configured.")
+        return self._sql_generator_resolver.resolve(
+            provider_key=str(selection.get("provider_key", "")),
+            model_key=str(selection.get("model_key", "")),
+            config_version=str(selection.get("config_version", "")),
+        )
 
     def _run_gate_preflight_repair_loop(
         self,
@@ -279,6 +318,7 @@ def validate_generate_request(request: object) -> list[InternalSqlAgentError]:
             "agent_run_id",
             "question",
             "principal",
+            "llm_selection",
             "correlation_metadata",
         }:
             errors.append(
@@ -288,6 +328,37 @@ def validate_generate_request(request: object) -> list[InternalSqlAgentError]:
                     "Request field is not allowed.",
                 )
             )
+    selection = request.get("llm_selection")
+    if selection is not None:
+        if not isinstance(selection, Mapping):
+            errors.append(
+                error(
+                    "INTERNAL_LLM_SELECTION_INVALID",
+                    "request",
+                    "LLM selection is invalid.",
+                )
+            )
+        else:
+            allowed = {"provider_key", "model_key", "config_version"}
+            if set(selection) - allowed:
+                errors.append(
+                    error(
+                        "INTERNAL_LLM_SELECTION_FIELD_FORBIDDEN",
+                        "request",
+                        "LLM selection field is not allowed.",
+                    )
+                )
+            for field in allowed:
+                value = selection.get(field)
+                if not isinstance(value, str) or not value.strip():
+                    errors.append(
+                        error(
+                            "INTERNAL_LLM_SELECTION_INVALID",
+                            "request",
+                            "LLM selection is incomplete.",
+                        )
+                    )
+                    break
     return errors
 
 
