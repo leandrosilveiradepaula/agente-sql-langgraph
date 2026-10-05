@@ -33,11 +33,18 @@ class InternalSqlAgentGateSummary(TypedDict, total=False):
     executed: bool | None
 
 
+class InternalLlmSelection(TypedDict):
+    provider_key: str
+    model_key: str
+    config_version: str
+
+
 class GenerateSqlV1Request(TypedDict, total=False):
     contract_version: str
     agent_run_id: str
     question: str
     principal: InternalSqlAgentPrincipal
+    llm_selection: InternalLlmSelection
     correlation_metadata: dict[str, str | int | bool | None]
 
 
