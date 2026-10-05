@@ -158,7 +158,7 @@ def _public_text(value: object, field_name: str) -> str:
     lowered = text.casefold()
     if field_name != "api_key_secret_name" and any(
         marker in lowered
-        for marker in ("bearer", "apikey=", "api_key=", "secret=")
+        for marker in ("bearer", "apikey", "api_key", "secret")
     ):
         raise OpenAiCompatibleConfigurationError(
             f"{field_name} parece conter segredo."
