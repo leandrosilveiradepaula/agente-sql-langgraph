@@ -21,8 +21,17 @@ class StdlibHttpTransport:
     Transporte HTTPS sincronico com stdlib, sem proxy, pool, redirect ou retry.
     """
 
-    def __init__(self, *, connection_factory=None, ssl_context=None) -> None:
+    def __init__(
+        self,
+        *,
+        connection_factory=None,
+        http_connection_factory=None,
+        ssl_context=None,
+    ) -> None:
         self._connection_factory = connection_factory or http.client.HTTPSConnection
+        self._http_connection_factory = (
+            http_connection_factory or http.client.HTTPConnection
+        )
         if ssl_context is None:
             ssl_context = ssl.create_default_context()
         if getattr(ssl_context, "check_hostname", True) is not True:
@@ -42,12 +51,19 @@ class StdlibHttpTransport:
             path = parsed.path or "/"
             if parsed.query:
                 path = f"{path}?{parsed.query}"
-            connection = self._connection_factory(
-                parsed.hostname,
-                parsed.port,
-                timeout=request.connect_timeout_seconds,
-                context=self._ssl_context,
-            )
+            if parsed.scheme == "http":
+                connection = self._http_connection_factory(
+                    parsed.hostname,
+                    parsed.port,
+                    timeout=request.connect_timeout_seconds,
+                )
+            else:
+                connection = self._connection_factory(
+                    parsed.hostname,
+                    parsed.port,
+                    timeout=request.connect_timeout_seconds,
+                    context=self._ssl_context,
+                )
             headers = materialize_headers(request.headers)
             headers["Content-Length"] = str(len(request.body))
             headers["Connection"] = "close"

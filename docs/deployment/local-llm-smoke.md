@@ -39,3 +39,19 @@ response_contract=select_1
 The smoke requires the provider to answer the synthetic instruction with a
 single read-only `SELECT 1`. A failure does not trigger fallback and does not
 change the OFFICIAL n8n flow.
+
+
+## Private VPN HTTP endpoint
+
+If the local provider is reachable only through a private VPN address using
+plain HTTP, keep the exception explicit:
+
+```text
+OPENAI_COMPATIBLE_SQL_ALLOW_PRIVATE_HTTP=true
+```
+
+The runtime accepts this only when the configured base URL uses a literal
+private, loopback, or link-local IP address. Public IPs and HTTP hostnames remain
+rejected. HTTPS does not require this flag.
+
+Keep the flag `false` when the provider is available over HTTPS.

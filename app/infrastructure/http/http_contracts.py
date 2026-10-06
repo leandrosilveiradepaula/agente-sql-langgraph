@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from ipaddress import ip_address
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -78,11 +79,16 @@ class HttpTransportRequest:
     operation_name: str
     request_id: str | None = None
     allow_query: bool = False
+    allow_private_http: bool = False
 
     def __post_init__(self) -> None:
         if self.method != "POST":
             raise WatsonFlowContractError("Metodo HTTP nao permitido.")
-        _validate_https_url(self.url, allow_query=self.allow_query)
+        _validate_url(
+            self.url,
+            allow_query=self.allow_query,
+            allow_private_http=self.allow_private_http,
+        )
         if not isinstance(self.body, bytes):
             raise WatsonFlowContractError("body deve ser bytes.")
         for name in ("connect_timeout_seconds", "read_timeout_seconds"):
@@ -255,16 +261,34 @@ def _validate_header_value(value: str, field_name: str) -> str:
     return value
 
 
-def _validate_https_url(value: str, *, allow_query: bool) -> None:
+def _validate_url(
+    value: str,
+    *,
+    allow_query: bool,
+    allow_private_http: bool,
+) -> None:
     if not isinstance(value, str) or not value.strip():
         raise WatsonFlowContractError("URL invalida.")
     if _has_control(value):
         raise WatsonFlowContractError("URL contem controle.")
     parsed = urlsplit(value)
-    if parsed.scheme != "https":
-        raise WatsonFlowContractError("Apenas HTTPS e permitido.")
+    if parsed.scheme not in {"https", "http"}:
+        raise WatsonFlowContractError("Scheme HTTP invalido.")
     if not parsed.hostname:
         raise WatsonFlowContractError("Host obrigatorio.")
+    if parsed.scheme == "http":
+        if not allow_private_http:
+            raise WatsonFlowContractError("HTTP privado nao permitido.")
+        try:
+            host = ip_address(parsed.hostname)
+        except ValueError as exc:
+            raise WatsonFlowContractError(
+                "HTTP privado exige IP literal."
+            ) from exc
+        if not (host.is_private or host.is_loopback or host.is_link_local):
+            raise WatsonFlowContractError(
+                "HTTP privado exige endereco nao-publico."
+            )
     if parsed.username or parsed.password:
         raise WatsonFlowContractError("URL nao permite userinfo.")
     if parsed.fragment:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from ipaddress import ip_address
 from urllib.parse import urlsplit
 
 
@@ -15,6 +16,7 @@ OPENAI_COMPATIBLE_SECRET_NAME_ENV = "OPENAI_COMPATIBLE_SQL_API_KEY_SECRET_NAME"
 OPENAI_COMPATIBLE_CONNECT_TIMEOUT_ENV = "OPENAI_COMPATIBLE_CONNECT_TIMEOUT_SECONDS"
 OPENAI_COMPATIBLE_READ_TIMEOUT_ENV = "OPENAI_COMPATIBLE_READ_TIMEOUT_SECONDS"
 OPENAI_COMPATIBLE_MAX_TOKENS_ENV = "OPENAI_COMPATIBLE_MAX_TOKENS"
+OPENAI_COMPATIBLE_ALLOW_PRIVATE_HTTP_ENV = "OPENAI_COMPATIBLE_SQL_ALLOW_PRIVATE_HTTP"
 
 DEFAULT_CREDENTIAL_NAME = "OPENAI_COMPATIBLE_SQL_API_KEY"
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5
@@ -40,6 +42,7 @@ class OpenAiCompatibleConfiguration:
     max_tokens: int = DEFAULT_MAX_TOKENS
     temperature: float = DEFAULT_TEMPERATURE
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
+    allow_private_http: bool = False
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -57,7 +60,10 @@ class OpenAiCompatibleConfiguration:
         object.__setattr__(
             self,
             "api_base_url",
-            _https_base_url(self.api_base_url),
+            _validated_base_url(
+                self.api_base_url,
+                allow_private_http=self.allow_private_http,
+            ),
         )
         _positive_int(self.connect_timeout_seconds, "connect_timeout_seconds", 300)
         _positive_int(self.read_timeout_seconds, "read_timeout_seconds", 300)
@@ -115,6 +121,9 @@ def load_openai_compatible_configuration(
             source,
             OPENAI_COMPATIBLE_MAX_TOKENS_ENV,
             DEFAULT_MAX_TOKENS,
+        ),
+        allow_private_http=bool(
+            _optional_bool(source, OPENAI_COMPATIBLE_ALLOW_PRIVATE_HTTP_ENV)
         ),
     )
 
@@ -188,12 +197,35 @@ def _public_text(value: object, field_name: str) -> str:
     return text
 
 
-def _https_base_url(value: object) -> str:
+def _validated_base_url(
+    value: object,
+    *,
+    allow_private_http: bool,
+) -> str:
     if not isinstance(value, str) or not value.strip():
         raise OpenAiCompatibleConfigurationError("api_base_url invalida.")
     text = value.strip().rstrip("/")
     parsed = urlsplit(text)
-    if parsed.scheme != "https" or not parsed.hostname:
+    if not parsed.hostname:
+        raise OpenAiCompatibleConfigurationError(
+            "api_base_url invalida."
+        )
+    if parsed.scheme == "http":
+        if not allow_private_http:
+            raise OpenAiCompatibleConfigurationError(
+                "api_base_url HTTP exige opt-in privado."
+            )
+        try:
+            host = ip_address(parsed.hostname)
+        except ValueError as exc:
+            raise OpenAiCompatibleConfigurationError(
+                "api_base_url HTTP exige IP literal privado."
+            ) from exc
+        if not (host.is_private or host.is_loopback or host.is_link_local):
+            raise OpenAiCompatibleConfigurationError(
+                "api_base_url HTTP exige endereco nao-publico."
+            )
+    elif parsed.scheme != "https":
         raise OpenAiCompatibleConfigurationError(
             "api_base_url deve usar HTTPS."
         )
