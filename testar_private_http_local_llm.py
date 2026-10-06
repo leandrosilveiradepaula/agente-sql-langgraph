@@ -41,6 +41,32 @@ class PrivateHttpLocalLlmTests(unittest.TestCase):
         self.assertIsNotNone(configuration)
         self.assertTrue(configuration.allow_private_http)
 
+    def test_configuration_rejects_public_http_even_with_opt_in(self):
+        with self.assertRaises(OpenAiCompatibleConfigurationError):
+            load_openai_compatible_configuration(
+                {
+                    "OPENAI_COMPATIBLE_SQL_ENABLED": "true",
+                    "OPENAI_COMPATIBLE_SQL_PROVIDER_KEY": "infodive_local",
+                    "OPENAI_COMPATIBLE_SQL_CONFIG_VERSION": "sql-infodive-demo-v1",
+                    "OPENAI_COMPATIBLE_SQL_MODEL": "sql-infodive",
+                    "OPENAI_COMPATIBLE_SQL_BASE_URL": "http://8.8.8.8:3005",
+                    "OPENAI_COMPATIBLE_SQL_ALLOW_PRIVATE_HTTP": "true",
+                }
+            )
+
+    def test_configuration_rejects_hostname_http_even_with_opt_in(self):
+        with self.assertRaises(OpenAiCompatibleConfigurationError):
+            load_openai_compatible_configuration(
+                {
+                    "OPENAI_COMPATIBLE_SQL_ENABLED": "true",
+                    "OPENAI_COMPATIBLE_SQL_PROVIDER_KEY": "infodive_local",
+                    "OPENAI_COMPATIBLE_SQL_CONFIG_VERSION": "sql-infodive-demo-v1",
+                    "OPENAI_COMPATIBLE_SQL_MODEL": "sql-infodive",
+                    "OPENAI_COMPATIBLE_SQL_BASE_URL": "http://llm.internal:3005",
+                    "OPENAI_COMPATIBLE_SQL_ALLOW_PRIVATE_HTTP": "true",
+                }
+            )
+
     def test_transport_rejects_public_http_even_with_opt_in(self):
         with self.assertRaises(WatsonFlowContractError):
             HttpTransportRequest(
