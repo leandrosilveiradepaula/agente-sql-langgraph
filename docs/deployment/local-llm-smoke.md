@@ -7,7 +7,9 @@ The check is opt-in and performs one synthetic provider request. It does not
 execute SQL against DuckLake, does not use benchmark data, and does not print
 the endpoint, credential, prompt body, or raw provider response.
 
-Run inside the LangGraph runtime environment:
+Run from the repository root, or mount the repository `scripts/` directory into
+the runtime container. The scripts bootstrap the repository root before importing
+the application package:
 
 ```bash
 python scripts/check_local_llm_runtime.py
