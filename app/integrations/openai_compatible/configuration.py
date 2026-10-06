@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from ipaddress import ip_address
 from urllib.parse import urlsplit
 
 
@@ -213,6 +214,16 @@ def _validated_base_url(
         if not allow_private_http:
             raise OpenAiCompatibleConfigurationError(
                 "api_base_url HTTP exige opt-in privado."
+            )
+        try:
+            host = ip_address(parsed.hostname)
+        except ValueError as exc:
+            raise OpenAiCompatibleConfigurationError(
+                "api_base_url HTTP exige IP literal privado."
+            ) from exc
+        if not (host.is_private or host.is_loopback or host.is_link_local):
+            raise OpenAiCompatibleConfigurationError(
+                "api_base_url HTTP exige endereco nao-publico."
             )
     elif parsed.scheme != "https":
         raise OpenAiCompatibleConfigurationError(
