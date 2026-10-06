@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 
+OPENAI_COMPATIBLE_ENABLED_ENV = "OPENAI_COMPATIBLE_SQL_ENABLED"
 OPENAI_COMPATIBLE_PROVIDER_KEY_ENV = "OPENAI_COMPATIBLE_SQL_PROVIDER_KEY"
 OPENAI_COMPATIBLE_CONFIG_VERSION_ENV = "OPENAI_COMPATIBLE_SQL_CONFIG_VERSION"
 OPENAI_COMPATIBLE_BASE_URL_ENV = "OPENAI_COMPATIBLE_SQL_BASE_URL"
@@ -74,13 +75,17 @@ def load_openai_compatible_configuration(
     environ: Mapping[str, str] | None = None,
 ) -> OpenAiCompatibleConfiguration | None:
     source = os.environ if environ is None else environ
+    enabled = _optional_bool(source, OPENAI_COMPATIBLE_ENABLED_ENV)
+    if enabled is False:
+        return None
+
     provider_key = _optional(source, OPENAI_COMPATIBLE_PROVIDER_KEY_ENV)
     base_url = _optional(source, OPENAI_COMPATIBLE_BASE_URL_ENV)
     model_id = _optional(source, OPENAI_COMPATIBLE_MODEL_ENV)
     config_version = _optional(source, OPENAI_COMPATIBLE_CONFIG_VERSION_ENV)
 
     configured = [provider_key, base_url, model_id, config_version]
-    if not any(configured):
+    if enabled is None and not any(configured):
         return None
     if not all(configured):
         raise OpenAiCompatibleConfigurationError(
@@ -125,6 +130,23 @@ def _optional(source: Mapping[str, str], name: str) -> str | None:
     if value is None or not str(value).strip():
         return None
     return str(value).strip()
+
+
+def _optional_bool(
+    source: Mapping[str, str],
+    name: str,
+) -> bool | None:
+    value = source.get(name)
+    if value is None or not str(value).strip():
+        return None
+    normalized = str(value).strip().casefold()
+    if normalized in {"true", "1", "yes", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "off"}:
+        return False
+    raise OpenAiCompatibleConfigurationError(
+        f"{name} deve ser booleano."
+    )
 
 
 def _optional_int(

@@ -396,6 +396,31 @@ LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false
 
 Gemini, Watson, n8n, DuckLake, and real SQL remain out of the first remote smoke.
 
+### Optional local SQL provider
+
+After the base Shadow runtime is healthy, the OpenAI-compatible SQL provider can
+be enabled only in the LangGraph runtime env:
+
+```text
+OPENAI_COMPATIBLE_SQL_ENABLED=true
+OPENAI_COMPATIBLE_SQL_PROVIDER_KEY=infodive_local
+OPENAI_COMPATIBLE_SQL_CONFIG_VERSION=sql-infodive-demo-v1
+OPENAI_COMPATIBLE_SQL_BASE_URL=<private-or-controlled-https-endpoint>
+OPENAI_COMPATIBLE_SQL_MODEL=sql-infodive
+OPENAI_COMPATIBLE_SQL_API_KEY_SECRET_NAME=OPENAI_COMPATIBLE_SQL_API_KEY
+OPENAI_COMPATIBLE_SQL_API_KEY=<runtime-secret>
+```
+
+Do not copy these values into n8n, browser configuration, Git, logs, or Product
+public payloads. The Product sends only provider_key/model_key/config_version.
+The LangGraph runtime resolves endpoint and credentials server-side. Keep
+`OPENAI_COMPATIBLE_SQL_ENABLED=false` until the endpoint and runtime secret are
+both configured and validated.
+
+If the endpoint is not HTTPS, do not weaken transport validation silently.
+Confirm the intended private-network transport separately before changing the
+security rule.
+
 Persistence validation:
 
 1. Send authenticated synthetic generate.
