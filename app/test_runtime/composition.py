@@ -279,16 +279,22 @@ def _sql_generator_registry(
 ) -> SqlGeneratorRegistry:
     gemini_configuration = load_google_gemini_configuration(environ)
     source = {} if environ is None else environ
+    gemini_provider_key = str(
+        source.get(
+            "GEMINI_SQL_GENERATOR_PROVIDER_KEY",
+            "google_gemini",
+        )
+    ).strip()
     gemini_config_version = str(
         source.get(
             "GEMINI_SQL_GENERATOR_CONFIG_VERSION",
-            "gemini-shadow-v1",
+            "gemini-demo-v1",
         )
     ).strip()
 
     registrations = [
         SqlGeneratorRegistration(
-            provider_key="google_gemini",
+            provider_key=gemini_provider_key,
             model_key=gemini_configuration.model_id,
             config_version=gemini_config_version,
             generator=default_generator,
