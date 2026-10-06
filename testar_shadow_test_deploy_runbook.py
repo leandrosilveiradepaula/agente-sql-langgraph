@@ -109,6 +109,7 @@ def test_docker_env_example_has_only_empty_secrets() -> None:
     assert "LANGGRAPH_S2S_TOKEN=abc" not in text
     assert "GEMINI_SQL_GENERATOR_PROVIDER_KEY=google_gemini" in text
     assert "GEMINI_SQL_GENERATOR_CONFIG_VERSION=gemini-demo-v1" in text
+    assert "OPENAI_COMPATIBLE_SQL_ENABLED=false" in text
     assert "OPENAI_COMPATIBLE_SQL_PROVIDER_KEY=infodive_local" in text
     assert "OPENAI_COMPATIBLE_SQL_CONFIG_VERSION=sql-infodive-demo-v1" in text
     assert "OPENAI_COMPATIBLE_SQL_MODEL=sql-infodive" in text
@@ -151,6 +152,7 @@ def test_runbook_covers_real_docker_traefik_contract() -> None:
         "build locally on the VPS from the approved repo commit",
         "SUPABASE CONNECTION MODE TO CONFIRM DURING DEPLOY",
         "LANGGRAPH_INTERNAL_BASE_URL=https://<LANGGRAPH_TEST_HOSTNAME>",
+        "OPENAI_COMPATIBLE_SQL_ENABLED=true",
         "OPENAI_COMPATIBLE_SQL_PROVIDER_KEY=infodive_local",
         "OPENAI_COMPATIBLE_SQL_CONFIG_VERSION=sql-infodive-demo-v1",
         "OPENAI_COMPATIBLE_SQL_MODEL=sql-infodive",
