@@ -84,6 +84,7 @@ class OpenAiCompatibleClient:
                 read_timeout_seconds=self._configuration.read_timeout_seconds,
                 max_response_bytes=self._configuration.max_response_bytes,
                 operation_name="openai_compatible_chat_completions",
+                allow_private_http=self._configuration.allow_private_http,
             )
         )
         if result.status != "success" or result.response is None:
