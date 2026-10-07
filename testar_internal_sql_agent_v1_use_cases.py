@@ -195,6 +195,26 @@ def test_generate_aceita_pergunta_multilinha() -> None:
     )
 
 
+def test_generate_aceita_tab_e_crlf_na_pergunta() -> None:
+    for question in (
+        "Execute uma generic analysis\tpor unidade.",
+        "Execute uma generic analysis.\r\nDetalhe por periodo.",
+    ):
+        errors = validate_generate_request(
+            {
+                "contract_version": "1",
+                "agent_run_id": "agent-run-whitespace",
+                "question": question,
+                "principal": _principal(),
+            }
+        )
+
+        assert not any(
+            item["code"] == "INTERNAL_GENERATE_QUESTION_REQUIRED"
+            for item in errors
+        )
+
+
 def test_generate_rejeita_controle_invisivel_na_pergunta() -> None:
     errors = validate_generate_request(
         {
@@ -444,6 +464,7 @@ def main() -> None:
         test_generate_valido_para_antes_de_execute_sql,
         test_generate_repair_loop_reaplica_gates_e_preflight,
         test_generate_aceita_pergunta_multilinha,
+        test_generate_aceita_tab_e_crlf_na_pergunta,
         test_generate_rejeita_controle_invisivel_na_pergunta,
         test_generate_expoe_resumo_seguro_da_resolucao_de_intencao,
         test_generate_expoe_resumo_seguro_do_query_plan,
