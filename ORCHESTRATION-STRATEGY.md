@@ -57,7 +57,7 @@ LangGraph is not the browser UI, product admin, user management system, visual h
 | Context/intent/planning | Supplies/correlates | Existing baseline | Owner target | Shadow captures evidence first. |
 | SQL repair | Coordinates through official path | Existing baseline | Owner target provider | Gemini Repairer exists offline. |
 | Security/contract gates | Product policy still applies | Existing workflow checks | SQL-domain gates | Boundaries must be mapped. |
-| Preflight | Coordinates | Official initial path | Offline initially | Watson TEST later needs authorization. |
+| Preflight | Coordinates | Official initial path | Offline initially | Future TEST integrations require explicit authorization. |
 | Gemini | Not direct UI concern | Baseline remains | Direct provider allowed | Does not replace n8n. |
 | Persistence/history | Owner | May pass ids/status | Separate shadow store plus future adapters | Do not use metadata as primary shadow store. |
 | Admin/CSV/PDF/bots | Owner | Operational integrations where applicable | None | Do not reimplement here. |
@@ -135,7 +135,7 @@ Initial shadow architecture:
 - dispatch is asynchronous;
 - user response is never delayed by shadow completion;
 - shadow failures do not interrupt, rollback, or alter the n8n official flow;
-- no Watson TEST real;
+- no real external TEST integration by default;
 - no real SQL execution;
 - no user-visible shadow output;
 - every official n8n SQL generation must trigger an asynchronous LangGraph shadow run;
