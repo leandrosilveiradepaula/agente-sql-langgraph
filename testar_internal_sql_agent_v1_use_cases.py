@@ -248,6 +248,39 @@ def test_generate_expoe_resumo_seguro_da_resolucao_de_intencao() -> None:
         assert forbidden not in serialized
 
 
+def test_generate_expoe_resumo_seguro_do_query_plan() -> None:
+    use_case, generator, preflight, repairer = _generate_use_case()
+    response = use_case.execute(
+        {
+            "contract_version": "1",
+            "agent_run_id": "agent-run-plan-diagnostic",
+            "question": "Execute uma generic analysis de teste.",
+            "principal": _principal(),
+        }
+    )
+
+    plan = response["metadata"]["query_plan"]
+
+    assert plan["available"] is True
+    assert plan["intent_name"] == "generic_test_intent"
+    assert plan["selected_pattern_name"]
+    assert isinstance(plan["required_tables"], list)
+    assert isinstance(plan["detected_dimensions"], list)
+    assert isinstance(plan["analytical_operations"], list)
+    assert isinstance(plan["planned_metrics"], list)
+    assert isinstance(plan["planned_filters"], list)
+
+    serialized = repr(plan).casefold()
+    for forbidden in (
+        "business_question_examples",
+        "sql_pattern",
+        "required_rules",
+        "rule_content",
+        "semantic_description",
+    ):
+        assert forbidden not in serialized
+
+
 def test_generate_rejeita_contract_version_invalida() -> None:
     use_case, generator, preflight, repairer = _generate_use_case()
     response = use_case.execute(
@@ -416,6 +449,7 @@ def main() -> None:
         test_generate_aceita_pergunta_multilinha,
         test_generate_rejeita_controle_invisivel_na_pergunta,
         test_generate_expoe_resumo_seguro_da_resolucao_de_intencao,
+        test_generate_expoe_resumo_seguro_do_query_plan,
         test_generate_rejeita_contract_version_invalida,
         test_generate_erro_provider_sanitizado,
         test_execute_approved_shadow_valida_sql_sem_generate_ou_execute,
