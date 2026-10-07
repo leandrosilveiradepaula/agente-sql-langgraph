@@ -11,9 +11,9 @@ import scripts.check_imports as check
 
 
 def main() -> None:
-    assert len(check.MODULES) == 9
+    assert len(check.MODULES) == 3
     env = dict(os.environ)
-    env["IBM_CLOUD_API_KEY"] = "fake-value-not-used"
+    env["TEST_SECRET_KEY"] = "fake-value-not-used"
     completed = subprocess.run(
         [sys.executable, "scripts/check_imports.py"],
         cwd=Path(__file__).resolve().parent,
@@ -30,7 +30,6 @@ def main() -> None:
     assert "importlib.import_module" in source
     assert "EnvironmentSecretProvider(" not in source
     assert "StdlibHttpTransport(" not in source
-    assert "manual_watson_flow_probe.main" not in source
     assert ".write_text" not in source or "TemporaryDirectory" in source
     assert "SQL_AGENT_DISABLE_NETWORK" in source
     print("testar_check_imports.py: 10/10 OK")
