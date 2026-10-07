@@ -8,7 +8,7 @@ from app.infrastructure.http.http_contracts import (
     http_transport_success,
 )
 from app.infrastructure.secrets.sensitive_secret import SensitiveSecret
-from app.integrations.watson.flow_limits import WatsonFlowContractError
+from app.infrastructure.contracts import InfrastructureContractError
 
 
 def _raises(fn, exc=Exception) -> None:
@@ -36,25 +36,25 @@ def _request(**overrides):
 
 def main() -> None:
     assert _request().method == "POST"
-    _raises(lambda: _request(method="GET"), WatsonFlowContractError)
-    _raises(lambda: _request(url="not-url"), WatsonFlowContractError)
-    _raises(lambda: _request(url="http://example.invalid/path"), WatsonFlowContractError)
-    _raises(lambda: _request(url="https://u:p@example.invalid/path"), WatsonFlowContractError)
-    _raises(lambda: _request(url="https://example.invalid/path?q=1"), WatsonFlowContractError)
+    _raises(lambda: _request(method="GET"), InfrastructureContractError)
+    _raises(lambda: _request(url="not-url"), InfrastructureContractError)
+    _raises(lambda: _request(url="http://example.invalid/path"), InfrastructureContractError)
+    _raises(lambda: _request(url="https://u:p@example.invalid/path"), InfrastructureContractError)
+    _raises(lambda: _request(url="https://example.invalid/path?q=1"), InfrastructureContractError)
     assert _request(url="https://example.invalid/path?q=1", allow_query=True).allow_query is True
-    _raises(lambda: _request(url="https://example.invalid/path#f"), WatsonFlowContractError)
+    _raises(lambda: _request(url="https://example.invalid/path#f"), InfrastructureContractError)
     assert repr(HttpHeader("Accept", public_value="application/json"))
     sensitive = HttpHeader("Authorization", sensitive_value=SensitiveSecret("Bearer test-token"))
     assert "test-token" not in repr(sensitive)
-    _raises(lambda: HttpHeader("X-Test", public_value="a\nb"), WatsonFlowContractError)
-    _raises(lambda: _request(headers=(sensitive, sensitive)), WatsonFlowContractError)
+    _raises(lambda: HttpHeader("X-Test", public_value="a\nb"), InfrastructureContractError)
+    _raises(lambda: _request(headers=(sensitive, sensitive)), InfrastructureContractError)
     cl = HttpHeader("Content-Length", public_value="1")
-    _raises(lambda: _request(headers=(cl, cl)), WatsonFlowContractError)
+    _raises(lambda: _request(headers=(cl, cl)), InfrastructureContractError)
     assert _request(body=b"abc").body == b"abc"
-    _raises(lambda: _request(body="abc"), WatsonFlowContractError)
-    _raises(lambda: _request(connect_timeout_seconds=0), WatsonFlowContractError)
-    _raises(lambda: _request(read_timeout_seconds=True), WatsonFlowContractError)
-    _raises(lambda: _request(max_response_bytes=0), WatsonFlowContractError)
+    _raises(lambda: _request(body="abc"), InfrastructureContractError)
+    _raises(lambda: _request(connect_timeout_seconds=0), InfrastructureContractError)
+    _raises(lambda: _request(read_timeout_seconds=True), InfrastructureContractError)
+    _raises(lambda: _request(max_response_bytes=0), InfrastructureContractError)
     response = HttpTransportResponse(status_code=200, headers={"Content-Type": "application/json", "Set-Cookie": "x"}, body=b"{}")
     assert response.headers == {"content-type": "application/json"}
     assert http_transport_success(response).status == "success"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.adapters.testing.fake_secret_value_provider import FakeSecretValueProvider
 from app.infrastructure.secrets.environment_secret_provider import EnvironmentSecretProvider
 from app.infrastructure.secrets.sensitive_secret import SensitiveSecret
-from app.integrations.watson.flow_limits import WatsonFlowContractError
+from app.infrastructure.contracts import InfrastructureContractError
 from app.ports.secret_value_provider import SecretName, secret_lookup_failure
 
 
@@ -16,16 +16,16 @@ def _raises(fn, exc=Exception) -> None:
 
 
 def main() -> None:
-    provider = EnvironmentSecretProvider(environ={"IBM_CLOUD_API_KEY": "test-secret"})
-    result = provider.get_secret(SecretName("IBM_CLOUD_API_KEY"))
+    provider = EnvironmentSecretProvider(environ={"TEST_SECRET_KEY": "test-secret"})
+    result = provider.get_secret(SecretName("TEST_SECRET_KEY"))
     assert result["status"] == "success"
     assert result["secret"].reveal_for_transport() == "test-secret"
     assert provider.get_secret(SecretName("MISSING"))["status"] == "missing"
     assert EnvironmentSecretProvider(environ={"A": ""}).get_secret(SecretName("A"))["status"] == "invalid"
     assert EnvironmentSecretProvider(environ={"A": "x\n"}).get_secret(SecretName("A"))["status"] == "invalid"
-    assert provider.requested_names == ["IBM_CLOUD_API_KEY", "MISSING"]
+    assert provider.requested_names == ["TEST_SECRET_KEY", "MISSING"]
     assert len(provider.requested_names) == 2
-    _raises(lambda: SecretName("bad-name"), WatsonFlowContractError)
+    _raises(lambda: SecretName("bad-name"), InfrastructureContractError)
     assert EnvironmentSecretProvider(environ={}, unavailable=True).get_secret(SecretName("A"))["status"] == "unavailable"
     assert "test-secret" not in repr(provider)
     source = {"A": "one"}

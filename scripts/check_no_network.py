@@ -10,13 +10,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 GUARDED_TESTS = [
-    "testar_manual_watson_flow_probe.py",
-    "testar_watson_test_composition.py",
-    "testar_watson_test_composition_graph.py",
-    "testar_offline_watson_test_composition_check.py",
-    "testar_live_iam_token_provider.py",
-    "testar_live_watson_flow_client.py",
-    "testar_watson_live_offline_integration.py",
     "testar_stdlib_http_transport.py",
     "testar_application_service_graph_integration.py",
     "testar_grafo_base.py",
@@ -78,10 +71,6 @@ def _network_env_names() -> set[str]:
         "HTTPS_PROXY",
         "ALL_PROXY",
         "NO_PROXY",
-        "IBM_CLOUD_API_KEY",
-        "WATSON_API_BASE_URL",
-        "WATSON_FLOW_ID",
-        "WATSON_IAM_TOKEN_URL",
     }
     return names | {name.lower() for name in names}
 

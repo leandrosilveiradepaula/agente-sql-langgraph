@@ -16,9 +16,9 @@ Current product responsibilities include:
 - Next.js BFF routes;
 - authentication and session handling;
 - users, levels/profiles, and policies;
-- current endpoints `/api/generate-sql` and `/api/execute-watson`;
+- current endpoints `/api/generate-sql` and `/api/execute-sql`;
 - n8n orchestration;
-- Watson operational execution path;
+- approved SQL execution path via n8n;
 - persistence in the product run/user/policy/audit tables;
 - local and persisted history;
 - admin areas;
@@ -57,8 +57,7 @@ LangGraph is not the browser UI, product admin, user management system, visual h
 | Context/intent/planning | Supplies/correlates | Existing baseline | Owner target | Shadow captures evidence first. |
 | SQL repair | Coordinates through official path | Existing baseline | Owner target provider | Gemini Repairer exists offline. |
 | Security/contract gates | Product policy still applies | Existing workflow checks | SQL-domain gates | Boundaries must be mapped. |
-| Preflight | Coordinates | Official initial path | Offline initially | Watson TEST later needs authorization. |
-| Watson | Coordinates via BFF/n8n | Official initial integration | Optional adapters | Real execution needs separate gate. |
+| Preflight | Coordinates | Official initial path | Offline initially | Future TEST integrations require explicit authorization. |
 | Gemini | Not direct UI concern | Baseline remains | Direct provider allowed | Does not replace n8n. |
 | Persistence/history | Owner | May pass ids/status | Separate shadow store plus future adapters | Do not use metadata as primary shadow store. |
 | Admin/CSV/PDF/bots | Owner | Operational integrations where applicable | None | Do not reimplement here. |
@@ -93,9 +92,9 @@ Canonical flow:
 
 ```text
 Browser UI
--> Next.js /api/execute-watson
+-> Next.js /api/execute-sql
 -> product auth/session/profile/policy/ownership checks
--> official n8n Watson execution path
+-> official n8n approved-SQL execution path
 -> official response to user
 -> asynchronous LangGraph offline shadow event for approved SQL
 -> no real SQL execution in initial shadow
@@ -114,7 +113,7 @@ The Next.js BFF is the compatibility boundary.
 
 Rules:
 
-- current endpoints remain `/api/generate-sql` and `/api/execute-watson`;
+- current endpoints remain `/api/generate-sql` and `/api/execute-sql`;
 - browser/UI does not call LangGraph directly;
 - Next.js calls LangGraph through internal HTTP;
 - LangGraph runs as a separate Python service;
@@ -136,13 +135,11 @@ Initial shadow architecture:
 - dispatch is asynchronous;
 - user response is never delayed by shadow completion;
 - shadow failures do not interrupt, rollback, or alter the n8n official flow;
-- no Watson TEST real;
+- no real external TEST integration by default;
 - no real SQL execution;
 - no user-visible shadow output;
 - every official n8n SQL generation must trigger an asynchronous LangGraph shadow run;
 - every approved-SQL execution event must trigger the corresponding asynchronous LangGraph shadow event.
-
-When future Watson TEST real is allowed in shadow, that permission does not automatically authorize real SQL execution. Real SQL execution in shadow requires a separate approval.
 
 When future real execution is approved, it must start read-only, use separate TEST/shadow credentials, and follow least privilege.
 
@@ -186,22 +183,6 @@ LangGraph receives only a normalized principal and non-secret authorization cont
 
 LangGraph retains its own SQL-domain controls, including Security Gate, Contract Gate, preflight, repair limits, and lifecycle validation. Fine-grained mapping from product policies into LangGraph gates can evolve later.
 
-## Watson Boundary
-
-Watson remains initially behind n8n in the official path.
-
-LangGraph Watson adapters remain optional and explicitly injected. They do not imply production use, TEST use, or real SQL execution without explicit authorization.
-
-Stage changes involving Watson must distinguish:
-
-- TEST connectivity;
-- preflight;
-- real SQL execution;
-- read-only execution;
-- credentials and least privilege.
-
-Each requires the appropriate approval boundary.
-
 ## Gemini Boundary
 
 Gemini Generator and Repairer may be direct LangGraph providers.
@@ -242,7 +223,7 @@ Every official n8n SQL generation must trigger an asynchronous offline LangGraph
 
 ### Stage 2: LangGraph shadow with authorized TEST integrations
 
-Selected TEST integrations may be enabled only after explicit approval. Watson TEST permission does not imply real SQL execution permission.
+Selected TEST integrations may be enabled only after explicit approval. Any future TEST integration permission does not imply real SQL execution permission.
 
 ### Stage 3: authorized read-only real shadow
 
@@ -259,3 +240,7 @@ No dates are assigned to these stages.
 Benchmark is postponed.
 
 Evidence capture must begin in Stage 1 so a future benchmark can compare SQL, intent, plan, gates, repair, success rate, errors, repair count, latency, cost, execution results, semantic divergences, and other available evidence.
+
+## Provider Boundary Update — 2026-10-07
+
+Watson and IBM Cloud are no longer part of the target architecture. n8n remains the operational integration/orchestration layer, LangGraph remains the semantic/reasoning core, and LLM providers are selected through versioned product/runtime configuration. SQL execution integrations must stay provider-neutral and preserve the human approval boundary.

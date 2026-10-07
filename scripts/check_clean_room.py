@@ -21,7 +21,7 @@ STEPS = [
         [
             sys.executable,
             "-c",
-            "import app.bootstrap; import app.composition.watson_test; print('BOOTSTRAP_SMOKE_OK')",
+            "import app.bootstrap; print('BOOTSTRAP_SMOKE_OK')",
         ],
     ),
 ]
@@ -42,10 +42,6 @@ def clean_environment(tmp: Path) -> dict[str, str]:
 
 def _removed_env_names() -> set[str]:
     names = {
-        "IBM_CLOUD_API_KEY",
-        "WATSON_API_BASE_URL",
-        "WATSON_FLOW_ID",
-        "WATSON_IAM_TOKEN_URL",
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "ALL_PROXY",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.integrations.watson.flow_limits import WatsonFlowContractError
+from app.infrastructure.contracts import InfrastructureContractError
 
 
 class SensitiveSecret:
@@ -8,16 +8,16 @@ class SensitiveSecret:
 
     def __init__(self, secret: str, *, max_bytes: int = 8192) -> None:
         if isinstance(max_bytes, bool) or not isinstance(max_bytes, int):
-            raise WatsonFlowContractError("Limite de secret invalido.")
+            raise InfrastructureContractError("Limite de secret invalido.")
         if max_bytes <= 0 or max_bytes > 64_000:
-            raise WatsonFlowContractError("Limite de secret fora do intervalo.")
+            raise InfrastructureContractError("Limite de secret fora do intervalo.")
         if not isinstance(secret, str) or not secret.strip():
-            raise WatsonFlowContractError("Secret invalido.")
+            raise InfrastructureContractError("Secret invalido.")
         encoded = secret.encode("utf-8")
         if len(encoded) > max_bytes:
-            raise WatsonFlowContractError("Secret excede limite.")
+            raise InfrastructureContractError("Secret excede limite.")
         if any(ord(char) < 32 or ord(char) == 127 for char in secret):
-            raise WatsonFlowContractError("Secret contem controle.")
+            raise InfrastructureContractError("Secret contem controle.")
         object.__setattr__(self, "_secret", secret)
         object.__setattr__(self, "_max_bytes", max_bytes)
 

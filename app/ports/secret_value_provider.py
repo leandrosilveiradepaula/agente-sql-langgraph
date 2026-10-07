@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Any, Literal, Protocol, TypedDict
 
 from app.infrastructure.secrets.sensitive_secret import SensitiveSecret
-from app.integrations.watson.flow_limits import WatsonFlowContractError
+from app.infrastructure.contracts import InfrastructureContractError
 
 
 SecretLookupStatus = Literal[
@@ -20,15 +20,15 @@ SecretLookupStatus = Literal[
 class SecretName(str):
     def __new__(cls, value: str) -> "SecretName":
         if not isinstance(value, str) or not value.strip():
-            raise WatsonFlowContractError("SecretName invalido.")
+            raise InfrastructureContractError("SecretName invalido.")
         text = value.strip()
         if len(text.encode("utf-8")) > 128:
-            raise WatsonFlowContractError("SecretName excede limite.")
+            raise InfrastructureContractError("SecretName excede limite.")
         if any(ord(char) < 32 or ord(char) == 127 for char in text):
-            raise WatsonFlowContractError("SecretName contem controle.")
+            raise InfrastructureContractError("SecretName contem controle.")
         allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
         if any(char not in allowed for char in text):
-            raise WatsonFlowContractError("SecretName deve usar nome estrutural.")
+            raise InfrastructureContractError("SecretName deve usar nome estrutural.")
         return str.__new__(cls, text)
 
 
@@ -57,7 +57,7 @@ _ERROR_MESSAGES = {
 
 def secret_lookup_success(secret: SensitiveSecret) -> SecretLookupResult:
     if not isinstance(secret, SensitiveSecret):
-        raise WatsonFlowContractError("secret deve ser SensitiveSecret.")
+        raise InfrastructureContractError("secret deve ser SensitiveSecret.")
     return {"status": "success", "secret": secret, "diagnostics": {}}
 
 
@@ -67,7 +67,7 @@ def secret_lookup_failure(
     diagnostics: Mapping[str, Any] | None = None,
 ) -> SecretLookupResult:
     if status == "success" or status not in _ERROR_MESSAGES:
-        raise WatsonFlowContractError("status de secret invalido.")
+        raise InfrastructureContractError("status de secret invalido.")
     return {
         "status": status,
         "public_error_code": f"SECRET_{status.upper()}",
