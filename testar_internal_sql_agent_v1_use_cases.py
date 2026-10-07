@@ -11,6 +11,7 @@ from app.application.internal_sql_agent_v1 import (
 from app.application.internal_sql_agent_v1_generate import (
     validate_generate_request,
 )
+from app.application.internal_sql_agent_v1_shared import metadata
 from app.domain.sql_generation import SqlGenerationProviderError
 from testar_grafo_base import SuccessContextRepository
 
@@ -459,8 +460,67 @@ def test_execute_approved_shadow_rejeita_payload_com_secret() -> None:
     assert repairer.calls == 0
 
 
+def test_metadata_expoe_diagnostico_estrutural_dos_gates_sem_sql() -> None:
+    diagnostic = metadata(
+        {
+            "security_result": {
+                "status": "rejected",
+                "tables": ["schema_test.table_extra"],
+                "findings": [
+                    {
+                        "code": "SQL_SECURITY_UNAUTHORIZED_TABLE",
+                        "details": {"table": "schema_test.table_extra"},
+                    }
+                ],
+            },
+            "contract_result": {
+                "status": "rejected",
+                "referenced_tables": [
+                    {
+                        "table": "schema_test.table_test",
+                        "status": "satisfied",
+                        "reason": "present",
+                    }
+                ],
+                "joins": [
+                    {
+                        "left_table": "schema_test.table_test",
+                        "right_table": "schema_test.table_extra",
+                        "status": "violated",
+                        "reason": "join_not_authorized_by_plan",
+                    }
+                ],
+                "findings": [
+                    {
+                        "code": "SQL_CONTRACT_JOIN_VIOLATED",
+                        "details": {"reason": "join_not_authorized_by_plan"},
+                    }
+                ],
+            },
+        }
+    )["gate_diagnostics"]
+
+    assert diagnostic["security"]["available"] is True
+    assert diagnostic["security"]["referenced_tables"] == [
+        "schema_test.table_extra"
+    ]
+    assert diagnostic["contract"]["joins"][0]["status"] == "violated"
+    assert diagnostic["contract"]["joins"][0]["reason"] == (
+        "join_not_authorized_by_plan"
+    )
+
+    serialized = repr(diagnostic).casefold()
+    assert "select " not in serialized
+    assert "current_sql" not in serialized
+    assert "sql_pattern" not in serialized
+    assert "raw_response" not in serialized
+    assert "authorization" not in serialized
+    assert "token" not in serialized
+
+
 def main() -> None:
     tests = [
+        test_metadata_expoe_diagnostico_estrutural_dos_gates_sem_sql,
         test_generate_valido_para_antes_de_execute_sql,
         test_generate_repair_loop_reaplica_gates_e_preflight,
         test_generate_aceita_pergunta_multilinha,
