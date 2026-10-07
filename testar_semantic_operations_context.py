@@ -66,6 +66,12 @@ MIGRATION_V7_PATH = (
     / "migrations"
     / "009_prepare_semantic_planned_metrics_context_v7.sql"
 )
+MIGRATION_V9_PERIOD_PATH = (
+    Path(__file__).resolve().parent
+    / "scripts"
+    / "migrations"
+    / "010_prepare_semantic_period_coverage_context_v9.sql"
+)
 
 
 def _resolver_config_rule() -> dict:
@@ -822,6 +828,69 @@ def _generic_metric_definition_v5() -> dict:
     ]
     definition["priority"] = 35
     return definition
+
+
+def _generic_metric_definition_v9_periods() -> dict:
+    definition = deepcopy(_generic_metric_definition_v5())
+    definition["user_term"] = "metric_total_by_period_period_coverage_v9"
+    definition["business_rule"]["intent_catalog"]["semantic_description"] = (
+        "Resolve perguntas analiticas genericas sobre metricas financeiras "
+        "por periodos relativos ou explicitos e dimensoes autorizadas."
+    )
+    period_concept = _concept(
+        "period_reference",
+        [
+            r"\bultimo mes\b",
+            r"\bultimo mes fechado\b",
+            r"\bultimo periodo\b",
+            r"\bultimo periodo disponivel\b",
+            r"\bmes passado\b",
+            r"\bmes anterior\b",
+            r"\bperiodo anterior\b",
+            r"\bperiodo passado\b",
+            r"\bno mes\b",
+            r"\b(?:19|20)\d{2}\b",
+            r"\btrimestre\b",
+            r"\b(?:primeiro|segundo|terceiro|quarto) trimestre\b",
+            r"\bsemestre\b",
+            r"\b(?:primeiro|segundo) semestre\b",
+            r"\bano atual\b",
+            r"\bano passado\b",
+            r"\bano anterior\b",
+            (
+                r"\b(?:janeiro|fevereiro|marco|abril|maio|junho|julho|"
+                r"agosto|setembro|outubro|novembro|dezembro)\b"
+            ),
+        ],
+        match_mode="regex",
+    )
+    for rule in definition["business_rule"]["intent_catalog"]["rules"]:
+        concepts = rule.get("concepts", [])
+        rule["concepts"] = [
+            deepcopy(period_concept)
+            if concept.get("concept_name") == "period_reference"
+            else concept
+            for concept in concepts
+        ]
+    return definition
+
+
+def _context_v9_periods() -> dict:
+    raw_context = _raw_context()
+    raw_context["semantic_agent_version"] = (
+        "v2.0-ducklake-query-generator-semantic-operations-v9-period-coverage"
+    )
+    raw_context["entidades"] = [
+        entity
+        for entity in raw_context["entidades"]
+        if not (
+            entity.get("entity_type") == "intent_definition"
+            and entity.get("canonical_value") == GENERIC_INTENT
+        )
+    ]
+    raw_context["entidades"].extend(_v4_dimension_mappings())
+    raw_context["entidades"].append(_generic_metric_definition_v9_periods())
+    return normalize_context_snapshot(raw_context)
 
 
 def _resolve(question: str, context: dict | None = None) -> dict:
@@ -1912,6 +1981,48 @@ def test_migration_v4_adiciona_mapeamentos_explicitos_de_dimensao() -> None:
     assert "expected_sql" not in sql
 
 
+def test_contexto_v9_resolve_periodos_explicitos_sem_reduzir_threshold() -> None:
+    context = _context_v9_periods()
+    config = context["intent_resolution"]["config"]
+
+    assert config["minimum_score"] == 100.0
+    assert config["ambiguity_margin"] == 20.0
+
+    questions = [
+        "Qual foi o total de receita no segundo trimestre de 2024?",
+        "Quanto tivemos de custos em setembro de 2025?",
+        "Mostre a receita por unidade em 2026.",
+        "Informe o faturamento consolidado no primeiro semestre de 2023.",
+    ]
+
+    for question in questions:
+        result = _resolve(question, context)
+        assert result["applied"] is True, (question, result)
+        assert result["intent"] == GENERIC_INTENT, (question, result)
+        assert result["best_candidate"] is not None, (question, result)
+        assert result["best_candidate"]["score"] >= 100.0, (question, result)
+
+
+def test_migration_v9_periodos_e_versionada_e_anti_overfitting() -> None:
+    sql = MIGRATION_V9_PERIOD_PATH.read_text(encoding="utf-8")
+
+    assert "semantic-operations-v7'::text" in sql
+    assert "semantic-operations-v9-period-coverage'::text" in sql
+    assert "'metric_total_by_period_period_coverage_v9'" in sql
+    assert '"match_mode": "regex"' in sql
+    assert "\\\\b(?:19|20)\\\\d{2}\\\\b" in sql
+    assert "\\\\btrimestre\\\\b" in sql
+    assert "\\\\bsemestre\\\\b" in sql
+    assert "score\": 140" in sql
+    assert "score\": 130" in sql
+    assert "minimum_score" not in sql
+    assert "ambiguity_margin" not in sql
+    assert "ai_ducklake_benchmarks" not in sql
+    assert "expected_sql" not in sql
+    assert "generated_sql" not in sql
+    assert sql.rstrip().endswith("COMMIT;")
+
+
 def test_inventario_semantico_resume_cobertura_sem_expor_termos() -> None:
     inventory = _intent_semantic_inventory(_context())
     by_intent = {item["intent_name"]: item for item in inventory}
@@ -1939,6 +2050,14 @@ def main() -> None:
         (
             "inventario semantico seguro",
             test_inventario_semantico_resume_cobertura_sem_expor_termos,
+        ),
+        (
+            "contexto v9 periodos explicitos",
+            test_contexto_v9_resolve_periodos_explicitos_sem_reduzir_threshold,
+        ),
+        (
+            "migration v9 periodos anti-overfitting",
+            test_migration_v9_periodos_e_versionada_e_anti_overfitting,
         ),
         (
             "metricas genericas resolvem",
