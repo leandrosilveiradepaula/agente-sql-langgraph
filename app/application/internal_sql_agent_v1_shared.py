@@ -200,7 +200,131 @@ def metadata(state: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(state.get("repair_history"), list)
         else 0,
         "intent_resolution": _intent_resolution_metadata(state),
+        "query_plan": _query_plan_metadata(state),
         "lineage": _lineage(state),
+    }
+
+
+def _query_plan_metadata(
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    Projeta um resumo estrutural do QueryPlan para evidence/benchmark.
+
+    Nao expoe exemplos de perguntas, regras, sql_pattern ou contexto bruto.
+    """
+
+    query_plan = state.get("query_plan")
+    if not isinstance(query_plan, Mapping):
+        return {"available": False}
+
+    planning = query_plan.get("planning_context")
+    if not isinstance(planning, Mapping):
+        planning = {}
+
+    selected_pattern = query_plan.get("selected_pattern")
+    if not isinstance(selected_pattern, Mapping):
+        selected_pattern = {}
+
+    def text_value(value: object) -> str | None:
+        return str(value) if isinstance(value, str) and value else None
+
+    tables: list[str] = []
+    for table in planning.get("required_tables", [])[:16]:
+        if not isinstance(table, Mapping):
+            continue
+        qualified = text_value(table.get("qualified_name"))
+        if qualified:
+            tables.append(qualified)
+
+    dimensions: list[dict[str, Any]] = []
+    for item in planning.get("detected_dimensions", [])[:16]:
+        if not isinstance(item, Mapping):
+            continue
+        dimensions.append(
+            {
+                "canonical_value": text_value(
+                    item.get("canonical_value")
+                ),
+                "target_table": text_value(item.get("target_table")),
+                "target_column": text_value(item.get("target_column")),
+                "grouping_requested": (
+                    item.get("grouping_requested") is True
+                ),
+            }
+        )
+
+    operations: list[dict[str, Any]] = []
+    for item in planning.get("analytical_operations", [])[:16]:
+        if not isinstance(item, Mapping):
+            continue
+        requested_limit = item.get("requested_limit")
+        operations.append(
+            {
+                "operation_type": text_value(
+                    item.get("operation_type")
+                ),
+                "canonical_value": text_value(
+                    item.get("canonical_value")
+                ),
+                "direction": text_value(item.get("direction")),
+                "requested_limit": (
+                    int(requested_limit)
+                    if isinstance(requested_limit, int)
+                    and not isinstance(requested_limit, bool)
+                    else None
+                ),
+                "metric_ref": text_value(item.get("metric_ref")),
+                "operand_metric_refs": [
+                    str(value)
+                    for value in item.get("operand_metric_refs", [])[:8]
+                    if isinstance(value, str) and value
+                ],
+            }
+        )
+
+    metrics: list[dict[str, Any]] = []
+    for item in planning.get("planned_metrics", [])[:16]:
+        if not isinstance(item, Mapping):
+            continue
+        metrics.append(
+            {
+                "metric_ref": text_value(item.get("metric_ref")),
+                "metric_concept": text_value(
+                    item.get("metric_concept")
+                ),
+                "target_table": text_value(item.get("target_table")),
+                "target_column": text_value(item.get("target_column")),
+            }
+        )
+
+    filters: list[dict[str, Any]] = []
+    for item in planning.get("planned_filters", [])[:16]:
+        if not isinstance(item, Mapping):
+            continue
+        filters.append(
+            {
+                "filter_ref": text_value(item.get("filter_ref")),
+                "filter_concept": text_value(
+                    item.get("filter_concept")
+                ),
+                "scope": text_value(item.get("scope")),
+                "required": item.get("required") is True,
+            }
+        )
+
+    return {
+        "available": True,
+        "planner_version": text_value(query_plan.get("planner_version")),
+        "intent_name": text_value(query_plan.get("intent_name")),
+        "selected_pattern_name": text_value(
+            selected_pattern.get("pattern_name")
+        ),
+        "required_tables": tables,
+        "detected_dimensions": dimensions,
+        "analytical_operations": operations,
+        "planned_metrics": metrics,
+        "planned_filters": filters,
     }
 
 
