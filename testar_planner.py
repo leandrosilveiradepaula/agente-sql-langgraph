@@ -1208,6 +1208,35 @@ def test_projeta_catalogo_colunas_e_joins() -> None:
     assert join_rules[0]["target_table"] == "schema_test.table_test"
 
 
+def test_join_rule_com_target_nao_selecionado_e_removida() -> None:
+    context = _context()
+    context["table_catalog"][0]["join_rules"] = [
+        {
+            "source_table": "schema_test.table_test",
+            "target_table": "schema_test.table_other",
+            "condition": "generic",
+        },
+        {
+            "source_table": "schema_test.table_test",
+            "target_table": "schema_test.table_test",
+            "condition": "self generic",
+        },
+    ]
+
+    plan = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="generic analysis",
+    )
+
+    join_rules = plan["query_plan"]["planning_context"]["authorized_joins"][0][
+        "join_rules"
+    ]
+    assert len(join_rules) == 1
+    assert join_rules[0]["target_table"] == "schema_test.table_test"
+
+
 def test_projeta_entidades_relevantes_e_exclui_intent_definition() -> None:
     plan = build_query_plan(
         context=_context(),
@@ -3109,6 +3138,7 @@ def test_planned_filters_vazio_preserva_compatibilidade() -> None:
 
 def main() -> None:
     tests = [
+        test_join_rule_com_target_nao_selecionado_e_removida,
         ("planned filter categoria A", test_planned_filter_categoria_sintetica_a),
         ("planned filter sinonimo", test_planned_filter_sinonimo_preserva_conceito),
         ("planned filter categoria B", test_planned_filter_categoria_b_vem_do_contexto),
