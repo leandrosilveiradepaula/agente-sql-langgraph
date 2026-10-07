@@ -91,6 +91,10 @@ STEPS = [
         [sys.executable, "testar_postgres_intent_catalog_curado_live.py"],
     ),
     (
+        "testar_semantic_context_v10_apply_runner.py",
+        [sys.executable, "testar_semantic_context_v10_apply_runner.py"],
+    ),
+    (
         "testar_build_plan.py",
         [sys.executable, "testar_build_plan.py"],
     ),
