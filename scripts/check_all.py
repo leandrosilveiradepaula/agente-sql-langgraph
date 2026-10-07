@@ -22,10 +22,6 @@ STEPS = [
         [sys.executable, "scripts/check_workspace_hygiene.py"],
     ),
     ("check_dependencies.py", [sys.executable, "scripts/check_dependencies.py"]),
-    (
-        "offline_watson_failure_rehearsal.py",
-        [sys.executable, "scripts/offline_watson_failure_rehearsal.py"],
-    ),
     ("testar_clean_room.py", [sys.executable, "testar_clean_room.py"]),
     (
         "testar_check_no_network.py",
@@ -35,14 +31,6 @@ STEPS = [
     (
         "testar_tracked_runtime_files.py",
         [sys.executable, "testar_tracked_runtime_files.py"],
-    ),
-    (
-        "testar_watson_test_probe_cmd.py",
-        [sys.executable, "testar_watson_test_probe_cmd.py"],
-    ),
-    (
-        "testar_offline_watson_failure_rehearsal.py",
-        [sys.executable, "testar_offline_watson_failure_rehearsal.py"],
     ),
     (
         "testar_workspace_hygiene.py",
@@ -279,70 +267,6 @@ STEPS = [
         [sys.executable, "testar_stdlib_http_transport.py"],
     ),
     (
-        "testar_live_iam_token_provider.py",
-        [sys.executable, "testar_live_iam_token_provider.py"],
-    ),
-    (
-        "testar_live_watson_flow_client.py",
-        [sys.executable, "testar_live_watson_flow_client.py"],
-    ),
-    (
-        "testar_watson_live_bootstrap.py",
-        [sys.executable, "testar_watson_live_bootstrap.py"],
-    ),
-    (
-        "testar_manual_watson_flow_probe.py",
-        [sys.executable, "testar_manual_watson_flow_probe.py"],
-    ),
-    (
-        "testar_watson_test_composition.py",
-        [sys.executable, "testar_watson_test_composition.py"],
-    ),
-    (
-        "testar_watson_test_composition_graph.py",
-        [sys.executable, "testar_watson_test_composition_graph.py"],
-    ),
-    (
-        "testar_offline_watson_test_composition_check.py",
-        [sys.executable, "testar_offline_watson_test_composition_check.py"],
-    ),
-    (
-        "testar_watson_live_offline_integration.py",
-        [sys.executable, "testar_watson_live_offline_integration.py"],
-    ),
-    (
-        "testar_watson_flow_configuration.py",
-        [sys.executable, "testar_watson_flow_configuration.py"],
-    ),
-    (
-        "testar_watson_sql_transport.py",
-        [sys.executable, "testar_watson_sql_transport.py"],
-    ),
-    (
-        "testar_iam_token_contract.py",
-        [sys.executable, "testar_iam_token_contract.py"],
-    ),
-    (
-        "testar_watson_flow_client_contract.py",
-        [sys.executable, "testar_watson_flow_client_contract.py"],
-    ),
-    (
-        "testar_watson_flow_response_normalizer.py",
-        [sys.executable, "testar_watson_flow_response_normalizer.py"],
-    ),
-    (
-        "testar_watson_flow_preflight_adapter.py",
-        [sys.executable, "testar_watson_flow_preflight_adapter.py"],
-    ),
-    (
-        "testar_watson_flow_sql_executor.py",
-        [sys.executable, "testar_watson_flow_sql_executor.py"],
-    ),
-    (
-        "testar_watson_flow_graph_integration.py",
-        [sys.executable, "testar_watson_flow_graph_integration.py"],
-    ),
-    (
         "testar_engine_preflight.py",
         [sys.executable, "testar_engine_preflight.py"],
     ),
@@ -408,8 +332,7 @@ STEPS = [
         [sys.executable, "testar_postgres_context_graph_bootstrap.py"],
     ),
     ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
-    ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),
-]
+    ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),]
 
 if os.environ.get("SQL_AGENT_CLEAN_ROOM") != "1":
     STEPS.append(("pip check", [sys.executable, "-m", "pip", "check"]))

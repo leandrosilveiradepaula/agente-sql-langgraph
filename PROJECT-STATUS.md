@@ -212,3 +212,7 @@ Proceed in this order:
 8. keep `real_sql_execution=false` until a separate explicit promotion decision.
 
 No cutover is claimed.
+
+## Architecture Decision — Watson / IBM Cloud Removal
+
+As of 2026-10-07, Watson and IBM Cloud are removed from the target architecture. The supported direction is Product + n8n + LangGraph with configurable LLM providers. Generic Generate, Repair, Preflight and Execute-Approved contracts remain, but no Watson-specific adapter, IBM IAM dependency, probe, test or runbook is part of the runtime target.
