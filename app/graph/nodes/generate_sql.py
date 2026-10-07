@@ -83,6 +83,7 @@ def create_generate_sql_node(
                 attempt=attempt,
                 details={
                     "exception_type": type(error).__name__,
+                    "provider_reason": error.reason,
                 },
             )
             return _error_state(

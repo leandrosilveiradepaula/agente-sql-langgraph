@@ -181,6 +181,22 @@ def test_falha_provider_vai_para_infra_sem_vazar_resposta() -> None:
     assert "credential=hidden" not in repr(result)
 
 
+def test_provider_reason_sanitizado_entra_no_diagnostico() -> None:
+    generator = FakeSqlGenerator(
+        raises=SqlGenerationProviderError(
+            "provider failed",
+            reason="timeout",
+        )
+    )
+    node = create_generate_sql_node(generator)
+
+    result = node(_state())
+
+    details = result["errors"][0]["details"]
+    assert details["provider_reason"] == "timeout"
+    assert result["errors"][0]["code"] == "SQL_GENERATION_PROVIDER_FAILED"
+
+
 def test_query_plan_ausente_gera_erro_de_contrato() -> None:
     generator = FakeSqlGenerator()
     node = create_generate_sql_node(generator)

@@ -43,8 +43,14 @@ class OpenAiCompatibleSqlGeneratorAdapter:
 
         result = self._client.generate_content(request)
         if not isinstance(result, Mapping) or result.get("status") != "success":
+            reason = (
+                result.get("error_code")
+                if isinstance(result, Mapping)
+                else "provider_failed"
+            )
             raise SqlGenerationProviderError(
-                "Provider OpenAI-compatible falhou de forma sanitizada."
+                "Provider OpenAI-compatible falhou de forma sanitizada.",
+                reason=str(reason or "provider_failed"),
             )
 
         output_text = result.get("output_text")

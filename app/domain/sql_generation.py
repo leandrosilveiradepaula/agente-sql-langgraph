@@ -198,6 +198,34 @@ class SqlGenerationProviderError(RuntimeError):
     Indica falha conhecida do adapter de geracao SQL.
     """
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str = "provider_failed",
+    ) -> None:
+        self.reason = _safe_provider_failure_reason(reason)
+        super().__init__(message)
+
+
+def _safe_provider_failure_reason(value: object) -> str:
+    text = str(value or "").strip().casefold()
+    allowed = {
+        "authentication_failed",
+        "connection_failure",
+        "dns_failure",
+        "invalid_response",
+        "provider_unavailable",
+        "rate_limited",
+        "response_too_large",
+        "secret_invalid",
+        "secret_unavailable",
+        "timeout",
+        "tls_failure",
+        "unexpected_error",
+    }
+    return text if text in allowed else "provider_failed"
+
 
 _PLAN_FIELDS_USED = [
     "planner_version",

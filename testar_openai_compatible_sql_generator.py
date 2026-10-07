@@ -27,7 +27,71 @@ class _Client:
         }
 
 
+
+class _FailingClient:
+    def __init__(self, error_code):
+        self.error_code = error_code
+
+    def generate_content(self, request):
+        return {
+            "status": "failure",
+            "error_code": self.error_code,
+        }
+
+
 class OpenAiCompatibleSqlGeneratorTests(unittest.TestCase):
+    def test_preserves_only_sanitized_provider_failure_reason(self):
+        configuration = OpenAiCompatibleConfiguration(
+            provider_key="local_provider",
+            config_version="v1",
+            api_base_url="https://llm.example.test",
+            model_id="sql-model",
+        )
+        adapter = OpenAiCompatibleSqlGeneratorAdapter(
+            client=_FailingClient("timeout"),
+            configuration=configuration,
+        )
+
+        with self.assertRaises(Exception) as captured:
+            adapter.generate(
+                {
+                    "contract_version": SQL_GENERATION_CONTRACT_VERSION,
+                    "generation_context": {},
+                    "instructions": [],
+                    "output_constraints": [],
+                }
+            )
+
+        self.assertEqual(getattr(captured.exception, "reason", None), "timeout")
+
+    def test_unknown_provider_failure_reason_is_redacted(self):
+        configuration = OpenAiCompatibleConfiguration(
+            provider_key="local_provider",
+            config_version="v1",
+            api_base_url="https://llm.example.test",
+            model_id="sql-model",
+        )
+        adapter = OpenAiCompatibleSqlGeneratorAdapter(
+            client=_FailingClient("token=secret-value"),
+            configuration=configuration,
+        )
+
+        with self.assertRaises(Exception) as captured:
+            adapter.generate(
+                {
+                    "contract_version": SQL_GENERATION_CONTRACT_VERSION,
+                    "generation_context": {},
+                    "instructions": [],
+                    "output_constraints": [],
+                }
+            )
+
+        self.assertEqual(
+            getattr(captured.exception, "reason", None),
+            "provider_failed",
+        )
+        self.assertNotIn("secret-value", repr(captured.exception))
+
     def test_normalizes_provider_result(self):
         configuration = OpenAiCompatibleConfiguration(
             provider_key="local_provider",
