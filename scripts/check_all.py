@@ -95,6 +95,10 @@ STEPS = [
         [sys.executable, "testar_semantic_context_v10_apply_runner.py"],
     ),
     (
+        "testar_postgres_consolidation_inventory.py",
+        [sys.executable, "testar_postgres_consolidation_inventory.py"],
+    ),
+    (
         "testar_build_plan.py",
         [sys.executable, "testar_build_plan.py"],
     ),
