@@ -1994,10 +1994,10 @@ def test_contexto_v8_resolve_periodos_explicitos_sem_reduzir_threshold() -> None
 
     for question in questions:
         result = _resolve(question, context)
-        assert result["applied"] is True
-        assert result["intent"] == GENERIC_INTENT
-        assert result["best_candidate"] is not None
-        assert result["best_candidate"]["score"] >= 100.0
+        assert result["applied"] is True, (question, result)
+        assert result["intent"] == GENERIC_INTENT, (question, result)
+        assert result["best_candidate"] is not None, (question, result)
+        assert result["best_candidate"]["score"] >= 100.0, (question, result)
 
 
 def test_migration_v8_periodos_e_versionada_e_anti_overfitting() -> None:
