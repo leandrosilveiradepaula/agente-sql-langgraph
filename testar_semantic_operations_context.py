@@ -9,6 +9,9 @@ from app.domain.context_normalizer import normalize_context_snapshot
 from app.domain.intent_resolver import resolve_intent
 from app.domain.planner import build_query_plan
 from app.domain.search_text import normalize_search_text
+from validar_postgres_intent_catalog_curado_live import (
+    _intent_semantic_inventory,
+)
 
 
 SEMANTIC_VERSION = (
@@ -1909,8 +1912,34 @@ def test_migration_v4_adiciona_mapeamentos_explicitos_de_dimensao() -> None:
     assert "expected_sql" not in sql
 
 
+def test_inventario_semantico_resume_cobertura_sem_expor_termos() -> None:
+    inventory = _intent_semantic_inventory(_context())
+    by_intent = {item["intent_name"]: item for item in inventory}
+
+    generic = by_intent[GENERIC_INTENT]
+    assert generic["pattern_count"] == 1
+    assert generic["definition_count"] == 1
+    assert generic["rule_count"] == 5
+    assert "financial_metric" in generic["concept_names"]
+    assert "period_reference" in generic["concept_names"]
+    assert generic["effect_counts"]["positive_score"] == 2
+
+    specialized = by_intent["responsavel_centro_custo"]
+    assert specialized["pattern_count"] == 1
+    assert specialized["definition_count"] == 0
+
+    serialized = repr(inventory).casefold()
+    assert "faturamento" not in serialized
+    assert "exemplo documental" not in serialized
+    assert "sql_pattern" not in serialized
+
+
 def main() -> None:
     tests = [
+        (
+            "inventario semantico seguro",
+            test_inventario_semantico_resume_cobertura_sem_expor_termos,
+        ),
         (
             "metricas genericas resolvem",
             test_metricas_financeiras_genericas_resolvem_sem_exemplos,
