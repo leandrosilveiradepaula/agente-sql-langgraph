@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${POSTGRES_DSN:?POSTGRES_DSN must be set outside Git/chat/logs}"
+: "${SEMANTIC_MIGRATION_POSTGRES_DSN:?SEMANTIC_MIGRATION_POSTGRES_DSN must be set outside Git/chat/logs}"
 
 SOURCE_VERSION="v2.0-ducklake-query-generator-semantic-operations-v7"
 V9_VERSION="v2.0-ducklake-query-generator-semantic-operations-v9-period-coverage"
@@ -31,7 +31,7 @@ done
 
 count_version() {
   local version="$1"
-  psql "${POSTGRES_DSN}" -X -A -t -v ON_ERROR_STOP=1     -v agent_version="${version}" <<'SQL'
+  psql "${SEMANTIC_MIGRATION_POSTGRES_DSN}" -X -A -t -v ON_ERROR_STOP=1     -v agent_version="${version}" <<'SQL'
 SELECT
   (SELECT COUNT(*) FROM public.ai_ducklake_agent_rules WHERE agent_version = :'agent_version')
 + (SELECT COUNT(*) FROM public.ai_ducklake_entity_aliases WHERE agent_version = :'agent_version')
@@ -59,7 +59,7 @@ fi
 
 if [[ "${v9_count}" == "0" ]]; then
   echo "APPLY: v9 period coverage"
-  psql "${POSTGRES_DSN}" -X -v ON_ERROR_STOP=1 -f "${V9_SQL}"
+  psql "${SEMANTIC_MIGRATION_POSTGRES_DSN}" -X -v ON_ERROR_STOP=1 -f "${V9_SQL}"
 else
   echo "SKIP: v9 already exists; preserving existing version."
 fi
@@ -71,7 +71,7 @@ if [[ -z "${v9_after}" || "${v9_after}" == "0" ]]; then
 fi
 
 echo "APPLY: v10 curated intents"
-psql "${POSTGRES_DSN}" -X -v ON_ERROR_STOP=1 -f "${V10_SQL}"
+psql "${SEMANTIC_MIGRATION_POSTGRES_DSN}" -X -v ON_ERROR_STOP=1 -f "${V10_SQL}"
 
 v10_after="$(count_version "${V10_VERSION}" | tr -d '[:space:]')"
 if [[ -z "${v10_after}" || "${v10_after}" == "0" ]]; then
