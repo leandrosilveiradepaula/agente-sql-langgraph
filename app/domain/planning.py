@@ -12,7 +12,7 @@ from app.domain.context import (
 )
 
 
-PLANNER_VERSION = "v1.2.0-planned-filter-generation"
+PLANNER_VERSION = "v1.3.0-selected-table-join-filtering"
 
 PlanningDecisionReason = Literal[
     "single_pattern_selected",
