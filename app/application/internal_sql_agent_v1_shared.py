@@ -201,7 +201,131 @@ def metadata(state: Mapping[str, Any]) -> dict[str, Any]:
         else 0,
         "intent_resolution": _intent_resolution_metadata(state),
         "query_plan": _query_plan_metadata(state),
+        "gate_diagnostics": _gate_diagnostics_metadata(state),
         "lineage": _lineage(state),
+    }
+
+
+def _gate_diagnostics_metadata(
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Projeta apenas diagnostico estrutural seguro dos gates."""
+
+    security = state.get("security_result")
+    contract = state.get("contract_result")
+
+    return {
+        "security": _security_gate_diagnostic(security),
+        "contract": _contract_gate_diagnostic(contract),
+    }
+
+
+def _security_gate_diagnostic(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {"available": False}
+
+    tables = [
+        str(item)
+        for item in value.get("tables", [])[:16]
+        if isinstance(item, str) and item
+    ]
+    findings: list[dict[str, Any]] = []
+    for item in value.get("findings", [])[:8]:
+        if not isinstance(item, Mapping):
+            continue
+        details = item.get("details")
+        if not isinstance(details, Mapping):
+            details = {}
+        findings.append(
+            {
+                "code": str(item.get("code") or "") or None,
+                "table": (
+                    str(details.get("table"))
+                    if isinstance(details.get("table"), str)
+                    else None
+                ),
+                "schema": (
+                    str(details.get("schema"))
+                    if isinstance(details.get("schema"), str)
+                    else None
+                ),
+            }
+        )
+
+    return {
+        "available": True,
+        "status": str(value.get("status") or "") or None,
+        "referenced_tables": tables,
+        "findings": findings,
+    }
+
+
+def _contract_gate_diagnostic(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {"available": False}
+
+    referenced_tables: list[dict[str, Any]] = []
+    for item in value.get("referenced_tables", [])[:16]:
+        if not isinstance(item, Mapping):
+            continue
+        referenced_tables.append(
+            {
+                "table": str(item.get("table") or "") or None,
+                "status": str(item.get("status") or "") or None,
+                "reason": str(item.get("reason") or "") or None,
+            }
+        )
+
+    joins: list[dict[str, Any]] = []
+    for item in value.get("joins", [])[:16]:
+        if not isinstance(item, Mapping):
+            continue
+        joins.append(
+            {
+                "left_table": (
+                    str(item.get("left_table"))
+                    if isinstance(item.get("left_table"), str)
+                    else None
+                ),
+                "right_table": (
+                    str(item.get("right_table"))
+                    if isinstance(item.get("right_table"), str)
+                    else None
+                ),
+                "status": str(item.get("status") or "") or None,
+                "reason": str(item.get("reason") or "") or None,
+            }
+        )
+
+    findings: list[dict[str, Any]] = []
+    for item in value.get("findings", [])[:8]:
+        if not isinstance(item, Mapping):
+            continue
+        details = item.get("details")
+        if not isinstance(details, Mapping):
+            details = {}
+        findings.append(
+            {
+                "code": str(item.get("code") or "") or None,
+                "table": (
+                    str(details.get("table"))
+                    if isinstance(details.get("table"), str)
+                    else None
+                ),
+                "reason": (
+                    str(details.get("reason"))
+                    if isinstance(details.get("reason"), str)
+                    else None
+                ),
+            }
+        )
+
+    return {
+        "available": True,
+        "status": str(value.get("status") or "") or None,
+        "referenced_tables": referenced_tables,
+        "joins": joins,
+        "findings": findings,
     }
 
 
