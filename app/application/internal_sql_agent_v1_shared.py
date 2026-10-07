@@ -588,7 +588,7 @@ def _has_forbidden_question_control(value: str) -> bool:
     payloads ambíguos ou invisíveis no contrato interno.
     """
 
-    allowed_whitespace = {"\\t", "\\n", "\\r"}
+    allowed_whitespace = {"\t", "\n", "\r"}
     return any(
         (ord(char) < 32 or ord(char) == 127)
         and char not in allowed_whitespace
