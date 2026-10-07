@@ -3138,7 +3138,10 @@ def test_planned_filters_vazio_preserva_compatibilidade() -> None:
 
 def main() -> None:
     tests = [
-        test_join_rule_com_target_nao_selecionado_e_removida,
+        (
+            "join target nao selecionado removido",
+            test_join_rule_com_target_nao_selecionado_e_removida,
+        ),
         ("planned filter categoria A", test_planned_filter_categoria_sintetica_a),
         ("planned filter sinonimo", test_planned_filter_sinonimo_preserva_conceito),
         ("planned filter categoria B", test_planned_filter_categoria_b_vem_do_contexto),
