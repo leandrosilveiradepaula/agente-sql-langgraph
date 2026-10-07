@@ -15,10 +15,11 @@ def test_runner_exige_confirmacao_e_dsn_externo() -> None:
 
     assert 'CONFIRM_VALUE="APLICAR_CONTEXT_V10"' in text
     assert 'CONFIRM_APPLY' in text
-    assert 'POSTGRES_DSN must be set outside Git/chat/logs' in text
+    assert 'SEMANTIC_MIGRATION_POSTGRES_DSN must be set outside Git/chat/logs' in text
     assert "postgresql://" not in text
     assert "password=" not in text
     assert "PGPASSWORD=" not in text
+    assert 'POSTGRES_DSN:?POSTGRES_DSN' not in text
 
 
 def test_runner_preserva_sequencia_versionada() -> None:
