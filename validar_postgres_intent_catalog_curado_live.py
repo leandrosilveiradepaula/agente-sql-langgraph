@@ -183,17 +183,43 @@ def _load_raw_snapshot(
     return deepcopy(dict(row))
 
 
-def _overlay_definitions(
+def _definition_key(value: Mapping[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(value.get("entity_type") or "").strip().casefold(),
+        str(value.get("user_term") or "").strip().casefold(),
+        str(value.get("canonical_value") or "").strip().casefold(),
+    )
+
+
+def _definition_contract(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "entity_type": str(value.get("entity_type") or "").strip(),
+        "user_term": str(value.get("user_term") or "").strip(),
+        "canonical_value": str(value.get("canonical_value") or "").strip(),
+        "target_table": value.get("target_table"),
+        "target_column": value.get("target_column"),
+        "sql_filter_hint": deepcopy(value.get("sql_filter_hint")),
+        "business_rule": deepcopy(value.get("business_rule")),
+        "priority": value.get("priority"),
+    }
+
+
+def _reconcile_definitions(
     raw_snapshot: dict[str, Any],
     definitions: list[dict[str, Any]],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """Usa definições persistidas equivalentes e sobrepõe apenas as ausentes."""
+
     output = deepcopy(raw_snapshot)
 
     entities = output.get("entidades")
     if not isinstance(entities, list):
         raise ValueError("A coleção física entidades não é uma lista.")
 
-    existing_definition_keys: set[tuple[str, str, str]] = set()
+    existing_by_key: dict[
+        tuple[str, str, str],
+        dict[str, Any],
+    ] = {}
     for entity in entities:
         if not isinstance(entity, Mapping):
             continue
@@ -201,27 +227,36 @@ def _overlay_definitions(
             "intent_definition"
         ):
             continue
-        existing_definition_keys.add(
-            (
-                str(entity.get("entity_type") or "").strip().casefold(),
-                str(entity.get("user_term") or "").strip().casefold(),
-                str(entity.get("canonical_value") or "").strip().casefold(),
+
+        key = _definition_key(entity)
+        if key in existing_by_key:
+            raise ValueError(
+                "A versão selecionada contém definições persistidas "
+                "duplicadas para a mesma chave lógica."
             )
-        )
+        existing_by_key[key] = deepcopy(dict(entity))
+
+    persisted_equivalent = 0
+    overlaid_in_memory = 0
 
     for definition in definitions:
-        key = (
-            str(definition.get("entity_type") or "").strip().casefold(),
-            str(definition.get("user_term") or "").strip().casefold(),
-            str(definition.get("canonical_value") or "").strip().casefold(),
-        )
-        if key in existing_definition_keys:
-            raise ValueError(
-                "A versão selecionada já contém uma definição com a "
-                "mesma chave lógica do catálogo local."
-            )
+        key = _definition_key(definition)
+        existing = existing_by_key.get(key)
+
+        if existing is not None:
+            if _definition_contract(existing) != _definition_contract(
+                definition
+            ):
+                raise ValueError(
+                    "A versão selecionada contém uma definição persistida "
+                    "divergente do catálogo curado local."
+                )
+            persisted_equivalent += 1
+            continue
+
         entities.append(deepcopy(definition))
-        existing_definition_keys.add(key)
+        existing_by_key[key] = deepcopy(definition)
+        overlaid_in_memory += 1
 
     counts = output.get("context_counts")
     if not isinstance(counts, Mapping):
@@ -231,7 +266,11 @@ def _overlay_definitions(
     updated_counts["entidades"] = len(entities)
     output["context_counts"] = updated_counts
     output["entidades"] = entities
-    return output
+    return output, {
+        "persisted_equivalent": persisted_equivalent,
+        "overlaid_in_memory": overlaid_in_memory,
+    }
+
 
 
 def _catalog_coverage(
@@ -547,8 +586,10 @@ def main() -> int:
     print("POSTGRES INTENT CATALOG CURATION — READ ONLY")
     print("=" * 70)
     print(
-        "O catálogo local será sobreposto apenas em memória. "
-        "Nenhum registro será alterado no PostgreSQL."
+        "O catálogo local será reconciliado em memória com a versão "
+        "persistida. Definições equivalentes serão reutilizadas e somente "
+        "definições ausentes serão sobrepostas em memória. Nenhum registro "
+        "será alterado no PostgreSQL."
     )
     print()
 
@@ -597,11 +638,11 @@ def main() -> int:
             semantic_agent_version=semantic_agent_version,
             connect_timeout_seconds=connect_timeout_seconds,
         )
-        overlaid_snapshot = _overlay_definitions(
+        reconciled_snapshot, reconciliation = _reconcile_definitions(
             raw_snapshot,
             definitions,
         )
-        snapshot = normalize_context_snapshot(overlaid_snapshot)
+        snapshot = normalize_context_snapshot(reconciled_snapshot)
         validation = validate_context_snapshot(snapshot)
 
         print()
@@ -610,6 +651,14 @@ def main() -> int:
         print("=" * 70)
         print(f"CATALOG_VERSION: {catalog_version}")
         print(f"LOCAL_DEFINITIONS: {len(definitions)}")
+        print(
+            "PERSISTED_EQUIVALENT_DEFINITIONS: "
+            f"{reconciliation['persisted_equivalent']}"
+        )
+        print(
+            "OVERLAID_IN_MEMORY_DEFINITIONS: "
+            f"{reconciliation['overlaid_in_memory']}"
+        )
         print(f"CONTEXT_VERSION: {snapshot.get('version', '-')}")
         print(
             f"CONTEXT_FINGERPRINT_SIMULATED: "
