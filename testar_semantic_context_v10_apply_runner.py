@@ -14,13 +14,16 @@ def test_runner_exige_confirmacao_e_dsn_externo() -> None:
     text = _text()
 
     assert 'CONFIRM_VALUE="APLICAR_CONTEXT_V10"' in text
-    assert 'CONFIRM_APPLY' in text
-    assert 'SEMANTIC_MIGRATION_POSTGRES_DSN must be set outside Git/chat/logs' in text
-    assert 'POSTGRES_CONTEXT_SCHEMA must be set outside Git/chat/logs' in text
+    assert "CONFIRM_APPLY" in text
+    assert (
+        "SEMANTIC_MIGRATION_POSTGRES_DSN must be set outside Git/chat/logs"
+        in text
+    )
+    assert "POSTGRES_CONTEXT_SCHEMA must be set outside Git/chat/logs" in text
     assert "postgresql://" not in text
     assert ("pass" + "word=") not in text
     assert "PGPASSWORD=" not in text
-    assert 'POSTGRES_DSN:?POSTGRES_DSN' not in text
+    assert "POSTGRES_DSN:?POSTGRES_DSN" not in text
 
 
 def test_runner_preserva_sequencia_versionada() -> None:
@@ -46,50 +49,10 @@ def test_runner_preserva_sequencia_versionada() -> None:
 def test_runner_exige_schema_postgres_valido_e_configuravel() -> None:
     text = _text()
 
-    assert 'POSTGRES_CONTEXT_SCHEMA' in text
-    assert '^[A-Za-z_][A-Za-z0-9_]*
-    text = _text()
-
-    assert 'if [[ "${v10_count}" != "0" ]]' in text
-    assert "v10 already contains records" in text
-    assert "No write performed" in text
-
-
-def test_runner_nao_altera_runtime_ou_official() -> None:
-    text = _text()
-
-    forbidden = (
-        "docker compose",
-        "SEMANTIC_AGENT_VERSION=",
-        "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=true",
-        "n8n",
-        "curl ",
-    )
-    for value in forbidden:
-        assert value not in text
-
-
-def main() -> None:
-    tests = [
-        ("confirmacao e dsn externo", test_runner_exige_confirmacao_e_dsn_externo),
-        ("sequencia versionada", test_runner_preserva_sequencia_versionada),
-        (
-            "schema postgres configuravel",
-            test_runner_exige_schema_postgres_valido_e_configuravel,
-        ),
-        ("v10 preexistente fail closed", test_runner_falha_fechado_para_v10_preexistente),
-        ("sem ativacao runtime", test_runner_nao_altera_runtime_ou_official),
-    ]
-
-    for index, (name, test_function) in enumerate(tests, start=1):
-        test_function()
-        print(f"TESTE {index} - {name}: OK")
-
-
-if __name__ == "__main__":
-    main()
- in text
-    assert 'public.ai_ducklake_' not in text
+    assert "POSTGRES_CONTEXT_SCHEMA" in text
+    assert "A-Za-z0-9_" in text
+    assert "simple PostgreSQL identifier" in text
+    assert "public.ai_ducklake_" not in text
     assert '-v context_schema="${POSTGRES_CONTEXT_SCHEMA}"' in text
 
 
@@ -119,7 +82,14 @@ def main() -> None:
     tests = [
         ("confirmacao e dsn externo", test_runner_exige_confirmacao_e_dsn_externo),
         ("sequencia versionada", test_runner_preserva_sequencia_versionada),
-        ("v10 preexistente fail closed", test_runner_falha_fechado_para_v10_preexistente),
+        (
+            "schema postgres configuravel",
+            test_runner_exige_schema_postgres_valido_e_configuravel,
+        ),
+        (
+            "v10 preexistente fail closed",
+            test_runner_falha_fechado_para_v10_preexistente,
+        ),
         ("sem ativacao runtime", test_runner_nao_altera_runtime_ou_official),
     ]
 
