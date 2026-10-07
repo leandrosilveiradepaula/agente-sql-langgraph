@@ -173,6 +173,81 @@ def test_generate_repair_loop_reaplica_gates_e_preflight() -> None:
     assert repairer.calls == 1
 
 
+def test_generate_aceita_pergunta_multilinha() -> None:
+    use_case, generator, preflight, repairer = _generate_use_case()
+    response = use_case.execute(
+        {
+            "contract_version": "1",
+            "agent_run_id": "agent-run-multiline",
+            "question": (
+                "Execute uma generic analysis de teste.\n"
+                "Detalhe por unidade e período."
+            ),
+            "principal": _principal(),
+        }
+    )
+
+    assert response["status"] == "success"
+    assert generator.calls == 1
+    assert preflight.calls == 1
+    assert repairer.calls == 0
+
+
+def test_generate_rejeita_controle_invisivel_na_pergunta() -> None:
+    use_case, generator, preflight, repairer = _generate_use_case()
+    response = use_case.execute(
+        {
+            "contract_version": "1",
+            "agent_run_id": "agent-run-control",
+            "question": "Execute uma generic analysis.\x00",
+            "principal": _principal(),
+        }
+    )
+
+    assert response["status"] == "rejected"
+    assert any(
+        item["code"] == "INTERNAL_GENERATE_QUESTION_REQUIRED"
+        for item in response["errors"]
+    )
+    assert generator.calls == 0
+    assert preflight.calls == 0
+    assert repairer.calls == 0
+
+
+def test_generate_expoe_resumo_seguro_da_resolucao_de_intencao() -> None:
+    use_case, generator, preflight, repairer = _generate_use_case()
+    response = use_case.execute(
+        {
+            "contract_version": "1",
+            "agent_run_id": "agent-run-intent-diagnostic",
+            "question": "Execute uma generic analysis de teste.",
+            "principal": _principal(),
+        }
+    )
+
+    diagnostic = response["metadata"]["intent_resolution"]
+
+    assert diagnostic["available"] is True
+    assert diagnostic["applied"] is True
+    assert diagnostic["reason"] == "configured_intent_selected"
+    assert diagnostic["resolver_version"]
+    assert diagnostic["best_candidate"]["intent_name"] == (
+        "generic_test_intent"
+    )
+    assert isinstance(diagnostic["minimum_score"], float)
+    assert isinstance(diagnostic["ambiguity_margin"], float)
+
+    serialized = repr(diagnostic).casefold()
+    for forbidden in (
+        "signals",
+        "rules",
+        "business_question_examples",
+        "sql_filter_hint",
+        "raw_pattern",
+    ):
+        assert forbidden not in serialized
+
+
 def test_generate_rejeita_contract_version_invalida() -> None:
     use_case, generator, preflight, repairer = _generate_use_case()
     response = use_case.execute(
@@ -338,6 +413,9 @@ def main() -> None:
     tests = [
         test_generate_valido_para_antes_de_execute_sql,
         test_generate_repair_loop_reaplica_gates_e_preflight,
+        test_generate_aceita_pergunta_multilinha,
+        test_generate_rejeita_controle_invisivel_na_pergunta,
+        test_generate_expoe_resumo_seguro_da_resolucao_de_intencao,
         test_generate_rejeita_contract_version_invalida,
         test_generate_erro_provider_sanitizado,
         test_execute_approved_shadow_valida_sql_sem_generate_ou_execute,
