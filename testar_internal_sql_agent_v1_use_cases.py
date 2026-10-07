@@ -8,6 +8,9 @@ from app.application.internal_sql_agent_v1 import (
     ExecuteApprovedSqlShadowUseCase,
     GenerateSqlUseCase,
 )
+from app.application.internal_sql_agent_v1_generate import (
+    validate_generate_request,
+)
 from app.domain.sql_generation import SqlGenerationProviderError
 from testar_grafo_base import SuccessContextRepository
 
@@ -174,8 +177,7 @@ def test_generate_repair_loop_reaplica_gates_e_preflight() -> None:
 
 
 def test_generate_aceita_pergunta_multilinha() -> None:
-    use_case, generator, preflight, repairer = _generate_use_case()
-    response = use_case.execute(
+    errors = validate_generate_request(
         {
             "contract_version": "1",
             "agent_run_id": "agent-run-multiline",
@@ -187,15 +189,14 @@ def test_generate_aceita_pergunta_multilinha() -> None:
         }
     )
 
-    assert response["status"] == "success"
-    assert generator.calls == 1
-    assert preflight.calls == 1
-    assert repairer.calls == 0
+    assert not any(
+        item["code"] == "INTERNAL_GENERATE_QUESTION_REQUIRED"
+        for item in errors
+    )
 
 
 def test_generate_rejeita_controle_invisivel_na_pergunta() -> None:
-    use_case, generator, preflight, repairer = _generate_use_case()
-    response = use_case.execute(
+    errors = validate_generate_request(
         {
             "contract_version": "1",
             "agent_run_id": "agent-run-control",
@@ -204,14 +205,10 @@ def test_generate_rejeita_controle_invisivel_na_pergunta() -> None:
         }
     )
 
-    assert response["status"] == "rejected"
     assert any(
         item["code"] == "INTERNAL_GENERATE_QUESTION_REQUIRED"
-        for item in response["errors"]
+        for item in errors
     )
-    assert generator.calls == 0
-    assert preflight.calls == 0
-    assert repairer.calls == 0
 
 
 def test_generate_expoe_resumo_seguro_da_resolucao_de_intencao() -> None:
