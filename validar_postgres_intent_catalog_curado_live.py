@@ -290,6 +290,104 @@ def _print_catalog_coverage(
     return not missing
 
 
+def _intent_semantic_inventory(
+    snapshot: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Resume cobertura estrutural por intenção sem expor termos ou exemplos."""
+
+    query_patterns = snapshot.get("query_patterns")
+    intent_resolution = snapshot.get("intent_resolution")
+
+    patterns_by_intent: dict[str, int] = defaultdict(int)
+    if isinstance(query_patterns, list):
+        for pattern in query_patterns:
+            if not isinstance(pattern, Mapping):
+                continue
+            intent_name = str(pattern.get("intent_name") or "").strip()
+            if intent_name:
+                patterns_by_intent[intent_name] += 1
+
+    catalog_by_intent: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    if isinstance(intent_resolution, Mapping):
+        raw_catalog = intent_resolution.get("intent_catalog")
+        if isinstance(raw_catalog, list):
+            for entry in raw_catalog:
+                if not isinstance(entry, Mapping):
+                    continue
+                intent_name = str(entry.get("intent_name") or "").strip()
+                if intent_name:
+                    catalog_by_intent[intent_name].append(entry)
+
+    intent_names = sorted(
+        set(patterns_by_intent) | set(catalog_by_intent),
+        key=str.casefold,
+    )
+    inventory: list[dict[str, Any]] = []
+
+    for intent_name in intent_names:
+        definitions = catalog_by_intent.get(intent_name, [])
+        concept_names: set[str] = set()
+        effect_counts: dict[str, int] = defaultdict(int)
+        rule_count = 0
+
+        for definition in definitions:
+            rules = definition.get("rules")
+            if not isinstance(rules, list):
+                continue
+            for rule in rules:
+                if not isinstance(rule, Mapping):
+                    continue
+                rule_count += 1
+                effect = str(rule.get("effect") or "").strip()
+                if effect:
+                    effect_counts[effect] += 1
+                concepts = rule.get("concepts")
+                if not isinstance(concepts, list):
+                    continue
+                for concept in concepts:
+                    if not isinstance(concept, Mapping):
+                        continue
+                    concept_name = str(
+                        concept.get("concept_name") or ""
+                    ).strip()
+                    if concept_name:
+                        concept_names.add(concept_name)
+
+        inventory.append(
+            {
+                "intent_name": intent_name,
+                "pattern_count": patterns_by_intent.get(intent_name, 0),
+                "definition_count": len(definitions),
+                "rule_count": rule_count,
+                "concept_names": sorted(concept_names, key=str.casefold),
+                "effect_counts": dict(sorted(effect_counts.items())),
+            }
+        )
+
+    return inventory
+
+
+def _print_intent_semantic_inventory(
+    snapshot: Mapping[str, Any],
+) -> None:
+    print()
+    print("INVENTARIO_SEMANTICO_POR_INTENCAO:")
+    for item in _intent_semantic_inventory(snapshot):
+        concepts = ",".join(item["concept_names"]) or "-"
+        effects = ",".join(
+            f"{name}:{count}"
+            for name, count in item["effect_counts"].items()
+        ) or "-"
+        print(
+            f"- {item['intent_name']}: "
+            f"patterns={item['pattern_count']} "
+            f"definitions={item['definition_count']} "
+            f"rules={item['rule_count']} "
+            f"concepts={concepts} "
+            f"effects={effects}"
+        )
+
+
 def _collect_examples(
     query_patterns: Any,
 ) -> list[tuple[str, str, str]]:
@@ -530,6 +628,7 @@ def main() -> int:
             return 4
 
         catalog_coverage_ok = _print_catalog_coverage(snapshot)
+        _print_intent_semantic_inventory(snapshot)
         passed, total = _evaluate_examples(snapshot)
         _evaluate_custom_question(snapshot, custom_question)
 
