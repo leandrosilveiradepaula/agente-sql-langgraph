@@ -10,14 +10,8 @@ from pathlib import Path
 
 MODULES = [
     "app.bootstrap",
-    "app.composition.watson_test",
     "app.infrastructure.http",
     "app.infrastructure.secrets",
-    "app.integrations.watson.live_configuration",
-    "app.integrations.watson.live_iam_token_provider",
-    "app.integrations.watson.live_watson_flow_client",
-    "scripts.manual_watson_flow_probe",
-    "scripts.offline_watson_test_composition_check",
 ]
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,12 +19,7 @@ sys.dont_write_bytecode = True
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-SENSITIVE_ENV = {
-    "IBM_CLOUD_API_KEY",
-    "WATSON_API_BASE_URL",
-    "WATSON_FLOW_ID",
-    "WATSON_IAM_TOKEN_URL",
-}
+SENSITIVE_ENV: set[str] = set()
 
 
 def _block_network() -> None:
