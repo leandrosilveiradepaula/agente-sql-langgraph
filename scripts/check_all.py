@@ -87,6 +87,10 @@ STEPS = [
         [sys.executable, "testar_curated_intent_context.py"],
     ),
     (
+        "testar_postgres_intent_catalog_curado_live.py",
+        [sys.executable, "testar_postgres_intent_catalog_curado_live.py"],
+    ),
+    (
         "testar_build_plan.py",
         [sys.executable, "testar_build_plan.py"],
     ),
