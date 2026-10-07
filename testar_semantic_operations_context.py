@@ -66,11 +66,11 @@ MIGRATION_V7_PATH = (
     / "migrations"
     / "009_prepare_semantic_planned_metrics_context_v7.sql"
 )
-MIGRATION_V8_PERIOD_PATH = (
+MIGRATION_V9_PERIOD_PATH = (
     Path(__file__).resolve().parent
     / "scripts"
     / "migrations"
-    / "010_prepare_semantic_period_coverage_context_v8.sql"
+    / "010_prepare_semantic_period_coverage_context_v9.sql"
 )
 
 
@@ -830,9 +830,9 @@ def _generic_metric_definition_v5() -> dict:
     return definition
 
 
-def _generic_metric_definition_v8_periods() -> dict:
+def _generic_metric_definition_v9_periods() -> dict:
     definition = deepcopy(_generic_metric_definition_v5())
-    definition["user_term"] = "metric_total_by_period_period_coverage_v8"
+    definition["user_term"] = "metric_total_by_period_period_coverage_v9"
     definition["business_rule"]["intent_catalog"]["semantic_description"] = (
         "Resolve perguntas analiticas genericas sobre metricas financeiras "
         "por periodos relativos ou explicitos e dimensoes autorizadas."
@@ -875,10 +875,10 @@ def _generic_metric_definition_v8_periods() -> dict:
     return definition
 
 
-def _context_v8_periods() -> dict:
+def _context_v9_periods() -> dict:
     raw_context = _raw_context()
     raw_context["semantic_agent_version"] = (
-        "v2.0-ducklake-query-generator-semantic-operations-v8-period-coverage"
+        "v2.0-ducklake-query-generator-semantic-operations-v9-period-coverage"
     )
     raw_context["entidades"] = [
         entity
@@ -889,7 +889,7 @@ def _context_v8_periods() -> dict:
         )
     ]
     raw_context["entidades"].extend(_v4_dimension_mappings())
-    raw_context["entidades"].append(_generic_metric_definition_v8_periods())
+    raw_context["entidades"].append(_generic_metric_definition_v9_periods())
     return normalize_context_snapshot(raw_context)
 
 
@@ -1981,8 +1981,8 @@ def test_migration_v4_adiciona_mapeamentos_explicitos_de_dimensao() -> None:
     assert "expected_sql" not in sql
 
 
-def test_contexto_v8_resolve_periodos_explicitos_sem_reduzir_threshold() -> None:
-    context = _context_v8_periods()
+def test_contexto_v9_resolve_periodos_explicitos_sem_reduzir_threshold() -> None:
+    context = _context_v9_periods()
     config = context["intent_resolution"]["config"]
 
     assert config["minimum_score"] == 100.0
@@ -2003,12 +2003,12 @@ def test_contexto_v8_resolve_periodos_explicitos_sem_reduzir_threshold() -> None
         assert result["best_candidate"]["score"] >= 100.0, (question, result)
 
 
-def test_migration_v8_periodos_e_versionada_e_anti_overfitting() -> None:
-    sql = MIGRATION_V8_PERIOD_PATH.read_text(encoding="utf-8")
+def test_migration_v9_periodos_e_versionada_e_anti_overfitting() -> None:
+    sql = MIGRATION_V9_PERIOD_PATH.read_text(encoding="utf-8")
 
     assert "semantic-operations-v7'::text" in sql
-    assert "semantic-operations-v8-period-coverage'::text" in sql
-    assert "'metric_total_by_period_period_coverage_v8'" in sql
+    assert "semantic-operations-v9-period-coverage'::text" in sql
+    assert "'metric_total_by_period_period_coverage_v9'" in sql
     assert '"match_mode": "regex"' in sql
     assert "\\\\b(?:19|20)\\\\d{2}\\\\b" in sql
     assert "\\\\btrimestre\\\\b" in sql
@@ -2052,12 +2052,12 @@ def main() -> None:
             test_inventario_semantico_resume_cobertura_sem_expor_termos,
         ),
         (
-            "contexto v8 periodos explicitos",
-            test_contexto_v8_resolve_periodos_explicitos_sem_reduzir_threshold,
+            "contexto v9 periodos explicitos",
+            test_contexto_v9_resolve_periodos_explicitos_sem_reduzir_threshold,
         ),
         (
-            "migration v8 periodos anti-overfitting",
-            test_migration_v8_periodos_e_versionada_e_anti_overfitting,
+            "migration v9 periodos anti-overfitting",
+            test_migration_v9_periodos_e_versionada_e_anti_overfitting,
         ),
         (
             "metricas genericas resolvem",
