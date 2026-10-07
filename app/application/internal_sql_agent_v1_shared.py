@@ -199,7 +199,103 @@ def metadata(state: Mapping[str, Any]) -> dict[str, Any]:
         "repair_history_count": len(state.get("repair_history", []))
         if isinstance(state.get("repair_history"), list)
         else 0,
+        "intent_resolution": _intent_resolution_metadata(state),
         "lineage": _lineage(state),
+    }
+
+
+def _intent_resolution_metadata(
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    Expõe apenas diagnóstico agregado e seguro da resolução de intenção.
+
+    O objetivo é permitir observabilidade do Shadow sem devolver regras,
+    sinais, exemplos de negócio ou o catálogo bruto ao consumidor.
+    """
+
+    result = state.get("intent_resolution_result")
+    if not isinstance(result, Mapping):
+        return {"available": False}
+
+    configuration = result.get("resolver_configuration")
+    if not isinstance(configuration, Mapping):
+        configuration = {}
+
+    catalog = result.get("intent_catalog")
+    if not isinstance(catalog, Mapping):
+        catalog = {}
+
+    def candidate_summary(value: object) -> dict[str, Any] | None:
+        if not isinstance(value, Mapping):
+            return None
+
+        score = value.get("score")
+        priority = value.get("best_priority")
+
+        return {
+            "intent_name": (
+                str(value.get("intent_name"))
+                if isinstance(value.get("intent_name"), str)
+                else None
+            ),
+            "score": (
+                float(score)
+                if isinstance(score, (int, float))
+                and not isinstance(score, bool)
+                else None
+            ),
+            "best_priority": (
+                float(priority)
+                if isinstance(priority, (int, float))
+                and not isinstance(priority, bool)
+                else None
+            ),
+        }
+
+    minimum_score = configuration.get("minimum_score")
+    ambiguity_margin = configuration.get("ambiguity_margin")
+    entries_evaluated = catalog.get("entries_evaluated")
+
+    return {
+        "available": True,
+        "applied": result.get("applied") is True,
+        "reason": (
+            str(result.get("reason"))
+            if isinstance(result.get("reason"), str)
+            else None
+        ),
+        "resolver_version": (
+            str(result.get("resolver_version"))
+            if isinstance(result.get("resolver_version"), str)
+            else None
+        ),
+        "minimum_score": (
+            float(minimum_score)
+            if isinstance(minimum_score, (int, float))
+            and not isinstance(minimum_score, bool)
+            else None
+        ),
+        "ambiguity_margin": (
+            float(ambiguity_margin)
+            if isinstance(ambiguity_margin, (int, float))
+            and not isinstance(ambiguity_margin, bool)
+            else None
+        ),
+        "best_candidate": candidate_summary(
+            result.get("best_candidate")
+        ),
+        "second_candidate": candidate_summary(
+            result.get("second_candidate")
+        ),
+        "catalog_available": catalog.get("available") is True,
+        "catalog_entries_evaluated": (
+            int(entries_evaluated)
+            if isinstance(entries_evaluated, int)
+            and not isinstance(entries_evaluated, bool)
+            and entries_evaluated >= 0
+            else None
+        ),
     }
 
 
@@ -353,7 +449,27 @@ def _contains_blocked_payload_key(value: object) -> bool:
 
 
 def _valid_question(value: object) -> bool:
-    return isinstance(value, str) and bool(value.strip()) and not _has_control(value)
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and not _has_forbidden_question_control(value)
+    )
+
+
+def _has_forbidden_question_control(value: str) -> bool:
+    """
+    Perguntas podem legitimamente conter tabulação e quebras de linha.
+
+    Outros caracteres de controle continuam bloqueados para evitar
+    payloads ambíguos ou invisíveis no contrato interno.
+    """
+
+    allowed_whitespace = {"\\t", "\\n", "\\r"}
+    return any(
+        (ord(char) < 32 or ord(char) == 127)
+        and char not in allowed_whitespace
+        for char in value
+    )
 
 
 def _valid_identifier(value: object, max_length: int) -> bool:
