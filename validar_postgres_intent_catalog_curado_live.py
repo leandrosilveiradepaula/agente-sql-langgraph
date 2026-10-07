@@ -234,6 +234,62 @@ def _overlay_definitions(
     return output
 
 
+def _catalog_coverage(
+    snapshot: Mapping[str, Any],
+) -> tuple[set[str], set[str], set[str]]:
+    query_patterns = snapshot.get("query_patterns")
+    intent_resolution = snapshot.get("intent_resolution")
+
+    pattern_intents: set[str] = set()
+    if isinstance(query_patterns, list):
+        for pattern in query_patterns:
+            if not isinstance(pattern, Mapping):
+                continue
+            intent_name = str(
+                pattern.get("intent_name") or ""
+            ).strip()
+            if intent_name:
+                pattern_intents.add(intent_name)
+
+    catalog_intents: set[str] = set()
+    if isinstance(intent_resolution, Mapping):
+        raw_catalog = intent_resolution.get("intent_catalog")
+        if isinstance(raw_catalog, list):
+            for entry in raw_catalog:
+                if not isinstance(entry, Mapping):
+                    continue
+                intent_name = str(
+                    entry.get("intent_name") or ""
+                ).strip()
+                if intent_name:
+                    catalog_intents.add(intent_name)
+
+    missing = pattern_intents - catalog_intents
+    extra = catalog_intents - pattern_intents
+    return pattern_intents, catalog_intents, missing | extra
+
+
+def _print_catalog_coverage(
+    snapshot: Mapping[str, Any],
+) -> bool:
+    pattern_intents, catalog_intents, _ = _catalog_coverage(snapshot)
+    missing = sorted(pattern_intents - catalog_intents)
+    extra = sorted(catalog_intents - pattern_intents)
+
+    print()
+    print("COBERTURA_DO_CATALOGO_DE_INTENCOES:")
+    print(f"- query_pattern_intents={len(pattern_intents)}")
+    print(f"- intent_catalog_intents={len(catalog_intents)}")
+    print(f"- missing_catalog_definitions={len(missing)}")
+    for intent_name in missing:
+        print(f"  - {intent_name}")
+    print(f"- catalog_without_query_pattern={len(extra)}")
+    for intent_name in extra:
+        print(f"  - {intent_name}")
+
+    return not missing
+
+
 def _collect_examples(
     query_patterns: Any,
 ) -> list[tuple[str, str, str]]:
@@ -473,16 +529,19 @@ def main() -> int:
                 )
             return 4
 
+        catalog_coverage_ok = _print_catalog_coverage(snapshot)
         passed, total = _evaluate_examples(snapshot)
         _evaluate_custom_question(snapshot, custom_question)
+
+        approved = passed == total and catalog_coverage_ok
 
         print()
         print(
             "CURATION_RESULT: "
-            + ("APPROVED" if passed == total else "REVIEW_REQUIRED")
+            + ("APPROVED" if approved else "REVIEW_REQUIRED")
         )
         print("DIAGNOSTICO_CONCLUIDO: OK")
-        return 0 if passed == total else 5
+        return 0 if approved else 5
 
     except (
         ContextNormalizationError,
