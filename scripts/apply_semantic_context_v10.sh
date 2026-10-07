@@ -2,11 +2,17 @@
 set -euo pipefail
 
 : "${SEMANTIC_MIGRATION_POSTGRES_DSN:?SEMANTIC_MIGRATION_POSTGRES_DSN must be set outside Git/chat/logs}"
+: "${POSTGRES_CONTEXT_SCHEMA:?POSTGRES_CONTEXT_SCHEMA must be set outside Git/chat/logs}"
 
 SOURCE_VERSION="v2.0-ducklake-query-generator-semantic-operations-v7"
 V9_VERSION="v2.0-ducklake-query-generator-semantic-operations-v9-period-coverage"
 V10_VERSION="v2.0-ducklake-query-generator-semantic-operations-v10-curated-intents"
 CONFIRM_VALUE="APLICAR_CONTEXT_V10"
+
+if [[ ! "${POSTGRES_CONTEXT_SCHEMA}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+  echo "ERROR: POSTGRES_CONTEXT_SCHEMA must be a simple PostgreSQL identifier."
+  exit 2
+fi
 
 if [[ "${CONFIRM_APPLY:-}" != "${CONFIRM_VALUE}" ]]; then
   echo "ABORTED: set CONFIRM_APPLY=${CONFIRM_VALUE} to continue."
@@ -31,13 +37,14 @@ done
 
 count_version() {
   local version="$1"
-  psql "${SEMANTIC_MIGRATION_POSTGRES_DSN}" -X -A -t -v ON_ERROR_STOP=1     -v agent_version="${version}" <<'SQL'
+  psql "${SEMANTIC_MIGRATION_POSTGRES_DSN}" -X -A -t -v ON_ERROR_STOP=1 \
+    -v agent_version="${version}" <<SQL
 SELECT
-  (SELECT COUNT(*) FROM public.ai_ducklake_agent_rules WHERE agent_version = :'agent_version')
-+ (SELECT COUNT(*) FROM public.ai_ducklake_entity_aliases WHERE agent_version = :'agent_version')
-+ (SELECT COUNT(*) FROM public.ai_ducklake_dre_mapping WHERE agent_version = :'agent_version')
-+ (SELECT COUNT(*) FROM public.ai_ducklake_sql_patterns WHERE agent_version = :'agent_version')
-+ (SELECT COUNT(*) FROM public.ai_ducklake_table_catalog WHERE agent_version = :'agent_version');
+  (SELECT COUNT(*) FROM "${POSTGRES_CONTEXT_SCHEMA}".ai_ducklake_agent_rules WHERE agent_version = :'agent_version')
++ (SELECT COUNT(*) FROM "${POSTGRES_CONTEXT_SCHEMA}".ai_ducklake_entity_aliases WHERE agent_version = :'agent_version')
++ (SELECT COUNT(*) FROM "${POSTGRES_CONTEXT_SCHEMA}".ai_ducklake_dre_mapping WHERE agent_version = :'agent_version')
++ (SELECT COUNT(*) FROM "${POSTGRES_CONTEXT_SCHEMA}".ai_ducklake_sql_patterns WHERE agent_version = :'agent_version')
++ (SELECT COUNT(*) FROM "${POSTGRES_CONTEXT_SCHEMA}".ai_ducklake_table_catalog WHERE agent_version = :'agent_version');
 SQL
 }
 
@@ -59,7 +66,7 @@ fi
 
 if [[ "${v9_count}" == "0" ]]; then
   echo "APPLY: v9 period coverage"
-  psql "${SEMANTIC_MIGRATION_POSTGRES_DSN}" -X -v ON_ERROR_STOP=1 -f "${V9_SQL}"
+  psql "${SEMANTIC_MIGRATION_POSTGRES_DSN}" -X -v ON_ERROR_STOP=1 -v context_schema="${POSTGRES_CONTEXT_SCHEMA}" -f "${V9_SQL}"
 else
   echo "SKIP: v9 already exists; preserving existing version."
 fi
@@ -71,7 +78,7 @@ if [[ -z "${v9_after}" || "${v9_after}" == "0" ]]; then
 fi
 
 echo "APPLY: v10 curated intents"
-psql "${SEMANTIC_MIGRATION_POSTGRES_DSN}" -X -v ON_ERROR_STOP=1 -f "${V10_SQL}"
+psql "${SEMANTIC_MIGRATION_POSTGRES_DSN}" -X -v ON_ERROR_STOP=1 -v context_schema="${POSTGRES_CONTEXT_SCHEMA}" -f "${V10_SQL}"
 
 v10_after="$(count_version "${V10_VERSION}" | tr -d '[:space:]')"
 if [[ -z "${v10_after}" || "${v10_after}" == "0" ]]; then
