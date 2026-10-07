@@ -12,19 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 CRITICAL_ENTRYPOINTS = (
     "app.bootstrap",
-    "app.composition.watson_test",
     "app.infrastructure.http",
     "app.infrastructure.secrets",
     "app.infrastructure.secrets.environment_secret_provider",
     "app.infrastructure.secrets.sensitive_secret",
     "app.integrations.google_gemini",
     "app.integrations.google_gemini.sql_repairer_adapter",
-    "app.integrations.watson.live_configuration",
-    "app.integrations.watson.live_iam_token_provider",
-    "app.integrations.watson.live_watson_flow_client",
-    "scripts.manual_watson_flow_probe",
-    "scripts.offline_watson_failure_rehearsal",
-    "scripts.offline_watson_test_composition_check",
 )
 
 LOCAL_ROOTS = {"app", "scripts"}
