@@ -30,9 +30,10 @@ resolvido por `binding_ref` e nao deriva de `sql_filter_hint`.
 
 ## Evidencia e GAPs remanescentes
 
-`DEMO-PF-001` fica resolvido somente para Receita. `DEMO-PF-002` mantem
-`dre_custos` em **BLOCKING_FAIL_CLOSED**, pois a evidencia de CMV nao prova o
-escopo da palavra generica "custos". `DEMO-PF-003` mantem
+`DEMO-PF-001` fica resolvido para Receita com binding versionado.
+`DEMO-PF-002` fica resolvido com evidencia versionada e decisao humana explicita
+para o escopo **CMV_ONLY**; o binding `demo-dre-custos-v1` permanece declarativo
+e nao autoriza ativacao automatica. `DEMO-PF-003` mantem
 `dre_despesas_operacionais` em **BLOCKING_FAIL_CLOSED**, pois o conceito cobre
 multiplos grupos e o contrato simples atual nao deve ser estendido ad hoc.
 
@@ -50,7 +51,7 @@ a ativacao integral do pacote permanece desabilitada.
    `demo-dre-receita-v1`.
 4. Confirmar join estruturado por `nk_conta` e que campos TRANSITIONAL nao entram
    no binding.
-5. Confirmar custos e opex sem binding e fail-closed.
+5. Confirmar custos/CMV com binding versionado e decisao humana, mantendo OPEX sem binding e fail-closed.
 6. Executar as regressoes de planner, generator e Contract Gate, que validam o
    contrato generico com dados sinteticos, sem criar comportamento DEMO no motor.
 
