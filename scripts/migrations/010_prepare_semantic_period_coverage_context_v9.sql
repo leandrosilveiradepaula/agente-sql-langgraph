@@ -1,15 +1,17 @@
--- Microetapa semantic-period-coverage-v8
+-- Microetapa semantic-period-coverage-v9
 -- Amplia cobertura temporal da intent generica sem alterar thresholds,
 -- benchmark, Python ou SQL pronta.
 
 BEGIN;
+
+SET LOCAL search_path TO :"context_schema";
 
 WITH versions AS (
   SELECT
     'v2.0-ducklake-query-generator-semantic-operations-v7'::text AS source_version,
     'v2.0-ducklake-query-generator-semantic-operations-v9-period-coverage'::text AS target_version
 )
-INSERT INTO public.ai_ducklake_agent_rules (
+INSERT INTO ai_ducklake_agent_rules (
   agent_version, rule_group, rule_name, rule_content, applies_to_intents,
   validation_hint, severity, priority, is_active
 )
@@ -17,7 +19,7 @@ SELECT
   versions.target_version, source.rule_group, source.rule_name,
   source.rule_content, source.applies_to_intents, source.validation_hint,
   source.severity, source.priority, source.is_active
-FROM public.ai_ducklake_agent_rules source
+FROM ai_ducklake_agent_rules source
 CROSS JOIN versions
 WHERE source.agent_version = versions.source_version
   AND source.is_active = TRUE
@@ -28,7 +30,7 @@ WITH versions AS (
     'v2.0-ducklake-query-generator-semantic-operations-v7'::text AS source_version,
     'v2.0-ducklake-query-generator-semantic-operations-v9-period-coverage'::text AS target_version
 )
-INSERT INTO public.ai_ducklake_entity_aliases (
+INSERT INTO ai_ducklake_entity_aliases (
   agent_version, entity_type, user_term, canonical_value, target_table,
   target_column, sql_filter_hint, business_rule, priority, is_active
 )
@@ -37,7 +39,7 @@ SELECT
   source.canonical_value, source.target_table, source.target_column,
   source.sql_filter_hint, source.business_rule, source.priority,
   source.is_active
-FROM public.ai_ducklake_entity_aliases source
+FROM ai_ducklake_entity_aliases source
 CROSS JOIN versions
 WHERE source.agent_version = versions.source_version
   AND source.is_active = TRUE
@@ -47,7 +49,7 @@ WHERE source.agent_version = versions.source_version
   )
 ON CONFLICT DO NOTHING;
 
-INSERT INTO public.ai_ducklake_entity_aliases (
+INSERT INTO ai_ducklake_entity_aliases (
   agent_version, entity_type, user_term, canonical_value, target_table,
   target_column, sql_filter_hint, business_rule, priority, is_active
 )
@@ -262,7 +264,7 @@ WITH versions AS (
     'v2.0-ducklake-query-generator-semantic-operations-v7'::text AS source_version,
     'v2.0-ducklake-query-generator-semantic-operations-v9-period-coverage'::text AS target_version
 )
-INSERT INTO public.ai_ducklake_dre_mapping (
+INSERT INTO ai_ducklake_dre_mapping (
   agent_version, dre_code, nivel_1_bi, business_description, sign_convention,
   category, is_revenue, is_deduction, is_cost, is_opex,
   is_financial_result, sql_filter_hint, sort_order, is_active
@@ -273,7 +275,7 @@ SELECT
   source.is_revenue, source.is_deduction, source.is_cost, source.is_opex,
   source.is_financial_result, source.sql_filter_hint, source.sort_order,
   source.is_active
-FROM public.ai_ducklake_dre_mapping source
+FROM ai_ducklake_dre_mapping source
 CROSS JOIN versions
 WHERE source.agent_version = versions.source_version
   AND source.is_active = TRUE
@@ -284,7 +286,7 @@ WITH versions AS (
     'v2.0-ducklake-query-generator-semantic-operations-v7'::text AS source_version,
     'v2.0-ducklake-query-generator-semantic-operations-v9-period-coverage'::text AS target_version
 )
-INSERT INTO public.ai_ducklake_sql_patterns (
+INSERT INTO ai_ducklake_sql_patterns (
   agent_version, intent_name, pattern_name, business_question_examples,
   required_tables, required_rules, sql_pattern, notes, priority, is_active
 )
@@ -293,7 +295,7 @@ SELECT
   source.business_question_examples, source.required_tables,
   source.required_rules, source.sql_pattern, source.notes,
   source.priority, source.is_active
-FROM public.ai_ducklake_sql_patterns source
+FROM ai_ducklake_sql_patterns source
 CROSS JOIN versions
 WHERE source.agent_version = versions.source_version
   AND source.is_active = TRUE
@@ -304,7 +306,7 @@ WITH versions AS (
     'v2.0-ducklake-query-generator-semantic-operations-v7'::text AS source_version,
     'v2.0-ducklake-query-generator-semantic-operations-v9-period-coverage'::text AS target_version
 )
-INSERT INTO public.ai_ducklake_table_catalog (
+INSERT INTO ai_ducklake_table_catalog (
   agent_version, table_name, schema_name, table_type, description, grain,
   primary_key, key_columns, metric_columns, date_columns, join_rules,
   ai_hint, priority, is_allowed
@@ -314,7 +316,7 @@ SELECT
   source.table_type, source.description, source.grain, source.primary_key,
   source.key_columns, source.metric_columns, source.date_columns,
   source.join_rules, source.ai_hint, source.priority, source.is_allowed
-FROM public.ai_ducklake_table_catalog source
+FROM ai_ducklake_table_catalog source
 CROSS JOIN versions
 WHERE source.agent_version = versions.source_version
   AND source.is_allowed = TRUE
