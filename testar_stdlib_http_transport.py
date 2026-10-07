@@ -6,7 +6,7 @@ import ssl
 from app.infrastructure.http.http_contracts import HttpHeader, HttpTransportRequest
 from app.infrastructure.http.stdlib_http_transport import StdlibHttpTransport
 from app.infrastructure.secrets.sensitive_secret import SensitiveSecret
-from app.integrations.watson.flow_limits import WatsonFlowContractError
+from app.infrastructure.contracts import InfrastructureContractError
 
 
 class FakeSock:
@@ -110,7 +110,7 @@ def main() -> None:
         raise AssertionError("TLS permissivo deveria falhar.")
     try:
         _request(url="http://example.invalid/path")
-    except WatsonFlowContractError:
+    except InfrastructureContractError:
         pass
     assert conn.requests[0][0] == "POST"
     assert conn.requests[0][1] == "/path"

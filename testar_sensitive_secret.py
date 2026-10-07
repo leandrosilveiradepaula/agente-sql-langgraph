@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 
 from app.infrastructure.secrets.sensitive_secret import SensitiveSecret
-from app.integrations.watson.flow_limits import WatsonFlowContractError
+from app.infrastructure.contracts import InfrastructureContractError
 
 
 def _raises(fn, exc=Exception) -> None:
@@ -17,14 +17,14 @@ def _raises(fn, exc=Exception) -> None:
 def main() -> None:
     secret = SensitiveSecret("secret-test")
     assert secret.reveal_for_transport() == "secret-test"
-    _raises(lambda: SensitiveSecret(""), WatsonFlowContractError)
-    _raises(lambda: SensitiveSecret("   "), WatsonFlowContractError)
-    _raises(lambda: SensitiveSecret("a\0b"), WatsonFlowContractError)
-    _raises(lambda: SensitiveSecret("a\rb"), WatsonFlowContractError)
-    _raises(lambda: SensitiveSecret("a\nb"), WatsonFlowContractError)
-    _raises(lambda: SensitiveSecret("a\x1fb"), WatsonFlowContractError)
+    _raises(lambda: SensitiveSecret(""), InfrastructureContractError)
+    _raises(lambda: SensitiveSecret("   "), InfrastructureContractError)
+    _raises(lambda: SensitiveSecret("a\0b"), InfrastructureContractError)
+    _raises(lambda: SensitiveSecret("a\rb"), InfrastructureContractError)
+    _raises(lambda: SensitiveSecret("a\nb"), InfrastructureContractError)
+    _raises(lambda: SensitiveSecret("a\x1fb"), InfrastructureContractError)
     assert SensitiveSecret("x" * 4, max_bytes=4).reveal_for_transport() == "xxxx"
-    _raises(lambda: SensitiveSecret("xxxxx", max_bytes=4), WatsonFlowContractError)
+    _raises(lambda: SensitiveSecret("xxxxx", max_bytes=4), InfrastructureContractError)
     assert SensitiveSecret("á", max_bytes=2).reveal_for_transport() == "á"
     assert "secret-test" not in repr(secret)
     assert str(secret) == "<redacted>"
@@ -36,7 +36,7 @@ def main() -> None:
     _raises(lambda: setattr(secret, "_secret", "changed"), AttributeError)
     try:
         SensitiveSecret("leak-value", max_bytes=1)
-    except WatsonFlowContractError as error:
+    except InfrastructureContractError as error:
         assert "leak-value" not in str(error)
     else:
         raise AssertionError("Era esperada falha.")

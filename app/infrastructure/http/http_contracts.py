@@ -6,7 +6,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from app.infrastructure.secrets.sensitive_secret import SensitiveSecret
-from app.integrations.watson.flow_limits import WatsonFlowContractError
+from app.infrastructure.contracts import InfrastructureContractError
 
 
 HttpTransportStatus = Literal[
@@ -40,7 +40,7 @@ class HttpHeader:
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", _validate_header_name(self.name))
         if (self.public_value is None) == (self.sensitive_value is None):
-            raise WatsonFlowContractError("Header deve ter exatamente um valor.")
+            raise InfrastructureContractError("Header deve ter exatamente um valor.")
         if self.public_value is not None:
             object.__setattr__(
                 self,
@@ -51,7 +51,7 @@ class HttpHeader:
             self.sensitive_value,
             SensitiveSecret,
         ):
-            raise WatsonFlowContractError("Header sensivel invalido.")
+            raise InfrastructureContractError("Header sensivel invalido.")
 
     def materialize_for_transport(self) -> tuple[str, str]:
         if self.sensitive_value is not None:
@@ -83,33 +83,33 @@ class HttpTransportRequest:
 
     def __post_init__(self) -> None:
         if self.method != "POST":
-            raise WatsonFlowContractError("Metodo HTTP nao permitido.")
+            raise InfrastructureContractError("Metodo HTTP nao permitido.")
         _validate_url(
             self.url,
             allow_query=self.allow_query,
             allow_private_http=self.allow_private_http,
         )
         if not isinstance(self.body, bytes):
-            raise WatsonFlowContractError("body deve ser bytes.")
+            raise InfrastructureContractError("body deve ser bytes.")
         for name in ("connect_timeout_seconds", "read_timeout_seconds"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0 or value > 300:
-                raise WatsonFlowContractError(f"{name} invalido.")
+                raise InfrastructureContractError(f"{name} invalido.")
         if (
             isinstance(self.max_response_bytes, bool)
             or not isinstance(self.max_response_bytes, int)
             or self.max_response_bytes <= 0
             or self.max_response_bytes > 20_000_000
         ):
-            raise WatsonFlowContractError("max_response_bytes invalido.")
+            raise InfrastructureContractError("max_response_bytes invalido.")
         if not isinstance(self.operation_name, str) or not self.operation_name.strip():
-            raise WatsonFlowContractError("operation_name invalido.")
+            raise InfrastructureContractError("operation_name invalido.")
         if self.request_id is not None and (
             not isinstance(self.request_id, str)
             or not self.request_id.strip()
             or _has_control(self.request_id)
         ):
-            raise WatsonFlowContractError("request_id tecnico invalido.")
+            raise InfrastructureContractError("request_id tecnico invalido.")
         _validate_headers(self.headers)
 
     def __repr__(self) -> str:
@@ -130,11 +130,11 @@ class HttpTransportResponse:
 
     def __post_init__(self) -> None:
         if isinstance(self.status_code, bool) or not isinstance(self.status_code, int):
-            raise WatsonFlowContractError("status_code invalido.")
+            raise InfrastructureContractError("status_code invalido.")
         if self.status_code < 100 or self.status_code > 599:
-            raise WatsonFlowContractError("status_code fora do intervalo.")
+            raise InfrastructureContractError("status_code fora do intervalo.")
         if not isinstance(self.body, bytes):
-            raise WatsonFlowContractError("body deve ser bytes.")
+            raise InfrastructureContractError("body deve ser bytes.")
         safe: dict[str, str] = {}
         for key, value in self.headers.items():
             lowered = _validate_header_name(key).casefold()
@@ -147,7 +147,7 @@ class HttpTransportResponse:
             or not isinstance(self.duration_ms, int)
             or self.duration_ms < 0
         ):
-            raise WatsonFlowContractError("duration_ms invalido.")
+            raise InfrastructureContractError("duration_ms invalido.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,7 +161,7 @@ class HttpTransportResult:
     def __post_init__(self) -> None:
         if self.status == "success":
             if not isinstance(self.response, HttpTransportResponse):
-                raise WatsonFlowContractError("response obrigatoria no sucesso.")
+                raise InfrastructureContractError("response obrigatoria no sucesso.")
             return
         if self.status not in {
             "timeout",
@@ -172,9 +172,9 @@ class HttpTransportResult:
             "invalid_response",
             "unexpected_error",
         }:
-            raise WatsonFlowContractError("status HTTP invalido.")
+            raise InfrastructureContractError("status HTTP invalido.")
         if self.response is not None:
-            raise WatsonFlowContractError("falha HTTP nao deve conter response.")
+            raise InfrastructureContractError("falha HTTP nao deve conter response.")
 
     def __repr__(self) -> str:
         return (
@@ -196,7 +196,7 @@ def http_transport_failure(
     diagnostics: dict[str, object] | None = None,
 ) -> HttpTransportResult:
     if status == "success":
-        raise WatsonFlowContractError("Use http_transport_success.")
+        raise InfrastructureContractError("Use http_transport_success.")
     return HttpTransportResult(
         status=status,
         public_error_code=code or f"HTTP_{status.upper()}",
@@ -224,40 +224,40 @@ def sanitize_response_headers(headers: object) -> dict[str, str]:
         if lowered in SAFE_RESPONSE_HEADERS and isinstance(value, str):
             try:
                 output[lowered] = _validate_header_value(value, "response header")
-            except WatsonFlowContractError:
+            except InfrastructureContractError:
                 continue
     return output
 
 
 def _validate_headers(headers: tuple[HttpHeader, ...]) -> None:
     if not isinstance(headers, tuple) or not all(isinstance(h, HttpHeader) for h in headers):
-        raise WatsonFlowContractError("headers devem ser HttpHeader.")
+        raise InfrastructureContractError("headers devem ser HttpHeader.")
     seen_critical: set[str] = set()
     for header in headers:
         lowered = header.name.casefold()
         if lowered in CRITICAL_HEADERS:
             if lowered in seen_critical:
-                raise WatsonFlowContractError("Header critico duplicado.")
+                raise InfrastructureContractError("Header critico duplicado.")
             seen_critical.add(lowered)
 
 
 def _validate_header_name(value: str) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise WatsonFlowContractError("Header name invalido.")
+        raise InfrastructureContractError("Header name invalido.")
     if any(ord(char) < 33 or ord(char) > 126 or char in "()<>@,;:\\\"/[]?={} \t" for char in value):
-        raise WatsonFlowContractError("Header name invalido.")
+        raise InfrastructureContractError("Header name invalido.")
     return value
 
 
 def _validate_header_value(value: str, field_name: str) -> str:
     if not isinstance(value, str):
-        raise WatsonFlowContractError(f"{field_name} invalido.")
+        raise InfrastructureContractError(f"{field_name} invalido.")
     if any(char in value for char in "\r\n\0"):
-        raise WatsonFlowContractError(f"{field_name} contem controle.")
+        raise InfrastructureContractError(f"{field_name} contem controle.")
     try:
         value.encode("latin-1")
     except UnicodeEncodeError as exc:
-        raise WatsonFlowContractError(f"{field_name} deve ser latin-1.") from exc
+        raise InfrastructureContractError(f"{field_name} deve ser latin-1.") from exc
     return value
 
 
@@ -268,37 +268,37 @@ def _validate_url(
     allow_private_http: bool,
 ) -> None:
     if not isinstance(value, str) or not value.strip():
-        raise WatsonFlowContractError("URL invalida.")
+        raise InfrastructureContractError("URL invalida.")
     if _has_control(value):
-        raise WatsonFlowContractError("URL contem controle.")
+        raise InfrastructureContractError("URL contem controle.")
     parsed = urlsplit(value)
     if parsed.scheme not in {"https", "http"}:
-        raise WatsonFlowContractError("Scheme HTTP invalido.")
+        raise InfrastructureContractError("Scheme HTTP invalido.")
     if not parsed.hostname:
-        raise WatsonFlowContractError("Host obrigatorio.")
+        raise InfrastructureContractError("Host obrigatorio.")
     if parsed.scheme == "http":
         if not allow_private_http:
-            raise WatsonFlowContractError("HTTP privado nao permitido.")
+            raise InfrastructureContractError("HTTP privado nao permitido.")
         try:
             host = ip_address(parsed.hostname)
         except ValueError as exc:
-            raise WatsonFlowContractError(
+            raise InfrastructureContractError(
                 "HTTP privado exige IP literal."
             ) from exc
         if not (host.is_private or host.is_loopback or host.is_link_local):
-            raise WatsonFlowContractError(
+            raise InfrastructureContractError(
                 "HTTP privado exige endereco nao-publico."
             )
     if parsed.username or parsed.password:
-        raise WatsonFlowContractError("URL nao permite userinfo.")
+        raise InfrastructureContractError("URL nao permite userinfo.")
     if parsed.fragment:
-        raise WatsonFlowContractError("URL nao permite fragment.")
+        raise InfrastructureContractError("URL nao permite fragment.")
     if parsed.query and not allow_query:
-        raise WatsonFlowContractError("URL nao permite query.")
+        raise InfrastructureContractError("URL nao permite query.")
     if not parsed.path.startswith("/"):
-        raise WatsonFlowContractError("Path absoluto obrigatorio.")
+        raise InfrastructureContractError("Path absoluto obrigatorio.")
     if parsed.port is not None and (parsed.port <= 0 or parsed.port > 65535):
-        raise WatsonFlowContractError("Porta invalida.")
+        raise InfrastructureContractError("Porta invalida.")
 
 
 def _sanitize_diagnostics(value: dict[str, object] | None) -> dict[str, object]:
