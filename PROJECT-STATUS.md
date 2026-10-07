@@ -1,169 +1,214 @@
-﻿# PROJECT-STATUS.md
+# PROJECT-STATUS.md
 
-Date: 2026-09-27
+Date: 2026-10-07
 
 Branch: `main`
 
-HEAD: `bed49790aa94106a846a3a1d243172f5d67a3e36`
+HEAD before PR #36: `8160b35da14329f9c6bb369d8812d0881730e0ba`
 
 ## Current State
 
 LangGraph has not replaced n8n.
 
-The original product remains the operational product. It lives outside this repository at:
+The governed architecture remains hybrid:
 
-`C:\Users\Leandro Silveira\Documents\Codex\2026-06-25\new-chat`
+```text
+Product / Next.js
++ n8n as official operational orchestration
++ LangGraph as semantic/reasoning core in shadow
+```
 
-The original product already has a real Next.js UI/BFF, authentication, session handling, users, levels/profiles, policies, history, admin screens, CSV/PDF export, WhatsApp/Teams adjacent integrations, and the operational two-stage flow used by users.
+Responsibilities remain separated:
 
-This repository contains the LangGraph SQL agent backend work. It is not a second product UI and must not redefine the product experience.
+- Product: interface, authentication, authorization, policies, history and observability.
+- n8n: webhooks, integrations, deterministic orchestration and operational execution.
+- LangGraph: semantic interpretation, intent resolution, context selection, planning, SQL generation/validation, repair proposal and evidence.
+
+No implicit cutover is authorized.
 
 ## Operational Authority
 
-The initial official path remains n8n.
+Current authority is:
 
-The target initial architecture is:
+- OFFICIAL = n8n;
+- SHADOW = LangGraph;
+- real_sql_execution = false for LangGraph shadow.
 
-```text
-Original Product / Next.js BFF
-+ n8n as official operational path
-+ LangGraph as reasoning core in offline asynchronous shadow
-```
+LangGraph shadow must not alter the official answer and must not execute repaired or modified SQL silently.
 
-The browser/UI must not call LangGraph directly. The current UI endpoints remain:
+Generate SQL, repair proposal and execute-approved remain separate lifecycle stages.
 
-- `/api/generate-sql`
-- `/api/execute-watson`
+## LLM Status
 
-Next.js will call the separate Python LangGraph service through internal HTTP when integration is implemented.
+Gemini remains the comparison provider used by the current benchmark baseline for both OFFICIAL and SHADOW so semantic architecture can be isolated from local-model quality.
 
-## LangGraph Role
+Connectivity to the Infodive local provider has been validated separately:
 
-LangGraph is the reasoning core for the SQL lifecycle:
+- provider: `infodive_local`;
+- model: `sql-infodive`;
+- transport: OpenWebUI/Ollama over VPN.
 
-- context loading;
-- intent resolution;
-- deterministic planning;
-- SQL generation;
-- SQL repair;
-- Security Gate;
-- Contract Gate;
-- offline preflight;
-- internal validations;
-- result normalization and controlled lifecycle contracts.
+This validates connectivity only. It does not claim semantic parity.
 
-The graph currently models an end-to-end lifecycle, but the canonical product flow requires two formal backend use cases:
+## Benchmark Baseline
 
-1. Generate SQL.
-2. Execute approved SQL.
+The latest measured 63-question benchmark remains the pre-v9/v10 baseline:
 
-The separation must exist in LangGraph/backend entrypoints, not only in the Next.js BFF.
+- OFFICIAL: 59/63 approved = 93.65%;
+- SHADOW technical success: 8/63;
+- SHADOW rejected: 55/63.
 
-## Gemini Status
+Primary baseline rejection groups:
 
-Offline Gemini SQL Generator and Gemini SQL Repairer providers have been implemented as explicit LangGraph providers. They do not replace n8n, do not make LangGraph official, do not authorize live Watson usage, and do not create benchmark execution.
+- 21 `INTENT_RESOLUTION_MINIMUM_SCORE_NOT_REACHED`;
+- 18 `INTENT_RESOLUTION_AMBIGUOUS`;
+- 10 `SQL_CONTRACT_JOIN_VIOLATED`;
+- 3 `SQL_SECURITY_UNAUTHORIZED_TABLE`;
+- 2 `INTERNAL_GENERATE_QUESTION_REQUIRED`;
+- 1 `SQL_CONTRACT_AMBIGUOUS_COLUMN`.
 
-## Planned Filters Status
+This baseline must not be used as generation context or question-to-SQL lookup.
 
-Microetapa 7 was completed and merged through PR `#18` after microetapa 6.
+No claim is made yet that v9/v10 improved these counts because the 63-question regression has not been rerun after the new semantic context work.
 
-- `main`: `bed49790aa94106a846a3a1d243172f5d67a3e36`
-- Post-merge CI: `Offline validation` green
-- Scope: offline only
-- Deploy: not authorized
-- Supabase: not changed
-- n8n: not changed
-- Runtime activation: not authorized
+## Recent Structural Changes
 
-The offline `planned_filters` flow now supports semantic obligations,
-separate `resolved_filter_bindings`, generator request separation, Contract
-Gate enforcement, structural `join_path` proof and generic multi-value `IN`
-bindings. Multi-value bindings accept only non-empty homogeneous simple literal
-collections; SQL order does not change equivalence, while subqueries,
-expressions, mixed types and `OR` remain fail-closed. Existing scalar bindings
-remain compatible. The `join_path` validation resolves SQL aliases, checks
-table/column/operator, accepts inverted operands and keeps comparisons isolated
-per `JOIN ... ON`.
+Merged changes include:
 
-The DEMO v8 delta remains unapplied:
+- provider failure reasons sanitized for observability;
+- multiline/tab/CRLF question contract handling;
+- safe intent-resolution and QueryPlan metadata;
+- semantic intent coverage inventory;
+- safe Security/Contract Gate diagnostics;
+- planner join filtering now rejects join rules that reference unselected tables;
+- `PLANNER_VERSION = v1.3.0-selected-table-join-filtering`.
 
-- `semantic_context/demo_planned_filters_v8.delta.json` is still an offline
-  proposal;
+The planner join correction is a confirmed structural bug fix. Correlation with historical unauthorized-table failures still requires post-change evidence.
+
+## Semantic Context Versions
+
+### v8 planned-filters
+
+`semantic_context/demo_planned_filters_v8.delta.json` remains declarative and unapplied.
+
 - `automatic_apply=false`;
-- `activation.allowed=false`.
+- `activation.allowed=false`;
+- Receita has a versioned binding;
+- Custos is explicitly scoped as `CMV_ONLY`, backed by versioned evidence and an approved human decision;
+- OPEX / `dre_despesas_operacionais` remains `BLOCKING_FAIL_CLOSED`.
 
-`dre_receita` has a versioned read-only evidence manifest and a complete
-binding for `demo-dre-receita-v1`. `dre_custos` remains
-`BLOCKING_FAIL_CLOSED`, and `dre_despesas_operacionais` remains
-`BLOCKING_FAIL_CLOSED`. Lucro, margem, ROL and derived concepts remain
-unresolved and must not be inferred from the completed Receita binding.
+The v8 delta is not the active runtime context.
 
-## Shadow Status
+### v9 period coverage
 
-Initial shadow is 100% offline:
+Migration merged:
 
-- no Watson TEST real;
-- no real SQL execution;
-- no user-visible result;
-- no rollback or interruption of the official n8n path;
-- asynchronous dispatch required to avoid user-perceived latency.
+`scripts/migrations/010_prepare_semantic_period_coverage_context_v9.sql`
 
-Every official n8n SQL generation must trigger an asynchronous LangGraph shadow run. Every approved-SQL execution event must trigger the corresponding asynchronous LangGraph shadow event, still without real SQL execution initially.
+Purpose:
 
-Shadow persistence must use a separate structure, not `ai_agent_runs.metadata` as the primary store. It should capture all technically allowed evidence needed for full reconstruction and future benchmark, while never storing secrets, credentials, tokens, cookies, or data prohibited by policy/compliance.
+- extend `metric_total_by_period` to explicit years, months, quarters and semesters;
+- keep existing resolver scores and thresholds;
+- remain context-driven rather than Python hardcode.
+
+The migration is merged in source control but this status does not claim it has been applied to PostgreSQL or activated in Shadow.
+
+### v10 curated intents
+
+Migration merged:
+
+`scripts/migrations/011_prepare_semantic_curated_intents_context_v10.sql`
+
+Purpose:
+
+- derive from v9;
+- persist the 9 curated specialized `intent_definition` records from `semantic_context/intent_catalog_curado_v1.json`;
+- preserve `metric_total_by_period`;
+- remove dependence on a local in-memory overlay for those definitions.
+
+The 9 curated definitions have no physical `target_table`, `target_column` or `sql_filter_hint` contract in the definition itself.
+
+The migration is merged in source control but this status does not claim it has been applied to PostgreSQL or activated in Shadow.
+
+## Intent Catalog Coverage
+
+The curated catalog currently contains 9 specialized intent definitions:
+
+- `resultado_por_marca`;
+- `opex_por_marca`;
+- `opex_por_centro_custo`;
+- `orcado_vs_realizado`;
+- `estouro_orcamento`;
+- `dre_mensal`;
+- `comparativo_marcas`;
+- `impacto_setor_marca`;
+- `responsavel_centro_custo`.
+
+The generic semantic evolution also contains `metric_total_by_period`.
+
+The live validator now inventories query-pattern intents versus intent-catalog definitions and reports missing coverage rather than silently treating examples as lookup.
+
+## Security and Least Privilege
+
+Shadow governance remains:
+
+- `langgraph_shadow`: only required evidence persistence privileges; no DELETE;
+- `langgraph_context_reader`: SELECT-only on authorized semantic context tables; no benchmark access and no writes.
+
+No privilege expansion is authorized by v9/v10.
+
+## Observability
+
+Preserve and correlate:
+
+- `agent_run_id`;
+- LangGraph `run_id`;
+- `shadow_record_id`;
+- fingerprints;
+- semantic/context versions;
+- provider/model;
+- token usage when available;
+- status/gates/timeline;
+- correlation metadata;
+- sanitized provider failure reason;
+- intent-resolution diagnostic;
+- QueryPlan diagnostic;
+- Security/Contract Gate structural diagnostic.
+
+Do not persist or expose secrets, DSNs, authorization headers, cookies, API keys or unnecessary raw provider responses.
 
 ## Closed Decisions
 
-- n8n is not being replaced in this phase.
-- n8n remains the official initial flow.
-- LangGraph begins in offline asynchronous shadow.
-- The original product remains authority for authentication, sessions, users, profiles, levels, and policies during stabilization.
-- Browser/UI does not call LangGraph directly.
-- Next.js calls LangGraph via internal HTTP.
-- LangGraph runs as a separate Python service.
-- `/v1/sql-agent/query` is not exposed directly to the UI in this phase.
-- `agent_run_id` identifies the original product run.
-- `run_id` identifies the LangGraph run.
-- Correlation between them may be 1:N.
-- Compatibility layer contract starts at v1.
-- Shadow storage is separate and long-retention, with no purge policy defined now.
-- Benchmark is postponed, but evidence capture starts in Stage 1.
-- Do not create `PRODUCT.md` in this repository in this phase.
+- n8n remains strategic and is not being replaced.
+- deterministic/operational work stays in n8n.
+- semantic/agentic reasoning belongs in LangGraph.
+- Product remains authority for UI, authn/authz, policies and history.
+- benchmark fields are evaluation-only and must not reach generation prompts.
+- business question examples are semantic signals only, never lookup.
+- business knowledge belongs in versioned context/configuration, not new Python/TypeScript hardcode.
+- repaired SQL loses approval and requires reapproval.
+- Shadow remains non-executing until explicit promotion decision.
 
-## Remaining Risks
+## Current Risks
 
-- LangGraph still lacks full integration parity with the original product layers.
-- Two-stage backend use cases still need implementation.
-- Internal HTTP service/runtime topology is not implemented here.
-- Shadow persistence schema and queue/async mechanism are future implementation decisions.
-- Policy mapping from the original product into LangGraph SQL gates still needs implementation design.
-- Future live Watson TEST and real SQL execution require separate explicit authorization.
-- DEMO planned filters v8 is prepared but not applied or activated.
-- `dre_custos` remains `BLOCKING_FAIL_CLOSED` and still needs explicit evidence/versioning before any binding.
-- `dre_despesas_operacionais` remains `BLOCKING_FAIL_CLOSED`. The generic multi-group mechanism now exists, but a versioned semantic rule and evidence-backed binding are still required before any DEMO binding or activation.
-- `sql_filter_hint` and `nivel_1_bi` remain TRANSITIONAL evidence only, not generation or binding contracts.
-
-## Semantic Decision Update — 2026-10-01
-
-A material requirement decision was approved through the AI Product Factory Control Plane: `dre_custos` is CMV-only in this explicitly versioned context.
-
-Microstage 8 versions the existing read-only CMV evidence into offline binding `demo-dre-custos-v1`. This does not activate the v8 delta, does not modify n8n/Supabase/Watson, does not authorize cutover and does not run the postponed 63-question benchmark.
-
-The approved scope does not promote `gasto/gastos`, `custo operacional` or `custo de vendas`. `dre_despesas_operacionais` remains `BLOCKING_FAIL_CLOSED`.
+- v9/v10 are merged in source control but still require controlled PostgreSQL application and read-only live validation before Shadow can select v10.
+- The live catalog validator needed adaptation because v10 persists the curated definitions instead of relying only on overlay; PR #36 addresses this.
+- OPEX planned-filter semantics remain fail-closed pending evidence-backed multi-group binding.
+- Technical success still does not prove semantic correctness.
+- Historical JOIN/security failures must be remeasured after the planner correction and new gate diagnostics.
+- Local `sql-infodive` connectivity is validated, but semantic quality remains a separate test phase.
 
 ## Next Stage
 
-Stage 1: n8n remains official while the Next.js BFF dispatches asynchronous offline LangGraph shadow runs. Every official n8n SQL generation must trigger shadow, and every approved-SQL execution event must trigger its corresponding shadow event.
+Proceed in this order:
+
+1. merge and validate PR #36;
+2. apply v9 then v10 migrations to the semantic context store without changing OFFICIAL n8n;
+3. run the live read-only catalog/context validator against v10;
+4. switch only the LangGraph Shadow semantic context version to v10;
+5. run a small set of new, semantically varied questions to verify generalization and evidence;
+6. only then rerun the 63-question regression for measurement;
+7. compare rejection distribution and semantic quality against the recorded baseline;
+8. keep `real_sql_execution=false` until a separate explicit promotion decision.
 
 No cutover is claimed.
-
-Benchmark remains postponed.
-
-The generic multi-group design has been completed in microetapa 7 without activating any financial concept.
-
-The next semantic work remains evidence/configuration, not a generic engine gap:
-
-1. decide explicitly whether `dre_custos` should mean CMV-only for the relevant context; or
-2. create versioned semantic evidence and a concrete binding for `dre_despesas_operacionais` using the now-supported generic multi-value contract.
-
-Neither path authorizes activation, Supabase changes, deploy, benchmark execution or cutover.
