@@ -3227,7 +3227,7 @@ def _filter_join_rules(
             continue
 
         interpreted_any = True
-        if any(
+        if all(
             reference.casefold() in selected_table_names
             for reference in referenced_tables
         ):
