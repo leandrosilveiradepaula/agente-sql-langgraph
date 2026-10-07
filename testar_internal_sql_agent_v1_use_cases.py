@@ -8,6 +8,9 @@ from app.application.internal_sql_agent_v1 import (
     ExecuteApprovedSqlShadowUseCase,
     GenerateSqlUseCase,
 )
+from app.application.internal_sql_agent_v1_generate import (
+    validate_generate_request,
+)
 from app.domain.sql_generation import SqlGenerationProviderError
 from testar_grafo_base import SuccessContextRepository
 
@@ -171,6 +174,128 @@ def test_generate_repair_loop_reaplica_gates_e_preflight() -> None:
     assert generator.calls == 1
     assert preflight.calls == 2
     assert repairer.calls == 1
+
+
+def test_generate_aceita_pergunta_multilinha() -> None:
+    errors = validate_generate_request(
+        {
+            "contract_version": "1",
+            "agent_run_id": "agent-run-multiline",
+            "question": (
+                "Execute uma generic analysis de teste.\n"
+                "Detalhe por unidade e período."
+            ),
+            "principal": _principal(),
+        }
+    )
+
+    assert not any(
+        item["code"] == "INTERNAL_GENERATE_QUESTION_REQUIRED"
+        for item in errors
+    )
+
+
+def test_generate_aceita_tab_e_crlf_na_pergunta() -> None:
+    for question in (
+        "Execute uma generic analysis\tpor unidade.",
+        "Execute uma generic analysis.\r\nDetalhe por periodo.",
+    ):
+        errors = validate_generate_request(
+            {
+                "contract_version": "1",
+                "agent_run_id": "agent-run-whitespace",
+                "question": question,
+                "principal": _principal(),
+            }
+        )
+
+        assert not any(
+            item["code"] == "INTERNAL_GENERATE_QUESTION_REQUIRED"
+            for item in errors
+        )
+
+
+def test_generate_rejeita_controle_invisivel_na_pergunta() -> None:
+    errors = validate_generate_request(
+        {
+            "contract_version": "1",
+            "agent_run_id": "agent-run-control",
+            "question": "Execute uma generic analysis.\x00",
+            "principal": _principal(),
+        }
+    )
+
+    assert any(
+        item["code"] == "INTERNAL_GENERATE_QUESTION_REQUIRED"
+        for item in errors
+    )
+
+
+def test_generate_expoe_resumo_seguro_da_resolucao_de_intencao() -> None:
+    use_case, generator, preflight, repairer = _generate_use_case()
+    response = use_case.execute(
+        {
+            "contract_version": "1",
+            "agent_run_id": "agent-run-intent-diagnostic",
+            "question": "Execute uma generic analysis de teste.",
+            "principal": _principal(),
+        }
+    )
+
+    diagnostic = response["metadata"]["intent_resolution"]
+
+    assert diagnostic["available"] is True
+    assert diagnostic["applied"] is True
+    assert diagnostic["reason"] == "configured_intent_selected"
+    assert diagnostic["resolver_version"]
+    assert diagnostic["best_candidate"]["intent_name"] == (
+        "generic_test_intent"
+    )
+    assert isinstance(diagnostic["minimum_score"], float)
+    assert isinstance(diagnostic["ambiguity_margin"], float)
+
+    serialized = repr(diagnostic).casefold()
+    for forbidden in (
+        "signals",
+        "rules",
+        "business_question_examples",
+        "sql_filter_hint",
+        "raw_pattern",
+    ):
+        assert forbidden not in serialized
+
+
+def test_generate_expoe_resumo_seguro_do_query_plan() -> None:
+    use_case, generator, preflight, repairer = _generate_use_case()
+    response = use_case.execute(
+        {
+            "contract_version": "1",
+            "agent_run_id": "agent-run-plan-diagnostic",
+            "question": "Execute uma generic analysis de teste.",
+            "principal": _principal(),
+        }
+    )
+
+    plan = response["metadata"]["query_plan"]
+
+    assert plan["available"] is True
+    assert plan["intent_name"] == "generic_test_intent"
+    assert plan["selected_pattern_name"]
+    assert isinstance(plan["required_tables"], list)
+    assert isinstance(plan["detected_dimensions"], list)
+    assert isinstance(plan["analytical_operations"], list)
+    assert isinstance(plan["planned_metrics"], list)
+    assert isinstance(plan["planned_filters"], list)
+
+    serialized = repr(plan).casefold()
+    for forbidden in (
+        "business_question_examples",
+        "sql_pattern",
+        "required_rules",
+        "rule_content",
+        "semantic_description",
+    ):
+        assert forbidden not in serialized
 
 
 def test_generate_rejeita_contract_version_invalida() -> None:
@@ -338,6 +463,11 @@ def main() -> None:
     tests = [
         test_generate_valido_para_antes_de_execute_sql,
         test_generate_repair_loop_reaplica_gates_e_preflight,
+        test_generate_aceita_pergunta_multilinha,
+        test_generate_aceita_tab_e_crlf_na_pergunta,
+        test_generate_rejeita_controle_invisivel_na_pergunta,
+        test_generate_expoe_resumo_seguro_da_resolucao_de_intencao,
+        test_generate_expoe_resumo_seguro_do_query_plan,
         test_generate_rejeita_contract_version_invalida,
         test_generate_erro_provider_sanitizado,
         test_execute_approved_shadow_valida_sql_sem_generate_ou_execute,

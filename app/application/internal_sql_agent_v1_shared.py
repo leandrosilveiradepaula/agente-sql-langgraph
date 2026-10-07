@@ -199,7 +199,227 @@ def metadata(state: Mapping[str, Any]) -> dict[str, Any]:
         "repair_history_count": len(state.get("repair_history", []))
         if isinstance(state.get("repair_history"), list)
         else 0,
+        "intent_resolution": _intent_resolution_metadata(state),
+        "query_plan": _query_plan_metadata(state),
         "lineage": _lineage(state),
+    }
+
+
+def _query_plan_metadata(
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    Projeta um resumo estrutural do QueryPlan para evidence/benchmark.
+
+    Nao expoe exemplos de perguntas, regras, sql_pattern ou contexto bruto.
+    """
+
+    query_plan = state.get("query_plan")
+    if not isinstance(query_plan, Mapping):
+        return {"available": False}
+
+    planning = query_plan.get("planning_context")
+    if not isinstance(planning, Mapping):
+        planning = {}
+
+    selected_pattern = query_plan.get("selected_pattern")
+    if not isinstance(selected_pattern, Mapping):
+        selected_pattern = {}
+
+    def text_value(value: object) -> str | None:
+        return str(value) if isinstance(value, str) and value else None
+
+    tables: list[str] = []
+    for table in planning.get("required_tables", [])[:16]:
+        if not isinstance(table, Mapping):
+            continue
+        qualified = text_value(table.get("qualified_name"))
+        if qualified:
+            tables.append(qualified)
+
+    dimensions: list[dict[str, Any]] = []
+    for item in planning.get("detected_dimensions", [])[:16]:
+        if not isinstance(item, Mapping):
+            continue
+        dimensions.append(
+            {
+                "canonical_value": text_value(
+                    item.get("canonical_value")
+                ),
+                "target_table": text_value(item.get("target_table")),
+                "target_column": text_value(item.get("target_column")),
+                "grouping_requested": (
+                    item.get("grouping_requested") is True
+                ),
+            }
+        )
+
+    operations: list[dict[str, Any]] = []
+    for item in planning.get("analytical_operations", [])[:16]:
+        if not isinstance(item, Mapping):
+            continue
+        requested_limit = item.get("requested_limit")
+        operations.append(
+            {
+                "operation_type": text_value(
+                    item.get("operation_type")
+                ),
+                "canonical_value": text_value(
+                    item.get("canonical_value")
+                ),
+                "direction": text_value(item.get("direction")),
+                "requested_limit": (
+                    int(requested_limit)
+                    if isinstance(requested_limit, int)
+                    and not isinstance(requested_limit, bool)
+                    else None
+                ),
+                "metric_ref": text_value(item.get("metric_ref")),
+                "operand_metric_refs": [
+                    str(value)
+                    for value in item.get("operand_metric_refs", [])[:8]
+                    if isinstance(value, str) and value
+                ],
+            }
+        )
+
+    metrics: list[dict[str, Any]] = []
+    for item in planning.get("planned_metrics", [])[:16]:
+        if not isinstance(item, Mapping):
+            continue
+        metrics.append(
+            {
+                "metric_ref": text_value(item.get("metric_ref")),
+                "metric_concept": text_value(
+                    item.get("metric_concept")
+                ),
+                "target_table": text_value(item.get("target_table")),
+                "target_column": text_value(item.get("target_column")),
+            }
+        )
+
+    filters: list[dict[str, Any]] = []
+    for item in planning.get("planned_filters", [])[:16]:
+        if not isinstance(item, Mapping):
+            continue
+        filters.append(
+            {
+                "filter_ref": text_value(item.get("filter_ref")),
+                "filter_concept": text_value(
+                    item.get("filter_concept")
+                ),
+                "scope": text_value(item.get("scope")),
+                "required": item.get("required") is True,
+            }
+        )
+
+    return {
+        "available": True,
+        "planner_version": text_value(query_plan.get("planner_version")),
+        "intent_name": text_value(query_plan.get("intent_name")),
+        "selected_pattern_name": text_value(
+            selected_pattern.get("pattern_name")
+        ),
+        "required_tables": tables,
+        "detected_dimensions": dimensions,
+        "analytical_operations": operations,
+        "planned_metrics": metrics,
+        "planned_filters": filters,
+    }
+
+
+def _intent_resolution_metadata(
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    Expõe apenas diagnóstico agregado e seguro da resolução de intenção.
+
+    O objetivo é permitir observabilidade do Shadow sem devolver regras,
+    sinais, exemplos de negócio ou o catálogo bruto ao consumidor.
+    """
+
+    result = state.get("intent_resolution_result")
+    if not isinstance(result, Mapping):
+        return {"available": False}
+
+    configuration = result.get("resolver_configuration")
+    if not isinstance(configuration, Mapping):
+        configuration = {}
+
+    catalog = result.get("intent_catalog")
+    if not isinstance(catalog, Mapping):
+        catalog = {}
+
+    def candidate_summary(value: object) -> dict[str, Any] | None:
+        if not isinstance(value, Mapping):
+            return None
+
+        score = value.get("score")
+        priority = value.get("best_priority")
+
+        return {
+            "intent_name": (
+                str(value.get("intent_name"))
+                if isinstance(value.get("intent_name"), str)
+                else None
+            ),
+            "score": (
+                float(score)
+                if isinstance(score, (int, float))
+                and not isinstance(score, bool)
+                else None
+            ),
+            "best_priority": (
+                float(priority)
+                if isinstance(priority, (int, float))
+                and not isinstance(priority, bool)
+                else None
+            ),
+        }
+
+    minimum_score = configuration.get("minimum_score")
+    ambiguity_margin = configuration.get("ambiguity_margin")
+    entries_evaluated = catalog.get("entries_evaluated")
+
+    return {
+        "available": True,
+        "applied": result.get("applied") is True,
+        "reason": (
+            str(result.get("reason"))
+            if isinstance(result.get("reason"), str)
+            else None
+        ),
+        "resolver_version": (
+            str(result.get("resolver_version"))
+            if isinstance(result.get("resolver_version"), str)
+            else None
+        ),
+        "minimum_score": (
+            float(minimum_score)
+            if isinstance(minimum_score, (int, float))
+            and not isinstance(minimum_score, bool)
+            else None
+        ),
+        "ambiguity_margin": (
+            float(ambiguity_margin)
+            if isinstance(ambiguity_margin, (int, float))
+            and not isinstance(ambiguity_margin, bool)
+            else None
+        ),
+        "best_candidate": candidate_summary(
+            result.get("best_candidate")
+        ),
+        "second_candidate": candidate_summary(
+            result.get("second_candidate")
+        ),
+        "catalog_available": catalog.get("available") is True,
+        "catalog_entries_evaluated": (
+            int(entries_evaluated)
+            if isinstance(entries_evaluated, int)
+            and not isinstance(entries_evaluated, bool)
+            and entries_evaluated >= 0
+            else None
+        ),
     }
 
 
@@ -353,7 +573,27 @@ def _contains_blocked_payload_key(value: object) -> bool:
 
 
 def _valid_question(value: object) -> bool:
-    return isinstance(value, str) and bool(value.strip()) and not _has_control(value)
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and not _has_forbidden_question_control(value)
+    )
+
+
+def _has_forbidden_question_control(value: str) -> bool:
+    """
+    Perguntas podem legitimamente conter tabulação e quebras de linha.
+
+    Outros caracteres de controle continuam bloqueados para evitar
+    payloads ambíguos ou invisíveis no contrato interno.
+    """
+
+    allowed_whitespace = {"\t", "\n", "\r"}
+    return any(
+        (ord(char) < 32 or ord(char) == 127)
+        and char not in allowed_whitespace
+        for char in value
+    )
 
 
 def _valid_identifier(value: object, max_length: int) -> bool:
