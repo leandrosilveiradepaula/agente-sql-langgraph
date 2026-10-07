@@ -48,6 +48,8 @@ def test_migration_v10_deriva_da_v9_sem_ativacao_automatica() -> None:
     assert "UPDATE " not in sql
     assert "DELETE " not in sql
     assert "SEMANTIC_AGENT_VERSION" not in sql
+    assert "SET LOCAL search_path TO :\"context_schema\";" in sql
+    assert "public.ai_ducklake_" not in sql
     assert sql.rstrip().endswith("COMMIT;")
 
 
@@ -77,14 +79,14 @@ def test_migration_v10_persiste_catalogo_curado_sem_lookup() -> None:
 def test_migration_v10_nao_cria_regra_de_negocio_no_motor() -> None:
     sql = MIGRATION_PATH.read_text(encoding="utf-8")
 
-    assert "INSERT INTO public.ai_ducklake_entity_aliases" in sql
-    assert "INSERT INTO public.ai_ducklake_agent_rules" in sql
-    assert "INSERT INTO public.ai_ducklake_sql_patterns" in sql
-    assert "INSERT INTO public.ai_ducklake_dre_mapping" in sql
-    assert "INSERT INTO public.ai_ducklake_table_catalog" in sql
+    assert "INSERT INTO ai_ducklake_entity_aliases" in sql
+    assert "INSERT INTO ai_ducklake_agent_rules" in sql
+    assert "INSERT INTO ai_ducklake_sql_patterns" in sql
+    assert "INSERT INTO ai_ducklake_dre_mapping" in sql
+    assert "INSERT INTO ai_ducklake_table_catalog" in sql
 
     definitions_block = sql.split(
-        "INSERT INTO public.ai_ducklake_entity_aliases", 2
+        "INSERT INTO ai_ducklake_entity_aliases", 2
     )[2].split("ON CONFLICT DO NOTHING;", 1)[0]
     assert "'intent_definition'" in definitions_block
     assert "NULL,\n  NULL,\n  NULL," in definitions_block
