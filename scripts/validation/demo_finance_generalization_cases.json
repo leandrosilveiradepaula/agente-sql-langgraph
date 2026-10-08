@@ -1,0 +1,38 @@
+{
+  "suite": "demo-finance-generalization-v1",
+  "purpose": "Evaluation-only semantic generalization suite. expected_intent is compared only after resolver execution and is never supplied to generation.",
+  "cases": [
+    {
+      "question": "Quais unidades de negócio tiveram os maiores valores no último mês fechado?",
+      "expected_intent": "ranking"
+    },
+    {
+      "question": "Quais marcas tiveram os menores valores no ano atual?",
+      "expected_intent": "ranking"
+    },
+    {
+      "question": "Mostre o ranking dos centros de custo por valor no segundo trimestre.",
+      "expected_intent": "ranking"
+    },
+    {
+      "question": "Compare os valores realizados e orçados por unidade de negócio no ano passado.",
+      "expected_intent": "actual_vs_budget"
+    },
+    {
+      "question": "Liste as unidades com menor valor no mês passado.",
+      "expected_intent": "ranking"
+    },
+    {
+      "question": "Compare orçamento e realizado por marca no primeiro semestre.",
+      "expected_intent": "actual_vs_budget"
+    },
+    {
+      "question": "Qual foi o valor por unidade de negócio no último período?",
+      "expected_intent": "realized_analysis"
+    },
+    {
+      "question": "Mostre a evolução do valor por mês no ano atual.",
+      "expected_intent": "trend"
+    }
+  ]
+}

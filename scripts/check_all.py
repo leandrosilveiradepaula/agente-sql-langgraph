@@ -183,6 +183,10 @@ STEPS = [
         [sys.executable, "testar_shadow_test_runtime.py"],
     ),
     (
+        "testar_shadow_semantic_validation_runner.py",
+        [sys.executable, "testar_shadow_semantic_validation_runner.py"],
+    ),
+    (
         "testar_shadow_real_generation_adapters.py",
         [sys.executable, "testar_shadow_real_generation_adapters.py"],
     ),
