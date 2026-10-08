@@ -4,7 +4,7 @@ set -euo pipefail
 : "${SEMANTIC_MIGRATION_POSTGRES_DSN:?SEMANTIC_MIGRATION_POSTGRES_DSN must be set outside Git/chat/logs}"
 : "${POSTGRES_CONTEXT_SCHEMA:?POSTGRES_CONTEXT_SCHEMA must be set outside Git/chat/logs}"
 
-SOURCE_VERSION="demo-finance-v7"
+SOURCE_VERSION="demo-finance-v6"
 TARGET_VERSION="demo-finance-v7"
 CONFIRM_VALUE="APLICAR_DEMO_FINANCE_V7"
 
