@@ -33,6 +33,14 @@ def test_expected_intent_is_not_input_to_resolver() -> None:
     assert "resolve_intent(question, expected_intent" not in text
 
 
+def test_failure_diagnostics_are_structured() -> None:
+    text = RUNNER.read_text(encoding="utf-8")
+    assert '"CANDIDATES:"' in text
+    assert '"DEFAULTS:"' in text
+    assert '"MATCHED_CATALOG_RULES:"' in text
+    assert 'result.get("candidates", [])' in text
+
+
 def test_shell_reuses_running_shadow_without_secrets() -> None:
     text = SHELL.read_text(encoding="utf-8")
     assert "docker exec" in text
@@ -48,6 +56,7 @@ def main() -> None:
     tests = [
         ("evaluation only", test_suite_is_evaluation_only),
         ("expected intent not supplied", test_expected_intent_is_not_input_to_resolver),
+        ("structured failure diagnostics", test_failure_diagnostics_are_structured),
         ("reuse running shadow", test_shell_reuses_running_shadow_without_secrets),
     ]
     for index, (name, function) in enumerate(tests, start=1):

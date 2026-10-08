@@ -72,6 +72,68 @@ def main() -> int:
         )
         print("RESULT:", "PASS" if passed else "FAIL")
 
+        if not passed:
+            print("CANDIDATES:")
+            for candidate in result.get("candidates", []):
+                print(
+                    " ",
+                    candidate["intent_name"],
+                    "score=", candidate["score"],
+                    "positive=", candidate["positive_score"],
+                    "negative=", candidate["negative_score"],
+                )
+
+            print(
+                "DEFAULTS:",
+                [
+                    item.get("concept_name")
+                    for item in result.get(
+                        "semantic_defaults",
+                        {},
+                    ).get("applied", [])
+                ],
+            )
+
+            print("MATCHED_CATALOG_RULES:")
+            for evaluation in result.get(
+                "intent_catalog",
+                {},
+            ).get("evaluations", []):
+                matched_rules = [
+                    rule
+                    for rule in evaluation.get("rules", [])
+                    if rule.get("satisfied")
+                ]
+                if not matched_rules:
+                    continue
+                print(
+                    " ",
+                    evaluation["intent_name"],
+                    "score_delta=", evaluation["score_delta"],
+                )
+                for rule in matched_rules:
+                    concepts = []
+                    for concept in rule.get("concepts", []):
+                        if not concept.get("satisfied"):
+                            continue
+                        concepts.append(
+                            {
+                                "concept": concept.get("concept_name"),
+                                "terms": [
+                                    term.get("term")
+                                    for term in concept.get("terms", [])
+                                    if term.get("matched")
+                                ],
+                            }
+                        )
+                    print(
+                        "   ",
+                        rule.get("rule_name"),
+                        rule.get("effect"),
+                        "score=", rule.get("score"),
+                        "concepts=", concepts,
+                    )
+
     print()
     print(
         "SUMMARY:",
