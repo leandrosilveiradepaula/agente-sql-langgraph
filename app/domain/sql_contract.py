@@ -2574,10 +2574,39 @@ def _join_allowed(
         for rule in raw_rules:
             if not isinstance(rule, Mapping):
                 continue
-            target = str(rule.get("target_table", "")).casefold()
-            if pair == {source, target}:
+            target = _join_rule_target_table(rule)
+            if target is None:
+                continue
+            if _join_pair_matches(
+                pair,
+                source_table=source,
+                target_table=target,
+            ):
                 return True
     return False
+
+
+def _join_rule_target_table(rule: Mapping[str, Any]) -> str | None:
+    for key in ("target_table", "to_table"):
+        value = rule.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().casefold()
+    return None
+
+
+def _join_pair_matches(
+    pair: set[str],
+    *,
+    source_table: str,
+    target_table: str,
+) -> bool:
+    source_candidates = {source_table, source_table.split(".")[-1]}
+    target_candidates = {target_table, target_table.split(".")[-1]}
+    return any(
+        pair == {source, target}
+        for source in source_candidates
+        for target in target_candidates
+    )
 
 
 def _has_uninterpreted_join_policy(
