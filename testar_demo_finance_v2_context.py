@@ -70,6 +70,13 @@ def test_periodo_e_ampliado_sem_reescrever_intents() -> None:
     assert "canonical_value IN (" not in text
 
 
+def test_business_rule_text_e_convertido_explicitamente_para_jsonb() -> None:
+    text = _text()
+    assert "(business_rule::jsonb) -> 'intent_catalog' -> 'rules'" in text
+    assert "(business_rule::jsonb) ? 'intent_catalog'" in text
+    assert "SET business_rule = transformed.new_business_rule::text" in text
+
+
 def main() -> None:
     tests = [
         ("preserva linhagem demo", test_preserva_linhagem_demo),
@@ -85,6 +92,10 @@ def main() -> None:
         (
             "periodo sem reescrever intents",
             test_periodo_e_ampliado_sem_reescrever_intents,
+        ),
+        (
+            "business_rule text com cast jsonb",
+            test_business_rule_text_e_convertido_explicitamente_para_jsonb,
         ),
     ]
     for index, (name, function) in enumerate(tests, start=1):

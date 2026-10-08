@@ -244,25 +244,25 @@ WITH transformed AS (
           ORDER BY ordinality
         )
         FROM jsonb_array_elements(
-          business_rule -> 'intent_catalog' -> 'rules'
+          (business_rule::jsonb) -> 'intent_catalog' -> 'rules'
         ) WITH ORDINALITY AS rules(rule, ordinality)
       )
     ) AS new_business_rule
   FROM ai_ducklake_entity_aliases
   WHERE agent_version = 'demo-finance-v2'
     AND entity_type = 'intent_definition'
-    AND business_rule ? 'intent_catalog'
+    AND (business_rule::jsonb) ? 'intent_catalog'
     AND EXISTS (
       SELECT 1
       FROM jsonb_array_elements(
-        business_rule -> 'intent_catalog' -> 'rules'
+        (business_rule::jsonb) -> 'intent_catalog' -> 'rules'
       ) AS rules(rule)
       WHERE jsonb_array_length(COALESCE(rule -> 'concepts', '[]'::jsonb)) = 1
         AND rule -> 'concepts' -> 0 ->> 'concept_name' = 'period_reference'
     )
 )
 UPDATE ai_ducklake_entity_aliases target
-SET business_rule = transformed.new_business_rule
+SET business_rule = transformed.new_business_rule::text
 FROM transformed
 WHERE target.ctid = transformed.row_id;
 
