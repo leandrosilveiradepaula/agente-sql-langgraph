@@ -31,13 +31,17 @@ if [[ "${REAL_SQL_FLAG}" != "false" ]]; then
   exit 5
 fi
 
-BACKUP="${ENV_FILE}.pre-runtime-$(date +%Y%m%d-%H%M%S)"
-cp -a "${ENV_FILE}" "${BACKUP}"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+ENV_BACKUP="${ENV_FILE}.pre-runtime-${STAMP}"
+COMPOSE_BACKUP="${DEPLOY_DIR}/compose.yaml.pre-runtime-${STAMP}"
+cp -a "${ENV_FILE}" "${ENV_BACKUP}"
+cp -a "${DEPLOY_DIR}/compose.yaml" "${COMPOSE_BACKUP}"
 
 cleanup_on_error() {
   status=$?
   if [[ $status -ne 0 ]]; then
-    cp -a "${BACKUP}" "${ENV_FILE}" || true
+    cp -a "${ENV_BACKUP}" "${ENV_FILE}" || true
+    cp -a "${COMPOSE_BACKUP}" "${DEPLOY_DIR}/compose.yaml" || true
     (
       cd "${DEPLOY_DIR}"
       docker compose -f compose.yaml up -d --force-recreate "${SERVICE}"
@@ -53,26 +57,27 @@ else
   printf '\nLANGGRAPH_COMMIT=%s\n' "${TARGET_COMMIT}" >> "${ENV_FILE}"
 fi
 
-IMAGE_TAG="agente-sql-langgraph-shadow-test:${TARGET_COMMIT:0:12}"
-
-echo "BUILD: ${IMAGE_TAG}"
-docker build   -f "${ROOT_DIR}/deploy/docker/Dockerfile.shadow-test"   -t "${IMAGE_TAG}"   "${ROOT_DIR}"
+IMAGE_TAG="agente-sql-langgraph-shadow-test:${TARGET_COMMIT:0:7}"
 
 cd "${DEPLOY_DIR}"
 
-CURRENT_IMAGE="$(docker compose -f compose.yaml config --images | head -n 1)"
-if [[ -z "${CURRENT_IMAGE}" ]]; then
-  echo "ERROR: could not determine compose image."
+if ! grep -Eq '^[[:space:]]*image:[[:space:]]*agente-sql-langgraph-shadow-test:' compose.yaml; then
+  echo "ERROR: expected Shadow image declaration was not found in compose.yaml."
   exit 6
 fi
 
-if [[ "${CURRENT_IMAGE}" != "${IMAGE_TAG}" ]]; then
-  echo "ERROR: compose image does not track target commit tag."
-  echo "current_image=${CURRENT_IMAGE}"
+sed -Ei   "s#^([[:space:]]*image:[[:space:]]*)agente-sql-langgraph-shadow-test:[^[:space:]]+#\\1${IMAGE_TAG}#"   compose.yaml
+
+CONFIG_IMAGE="$(docker compose -f compose.yaml config --images | head -n 1)"
+if [[ "${CONFIG_IMAGE}" != "${IMAGE_TAG}" ]]; then
+  echo "ERROR: compose image does not match target commit tag."
+  echo "configured_image=${CONFIG_IMAGE}"
   echo "target_image=${IMAGE_TAG}"
   exit 7
 fi
 
+echo "BUILD: ${IMAGE_TAG}"
+docker compose -f compose.yaml build "${SERVICE}"
 docker compose -f compose.yaml up -d --force-recreate "${SERVICE}"
 
 for _ in $(seq 1 90); do
