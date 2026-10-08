@@ -705,6 +705,34 @@ def test_join_autorizado_com_to_table_bare() -> None:
     assert result["joins"][0]["status"] == "satisfied"
 
 
+def test_join_autorizado_com_to_table_bare_e_sql_qualificada() -> None:
+    plan = _with_second_table(authorized_join=False)
+    plan["planning_context"]["authorized_joins"] = [
+        {
+            "source_table": "schema_test.table_test",
+            "join_rules": [{"to_table": "table_other"}],
+            "interpretation": "preserved_selected_table_rules",
+        }
+    ]
+
+    result = _run(
+        "SELECT t.value, o.other_value "
+        "FROM schema_test.table_test AS t "
+        "INNER JOIN schema_test.table_other AS o ON t.id = o.id",
+        plan,
+    )
+
+    assert result["status"] == "approved"
+    assert result["joins"] == [
+        {
+            "left_table": "schema_test.table_test",
+            "right_table": "schema_test.table_other",
+            "status": "satisfied",
+            "reason": "join_matches_authorized_rule",
+        }
+    ]
+
+
 def test_join_divergente() -> None:
     result = _run(
         "SELECT t.value, o.other_value "
