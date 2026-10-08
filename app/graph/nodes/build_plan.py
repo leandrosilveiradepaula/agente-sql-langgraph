@@ -246,6 +246,31 @@ def _project_planner_concept(concept: Any) -> dict[str, Any] | None:
     semantic_signals = _project_semantic_signals(concept)
     if semantic_signals:
         projected["semantic_signals"] = semantic_signals
+        projected["terms"] = [
+            {
+                "matched": True,
+                "normalized_term": str(
+                    signal.get("normalized_term")
+                    or signal.get("term")
+                    or ""
+                ),
+                "match_details": {
+                    "semantic_signal": deepcopy(signal),
+                },
+            }
+            for signal in semantic_signals
+            if (
+                isinstance(
+                    signal.get("normalized_term")
+                    or signal.get("term"),
+                    str,
+                )
+                and str(
+                    signal.get("normalized_term")
+                    or signal.get("term")
+                ).strip()
+            )
+        ]
     return projected
 
 
@@ -268,11 +293,21 @@ def _project_semantic_signals(
             if projected is not None:
                 signals.append(projected)
     output: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str, tuple[str, ...]]] = set()
     for signal in signals:
         key = (
             str(signal.get("concept_name", "")).casefold(),
             str(signal.get("source", "")).casefold(),
+            str(
+                signal.get("normalized_term")
+                or signal.get("term")
+                or ""
+            ).casefold(),
+            tuple(
+                str(token).casefold()
+                for token in signal.get("matched_tokens", [])
+                if isinstance(token, str)
+            ),
         )
         if key in seen:
             continue
@@ -288,7 +323,24 @@ def _project_semantic_signal(signal: Any) -> dict[str, Any] | None:
     source = str(signal.get("source", "")).strip()
     if not concept_name or not source:
         return None
-    return {
+
+    projected: dict[str, Any] = {
         "concept_name": concept_name,
         "source": source,
     }
+    term = signal.get("term")
+    normalized_term = signal.get("normalized_term")
+    matched_tokens = signal.get("matched_tokens")
+
+    if isinstance(term, str) and term.strip():
+        projected["term"] = term.strip()
+    if isinstance(normalized_term, str) and normalized_term.strip():
+        projected["normalized_term"] = normalized_term.strip()
+    if isinstance(matched_tokens, list):
+        projected["matched_tokens"] = [
+            str(token).strip()
+            for token in matched_tokens
+            if isinstance(token, str) and token.strip()
+        ]
+
+    return projected
