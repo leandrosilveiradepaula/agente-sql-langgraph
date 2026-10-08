@@ -24,6 +24,37 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 4
 fi
 
+CONTEXT_DSN="$(sed -n 's/^CONTEXT_POSTGRES_DSN=//p' "${ENV_FILE}" | tail -n 1)"
+CONTEXT_SCHEMA="$(sed -n 's/^POSTGRES_CONTEXT_SCHEMA=//p' "${ENV_FILE}" | tail -n 1)"
+if [[ -z "${CONTEXT_DSN}" || -z "${CONTEXT_SCHEMA}" ]]; then
+  echo "ABORTED: context reader configuration is incomplete."
+  exit 5
+fi
+if [[ ! "${CONTEXT_SCHEMA}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+  echo "ABORTED: POSTGRES_CONTEXT_SCHEMA is invalid."
+  exit 5
+fi
+if ! command -v psql >/dev/null 2>&1; then
+  echo "ABORTED: psql is required for semantic version precheck."
+  exit 5
+fi
+
+TARGET_RECORDS="$(psql "${CONTEXT_DSN}" -X -A -t -v ON_ERROR_STOP=1 -v agent_version="${TARGET_VERSION}" <<SQL
+SELECT
+  (SELECT COUNT(*) FROM "${CONTEXT_SCHEMA}".ai_ducklake_agent_rules WHERE agent_version = :'agent_version')
++ (SELECT COUNT(*) FROM "${CONTEXT_SCHEMA}".ai_ducklake_entity_aliases WHERE agent_version = :'agent_version')
++ (SELECT COUNT(*) FROM "${CONTEXT_SCHEMA}".ai_ducklake_dre_mapping WHERE agent_version = :'agent_version')
++ (SELECT COUNT(*) FROM "${CONTEXT_SCHEMA}".ai_ducklake_sql_patterns WHERE agent_version = :'agent_version')
++ (SELECT COUNT(*) FROM "${CONTEXT_SCHEMA}".ai_ducklake_table_catalog WHERE agent_version = :'agent_version');
+SQL
+)"
+TARGET_RECORDS="$(printf '%s' "${TARGET_RECORDS}" | tr -d '[:space:]')"
+if [[ -z "${TARGET_RECORDS}" || "${TARGET_RECORDS}" == "0" ]]; then
+  echo "ABORTED: semantic version ${TARGET_VERSION} has no context records."
+  exit 5
+fi
+echo "PRECHECK: semantic_agent_version=${TARGET_VERSION} records=${TARGET_RECORDS}"
+
 CURRENT_EXECUTION_FLAG="$(sed -n 's/^LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=//p' "${ENV_FILE}" | tail -n 1)"
 if [[ "${CURRENT_EXECUTION_FLAG}" != "false" ]]; then
   echo "ABORTED: LANGGRAPH_ALLOW_REAL_SQL_EXECUTION must be false."
