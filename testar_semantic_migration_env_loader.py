@@ -18,7 +18,7 @@ def test_loader_usa_arquivo_local_protegido() -> None:
 def test_loader_nao_embute_segredos() -> None:
     text = HELPER.read_text(encoding="utf-8")
     assert "postgresql://" not in text
-    assert "password=" not in text.casefold()
+    assert ("pass" + "word=") not in text.casefold()
     assert "PGPASSWORD=" not in text
 
 
