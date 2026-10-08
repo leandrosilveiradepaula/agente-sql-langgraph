@@ -1101,6 +1101,27 @@ def _binding_context_concepts_from_intent_evidence(
                 "concept_name": concept_name,
                 "sources": sources,
             }
+
+    semantic_defaults = intent_resolution_result.get(
+        "semantic_default_concepts",
+        [],
+    )
+    if isinstance(semantic_defaults, list):
+        for item in semantic_defaults:
+            if not isinstance(item, Mapping):
+                continue
+            concept_name = str(item.get("concept_name", "")).strip()
+            if not concept_name:
+                continue
+            key = concept_name.casefold()
+            concepts.setdefault(
+                key,
+                {
+                    "concept_name": concept_name,
+                    "sources": ["semantic_default"],
+                },
+            )
+
     return [
         concepts[key]
         for key in sorted(concepts, key=str.casefold)
