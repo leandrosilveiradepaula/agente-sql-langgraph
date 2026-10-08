@@ -168,6 +168,20 @@ def _planner_intent_evidence(
     projected: dict[str, Any] = {
         "intent": intent_resolution_result.get("intent"),
     }
+
+    semantic_defaults = intent_resolution_result.get("semantic_defaults")
+    if isinstance(semantic_defaults, Mapping):
+        applied_defaults = semantic_defaults.get("applied")
+        if isinstance(applied_defaults, list):
+            projected["semantic_default_concepts"] = [
+                {"concept_name": str(item.get("concept_name", "")).strip()}
+                for item in applied_defaults
+                if (
+                    isinstance(item, Mapping)
+                    and isinstance(item.get("concept_name"), str)
+                    and item.get("concept_name", "").strip()
+                )
+            ]
     best_candidate = _project_dimension_grouping_candidate(
         intent_resolution_result.get("best_candidate")
     )
