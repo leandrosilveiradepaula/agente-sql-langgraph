@@ -7,9 +7,6 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from app.integrations.openai_compatible.configuration import (
-    load_openai_compatible_configuration,
-)
 from app.test_runtime.composition import create_shadow_test_runtime
 
 
@@ -69,10 +66,8 @@ def main() -> int:
     if runtime.config.allow_real_sql_execution:
         raise RuntimeError("Real SQL execution must remain disabled.")
 
-    local = load_openai_compatible_configuration()
-    if local is None:
-        raise RuntimeError("OpenAI-compatible local provider is not configured.")
 
+    print("PROVIDER: default runtime generator")
     cases = json.loads(
         Path(args.cases).read_text(encoding="utf-8")
     )["cases"]
@@ -86,11 +81,6 @@ def main() -> int:
             "agent_run_id": f"shadow-full-flow-{index}",
             "question": question,
             "principal": {"id": "shadow-validation"},
-            "llm_selection": {
-                "provider_key": local.provider_key,
-                "model_key": local.model_id,
-                "config_version": local.config_version,
-            },
             "correlation_metadata": {
                 "validation_suite":
                     "demo-finance-generalization-full-flow-v1",
