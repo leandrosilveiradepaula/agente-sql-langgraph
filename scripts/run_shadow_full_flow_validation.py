@@ -148,6 +148,20 @@ def main() -> int:
                     separators=(",", ":"),
                 ),
             )
+        query_plan = (
+            metadata.get("query_plan")
+            if isinstance(metadata, dict)
+            else None
+        )
+        if query_plan:
+            print(
+                "QUERY_PLAN:",
+                json.dumps(
+                    query_plan,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            )
         print(
             "SEMANTIC_RESULT:",
             "PASS" if semantic_passed else "FAIL",
