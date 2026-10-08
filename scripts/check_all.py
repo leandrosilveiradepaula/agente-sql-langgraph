@@ -83,6 +83,10 @@ STEPS = [
         [sys.executable, "testar_demo_finance_v3_context.py"],
     ),
     (
+        "testar_demo_finance_v4_context.py",
+        [sys.executable, "testar_demo_finance_v4_context.py"],
+    ),
+    (
         "testar_curated_intent_context.py",
         [sys.executable, "testar_curated_intent_context.py"],
     ),
