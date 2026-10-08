@@ -2600,13 +2600,28 @@ def _join_pair_matches(
     source_table: str,
     target_table: str,
 ) -> bool:
-    source_candidates = {source_table, source_table.split(".")[-1]}
-    target_candidates = {target_table, target_table.split(".")[-1]}
-    return any(
-        pair == {source, target}
-        for source in source_candidates
-        for target in target_candidates
-    )
+    if len(pair) != 2:
+        return False
+
+    source = source_table.casefold()
+    target = target_table.casefold()
+    source_bare = source.split(".")[-1]
+    target_bare = target.split(".")[-1]
+
+    for left, right in ((item, other) for item in pair for other in pair if item != other):
+        left_key = left.casefold()
+        right_key = right.casefold()
+        source_matches = (
+            left_key == source
+            or left_key.split(".")[-1] == source_bare
+        )
+        target_matches = (
+            right_key == target
+            or right_key.split(".")[-1] == target_bare
+        )
+        if source_matches and target_matches:
+            return True
+    return False
 
 
 def _has_uninterpreted_join_policy(
