@@ -170,7 +170,7 @@ VALUES
 ON CONFLICT DO NOTHING;
 
 -- Amplia apenas regras de catalogo que ja possuam um conceito isolado
--- period_reference. Nao altera score, prioridade, minimum_score ou margem.
+-- period_reference. Nao altera configuracao de resolucao, score ou prioridade.
 -- A transformacao e estrutural: preserva regras/intents existentes e amplia
 -- termos relativos, alem de aceitar anos explicitos por regex.
 WITH transformed AS (
