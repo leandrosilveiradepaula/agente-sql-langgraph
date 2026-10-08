@@ -177,7 +177,7 @@ WITH transformed AS (
   SELECT
     ctid AS row_id,
     jsonb_set(
-      business_rule,
+      business_rule::jsonb,
       '{intent_catalog,rules}',
       (
         SELECT jsonb_agg(

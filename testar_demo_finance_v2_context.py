@@ -75,6 +75,7 @@ def test_business_rule_text_e_convertido_explicitamente_para_jsonb() -> None:
     assert "(business_rule::jsonb) -> 'intent_catalog' -> 'rules'" in text
     assert "(business_rule::jsonb) ? 'intent_catalog'" in text
     assert "SET business_rule = transformed.new_business_rule::text" in text
+    assert "jsonb_set(\n      business_rule::jsonb," in text
 
 
 def main() -> None:
