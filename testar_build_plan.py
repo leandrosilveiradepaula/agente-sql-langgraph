@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from app.graph.nodes.build_plan import build_plan
+from app.graph.nodes.build_plan import (
+    _planner_intent_evidence,
+    build_plan,
+)
 from app.graph.state import GraphState
 from testar_planner import _context, _pattern
 
@@ -78,6 +81,73 @@ def test_build_plan_required_table_inexistente_rejeita() -> None:
     assert "PLANNING_REQUIRED_TABLE_NOT_FOUND" in _error_codes(result)
 
 
+def test_planner_evidence_preserva_sinal_semantico_seguro() -> None:
+    raw = {
+        "intent": "generic_test_intent",
+        "best_candidate": {
+            "intent_name": "generic_test_intent",
+            "matches": [
+                {
+                    "match_details": {
+                        "concepts": [
+                            {
+                                "concept_name": "financial_metric",
+                                "satisfied": True,
+                                "semantic_signals": [
+                                    {
+                                        "concept_name": "financial_metric",
+                                        "term": "amount",
+                                        "normalized_term": "amount",
+                                        "source": "intent_catalog_concept",
+                                        "confidence": 1.0,
+                                        "matched_tokens": ["amount"],
+                                    }
+                                ],
+                            },
+                            {
+                                "concept_name": "analytical_operation",
+                                "satisfied": True,
+                                "semantic_signals": [
+                                    {
+                                        "concept_name": "analytical_operation",
+                                        "term": "highest",
+                                        "normalized_term": "highest",
+                                        "source": "intent_catalog_concept",
+                                        "confidence": 1.0,
+                                        "matched_tokens": ["highest"],
+                                    }
+                                ],
+                            },
+                        ]
+                    }
+                }
+            ],
+        },
+    }
+
+    projected = _planner_intent_evidence(raw)
+
+    assert projected is not None
+    concepts = projected["best_candidate"]["matches"][0][
+        "match_details"
+    ]["concepts"]
+    metric = next(
+        item for item in concepts
+        if item["concept_name"] == "financial_metric"
+    )
+    operation = next(
+        item for item in concepts
+        if item["concept_name"] == "analytical_operation"
+    )
+
+    assert metric["terms"][0]["matched"] is True
+    assert metric["terms"][0]["normalized_term"] == "amount"
+    assert metric["terms"][0]["match_details"]["semantic_signal"][
+        "matched_tokens"
+    ] == ["amount"]
+    assert operation["terms"][0]["normalized_term"] == "highest"
+
+
 def main() -> None:
     tests = [
         ("build_plan sucesso", test_build_plan_sucesso_sem_mutacao),
@@ -92,6 +162,10 @@ def main() -> None:
         (
             "build_plan required_table inexistente",
             test_build_plan_required_table_inexistente_rejeita,
+        ),
+        (
+            "planner preserva evidencia semantica segura",
+            test_planner_evidence_preserva_sinal_semantico_seguro,
         ),
     ]
 
