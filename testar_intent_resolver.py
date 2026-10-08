@@ -1631,6 +1631,35 @@ def test_termo_composto_casa_tokens_em_janela_curta() -> None:
     assert result["intent"] == "synthetic_intent"
 
 
+def test_plural_ores_e_equivalente_ao_singular_sem_termo_de_negocio() -> None:
+    context = _context(
+        [],
+        intent_catalog=[
+            _catalog_entry(
+                intent_name="synthetic_intent",
+                rules=[
+                    _rule(
+                        rule_name="generic_plural_score",
+                        effect="positive_score",
+                        concepts=[
+                            _concept(
+                                concept_name="synthetic_concept",
+                                terms=["valor", "maior", "menor"],
+                            )
+                        ],
+                        score=120,
+                    )
+                ],
+            )
+        ],
+    )
+
+    for question in ("valores", "maiores", "menores"):
+        result = resolve_intent(question, context)
+        assert result["applied"] is True
+        assert result["intent"] == "synthetic_intent"
+
+
 def test_pluralizacao_nao_cria_equivalencia_artificial() -> None:
     context = _context(
         [],
@@ -1848,6 +1877,10 @@ def main() -> None:
         (
             "termo composto casa janela curta",
             test_termo_composto_casa_tokens_em_janela_curta,
+        ),
+        (
+            "plural ores equivale ao singular",
+            test_plural_ores_e_equivalente_ao_singular_sem_termo_de_negocio,
         ),
         (
             "pluralização não cria equivalência artificial",
