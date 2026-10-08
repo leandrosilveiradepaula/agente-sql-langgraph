@@ -36,4 +36,4 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker exec "${CONTAINER}" python "${RUNNER}" --cases "${CASES}"
+docker exec -w /app -e PYTHONPATH=/app "${CONTAINER}" python "${RUNNER}" --cases "${CASES}"
