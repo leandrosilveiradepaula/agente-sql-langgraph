@@ -77,7 +77,8 @@ if [[ "${CONFIG_IMAGE}" != "${IMAGE_TAG}" ]]; then
 fi
 
 echo "BUILD: ${IMAGE_TAG}"
-docker compose -f compose.yaml build "${SERVICE}"
+docker build   -f "${ROOT_DIR}/deploy/docker/Dockerfile.shadow-test"   -t "${IMAGE_TAG}"   "${ROOT_DIR}"
+
 docker compose -f compose.yaml up -d --force-recreate "${SERVICE}"
 
 for _ in $(seq 1 90); do
@@ -97,6 +98,7 @@ fi
 
 ACTIVE_COMMIT="$(docker inspect "${CONTAINER}" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^LANGGRAPH_COMMIT=//p' | tail -n 1)"
 ACTIVE_REAL_SQL="$(docker inspect "${CONTAINER}" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=//p' | tail -n 1)"
+ACTIVE_IMAGE="$(docker inspect "${CONTAINER}" --format '{{.Config.Image}}')"
 
 if [[ "${ACTIVE_COMMIT}" != "${TARGET_COMMIT}" ]]; then
   echo "ERROR: active LANGGRAPH_COMMIT does not match repository HEAD."
@@ -108,6 +110,13 @@ if [[ "${ACTIVE_REAL_SQL}" != "false" ]]; then
   exit 10
 fi
 
+if [[ "${ACTIVE_IMAGE}" != "${IMAGE_TAG}" ]]; then
+  echo "ERROR: active container image does not match repository build."
+  echo "active_image=${ACTIVE_IMAGE}"
+  echo "target_image=${IMAGE_TAG}"
+  exit 11
+fi
+
 trap - EXIT
 
-echo "DONE: shadow runtime commit=${ACTIVE_COMMIT} real_sql_execution=false"
+echo "DONE: shadow runtime commit=${ACTIVE_COMMIT} image=${ACTIVE_IMAGE} real_sql_execution=false"
