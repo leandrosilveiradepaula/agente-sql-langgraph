@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${SEMANTIC_MIGRATION_POSTGRES_DSN:?SEMANTIC_MIGRATION_POSTGRES_DSN must be set outside Git/chat/logs}"
-: "${POSTGRES_CONTEXT_SCHEMA:?POSTGRES_CONTEXT_SCHEMA must be set outside Git/chat/logs}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=load_semantic_migration_env.sh
+source "${ROOT_DIR}/scripts/load_semantic_migration_env.sh"
 
 SOURCE_VERSION="demo-finance-v4"
 TARGET_VERSION="demo-finance-v5"
@@ -21,7 +22,6 @@ if ! command -v psql >/dev/null 2>&1; then
   exit 3
 fi
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MIGRATION="${ROOT_DIR}/scripts/migrations/015_prepare_demo_finance_context_v5.sql"
 
 count_version() {

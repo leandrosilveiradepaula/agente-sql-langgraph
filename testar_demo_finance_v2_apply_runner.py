@@ -14,11 +14,8 @@ def test_runner_exige_confirmacao_e_dsn_externo() -> None:
     text = _text()
     assert 'CONFIRM_VALUE="APLICAR_DEMO_FINANCE_V2"' in text
     assert "CONFIRM_APPLY" in text
-    assert (
-        "SEMANTIC_MIGRATION_POSTGRES_DSN must be set outside Git/chat/logs"
-        in text
-    )
-    assert "POSTGRES_CONTEXT_SCHEMA must be set outside Git/chat/logs" in text
+    assert 'source "${ROOT_DIR}/scripts/load_semantic_migration_env.sh"' in text
+    assert "POSTGRES_CONTEXT_SCHEMA" in text
     assert "postgresql://" not in text
     assert ("pass" + "word=") not in text
     assert "PGPASSWORD=" not in text

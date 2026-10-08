@@ -99,6 +99,10 @@ STEPS = [
         [sys.executable, "testar_demo_finance_v8_context.py"],
     ),
     (
+        "testar_semantic_migration_env_loader.py",
+        [sys.executable, "testar_semantic_migration_env_loader.py"],
+    ),
+    (
         "testar_curated_intent_context.py",
         [sys.executable, "testar_curated_intent_context.py"],
     ),
