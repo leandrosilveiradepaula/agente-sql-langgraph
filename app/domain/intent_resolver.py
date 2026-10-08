@@ -1651,6 +1651,8 @@ def _semantic_tokens_equivalent(
 def _semantic_token_root(token: str) -> str:
     if len(token) <= 3:
         return token
+    if token.endswith("ores") and len(token) > 5:
+        return token[:-2]
     if token.endswith("oes") and len(token) > 5:
         return token[:-3] + "ao"
     if (
