@@ -159,6 +159,8 @@ WITH transformed AS (
     ) AS new_rule_content
   FROM ai_ducklake_agent_rules
   WHERE agent_version = 'demo-finance-v4'
+    AND rule_group = 'component_config'
+    AND rule_name = 'semantic_defaults_config'
     AND (rule_content::jsonb) ->> 'component' = 'semantic_defaults'
 )
 UPDATE ai_ducklake_agent_rules target
