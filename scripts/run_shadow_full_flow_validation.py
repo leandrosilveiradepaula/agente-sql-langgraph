@@ -71,7 +71,8 @@ def main() -> int:
     cases = json.loads(
         Path(args.cases).read_text(encoding="utf-8")
     )["cases"]
-    failures = 0
+    semantic_failures = 0
+    full_flow_failures = 0
 
     for index, case in enumerate(cases, start=1):
         question = case["question"]
@@ -104,13 +105,19 @@ def main() -> int:
         ]
         intent = response.get("intent")
         status = response.get("status")
-        passed = (
-            http_status in {200, 422}
-            and intent == expected_intent
-            and status in {"success", "rejected"}
+        semantic_passed = intent == expected_intent
+        full_flow_passed = (
+            semantic_passed
+            and http_status == 200
+            and status == "success"
+            and response.get("plan_status") == "planned"
+            and isinstance(response.get("sql"), str)
+            and bool(response.get("sql"))
         )
-        if not passed:
-            failures += 1
+        if not semantic_passed:
+            semantic_failures += 1
+        if not full_flow_passed:
+            full_flow_failures += 1
 
         print("=" * 80)
         print("CASE:", index)
@@ -126,11 +133,40 @@ def main() -> int:
             and bool(response.get("sql")),
         )
         print("ERROR_CODES:", error_codes)
-        print("RESULT:", "PASS" if passed else "FAIL")
+        metadata = response.get("metadata")
+        gate_diagnostics = (
+            metadata.get("gate_diagnostics")
+            if isinstance(metadata, dict)
+            else None
+        )
+        if gate_diagnostics:
+            print(
+                "GATE_DIAGNOSTICS:",
+                json.dumps(
+                    gate_diagnostics,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            )
+        print(
+            "SEMANTIC_RESULT:",
+            "PASS" if semantic_passed else "FAIL",
+        )
+        print(
+            "FULL_FLOW_RESULT:",
+            "PASS" if full_flow_passed else "FAIL",
+        )
 
     print()
-    print("SUMMARY:", f"{len(cases) - failures}/{len(cases)} PASS")
-    return 1 if failures else 0
+    print(
+        "SEMANTIC_SUMMARY:",
+        f"{len(cases) - semantic_failures}/{len(cases)} PASS",
+    )
+    print(
+        "FULL_FLOW_SUMMARY:",
+        f"{len(cases) - full_flow_failures}/{len(cases)} PASS",
+    )
+    return 1 if full_flow_failures else 0
 
 
 if __name__ == "__main__":
