@@ -437,6 +437,27 @@ def _query_plan_metadata(
             }
         )
 
+    authorized_joins: list[dict[str, Any]] = []
+    for item in planning.get("authorized_joins", [])[:16]:
+        if not isinstance(item, Mapping):
+            continue
+        raw_rules = item.get("join_rules")
+        authorized_joins.append(
+            {
+                "source_table": text_value(item.get("source_table")),
+                "interpretation": text_value(item.get("interpretation")),
+                "join_rule_count": (
+                    len(raw_rules)
+                    if isinstance(raw_rules, list)
+                    else (
+                        0
+                        if raw_rules in (None, {}, [])
+                        else None
+                    )
+                ),
+            }
+        )
+
     return {
         "available": True,
         "planner_version": text_value(query_plan.get("planner_version")),
@@ -449,6 +470,7 @@ def _query_plan_metadata(
         "analytical_operations": operations,
         "planned_metrics": metrics,
         "planned_filters": filters,
+        "authorized_joins": authorized_joins,
     }
 
 
