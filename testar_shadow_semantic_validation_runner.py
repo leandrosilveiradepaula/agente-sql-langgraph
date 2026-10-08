@@ -37,6 +37,8 @@ def test_shell_reuses_running_shadow_without_secrets() -> None:
     text = SHELL.read_text(encoding="utf-8")
     assert "docker exec" in text
     assert "docker cp" in text
+    assert "-w /app" in text
+    assert "-e PYTHONPATH=/app" in text
     assert "CONTEXT_POSTGRES_DSN=" not in text
     assert "postgresql://" not in text
     assert "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=true" not in text
