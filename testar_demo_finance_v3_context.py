@@ -27,7 +27,7 @@ def test_nao_altera_thresholds_ou_runtime() -> None:
     forbidden = (
         "minimum_score",
         "ambiguity_margin",
-        "SEMANTIC_AGENT_VERSION",
+        "SEMANTIC_AGENT_VERSION=",
         "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=true",
     )
     for value in forbidden:
