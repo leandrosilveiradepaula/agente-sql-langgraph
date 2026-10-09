@@ -319,6 +319,7 @@ def project_planning_context(
     planned_metrics, planned_metric_diagnostic = _detect_planned_metrics(
         context=context,
         intent_resolution_result=intent_resolution_result,
+        selected_pattern=selected_pattern,
     )
     planned_filters, planned_filter_diagnostic = _detect_planned_filters(
         context=context,
@@ -966,12 +967,14 @@ def _detect_planned_metrics(
     *,
     context: ContextSnapshot,
     intent_resolution_result: Mapping[str, Any] | None = None,
+    selected_pattern: Mapping[str, Any] | None = None,
 ) -> tuple[list[ProjectedPlannedMetric], dict[str, Any]]:
     evidence_terms = _metric_terms_from_intent_evidence(
         intent_resolution_result,
     )
     binding_context_concepts = _binding_context_concepts_from_intent_evidence(
         intent_resolution_result,
+        selected_pattern=selected_pattern,
     )
     operation_cardinality = _metric_binding_cardinality_from_operations(
         context=context,
@@ -1076,6 +1079,8 @@ def _metric_terms_from_intent_evidence(
 
 def _binding_context_concepts_from_intent_evidence(
     intent_resolution_result: Mapping[str, Any] | None,
+    *,
+    selected_pattern: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     if not isinstance(intent_resolution_result, Mapping):
         return []
@@ -1101,6 +1106,21 @@ def _binding_context_concepts_from_intent_evidence(
                 "concept_name": concept_name,
                 "sources": sources,
             }
+
+    if isinstance(selected_pattern, Mapping):
+        required_rules = selected_pattern.get("required_rules")
+        if isinstance(required_rules, list):
+            for rule_name in required_rules:
+                if not isinstance(rule_name, str) or not rule_name.strip():
+                    continue
+                name = rule_name.strip()
+                concepts.setdefault(
+                    name.casefold(),
+                    {
+                        "concept_name": name,
+                        "sources": ["selected_pattern_required_rule"],
+                    },
+                )
 
     semantic_defaults = intent_resolution_result.get(
         "semantic_default_concepts",
