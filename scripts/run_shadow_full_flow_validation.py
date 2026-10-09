@@ -138,9 +138,7 @@ def main() -> int:
         expected_intent = case["expected_intent"]
         payload = {
             "contract_version": "1",
-            "agent_run_id": f"shadow-full-flow-{index}"
-            if suite_name == "demo-finance-generalization-v1"
-            else f"shadow-unseen-{index}",
+            "agent_run_id": f"{suite.get('agent_run_id_prefix', 'shadow-full-flow')}-{index}",
             "question": question,
             "principal": {"id": "shadow-validation"},
             "correlation_metadata": {
