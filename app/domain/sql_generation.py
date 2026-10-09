@@ -254,6 +254,7 @@ _OUTPUT_CONSTRAINTS = [
     "Nao inclua explicacoes antes ou depois da SQL.",
     "Nao inclua mais de uma consulta.",
     "Nao use comandos de escrita ou DDL.",
+    "Em FROM/JOIN, use apenas tabelas autorizadas ou CTEs declaradas; nao use chamadas de funcao como fonte tabular.",
     "Use apenas schemas, tabelas, colunas e joins autorizados.",
     "Nao invente tabelas, colunas, filtros ou regras.",
     "Nao aplique LIMIT automatico quando nao configurado.",
@@ -343,6 +344,14 @@ def build_sql_generation_request(
                 "na requisicao."
             ),
         },
+        {
+            "name": "from_join_sources",
+            "content": (
+                "Em FROM/JOIN use somente authorized_tables ou CTEs "
+                "declaradas na propria SQL. Nao use funcoes, chamadas "
+                "tabulares ou fontes sinteticas em FROM/JOIN."
+            ),
+        },
     ]
     if any(item.get("required") is True for item in planned_filters):
         instructions.append(
@@ -367,12 +376,16 @@ def build_sql_generation_request(
                 "name": "analytical_operations",
                 "content": (
                     "Quando analytical_operations incluir ranking com "
-                    "metric_ref, gere ORDER BY na direcao solicitada para "
-                    "a planned_metric referenciada por metric_ref. Use "
-                    "DESC para descending e ASC para ascending. Quando a "
-                    "planned_metric tiver aggregate null, nao invente a "
-                    "agregacao a partir do contrato de ranking. Nao "
-                    "adicione LIMIT quando requested_limit for null."
+                    "metric_ref, materialize a planned_metric referenciada "
+                    "como um item explicito do SELECT com alias estavel e "
+                    "use exatamente esse alias (ou o ordinal desse mesmo "
+                    "item) no ORDER BY. Nunca ordene pela dimensao nem por "
+                    "uma coluna bruta diferente do item de metrica "
+                    "selecionado. Use DESC para descending e ASC para "
+                    "ascending. Quando a planned_metric tiver aggregate "
+                    "null, nao invente a agregacao a partir do contrato de "
+                    "ranking. Nao adicione LIMIT quando requested_limit for "
+                    "null."
                 ),
             }
         )
@@ -395,14 +408,15 @@ def build_sql_generation_request(
                     "agregados com CROSS JOIN; e proibido join direto entre "
                     "source tables de metricas antes da agregacao. Para "
                     "multiple_metric_sources=true com grouping_dimensions, "
-                    "agregue cada operand independentemente no mesmo grain "
-                    "logico, preserve todas as dimensoes planejadas e combine "
-                    "os operands agregados conforme join_semantics. Cada source "
-                    "table e seus joins de dimensao necessarios devem ficar "
-                    "isolados dentro do CTE/subquery do proprio operand; o "
-                    "escopo que combina operands pode referenciar somente os "
-                    "resultados agregados, nunca source tables brutas ou "
-                    "dimensoes brutas. "
+                    "crie um CTE/subquery de agregacao separado para cada "
+                    "operand_metric_ref. Cada escopo de operand pode "
+                    "referenciar somente a source table daquela metrica e "
+                    "as dimensoes necessarias ao grain planejado; nunca "
+                    "referencie a source table de outro operand nesse mesmo "
+                    "escopo. Depois, combine somente os resultados agregados "
+                    "dos operands. O escopo que combina operands nao pode "
+                    "referenciar source tables brutas nem dimensoes brutas, "
+                    "direta ou indiretamente. "
                     "join_semantics "
                     "preserve_all_operand_categories exige preservacao "
                     "bilateral das categorias, compativel com FULL OUTER "
