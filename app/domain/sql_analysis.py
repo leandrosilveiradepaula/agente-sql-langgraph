@@ -58,6 +58,7 @@ class SqlColumnReference(TypedDict, total=False):
     column: str
     clause: str
     is_wildcard: bool
+    resolved_physical_table: str
 
 
 class SqlJoinComparison(TypedDict, total=False):
@@ -319,10 +320,8 @@ def analyze_sql(sql: str) -> SqlStatementAnalysis:
     )
 
     object_references = _extract_objects(statement_tokens, ctes)
-    column_references = _extract_columns(
-        statement_tokens,
-        object_references,
-        cte_output_columns,
+    column_references = _extract_scoped_columns(
+        statement_tokens, ctes, cte_output_columns,
     )
     joins = _extract_joins(statement_tokens, object_references)
     predicates = _extract_predicates(statement_tokens)
@@ -628,6 +627,21 @@ def _first_word_after_ctes(tokens: list[SqlToken], ctes: list[str]) -> str | Non
     return None
 
 
+def _is_extract_from(tokens: list[SqlToken], index: int) -> bool:
+    """Do not treat EXTRACT(field FROM scalar) as a table source."""
+    depth = 0
+    for pos in range(index - 1, -1, -1):
+        value = tokens[pos]["value"]
+        if value == ")":
+            depth += 1
+        elif value == "(":
+            if depth:
+                depth -= 1
+            else:
+                return _norm_at(tokens, pos - 1) == "extract"
+    return False
+
+
 def _extract_objects(
     tokens: list[SqlToken],
     ctes: list[str],
@@ -642,7 +656,7 @@ def _extract_objects(
             source = "from"
         elif norm == "join":
             source = "join"
-        if source is None:
+        if source is None or (source == "from" and _is_extract_from(tokens, index)):
             index += 1
             continue
         index += 1
@@ -695,6 +709,47 @@ def _extract_objects(
             }
         )
     return _stable_objects(objects)
+
+
+def _extract_scoped_columns(
+    tokens: list[SqlToken],
+    ctes: list[str],
+    cte_output_columns: Mapping[str, list[str]],
+) -> list[SqlColumnReference]:
+    """Analyze each CTE's column bindings independently of sibling aliases."""
+    if not ctes:
+        return _columns_for_scope(tokens, [], cte_output_columns)
+    result: list[SqlColumnReference] = []
+    visible: list[str] = []
+    for cte_name, body in _cte_bodies(tokens):
+        result.extend(_columns_for_scope(body, visible, cte_output_columns))
+        visible.append(cte_name)
+    result.extend(_columns_for_scope(_root_query_tokens(tokens), ctes, cte_output_columns))
+    return result
+
+
+def _columns_for_scope(
+    tokens: list[SqlToken],
+    ctes: list[str],
+    cte_output_columns: Mapping[str, list[str]],
+) -> list[SqlColumnReference]:
+    objects = _extract_scope_objects(tokens, ctes)
+    columns = _extract_columns(tokens, objects, cte_output_columns)
+    physical: dict[str, str] = {}
+    for obj in objects:
+        if obj.get("is_cte") or obj.get("is_function") or obj.get("is_subquery"):
+            continue
+        table = str(obj.get("table") or "").casefold()
+        schema = obj.get("schema")
+        full = f"{str(schema).casefold()}.{table}" if schema else table
+        physical[table] = full
+        if obj.get("alias"):
+            physical[str(obj["alias"]).casefold()] = full
+    for column in columns:
+        qualifier = column.get("qualifier")
+        if qualifier and qualifier.casefold() in physical:
+            column["resolved_physical_table"] = physical[qualifier.casefold()]
+    return columns
 
 
 def _extract_columns(
