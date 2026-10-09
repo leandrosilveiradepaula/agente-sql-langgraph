@@ -1460,6 +1460,14 @@ def _resolve_column_table(
     aliases: dict[str, str],
 ) -> dict[str, Any]:
     column_name = column["column"].casefold()
+    scoped_table = column.get("resolved_physical_table")
+    if scoped_table:
+        physical = scoped_table.casefold()
+        if physical not in allowed:
+            matches = [name for name in allowed if name.split(".")[-1] == physical]
+            if len(matches) == 1:
+                physical = matches[0]
+        return _column_on_table(column_name, physical, allowed)
     schema = column.get("schema")
     table = column.get("table")
     qualifier = column.get("qualifier")
