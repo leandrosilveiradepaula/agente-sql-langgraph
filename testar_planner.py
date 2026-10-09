@@ -1778,6 +1778,29 @@ def test_financial_metric_com_aggregate_nao_e_projetada() -> None:
     assert projection["planned_metrics"] == []
 
 
+def test_metric_binding_aplica_por_required_rule_do_pattern() -> None:
+    context = _metric_context()
+    _append_metric_binding(
+        context,
+        when_present=["generic_required_rule"],
+    )
+
+    projection = _metric_plan_for_term(
+        context=context,
+        term="amount",
+    )
+
+    assert len(projection["planned_metrics"]) == 1
+    metric = projection["planned_metrics"][0]
+    assert metric["mapping_source"] == "metric_binding"
+    assert metric["target_column"] == "measure_value"
+    diagnostic = projection["diagnostics"]["planned_metric_diagnostic"]
+    assert {
+        item["concept_name"]
+        for item in diagnostic["binding_context_concepts"]
+    } >= {"financial_metric", "generic_required_rule"}
+
+
 def test_metric_binding_single_aplica_corretamente() -> None:
     context = _metric_context()
     _append_metric_binding(context, when_present=["mode_a"])
