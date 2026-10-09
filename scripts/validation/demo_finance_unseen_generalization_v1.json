@@ -1,0 +1,90 @@
+{
+  "suite": "demo-finance-unseen-generalization-v1",
+  "purpose": "Independent evaluation-only paraphrases and new combinations. Expectations are checked after runtime execution and never supplied to classifier, planner or SQL generator. No benchmark fixtures, expected SQL, or answer leakage.",
+  "cases": [
+    {
+      "question": "Ordene as unidades de negócio do maior para o menor valor no mês anterior.",
+      "expected_intent": "ranking",
+      "expected_plan": {
+        "minimum_planned_metrics": 1,
+        "operation_type": "ranking",
+        "operation_metric_ref": true
+      }
+    },
+    {
+      "question": "Quais centros de custo apresentaram os menores valores no trimestre passado?",
+      "expected_intent": "ranking",
+      "expected_plan": {
+        "minimum_planned_metrics": 1,
+        "operation_type": "ranking",
+        "operation_metric_ref": true
+      }
+    },
+    {
+      "question": "Faça uma comparação entre valor orçado e realizado por unidade de negócio neste ano.",
+      "expected_intent": "actual_vs_budget",
+      "expected_plan": {
+        "minimum_planned_metrics": 2,
+        "operation_type": "comparison",
+        "minimum_operand_metric_refs": 2
+      }
+    },
+    {
+      "question": "Quero ver o comparativo de realizado contra orçamento por marca no ano anterior.",
+      "expected_intent": "actual_vs_budget",
+      "expected_plan": {
+        "minimum_planned_metrics": 2,
+        "operation_type": "comparison",
+        "minimum_operand_metric_refs": 2
+      }
+    },
+    {
+      "question": "Apresente a evolução mensal dos valores realizados no ano vigente.",
+      "expected_intent": "trend",
+      "expected_plan": {
+        "minimum_planned_metrics": 1
+      }
+    },
+    {
+      "question": "Como os valores variaram mês a mês durante o ano atual?",
+      "expected_intent": "trend",
+      "expected_plan": {
+        "minimum_planned_metrics": 1
+      }
+    },
+    {
+      "question": "Apresente os valores de cada unidade de negócio no período mais recente.",
+      "expected_intent": "realized_analysis",
+      "expected_plan": {
+        "minimum_planned_metrics": 1
+      }
+    },
+    {
+      "question": "Mostre as marcas com os maiores valores no primeiro trimestre.",
+      "expected_intent": "ranking",
+      "expected_plan": {
+        "minimum_planned_metrics": 1,
+        "operation_type": "ranking",
+        "operation_metric_ref": true
+      }
+    },
+    {
+      "question": "Compare realizado versus orçamento por centro de custo no ano passado.",
+      "expected_intent": "actual_vs_budget",
+      "expected_plan": {
+        "minimum_planned_metrics": 2,
+        "operation_type": "comparison",
+        "minimum_operand_metric_refs": 2
+      }
+    },
+    {
+      "question": "Quais são os centros de custo de maior valor neste semestre?",
+      "expected_intent": "ranking",
+      "expected_plan": {
+        "minimum_planned_metrics": 1,
+        "operation_type": "ranking",
+        "operation_metric_ref": true
+      }
+    }
+  ]
+}
