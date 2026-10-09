@@ -116,7 +116,7 @@ def validate_context_snapshot(
         intent_names,
         table_index,
         collections["table_catalog"],
-        _semantic_concept_universe(snapshot),
+        _metric_binding_condition_universe(snapshot),
         errors,
     )
 
@@ -653,7 +653,7 @@ def _validate_metric_binding_concepts(
                 code="METRIC_BINDING_CONDITION_UNKNOWN_CONCEPT",
                 message=(
                     "Condição de metric_binding deve referenciar conceito "
-                    "projetável pelo contexto semântico."
+                    "projetável ou regra versionada existente no contexto."
                 ),
                 path=f"{path}[{index}]",
                 details={"concept": item},
@@ -670,6 +670,23 @@ def _validate_metric_binding_concepts(
             return None
         output.add(key)
     return output
+
+
+def _metric_binding_condition_universe(
+    snapshot: Mapping[str, Any],
+) -> set[str]:
+    conditions = _semantic_concept_universe(snapshot)
+
+    rules = snapshot.get("rules", [])
+    if isinstance(rules, list):
+        for rule in rules:
+            if not isinstance(rule, Mapping):
+                continue
+            rule_name = rule.get("rule_name")
+            if _is_non_empty_text(rule_name):
+                conditions.add(str(rule_name).strip().casefold())
+
+    return conditions
 
 
 def _semantic_concept_universe(snapshot: Mapping[str, Any]) -> set[str]:
