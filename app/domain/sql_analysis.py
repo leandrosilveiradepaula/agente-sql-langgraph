@@ -850,7 +850,7 @@ def _extract_columns(
             and norm not in _RESERVED_WORDS
             and not (
                 norm in expression_aliases
-                and current_clause in {"select", "group", "order"}
+                and current_clause in {"select", "order"}
             )
             and not _is_table_position(tokens, index)
             and _norm_at(tokens, index + 1) != "("
