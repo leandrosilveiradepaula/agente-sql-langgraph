@@ -403,6 +403,20 @@ def test_rejeita_metric_binding_condicoes_invalidas() -> None:
     assert "METRIC_BINDING_PRIORITY_INVALID" in codes
 
 
+def test_aceita_metric_binding_condition_de_regra_versionada() -> None:
+    snapshot = _valid_snapshot()
+    binding = _metric_binding_entity()
+    binding["business_rule"]["metric_binding"]["when_present"] = [
+        "rule_test"
+    ]
+    snapshot["entities"].append(binding)
+    snapshot["counts"]["entities"] += 1
+
+    result = validate_context_snapshot(snapshot)
+
+    assert result["status"] == "valid"
+
+
 def test_rejeita_metric_binding_condition_concept_inexistente() -> None:
     snapshot = _valid_snapshot()
     invalid = _metric_binding_entity()
