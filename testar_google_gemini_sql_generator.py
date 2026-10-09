@@ -215,6 +215,9 @@ def test_payload_deterministico_e_derivado_da_request() -> None:
     assert request["contract_version"] in prompt
     assert "grouping_dimensions" in prompt
     assert "target_table e target_column" in prompt
+    assert "Em ranking, ORDER BY" in prompt
+    assert "comparison com multiplas fontes" in prompt
+    assert "chamadas de funcao como fonte tabular" in prompt
     assert "GraphState" not in prompt
     assert "authorization" not in prompt.casefold()
     assert "headers" not in prompt.casefold()
