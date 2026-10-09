@@ -2583,6 +2583,8 @@ def _comparison_operation_metadata(
         if not isinstance(join_semantics, str) or not join_semantics.strip():
             return None
         output["join_semantics"] = join_semantics.strip()
+    elif operation.get("preserve_all_categories") is True:
+        output["join_semantics"] = "preserve_all_operand_categories"
     return output
 
 
