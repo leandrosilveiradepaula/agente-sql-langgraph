@@ -968,6 +968,21 @@ def test_dimensao_planejada_aceita_alias_sql_da_tabela() -> None:
     assert _check_status_by_name(result, "grouping_dimensions") == "passed"
 
 
+def test_cte_grouping_with_same_name_output_alias_preserves_physical_column() -> None:
+    plan = _with_grouping_dimension()
+    result = _run(
+        "WITH grouped AS ("
+        "SELECT d.business_key AS business_key, SUM(d.amount) AS total "
+        "FROM schema_test.dimension_test AS d GROUP BY d.business_key"
+        ") SELECT grouped.business_key, grouped.total FROM grouped",
+        plan,
+    )
+    assert not any(
+        finding["code"] == "SQL_CONTRACT_GROUPING_DIMENSION_MISMATCH"
+        for finding in result["findings"]
+    )
+
+
 def test_dimensao_planejada_rejeita_outra_coluna_fisica_valida() -> None:
     result = _run(
         "SELECT d.label, COUNT(*) "
