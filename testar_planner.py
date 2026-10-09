@@ -1801,6 +1801,35 @@ def test_metric_binding_aplica_por_required_rule_do_pattern() -> None:
     } >= {"financial_metric", "generic_required_rule"}
 
 
+def test_metric_binding_multi_inferida_por_required_rules_sem_metric_term() -> None:
+    context = _comparison_context()
+    for entity in context["entities"]:
+        if entity.get("entity_type") == "metric_binding":
+            entity["business_rule"]["metric_binding"]["when_present"] = [
+                "generic_required_rule"
+            ]
+
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="compare",
+        intent_resolution_result=_intent_operation_evidence(term="compare"),
+    )
+    projection = result["query_plan"]["planning_context"]
+
+    assert len(projection["planned_metrics"]) == 2
+    assert {
+        metric["detection_source"]
+        for metric in projection["planned_metrics"]
+    } == {"selected_pattern_context"}
+    operation = projection["analytical_operations"][0]
+    assert len(operation["operand_metric_refs"]) == 2
+    assert projection["diagnostics"]["planned_metric_diagnostic"][
+        "binding_inference"
+    ]["status"] == "resolved"
+
+
 def test_metric_binding_single_aplica_corretamente() -> None:
     context = _metric_context()
     _append_metric_binding(context, when_present=["mode_a"])
@@ -3310,6 +3339,10 @@ def main() -> None:
         (
             "financial metric aggregate ausente",
             test_financial_metric_com_aggregate_nao_e_projetada,
+        ),
+        (
+            "metric binding multiple inferido por required rules",
+            test_metric_binding_multi_inferida_por_required_rules_sem_metric_term,
         ),
         (
             "metric binding single",
