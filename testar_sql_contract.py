@@ -2097,6 +2097,10 @@ def main() -> None:
             test_dimensao_planejada_aceita_alias_sql_da_tabela,
         ),
         (
+            "dimensao planejada CTE alias",
+            test_cte_grouping_with_same_name_output_alias_preserves_physical_column,
+        ),
+        (
             "dimensao planejada coluna errada",
             test_dimensao_planejada_rejeita_outra_coluna_fisica_valida,
         ),
