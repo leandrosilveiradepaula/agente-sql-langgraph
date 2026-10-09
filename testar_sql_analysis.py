@@ -1092,3 +1092,42 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def test_cte_reused_aliases_keep_physical_scope() -> None:
+    sql = (
+        "WITH first_data AS ("
+        "SELECT t1.amount AS first_amount FROM schema_test.actual t1), "
+        "second_data AS ("
+        "SELECT t1.budget_amount AS second_amount FROM schema_test.budget t1) "
+        "SELECT first_data.first_amount, second_data.second_amount "
+        "FROM first_data JOIN second_data ON 1 = 1"
+    )
+    analysis = analyze_sql(sql)
+    pairs = {
+        (c.get("column"), c.get("resolved_physical_table"))
+        for c in analysis["column_references"]
+        if c.get("resolved_physical_table")
+    }
+    assert ("amount", "schema_test.actual") in pairs
+    assert ("budget_amount", "schema_test.budget") in pairs
+    assert ("amount", "schema_test.budget") not in pairs
+
+
+def test_extract_from_scalar_is_not_a_table_reference() -> None:
+    analysis = analyze_sql(
+        "SELECT EXTRACT(YEAR FROM CURRENT_DATE()) AS year_value "
+        "FROM schema_test.events e"
+    )
+    assert analysis["tables"] == ["schema_test.events"]
+    assert not any(
+        obj.get("is_function") and obj.get("table") == "current_date"
+        for obj in analysis["object_references"]
+    )
+
+
+def test_from_function_still_identified_as_table_source() -> None:
+    analysis = analyze_sql(
+        "SELECT value FROM generate_series(1, 5) AS series(value)"
+    )
+    assert any(obj.get("is_function") for obj in analysis["object_references"])
