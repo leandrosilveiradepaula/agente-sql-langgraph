@@ -2334,6 +2334,23 @@ def test_comparison_metadata_e_aceita_pelo_planner() -> None:
     assert operation["binding_cardinality"] == _comparison_cardinality()
 
 
+def test_comparison_normaliza_preserve_all_categories_legado() -> None:
+    context = _comparison_context()
+    for entity in context["entities"]:
+        if (
+            entity.get("entity_type") == "analytical_operation"
+            and entity.get("canonical_value") == "comparison"
+        ):
+            operation = entity["business_rule"]["operation"]
+            operation.pop("join_semantics", None)
+            operation["preserve_all_categories"] = True
+
+    projection = _comparison_projection(context)
+    operation = projection["analytical_operations"][0]
+
+    assert operation["join_semantics"] == "preserve_all_operand_categories"
+
+
 def test_comparison_preserva_join_semantics_string_versionada() -> None:
     projection = _comparison_projection(
         _comparison_context(
@@ -3407,6 +3424,10 @@ def main() -> None:
         (
             "comparison metadata",
             test_comparison_metadata_e_aceita_pelo_planner,
+        ),
+        (
+            "comparison preserve all legado",
+            test_comparison_normaliza_preserve_all_categories_legado,
         ),
         (
             "comparison join semantics string",
