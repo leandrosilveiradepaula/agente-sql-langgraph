@@ -125,9 +125,11 @@ def main() -> int:
 
 
     print("PROVIDER: default runtime generator")
-    cases = json.loads(
+    suite = json.loads(
         Path(args.cases).read_text(encoding="utf-8")
-    )["cases"]
+    )
+    cases = suite["cases"]
+    suite_name = suite.get("suite", "demo-finance-generalization-full-flow-v1")
     semantic_failures = 0
     full_flow_failures = 0
 
@@ -136,12 +138,13 @@ def main() -> int:
         expected_intent = case["expected_intent"]
         payload = {
             "contract_version": "1",
-            "agent_run_id": f"shadow-full-flow-{index}",
+            "agent_run_id": f"shadow-full-flow-{index}"
+            if suite_name == "demo-finance-generalization-v1"
+            else f"shadow-unseen-{index}",
             "question": question,
             "principal": {"id": "shadow-validation"},
             "correlation_metadata": {
-                "validation_suite":
-                    "demo-finance-generalization-full-flow-v1",
+                "validation_suite": suite_name,
                 "case_index": index,
             },
         }
