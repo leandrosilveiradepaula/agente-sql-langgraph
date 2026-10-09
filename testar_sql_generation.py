@@ -792,6 +792,51 @@ def test_rejeita_resposta_nao_textual() -> None:
         raise AssertionError("Era esperado erro estrutural.")
 
 
+def test_request_explica_contratos_estruturais_ao_gerador() -> None:
+    ranking_plan = _query_plan()
+    ranking_plan["planning_context"]["planned_metrics"] = [
+        {
+            "metric_ref": "metric-synthetic",
+            "metric_concept": "amount",
+            "target_table": "schema_test.table_test",
+            "target_column": "value",
+            "aggregate": None,
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+    ranking_plan["planning_context"]["analytical_operations"] = [
+        {
+            "operation_type": "ranking",
+            "canonical_value": "ranking",
+            "direction": "ascending",
+            "requested_limit": None,
+            "metric_ref": "metric-synthetic",
+            "detection_source": "intent_semantic_evidence",
+            "mapping_source": "entity_alias",
+        }
+    ]
+    ranking_request = build_sql_generation_request(ranking_plan)
+    ranking_repr = repr(ranking_request)
+
+    assert "alias estavel" in ranking_repr
+    assert "mesmo item" in ranking_repr
+    assert "FROM/JOIN" in ranking_repr
+    assert "fontes sinteticas" in ranking_repr
+
+    comparison_request = build_sql_generation_request(
+        _comparison_query_plan(
+            grouped=True,
+            join_semantics="preserve_all_operand_categories",
+        )
+    )
+    comparison_repr = repr(comparison_request)
+
+    assert "CTE/subquery de agregacao separado" in comparison_repr
+    assert "source table de outro operand" in comparison_repr
+    assert "combine somente os resultados agregados" in comparison_repr
+
+
 def test_comportamento_deterministico_repetido() -> None:
     query_plan = _query_plan()
     outputs = [
@@ -949,6 +994,10 @@ def main() -> None:
             test_rejeita_apenas_ponto_e_virgula_comentario_e_controle,
         ),
         ("rejeita nao textual", test_rejeita_resposta_nao_textual),
+        (
+            "contratos estruturais explicitos",
+            test_request_explica_contratos_estruturais_ao_gerador,
+        ),
         (
             "deterministico repetido",
             test_comportamento_deterministico_repetido,

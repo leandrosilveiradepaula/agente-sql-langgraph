@@ -57,6 +57,63 @@ def _run_request(
     return status, response
 
 
+def _plan_expectation_failures(
+    query_plan: Any,
+    expected_plan: Any,
+) -> list[str]:
+    if not isinstance(expected_plan, dict):
+        return []
+    if not isinstance(query_plan, dict):
+        return ["query_plan_missing"]
+
+    failures: list[str] = []
+    metrics = query_plan.get("planned_metrics")
+    operations = query_plan.get("analytical_operations")
+    metrics = metrics if isinstance(metrics, list) else []
+    operations = operations if isinstance(operations, list) else []
+
+    minimum_metrics = expected_plan.get("minimum_planned_metrics")
+    if (
+        isinstance(minimum_metrics, int)
+        and not isinstance(minimum_metrics, bool)
+        and len(metrics) < minimum_metrics
+    ):
+        failures.append("planned_metrics_below_minimum")
+
+    operation_type = expected_plan.get("operation_type")
+    matching_operations = [
+        item
+        for item in operations
+        if isinstance(item, dict)
+        and item.get("operation_type") == operation_type
+    ]
+    if isinstance(operation_type, str) and not matching_operations:
+        failures.append("expected_operation_missing")
+
+    if expected_plan.get("operation_metric_ref") is True:
+        if not any(
+            isinstance(item.get("metric_ref"), str)
+            and bool(item.get("metric_ref"))
+            for item in matching_operations
+        ):
+            failures.append("operation_metric_ref_missing")
+
+    minimum_operand_refs = expected_plan.get("minimum_operand_metric_refs")
+    if (
+        isinstance(minimum_operand_refs, int)
+        and not isinstance(minimum_operand_refs, bool)
+    ):
+        operand_counts = [
+            len(item.get("operand_metric_refs"))
+            for item in matching_operations
+            if isinstance(item.get("operand_metric_refs"), list)
+        ]
+        if not operand_counts or max(operand_counts) < minimum_operand_refs:
+            failures.append("operand_metric_refs_below_minimum")
+
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", required=True)
@@ -106,6 +163,16 @@ def main() -> int:
         intent = response.get("intent")
         status = response.get("status")
         semantic_passed = intent == expected_intent
+        metadata = response.get("metadata")
+        query_plan = (
+            metadata.get("query_plan")
+            if isinstance(metadata, dict)
+            else None
+        )
+        plan_expectation_failures = _plan_expectation_failures(
+            query_plan,
+            case.get("expected_plan"),
+        )
         full_flow_passed = (
             semantic_passed
             and http_status == 200
@@ -113,6 +180,7 @@ def main() -> int:
             and response.get("plan_status") == "planned"
             and isinstance(response.get("sql"), str)
             and bool(response.get("sql"))
+            and not plan_expectation_failures
         )
         if not semantic_passed:
             semantic_failures += 1
@@ -133,7 +201,7 @@ def main() -> int:
             and bool(response.get("sql")),
         )
         print("ERROR_CODES:", error_codes)
-        metadata = response.get("metadata")
+        print("PLAN_EXPECTATION_FAILURES:", plan_expectation_failures)
         gate_diagnostics = (
             metadata.get("gate_diagnostics")
             if isinstance(metadata, dict)
@@ -148,11 +216,6 @@ def main() -> int:
                     separators=(",", ":"),
                 ),
             )
-        query_plan = (
-            metadata.get("query_plan")
-            if isinstance(metadata, dict)
-            else None
-        )
         if query_plan:
             print(
                 "QUERY_PLAN:",

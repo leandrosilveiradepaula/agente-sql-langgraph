@@ -70,6 +70,22 @@ def build_gemini_prompt(request: SqlGenerationRequest) -> str:
                 "Se nao puder cumprir uma grouping_dimension planejada, nao "
                 "invente alternativa."
             ),
+            (
+                "Em ranking, ORDER BY deve apontar para o mesmo item de "
+                "metrica materializado no SELECT, preferencialmente por alias "
+                "explicito ou ordinal."
+            ),
+            (
+                "Em comparison com multiplas fontes, isole cada operand em "
+                "seu proprio CTE/subquery agregado e combine apenas esses "
+                "resultados; nunca una duas fontes metricas brutas no mesmo "
+                "escopo, nem atraves de uma dimensao."
+            ),
+            (
+                "Em FROM/JOIN, use apenas tabelas autorizadas ou CTEs "
+                "declaradas; chamadas de funcao como fonte tabular sao "
+                "proibidas."
+            ),
             "Use somente os dados contidos em SqlGenerationRequest.",
             "SqlGenerationRequest:",
             request_json,

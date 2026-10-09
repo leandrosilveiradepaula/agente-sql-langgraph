@@ -984,6 +984,7 @@ def _detect_planned_metrics(
     unresolved: list[str] = []
     invalid_metadata: list[str] = []
     failed_bindings: list[dict[str, Any]] = []
+    inference_diagnostic: dict[str, Any] = {"status": "not_applicable"}
     for matched_user_term in evidence_terms:
         resolved_metrics, reason, diagnostic = _resolve_planned_metrics(
             context=context,
@@ -1000,6 +1001,24 @@ def _detect_planned_metrics(
                 failed_bindings.append(diagnostic)
             continue
         metrics.extend(resolved_metrics)
+
+    if (
+        not evidence_terms
+        and operation_cardinality.get("mode") == "multiple"
+    ):
+        inferred_metrics, inference_diagnostic = (
+            _infer_planned_metrics_from_binding_context(
+                context=context,
+                binding_context_concepts=binding_context_concepts,
+                cardinality=operation_cardinality,
+            )
+        )
+        metrics.extend(inferred_metrics)
+        if (
+            inference_diagnostic.get("status")
+            not in {"resolved", "not_applicable"}
+        ):
+            failed_bindings.append(inference_diagnostic)
 
     planned_metrics = _dedupe_planned_metrics(metrics)
     global_binding_status = "not_applicable"
@@ -1030,12 +1049,25 @@ def _detect_planned_metrics(
             key=str.casefold,
         ),
         "source": (
-            "none" if not evidence_terms else "intent_semantic_evidence"
+            "intent_semantic_evidence"
+            if evidence_terms
+            else (
+                "selected_pattern_context"
+                if inference_diagnostic.get("status") == "resolved"
+                else "none"
+            )
         ),
         "detection_source": (
-            "intent_semantic_evidence" if evidence_terms else "none"
+            "intent_semantic_evidence"
+            if evidence_terms
+            else (
+                "selected_pattern_context"
+                if inference_diagnostic.get("status") == "resolved"
+                else "none"
+            )
         ),
         "projected_count": len(planned_metrics),
+        "binding_inference": inference_diagnostic,
         "binding_context_concepts": binding_context_concepts,
         "binding_cardinality": operation_cardinality,
         "global_binding_status": global_binding_status,
@@ -1657,6 +1689,73 @@ def _resolve_planned_metrics(
             ),
         )[0][1]
     ], "resolved", {}
+
+
+def _infer_planned_metrics_from_binding_context(
+    *,
+    context: ContextSnapshot,
+    binding_context_concepts: list[dict[str, Any]],
+    cardinality: dict[str, Any],
+) -> tuple[list[ProjectedPlannedMetric], dict[str, Any]]:
+    metric_concepts: set[str] = set()
+    for entity in context.get("entities", []):
+        if not isinstance(entity, Mapping):
+            continue
+        if str(entity.get("entity_type", "")).casefold() != "metric_binding":
+            continue
+        binding, _reason = _metric_binding_metadata(
+            entity,
+            table_catalog=context.get("table_catalog", []),
+        )
+        if binding is not None:
+            metric_concepts.add(binding["metric_concept"])
+
+    resolved_by_concept: list[
+        tuple[str, list[ProjectedPlannedMetric], dict[str, Any]]
+    ] = []
+    diagnostics: list[dict[str, Any]] = []
+    for metric_concept in sorted(metric_concepts, key=str.casefold):
+        resolved, diagnostic = _resolve_metric_bindings(
+            context=context,
+            metric_concept=metric_concept,
+            matched_user_term=metric_concept,
+            binding_context_concepts=binding_context_concepts,
+            cardinality=cardinality,
+        )
+        diagnostics.append(diagnostic)
+        if resolved:
+            inferred = deepcopy(resolved)
+            for metric in inferred:
+                metric["detection_source"] = "selected_pattern_context"
+            resolved_by_concept.append(
+                (metric_concept, inferred, diagnostic)
+            )
+
+    if not resolved_by_concept:
+        return [], {
+            "status": "not_applicable",
+            "candidate_metric_concepts": sorted(
+                metric_concepts,
+                key=str.casefold,
+            ),
+            "binding_diagnostics": diagnostics,
+        }
+    if len(resolved_by_concept) != 1:
+        return [], {
+            "status": "ambiguous_metric_concept",
+            "candidate_metric_concepts": [
+                item[0] for item in resolved_by_concept
+            ],
+            "binding_diagnostics": diagnostics,
+        }
+
+    metric_concept, metrics, _diagnostic = resolved_by_concept[0]
+    return metrics, {
+        "status": "resolved",
+        "metric_concept": metric_concept,
+        "projected_count": len(metrics),
+        "binding_diagnostics": diagnostics,
+    }
 
 
 def _resolve_metric_bindings(
@@ -2484,6 +2583,8 @@ def _comparison_operation_metadata(
         if not isinstance(join_semantics, str) or not join_semantics.strip():
             return None
         output["join_semantics"] = join_semantics.strip()
+    elif operation.get("preserve_all_categories") is True:
+        output["join_semantics"] = "preserve_all_operand_categories"
     return output
 
 

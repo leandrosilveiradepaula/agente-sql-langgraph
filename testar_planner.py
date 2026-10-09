@@ -1801,6 +1801,35 @@ def test_metric_binding_aplica_por_required_rule_do_pattern() -> None:
     } >= {"financial_metric", "generic_required_rule"}
 
 
+def test_metric_binding_multi_inferida_por_required_rules_sem_metric_term() -> None:
+    context = _comparison_context()
+    for entity in context["entities"]:
+        if entity.get("entity_type") == "metric_binding":
+            entity["business_rule"]["metric_binding"]["when_present"] = [
+                "generic_required_rule"
+            ]
+
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="compare",
+        intent_resolution_result=_intent_operation_evidence(term="compare"),
+    )
+    projection = result["query_plan"]["planning_context"]
+
+    assert len(projection["planned_metrics"]) == 2
+    assert {
+        metric["detection_source"]
+        for metric in projection["planned_metrics"]
+    } == {"selected_pattern_context"}
+    operation = projection["analytical_operations"][0]
+    assert len(operation["operand_metric_refs"]) == 2
+    assert projection["diagnostics"]["planned_metric_diagnostic"][
+        "binding_inference"
+    ]["status"] == "resolved"
+
+
 def test_metric_binding_single_aplica_corretamente() -> None:
     context = _metric_context()
     _append_metric_binding(context, when_present=["mode_a"])
@@ -2303,6 +2332,23 @@ def test_comparison_metadata_e_aceita_pelo_planner() -> None:
     assert operation["output_behavior"] == "side_by_side"
     assert operation["combination_strategy"] == "aggregate_then_combine"
     assert operation["binding_cardinality"] == _comparison_cardinality()
+
+
+def test_comparison_normaliza_preserve_all_categories_legado() -> None:
+    context = _comparison_context()
+    for entity in context["entities"]:
+        if (
+            entity.get("entity_type") == "analytical_operation"
+            and entity.get("canonical_value") == "comparison"
+        ):
+            operation = entity["business_rule"]["operation"]
+            operation.pop("join_semantics", None)
+            operation["preserve_all_categories"] = True
+
+    projection = _comparison_projection(context)
+    operation = projection["analytical_operations"][0]
+
+    assert operation["join_semantics"] == "preserve_all_operand_categories"
 
 
 def test_comparison_preserva_join_semantics_string_versionada() -> None:
@@ -3312,6 +3358,10 @@ def main() -> None:
             test_financial_metric_com_aggregate_nao_e_projetada,
         ),
         (
+            "metric binding multiple inferido por required rules",
+            test_metric_binding_multi_inferida_por_required_rules_sem_metric_term,
+        ),
+        (
             "metric binding single",
             test_metric_binding_single_aplica_corretamente,
         ),
@@ -3374,6 +3424,10 @@ def main() -> None:
         (
             "comparison metadata",
             test_comparison_metadata_e_aceita_pelo_planner,
+        ),
+        (
+            "comparison preserve all legado",
+            test_comparison_normaliza_preserve_all_categories_legado,
         ),
         (
             "comparison join semantics string",
