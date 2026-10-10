@@ -862,7 +862,11 @@ def _comparison_projection(
             context_concepts=context_concepts or ["mode_a", "mode_b"],
         ),
     )
-    return result["query_plan"]["planning_context"]
+    return (
+        result["query_plan"]["planning_context"]
+        if result["query_plan"] is not None
+        else result["projection"]
+    )
 
 
 def _comparison_projection_for_operation_terms(
