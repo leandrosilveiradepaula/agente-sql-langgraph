@@ -3536,6 +3536,7 @@ def main() -> None:
         ("metric separately explicit", test_explicit_metric_outside_dimension_is_preserved),
     ]
 
+    tests.append(("ranking ordered direction", test_ranking_direction_follows_configured_evidence_order))
     for index, (name, test_function) in enumerate(tests, start=1):
         test_function()
         print(f"TESTE {index} - {name}: OK")
@@ -3600,6 +3601,34 @@ def test_explicit_metric_outside_dimension_is_preserved() -> None:
         normalized_question="Compare margin by region",
         dimension_terms=["region"],
     )
+
+
+
+def test_ranking_direction_follows_configured_evidence_order() -> None:
+    from app.domain.planner import _detect_analytical_operations
+
+    context = _operation_context()
+    for question, first, expected in (
+        ("highest to lowest", "highest", "descending"),
+        ("lowest to highest", "lowest", "ascending"),
+    ):
+        evidence = _intent_operation_evidence(term=first)
+        evidence["normalized_question"] = question
+        concepts = evidence["best_candidate"]["matches"][0]["match_details"]["concepts"]
+        op_concept = next(
+            item for item in concepts
+            if item.get("concept_name") == "analytical_operation"
+        )
+        op_concept["terms"] = [
+            {"term": term, "normalized_term": term, "matched": True}
+            for term in ("highest", "lowest")
+        ]
+        operations, _diagnostic = _detect_analytical_operations(
+            context=context, intent_resolution_result=evidence,
+        )
+        assert len(operations) == 1
+        assert operations[0]["direction"] == expected
+
 
 
 if __name__ == "__main__":
