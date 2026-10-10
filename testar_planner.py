@@ -3532,13 +3532,16 @@ def main() -> None:
         ),
     ]
 
+        ("comparison incomplete fail-closed", test_comparison_missing_operands_fails_closed_at_plan_gate),
+        ("comparison complete operands", test_comparison_complete_operands_pass_plan_gate),
+        ("metric inside dimension", test_metric_embedded_in_dimension_not_independent),
+        ("metric separately explicit", test_explicit_metric_outside_dimension_is_preserved),
+
     for index, (name, test_function) in enumerate(tests, start=1):
         test_function()
         print(f"TESTE {index} - {name}: OK")
 
 
-if __name__ == "__main__":
-    main()
 
 
 def test_comparison_missing_operands_fails_closed_at_plan_gate() -> None:
@@ -3598,3 +3601,7 @@ def test_explicit_metric_outside_dimension_is_preserved() -> None:
         normalized_question="Compare margin by region",
         dimension_terms=["region"],
     )
+
+
+if __name__ == "__main__":
+    main()
