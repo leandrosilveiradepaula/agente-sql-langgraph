@@ -969,7 +969,47 @@ def _detect_analytical_operations(
             "source": "none" if not evidence_terms else "intent_semantic_evidence",
         }
 
-    return _dedupe_analytical_operations(operations), {
+    deduped_operations = _dedupe_analytical_operations(operations)
+    ranked_operations = [
+        item for item in deduped_operations
+        if item.get("operation_type") == "ranking"
+    ]
+    if len({item.get("direction") for item in ranked_operations}) > 1:
+        # A direction can be selected only from the order of explicit
+        # configured operation evidence, not from arbitrary alias priority.
+        question = str(
+            (intent_resolution_result or {}).get("normalized_question", "")
+        )
+        positions: list[tuple[int, str]] = []
+        for term in evidence_terms:
+            operation = _resolve_analytical_operation(
+                context.get("entities", []),
+                matched_user_term=term,
+            )
+            if operation is None or operation.get("operation_type") != "ranking":
+                continue
+            normalized = normalize_search_text(term)
+            match = re.search(
+                r"(?<!\\w)" + re.escape(normalized) + r"(?!\\w)",
+                question,
+            )
+            if match:
+                positions.append((match.start(), str(operation.get("direction"))))
+        if positions:
+            positions.sort(key=lambda item: item[0])
+            chosen_direction = positions[0][1]
+            deduped_operations = [
+                item for item in deduped_operations
+                if item.get("operation_type") != "ranking"
+                or item.get("direction") == chosen_direction
+            ]
+        else:
+            raise PlanningRejection(
+                "PLANNING_OPERATION_DIRECTION_AMBIGUOUS",
+                "Direcoes analiticas conflitantes sem evidencia de ordem.",
+            )
+
+    return deduped_operations, {
         "operation_requested": True,
         "matched_terms": sorted(set(evidence_terms), key=str.casefold),
         "unresolved_terms": sorted(set(unresolved), key=str.casefold),
