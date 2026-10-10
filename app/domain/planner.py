@@ -120,6 +120,22 @@ def build_query_plan(
             "error_message": rejection.message,
         }
 
+    if not _analytical_operand_bindings_complete(projection):
+        failed_selection = deepcopy(selection)
+        failed_selection["status"] = "rejected"
+        failed_selection["error_code"] = "PLANNING_ANALYTICAL_BINDING_INCOMPLETE"
+        failed_selection["error_message"] = (
+            "Operacao analitica sem vinculos de metricas suficientes."
+        )
+        return {
+            "status": "rejected",
+            "query_plan": None,
+            "selection_result": failed_selection,
+            "projection": projection,
+            "error_code": "PLANNING_ANALYTICAL_BINDING_INCOMPLETE",
+            "error_message": failed_selection["error_message"],
+        }
+
     query_plan: QueryPlan = {
         "planner_version": PLANNER_VERSION,
         "context_version": context.get("version", ""),
@@ -144,6 +160,40 @@ def build_query_plan(
         "error_code": None,
         "error_message": None,
     }
+
+
+def _analytical_operand_bindings_complete(
+    projection: Mapping[str, Any],
+) -> bool:
+    """Reject analytical operations that lack their versioned metric cardinality."""
+    operations = projection.get("analytical_operations", [])
+    planned_metrics = projection.get("planned_metrics", [])
+    if not isinstance(operations, list) or not isinstance(planned_metrics, list):
+        return False
+    refs = {
+        str(metric.get("metric_ref", "")).strip()
+        for metric in planned_metrics
+        if isinstance(metric, Mapping) and metric.get("metric_ref")
+    }
+    for operation in operations:
+        if not isinstance(operation, Mapping):
+            return False
+        if operation.get("operation_type") != "comparison":
+            continue
+        cardinality = operation.get("binding_cardinality", {})
+        if not isinstance(cardinality, Mapping):
+            return False
+        minimum = cardinality.get("minimum")
+        if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 1:
+            return False
+        operand_refs = operation.get("operand_metric_refs", [])
+        if not isinstance(operand_refs, list):
+            return False
+        if len(operand_refs) < minimum or len(operand_refs) != len(set(operand_refs)):
+            return False
+        if any(not isinstance(ref, str) or ref not in refs for ref in operand_refs):
+            return False
+    return True
 
 
 def select_query_pattern(

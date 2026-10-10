@@ -862,7 +862,11 @@ def _comparison_projection(
             context_concepts=context_concepts or ["mode_a", "mode_b"],
         ),
     )
-    return result["query_plan"]["planning_context"]
+    return (
+        result["query_plan"]["planning_context"]
+        if result["query_plan"] is not None
+        else result["projection"]
+    )
 
 
 def _comparison_projection_for_operation_terms(
@@ -3535,3 +3539,32 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def test_comparison_missing_operands_fails_closed_at_plan_gate() -> None:
+    from app.domain.planner import _analytical_operand_bindings_complete
+
+    assert not _analytical_operand_bindings_complete({
+        "planned_metrics": [],
+        "analytical_operations": [{
+            "operation_type": "comparison",
+            "binding_cardinality": _comparison_cardinality(),
+            "operand_metric_refs": [],
+        }],
+    })
+
+
+def test_comparison_complete_operands_pass_plan_gate() -> None:
+    from app.domain.planner import _analytical_operand_bindings_complete
+
+    assert _analytical_operand_bindings_complete({
+        "planned_metrics": [
+            {"metric_ref": "metric-a"},
+            {"metric_ref": "metric-b"},
+        ],
+        "analytical_operations": [{
+            "operation_type": "comparison",
+            "binding_cardinality": _comparison_cardinality(),
+            "operand_metric_refs": ["metric-a", "metric-b"],
+        }],
+    })
