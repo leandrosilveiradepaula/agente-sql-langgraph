@@ -3530,12 +3530,11 @@ def main() -> None:
             "dimension sem match permite fallback",
             test_dimension_explicita_sem_match_nao_bloqueia_fallback_legado,
         ),
-    ]
-
         ("comparison incomplete fail-closed", test_comparison_missing_operands_fails_closed_at_plan_gate),
         ("comparison complete operands", test_comparison_complete_operands_pass_plan_gate),
         ("metric inside dimension", test_metric_embedded_in_dimension_not_independent),
         ("metric separately explicit", test_explicit_metric_outside_dimension_is_preserved),
+    ]
 
     for index, (name, test_function) in enumerate(tests, start=1):
         test_function()
