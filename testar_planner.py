@@ -3568,3 +3568,33 @@ def test_comparison_complete_operands_pass_plan_gate() -> None:
             "operand_metric_refs": ["metric-a", "metric-b"],
         }],
     })
+
+
+def test_metric_embedded_in_dimension_not_independent() -> None:
+    from app.domain.planner import _term_exclusively_inside_dimensions
+
+    assert _term_exclusively_inside_dimensions(
+        "cost",
+        normalized_question="Compare amounts by cost center last year",
+        dimension_terms=["cost center"],
+    )
+    assert _term_exclusively_inside_dimensions(
+        "value",
+        normalized_question="Compare amounts by value band",
+        dimension_terms=["value band"],
+    )
+
+
+def test_explicit_metric_outside_dimension_is_preserved() -> None:
+    from app.domain.planner import _term_exclusively_inside_dimensions
+
+    assert not _term_exclusively_inside_dimensions(
+        "cost",
+        normalized_question="Compare cost by cost center last year",
+        dimension_terms=["cost center"],
+    )
+    assert not _term_exclusively_inside_dimensions(
+        "margin",
+        normalized_question="Compare margin by region",
+        dimension_terms=["region"],
+    )
