@@ -1035,7 +1035,7 @@ def _term_exclusively_inside_dimensions(
         return [
             match.span()
             for match in re.finditer(
-                r"(?<!\\w)" + re.escape(normalized) + r"(?!\\w)",
+                r"(?<!\w)" + re.escape(normalized) + r"(?!\w)",
                 question,
             )
         ]
