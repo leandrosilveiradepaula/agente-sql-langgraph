@@ -3535,3 +3535,32 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def test_comparison_missing_operands_fails_closed_at_plan_gate() -> None:
+    from app.domain.planner import _analytical_operand_bindings_complete
+
+    assert not _analytical_operand_bindings_complete({
+        "planned_metrics": [],
+        "analytical_operations": [{
+            "operation_type": "comparison",
+            "binding_cardinality": _comparison_cardinality(),
+            "operand_metric_refs": [],
+        }],
+    })
+
+
+def test_comparison_complete_operands_pass_plan_gate() -> None:
+    from app.domain.planner import _analytical_operand_bindings_complete
+
+    assert _analytical_operand_bindings_complete({
+        "planned_metrics": [
+            {"metric_ref": "metric-a"},
+            {"metric_ref": "metric-b"},
+        ],
+        "analytical_operations": [{
+            "operation_type": "comparison",
+            "binding_cardinality": _comparison_cardinality(),
+            "operand_metric_refs": ["metric-a", "metric-b"],
+        }],
+    })
