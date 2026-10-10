@@ -990,7 +990,7 @@ def _detect_analytical_operations(
                 continue
             normalized = normalize_search_text(term)
             match = re.search(
-                r"(?<!\\w)" + re.escape(normalized) + r"(?!\\w)",
+                r"(?<!\w)" + re.escape(normalized) + r"(?!\w)",
                 question,
             )
             if match:
