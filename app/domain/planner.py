@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
@@ -370,6 +371,8 @@ def project_planning_context(
         context=context,
         intent_resolution_result=intent_resolution_result,
         selected_pattern=selected_pattern,
+        normalized_question=normalized_question,
+        dimension_terms=dimension_diagnostic.get("matched_terms", []),
     )
     planned_filters, planned_filter_diagnostic = _detect_planned_filters(
         context=context,
@@ -1013,15 +1016,64 @@ def _operation_terms_from_intent_evidence(
     return sorted(set(matches), key=str.casefold)
 
 
+def _term_exclusively_inside_dimensions(
+    term: str,
+    *,
+    normalized_question: str,
+    dimension_terms: list[str],
+) -> bool:
+    """Exclude metric mentions wholly contained in recognized dimension spans."""
+    question = normalize_search_text(normalized_question)
+    needle = normalize_search_text(term)
+    if not question or not needle:
+        return False
+
+    def spans(phrase: str) -> list[tuple[int, int]]:
+        normalized = normalize_search_text(phrase)
+        if not normalized:
+            return []
+        return [
+            match.span()
+            for match in re.finditer(
+                r"(?<!\w)" + re.escape(normalized) + r"(?!\w)",
+                question,
+            )
+        ]
+
+    occurrences = spans(needle)
+    if not occurrences:
+        return False
+    dimension_spans = [
+        span
+        for phrase in dimension_terms
+        if isinstance(phrase, str)
+        for span in spans(phrase)
+    ]
+    return bool(dimension_spans) and all(
+        any(start >= left and end <= right for left, right in dimension_spans)
+        for start, end in occurrences
+    )
+
+
 def _detect_planned_metrics(
     *,
     context: ContextSnapshot,
     intent_resolution_result: Mapping[str, Any] | None = None,
     selected_pattern: Mapping[str, Any] | None = None,
+    normalized_question: str = "",
+    dimension_terms: list[str] | None = None,
 ) -> tuple[list[ProjectedPlannedMetric], dict[str, Any]]:
-    evidence_terms = _metric_terms_from_intent_evidence(
+    raw_evidence_terms = _metric_terms_from_intent_evidence(
         intent_resolution_result,
     )
+    evidence_terms = [
+        term for term in raw_evidence_terms
+        if not _term_exclusively_inside_dimensions(
+            term,
+            normalized_question=normalized_question,
+            dimension_terms=dimension_terms or [],
+        )
+    ]
     binding_context_concepts = _binding_context_concepts_from_intent_evidence(
         intent_resolution_result,
         selected_pattern=selected_pattern,
