@@ -32,6 +32,7 @@ from app.domain.planning import (
     ProjectedPlannedFilter,
     ProjectedFilterBinding,
     ProjectedPlannedMetric,
+    ProjectedTemporalSeries,
     ProjectedRule,
     ProjectedTable,
     QueryPlan,
@@ -137,6 +138,22 @@ def build_query_plan(
             "error_message": failed_selection["error_message"],
         }
 
+    if not _temporal_bindings_complete(projection):
+        failed_selection = deepcopy(selection)
+        failed_selection["status"] = "rejected"
+        failed_selection["error_code"] = "PLANNING_TEMPORAL_BINDING_INCOMPLETE"
+        failed_selection["error_message"] = (
+            "Serie temporal sem metrica, granularidade ou coluna de data autorizada."
+        )
+        return {
+            "status": "rejected",
+            "query_plan": None,
+            "selection_result": failed_selection,
+            "projection": projection,
+            "error_code": "PLANNING_TEMPORAL_BINDING_INCOMPLETE",
+            "error_message": failed_selection["error_message"],
+        }
+
     query_plan: QueryPlan = {
         "planner_version": PLANNER_VERSION,
         "context_version": context.get("version", ""),
@@ -161,6 +178,227 @@ def build_query_plan(
         "error_code": None,
         "error_message": None,
     }
+
+
+def _temporal_bindings_complete(projection: Mapping[str, Any]) -> bool:
+    """Apply a fail-closed gate only where versioned context requires time series."""
+    diagnostics = projection.get("diagnostics", {})
+    if not isinstance(diagnostics, Mapping):
+        return False
+    diagnostic = diagnostics.get("temporal_diagnostic", {})
+    if not isinstance(diagnostic, Mapping):
+        return False
+    if not diagnostic.get("required"):
+        return True
+    series = projection.get("temporal_series")
+    if not isinstance(series, Mapping) or diagnostic.get("status") != "resolved":
+        return False
+    metrics = projection.get("planned_metrics", [])
+    if not isinstance(metrics, list):
+        return False
+    refs = {
+        metric.get("metric_ref")
+        for metric in metrics
+        if isinstance(metric, Mapping)
+        and isinstance(metric.get("metric_ref"), str)
+        and metric["metric_ref"].strip()
+    }
+    bound_refs = series.get("metric_refs")
+    return (
+        isinstance(series.get("time_grain"), str)
+        and bool(series["time_grain"].strip())
+        and isinstance(series.get("date_table"), str)
+        and bool(series["date_table"].strip())
+        and isinstance(series.get("date_column"), str)
+        and bool(series["date_column"].strip())
+        and isinstance(bound_refs, list)
+        and bool(bound_refs)
+        and len(bound_refs) == len(set(bound_refs))
+        and set(bound_refs) == refs
+    )
+
+
+def _project_temporal_series(
+    *,
+    context: ContextSnapshot,
+    intent_name: str,
+    normalized_question: str,
+    planned_metrics: list[ProjectedPlannedMetric],
+    required_tables: list[ProjectedTable],
+    intent_resolution_result: Mapping[str, Any] | None,
+) -> tuple[ProjectedTemporalSeries | None, dict[str, Any]]:
+    """Bind a series to configured grain aliases and authorized date metadata.
+
+    All intent names and user vocabulary come from the versioned context;
+    date columns come from the selected table catalog, never code defaults.
+    """
+    components = context.get("component_configs", {})
+    config = (
+        components.get("temporal_planning")
+        if isinstance(components, Mapping)
+        else None
+    )
+    if config is None:
+        return None, {"required": False, "status": "not_applicable"}
+    if not isinstance(config, Mapping):
+        return None, {"required": True, "status": "invalid_metadata"}
+
+    configured_intents = config.get("required_intents")
+    if not isinstance(configured_intents, list) or not all(
+        isinstance(item, str) and item.strip()
+        for item in configured_intents
+    ):
+        return None, {"required": True, "status": "invalid_metadata"}
+    if intent_name.casefold() not in {
+        item.casefold() for item in configured_intents
+    }:
+        return None, {"required": False, "status": "not_applicable"}
+
+    issues: list[str] = []
+    config_grains = config.get("granularities")
+    matches: dict[str, set[str]] = {}
+    normalized = normalize_search_text(normalized_question)
+    if not isinstance(config_grains, list) or not config_grains:
+        issues.append("missing_granularity_config")
+    else:
+        for item in config_grains:
+            if not isinstance(item, Mapping):
+                issues.append("invalid_granularity_metadata")
+                continue
+            grain, terms = item.get("grain"), item.get("terms")
+            if (
+                not isinstance(grain, str) or not grain.strip()
+                or not isinstance(terms, list) or not terms
+                or not all(isinstance(term, str) and term.strip() for term in terms)
+            ):
+                issues.append("invalid_granularity_metadata")
+                continue
+            for term in terms:
+                term_normalized = normalize_search_text(term)
+                if term_normalized and re.search(
+                    r"(?<!\w)" + re.escape(term_normalized) + r"(?!\w)",
+                    normalized,
+                ):
+                    matches.setdefault(grain, set()).add(term)
+    if len(matches) != 1:
+        issues.append(
+            "ambiguous_granularity" if len(matches) > 1 else "missing_granularity"
+        )
+
+    metric_refs = _operand_metric_refs(planned_metrics)
+    if not metric_refs or len(metric_refs) != len(planned_metrics):
+        issues.append("metric_binding_missing")
+    source_tables = {
+        str(metric.get("target_table", "")).strip().casefold()
+        for metric in planned_metrics
+        if isinstance(metric, Mapping) and metric.get("target_table")
+    }
+    if len(source_tables) != 1:
+        issues.append("metric_source_table_missing_or_ambiguous")
+
+    strategy = config.get("date_binding_strategy")
+    if strategy != "unique_metric_source_catalog_date":
+        issues.append("unsupported_date_binding_strategy")
+
+    date_table: str | None = None
+    date_column: str | None = None
+    if len(source_tables) == 1 and strategy == "unique_metric_source_catalog_date":
+        source = next(iter(source_tables))
+        matches_table = [
+            table for table in required_tables
+            if str(table.get("qualified_name", "")).casefold() == source
+        ]
+        if len(matches_table) != 1:
+            issues.append("metric_source_not_in_selected_catalog")
+        else:
+            table = matches_table[0]
+            date_fields = table.get("date_columns")
+            if not isinstance(date_fields, list):
+                issues.append("invalid_date_catalog")
+            else:
+                names: set[str] = set()
+                for field in date_fields:
+                    if isinstance(field, str) and field.strip():
+                        names.add(field.strip())
+                    elif isinstance(field, Mapping):
+                        name = field.get("name")
+                        if isinstance(name, str) and name.strip():
+                            names.add(name.strip())
+                        else:
+                            issues.append("invalid_date_catalog")
+                    else:
+                        issues.append("invalid_date_catalog")
+                if len({name.casefold() for name in names}) != 1:
+                    issues.append(
+                        "ambiguous_date_columns" if names else "date_column_missing"
+                    )
+                else:
+                    date_column = next(iter(names))
+                    date_table = str(table.get("qualified_name", ""))
+                    columns = table.get("columns", [])
+                    allowed_columns = {
+                        str(col.get("name", "")).casefold()
+                        for col in columns
+                        if isinstance(col, Mapping) and col.get("name")
+                    } if isinstance(columns, list) else set()
+                    if allowed_columns and date_column.casefold() not in allowed_columns:
+                        issues.append("date_column_not_in_allowed_catalog")
+
+    if issues:
+        return None, {
+            "required": True,
+            "status": "incomplete",
+            "issues": sorted(set(issues)),
+            "matched_granularities": sorted(matches),
+            "planned_metric_count": len(planned_metrics),
+        }
+
+    grain = next(iter(matches))
+    period_terms = _matched_temporal_period_terms(intent_resolution_result)
+    return {
+        "operation_type": "time_series",
+        "time_grain": grain,
+        "date_table": date_table or "",
+        "date_column": date_column or "",
+        "metric_refs": metric_refs,
+        "period_reference_terms": period_terms,
+        "mapping_source": "table_catalog.date_columns",
+        "detection_source": "versioned_temporal_planning_config",
+    }, {
+        "required": True,
+        "status": "resolved",
+        "matched_granularities": sorted(matches),
+        "matched_grain_terms": sorted(matches[grain]),
+        "date_binding_source": "table_catalog.date_columns",
+        "planned_metric_count": len(metric_refs),
+    }
+
+
+def _matched_temporal_period_terms(
+    intent_resolution_result: Mapping[str, Any] | None,
+) -> list[str]:
+    if not isinstance(intent_resolution_result, Mapping):
+        return []
+    selected_intent = intent_resolution_result.get("intent")
+    result: set[str] = set()
+    for candidate in _selected_intent_candidates(
+        intent_resolution_result,
+        selected_intent=selected_intent,
+    ):
+        for concept in _concepts_from_candidate(candidate):
+            if str(concept.get("concept_name", "")).casefold() not in {
+                "period_reference", "explicit_period_reference"
+            }:
+                continue
+            if not concept.get("satisfied"):
+                continue
+            for evidence in concept.get("terms", []):
+                if not isinstance(evidence, Mapping) or not evidence.get("matched"):
+                    continue
+                term = evidence.get("normalized_term")
+                if isinstance(term, str) and term.strip():
+                    result.add(term.strip())
+    return sorted(result, key=str.casefold)
 
 
 def _analytical_operand_bindings_complete(
@@ -452,6 +690,15 @@ def project_planning_context(
         selected_columns=selected_columns,
     )
 
+    temporal_series, temporal_diagnostic = _project_temporal_series(
+        context=context,
+        intent_name=intent_name,
+        normalized_question=normalized_question,
+        planned_metrics=planned_metrics,
+        required_tables=required_tables,
+        intent_resolution_result=intent_resolution_result,
+    )
+
     relevant_columns = {
         table["qualified_name"]: deepcopy(
             table.get("columns", [])
@@ -475,6 +722,7 @@ def project_planning_context(
         "relevant_dre_mappings": dre_projection,
         "detected_dimensions": dimension_projection,
         "analytical_operations": operation_projection,
+        "temporal_series": temporal_series,
         "planned_metrics": planned_metrics,
         "planned_filters": planned_filters,
         "resolved_filter_bindings": resolved_filter_bindings,
@@ -492,6 +740,7 @@ def project_planning_context(
             "analytical_operation_diagnostic": operation_diagnostic,
             "planned_metric_diagnostic": planned_metric_diagnostic,
             "planned_filter_diagnostic": planned_filter_diagnostic,
+            "temporal_diagnostic": temporal_diagnostic,
         },
     }
 
