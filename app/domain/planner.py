@@ -364,6 +364,7 @@ def project_planning_context(
     operation_projection, operation_diagnostic = (
         _detect_analytical_operations(
             context=context,
+            normalized_question=normalized_question,
             intent_resolution_result=intent_resolution_result,
         )
     )
@@ -939,6 +940,7 @@ def _grouping_terms_from_concept_evidence(
 def _detect_analytical_operations(
     *,
     context: ContextSnapshot,
+    normalized_question: str = "",
     intent_resolution_result: Mapping[str, Any] | None = None,
 ) -> tuple[list[ProjectedAnalyticalOperation], dict[str, Any]]:
     evidence_terms = _operation_terms_from_intent_evidence(
@@ -977,8 +979,9 @@ def _detect_analytical_operations(
     if len({item.get("direction") for item in ranked_operations}) > 1:
         # A direction can be selected only from the order of explicit
         # configured operation evidence, not from arbitrary alias priority.
-        question = str(
-            (intent_resolution_result or {}).get("normalized_question", "")
+        question = normalize_search_text(
+            normalized_question
+            or str((intent_resolution_result or {}).get("normalized_question", ""))
         )
         positions: list[tuple[int, str]] = []
         for term in evidence_terms:
