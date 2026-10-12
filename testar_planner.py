@@ -3542,6 +3542,7 @@ def main() -> None:
         ("temporal grain ambiguity gate", test_temporal_plan_rejects_missing_or_conflicting_grain),
         ("temporal authorized date metadata", test_temporal_plan_rejects_date_metadata_not_authorized),
         ("temporal missing metric fail-closed", test_temporal_planner_gate_rejects_absent_metric_without_affecting_legacy),
+        ("temporal complete plan projection", test_temporal_plan_end_to_end_planner_projection),
     ])
     for index, (name, test_function) in enumerate(tests, start=1):
         test_function()
@@ -3767,6 +3768,33 @@ def test_temporal_planner_gate_rejects_absent_metric_without_affecting_legacy() 
     )
     assert legacy["status"] == "planned"
 
+
+
+def test_temporal_plan_end_to_end_planner_projection() -> None:
+    from app.domain.planner import build_query_plan
+
+    context = _metric_context()
+    context["component_configs"]["temporal_planning"] = {
+        "component": "temporal_planning",
+        "required_intents": ["generic_test_intent"],
+        "date_binding_strategy": "unique_metric_source_catalog_date",
+        "granularities": [
+            {"grain": "month", "terms": ["monthly"]},
+        ],
+    }
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.94,
+        normalized_question="Show monthly amount",
+        intent_resolution_result=_intent_metric_evidence(term="amount"),
+    )
+    assert result["status"] == "planned", result.get("error_code")
+    projection = result["query_plan"]["planning_context"]
+    assert projection["temporal_series"]["date_table"] == "schema_test.fact_metrics"
+    assert projection["temporal_series"]["date_column"] == "event_date"
+    assert projection["temporal_series"]["time_grain"] == "month"
+    assert len(projection["temporal_series"]["metric_refs"]) == 1
 
 if __name__ == "__main__":
     main()
