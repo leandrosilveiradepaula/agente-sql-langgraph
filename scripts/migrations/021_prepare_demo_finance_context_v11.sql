@@ -6,28 +6,27 @@
 BEGIN;
 SET LOCAL search_path TO :"context_schema";
 
-DO $
-BEGIN
+DO 'BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM ai_ducklake_agent_rules
-    WHERE agent_version = 'demo-finance-v10' AND is_active = TRUE
+    WHERE agent_version = ''demo-finance-v10'' AND is_active = TRUE
   ) THEN
-    RAISE EXCEPTION 'demo-finance-v10 source context is missing';
+    RAISE EXCEPTION ''demo-finance-v10 source context is missing'';
   END IF;
   IF EXISTS (
-    SELECT 1 FROM ai_ducklake_agent_rules WHERE agent_version = 'demo-finance-v11'
+    SELECT 1 FROM ai_ducklake_agent_rules WHERE agent_version = ''demo-finance-v11''
   ) OR EXISTS (
-    SELECT 1 FROM ai_ducklake_entity_aliases WHERE agent_version = 'demo-finance-v11'
+    SELECT 1 FROM ai_ducklake_entity_aliases WHERE agent_version = ''demo-finance-v11''
   ) OR EXISTS (
-    SELECT 1 FROM ai_ducklake_sql_patterns WHERE agent_version = 'demo-finance-v11'
+    SELECT 1 FROM ai_ducklake_sql_patterns WHERE agent_version = ''demo-finance-v11''
   ) OR EXISTS (
-    SELECT 1 FROM ai_ducklake_table_catalog WHERE agent_version = 'demo-finance-v11'
+    SELECT 1 FROM ai_ducklake_table_catalog WHERE agent_version = ''demo-finance-v11''
   ) OR EXISTS (
-    SELECT 1 FROM ai_ducklake_dre_mapping WHERE agent_version = 'demo-finance-v11'
+    SELECT 1 FROM ai_ducklake_dre_mapping WHERE agent_version = ''demo-finance-v11''
   ) THEN
-    RAISE EXCEPTION 'demo-finance-v11 already exists; immutable context not modified';
+    RAISE EXCEPTION ''demo-finance-v11 already exists; immutable context not modified'';
   END IF;
-END $;
+END';
 
 WITH versions AS (
   SELECT 'demo-finance-v10'::text AS source_version,
