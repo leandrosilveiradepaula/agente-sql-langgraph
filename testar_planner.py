@@ -3620,11 +3620,28 @@ def test_ranking_direction_follows_configured_evidence_order() -> None:
             if item.get("concept_name") == "analytical_operation"
         )
         op_concept["terms"] = [
-            {"term": term, "normalized_term": term, "matched": True}
-            for term in ("highest", "lowest")
+            {
+                "term": term,
+                "normalized_term": term,
+                "matched": True,
+                "match_details": {
+                    "matched_token_indexes": [index],
+                    "semantic_signal": {
+                        "source": "intent_catalog_concept",
+                        "matched_tokens": [("highest" if index == 0 else "lowest")],
+                    },
+                },
+            }
+            for index, term in enumerate(
+                ("highest", "lowest") if first == "highest"
+                else ("lowest", "highest")
+            )
         ]
+        evidence.pop("normalized_question", None)
         operations, _diagnostic = _detect_analytical_operations(
-            context=context, intent_resolution_result=evidence,
+            context=context,
+            normalized_question=question,
+            intent_resolution_result=evidence,
         )
         assert len(operations) == 1
         assert operations[0]["direction"] == expected

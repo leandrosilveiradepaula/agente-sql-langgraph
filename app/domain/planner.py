@@ -364,6 +364,7 @@ def project_planning_context(
     operation_projection, operation_diagnostic = (
         _detect_analytical_operations(
             context=context,
+            normalized_question=normalized_question,
             intent_resolution_result=intent_resolution_result,
         )
     )
@@ -939,6 +940,7 @@ def _grouping_terms_from_concept_evidence(
 def _detect_analytical_operations(
     *,
     context: ContextSnapshot,
+    normalized_question: str = "",
     intent_resolution_result: Mapping[str, Any] | None = None,
 ) -> tuple[list[ProjectedAnalyticalOperation], dict[str, Any]]:
     evidence_terms = _operation_terms_from_intent_evidence(
@@ -977,8 +979,9 @@ def _detect_analytical_operations(
     if len({item.get("direction") for item in ranked_operations}) > 1:
         # A direction can be selected only from the order of explicit
         # configured operation evidence, not from arbitrary alias priority.
-        question = str(
-            (intent_resolution_result or {}).get("normalized_question", "")
+        question = normalize_search_text(
+            normalized_question
+            or str((intent_resolution_result or {}).get("normalized_question", ""))
         )
         positions: list[tuple[int, str]] = []
         for term in evidence_terms:
@@ -995,7 +998,55 @@ def _detect_analytical_operations(
             )
             if match:
                 positions.append((match.start(), str(operation.get("direction"))))
-        if positions:
+        semantic_positions: list[tuple[int, str]] = []
+        selected_intent = (intent_resolution_result or {}).get("intent")
+        for candidate in _selected_intent_candidates(
+            intent_resolution_result or {},
+            selected_intent=selected_intent,
+        ):
+            for concept in _concepts_from_candidate(candidate):
+                if str(concept.get("concept_name", "")).casefold() != "analytical_operation":
+                    continue
+                for evidence in concept.get("terms", []):
+                    if not isinstance(evidence, Mapping) or not evidence.get("matched"):
+                        continue
+                    details = evidence.get("match_details")
+                    if not isinstance(details, Mapping):
+                        continue
+                    indexes = details.get("matched_token_indexes")
+                    if not isinstance(indexes, list) or not indexes:
+                        continue
+                    if not isinstance(indexes[0], int) or isinstance(indexes[0], bool):
+                        continue
+                    term = evidence.get("normalized_term")
+                    if not isinstance(term, str):
+                        continue
+                    operation = _resolve_analytical_operation(
+                        context.get("entities", []),
+                        matched_user_term=term,
+                    )
+                    if operation is not None and operation.get("operation_type") == "ranking":
+                        semantic_positions.append(
+                            (indexes[0], str(operation.get("direction")))
+                        )
+        if semantic_positions:
+            semantic_positions.sort(key=lambda item: item[0])
+            if (
+                len(semantic_positions) > 1
+                and semantic_positions[0][0] == semantic_positions[1][0]
+                and semantic_positions[0][1] != semantic_positions[1][1]
+            ):
+                raise PlanningRejection(
+                    "PLANNING_OPERATION_DIRECTION_AMBIGUOUS",
+                    "Evidencias de direcao conflitantes na mesma posicao.",
+                )
+            chosen_direction = semantic_positions[0][1]
+            deduped_operations = [
+                item for item in deduped_operations
+                if item.get("operation_type") != "ranking"
+                or item.get("direction") == chosen_direction
+            ]
+        elif positions:
             positions.sort(key=lambda item: item[0])
             chosen_direction = positions[0][1]
             deduped_operations = [
