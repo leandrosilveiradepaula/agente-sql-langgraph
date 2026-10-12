@@ -119,9 +119,9 @@ WITH target AS (
                         COALESCE(concept -> 'terms', '[]'::jsonb)
                       ) AS term
                       UNION ALL SELECT unnest(ARRAY[
-                        'variar','varia','variam','variou','variaram','variando',
+                        'variar','variam','variou','variaram','variando',
                         'mudança','mudanças','mudou','mudaram',
-                        'oscilação','oscilar','oscila','oscilou','oscilaram',
+                        'oscilação','oscilar','oscilou','oscilaram',
                         'flutuação','flutuar','flutuou','flutuaram'
                       ])
                     ) all_terms
