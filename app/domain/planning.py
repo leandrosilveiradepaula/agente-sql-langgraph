@@ -34,6 +34,7 @@ PlanningErrorCode = Literal[
     "PLANNING_REQUIRED_RULE_NOT_FOUND",
     "PLANNING_REQUIRED_TABLE_NOT_FOUND",
     "PLANNING_CONTEXT_INVALID",
+    "PLANNING_TEMPORAL_BINDING_INCOMPLETE",
     "PLANNING_UNEXPECTED_ERROR",
 ]
 
@@ -185,6 +186,18 @@ class ProjectedAnalyticalOperation(TypedDict, total=False):
     priority: int | None
 
 
+class ProjectedTemporalSeries(TypedDict):
+    """Authorized temporal grouping derived from versioned semantic metadata."""
+    operation_type: str
+    time_grain: str
+    date_table: str
+    date_column: str
+    metric_refs: list[str]
+    period_reference_terms: list[str]
+    mapping_source: str
+    detection_source: str
+
+
 class ProjectedPlannedMetric(TypedDict, total=False):
     metric_ref: str
     metric_concept: str
@@ -234,6 +247,7 @@ class ProjectionDiagnostic(TypedDict):
     analytical_operation_diagnostic: dict[str, Any]
     planned_metric_diagnostic: dict[str, Any]
     planned_filter_diagnostic: dict[str, Any]
+    temporal_diagnostic: dict[str, Any]
 
 
 class PlanningContextProjection(TypedDict):
@@ -250,6 +264,7 @@ class PlanningContextProjection(TypedDict):
     relevant_dre_mappings: list[ProjectedDreMapping]
     detected_dimensions: list[ProjectedDimension]
     analytical_operations: list[ProjectedAnalyticalOperation]
+    temporal_series: ProjectedTemporalSeries | None
     planned_metrics: list[ProjectedPlannedMetric]
     planned_filters: list[ProjectedPlannedFilter]
     resolved_filter_bindings: list[ProjectedFilterBinding]
