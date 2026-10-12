@@ -3623,8 +3623,11 @@ def test_ranking_direction_follows_configured_evidence_order() -> None:
             {"term": term, "normalized_term": term, "matched": True}
             for term in ("highest", "lowest")
         ]
+        evidence.pop("normalized_question", None)
         operations, _diagnostic = _detect_analytical_operations(
-            context=context, intent_resolution_result=evidence,
+            context=context,
+            normalized_question=question,
+            intent_resolution_result=evidence,
         )
         assert len(operations) == 1
         assert operations[0]["direction"] == expected
