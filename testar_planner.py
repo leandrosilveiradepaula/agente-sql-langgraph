@@ -3537,6 +3537,12 @@ def main() -> None:
     ]
 
     tests.append(("ranking ordered direction", test_ranking_direction_follows_configured_evidence_order))
+    tests.extend([
+        ("temporal grain date metadata", test_temporal_plan_resolves_configured_grain_and_catalog_date),
+        ("temporal grain ambiguity gate", test_temporal_plan_rejects_missing_or_conflicting_grain),
+        ("temporal authorized date metadata", test_temporal_plan_rejects_date_metadata_not_authorized),
+        ("temporal missing metric fail-closed", test_temporal_planner_gate_rejects_absent_metric_without_affecting_legacy),
+    ])
     for index, (name, test_function) in enumerate(tests, start=1):
         test_function()
         print(f"TESTE {index} - {name}: OK")
@@ -3646,6 +3652,120 @@ def test_ranking_direction_follows_configured_evidence_order() -> None:
         assert len(operations) == 1
         assert operations[0]["direction"] == expected
 
+
+
+
+def _synthetic_temporal_context() -> dict:
+    context = _context()
+    context["component_configs"]["temporal_planning"] = {
+        "component": "temporal_planning",
+        "required_intents": ["generic_test_intent"],
+        "date_binding_strategy": "unique_metric_source_catalog_date",
+        "granularities": [
+            {"grain": "month", "terms": ["monthly", "month by month"]},
+            {"grain": "quarter", "terms": ["quarterly", "each quarter"]},
+        ],
+    }
+    context["table_catalog"][0]["columns"].append(
+        {"name": "event_date", "data_type": "date"}
+    )
+    return context
+
+
+def _synthetic_temporal_projection(
+    context: dict,
+    question: str,
+    *,
+    metrics: list[dict] | None = None,
+) -> tuple:
+    from app.domain.planner import _project_temporal_series
+
+    table = dict(context["table_catalog"][0])
+    table["qualified_name"] = "schema_test.table_test"
+    return _project_temporal_series(
+        context=context,
+        intent_name="generic_test_intent",
+        normalized_question=question,
+        planned_metrics=(
+            metrics if metrics is not None else [
+                {
+                    "metric_ref": "metric-synthetic",
+                    "target_table": "schema_test.table_test",
+                    "target_column": "value",
+                }
+            ]
+        ),
+        required_tables=[table],
+        intent_resolution_result=None,
+    )
+
+
+def test_temporal_plan_resolves_configured_grain_and_catalog_date() -> None:
+    context = _synthetic_temporal_context()
+    for question, grain in [
+        ("Show monthly totals", "month"),
+        ("Show totals each quarter", "quarter"),
+        ("Show totals month by month", "month"),
+    ]:
+        series, diagnostic = _synthetic_temporal_projection(context, question)
+        assert diagnostic["status"] == "resolved", diagnostic
+        assert series["time_grain"] == grain
+        assert series["date_table"] == "schema_test.table_test"
+        assert series["date_column"] == "event_date"
+        assert series["metric_refs"] == ["metric-synthetic"]
+
+
+def test_temporal_plan_rejects_missing_or_conflicting_grain() -> None:
+    context = _synthetic_temporal_context()
+    for question, expected_issue in [
+        ("Show totals over time", "missing_granularity"),
+        ("Show monthly and quarterly totals", "ambiguous_granularity"),
+    ]:
+        series, diagnostic = _synthetic_temporal_projection(context, question)
+        assert series is None
+        assert expected_issue in diagnostic["issues"]
+
+
+def test_temporal_plan_rejects_date_metadata_not_authorized() -> None:
+    context = _synthetic_temporal_context()
+    context["table_catalog"][0]["date_columns"] = ["event_date", "logged_at"]
+    series, diagnostic = _synthetic_temporal_projection(
+        context, "Show monthly totals"
+    )
+    assert series is None
+    assert "ambiguous_date_columns" in diagnostic["issues"]
+    context["table_catalog"][0]["date_columns"] = ["unknown_date"]
+    series, diagnostic = _synthetic_temporal_projection(
+        context, "Show monthly totals"
+    )
+    assert series is None
+    assert "date_column_not_in_allowed_catalog" in diagnostic["issues"]
+
+
+def test_temporal_planner_gate_rejects_absent_metric_without_affecting_legacy() -> None:
+    from app.domain.planner import build_query_plan
+
+    context = _synthetic_temporal_context()
+    rejected = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.96,
+        normalized_question="Show monthly totals",
+    )
+    assert rejected["status"] == "rejected"
+    assert rejected["error_code"] == "PLANNING_TEMPORAL_BINDING_INCOMPLETE"
+    assert rejected["projection"] is not None
+    assert "metric_binding_missing" in (
+        rejected["projection"]["diagnostics"]["temporal_diagnostic"]["issues"]
+    )
+    context["component_configs"].pop("temporal_planning")
+    legacy = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.96,
+        normalized_question="Show monthly totals",
+    )
+    assert legacy["status"] == "planned"
 
 
 if __name__ == "__main__":
