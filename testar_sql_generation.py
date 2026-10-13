@@ -1243,6 +1243,21 @@ def test_temporal_generation_rejects_unauthorized_bindings() -> None:
             raise AssertionError("unauthorized temporal binding must fail closed")
 
 
+def test_temporal_generation_rejects_missing_required_series() -> None:
+    plan = _query_plan()
+    plan["planning_context"]["diagnostics"]["temporal_diagnostic"] = {
+        "required": True,
+        "status": "incomplete",
+    }
+    assert plan["planning_context"]["temporal_series"] is None
+    try:
+        build_sql_generation_request(plan)
+    except SqlGenerationInputError as error:
+        assert "temporal_series obrigatoria" in str(error)
+    else:
+        raise AssertionError("missing required temporal series must fail closed")
+
+
 def test_temporal_generation_rejects_invalid_grain_and_terms() -> None:
     plan = _complete_temporal_query_plan()
     for field, invalid in [
@@ -1274,6 +1289,7 @@ if __name__ == "__main__":
         ("legacy temporal opt-in", test_legacy_generation_does_not_gain_temporal_assumptions),
         ("temporal unauthorized bindings", test_temporal_generation_rejects_unauthorized_bindings),
         ("temporal invalid metadata", test_temporal_generation_rejects_invalid_grain_and_terms),
+        ("temporal missing required series", test_temporal_generation_rejects_missing_required_series),
     ]
     for index, (name, test_function) in enumerate(extra_tests, start=44):
         test_function()
