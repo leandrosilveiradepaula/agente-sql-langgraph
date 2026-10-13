@@ -356,6 +356,21 @@ def build_sql_generation_request(
         authorized_tables=authorized_tables,
         catalog_columns=catalog_columns,
     )
+    diagnostics = planning_context.get("diagnostics", {})
+    temporal_diagnostic = (
+        diagnostics.get("temporal_diagnostic", {})
+        if isinstance(diagnostics, Mapping)
+        else {}
+    )
+    if (
+        isinstance(temporal_diagnostic, Mapping)
+        and temporal_diagnostic.get("required") is True
+        and temporal_series is None
+    ):
+        raise SqlGenerationInputError(
+            "temporal_series obrigatoria nao foi resolvida."
+        )
+
     instructions: list[SqlGenerationInstruction] = [
         {
             "name": "output_format",
