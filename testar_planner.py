@@ -3795,6 +3795,9 @@ def test_temporal_plan_end_to_end_planner_projection() -> None:
     assert projection["temporal_series"]["date_column"] == "event_date"
     assert projection["temporal_series"]["time_grain"] == "month"
     assert len(projection["temporal_series"]["metric_refs"]) == 1
+    assert "event_date" in {
+        column["name"] for column in projection["relevant_columns"]["schema_test.fact_metrics"]
+    }
 
 if __name__ == "__main__":
     main()
