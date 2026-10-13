@@ -154,7 +154,7 @@ VALUES (
       )
     )
   )::text,
-  ARRAY['trend']::text[],
+  jsonb_build_array('trend'),
   NULL,
   'error',
   20,
