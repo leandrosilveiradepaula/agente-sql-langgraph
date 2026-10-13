@@ -17,6 +17,7 @@ OPENAI_COMPATIBLE_CONNECT_TIMEOUT_ENV = "OPENAI_COMPATIBLE_CONNECT_TIMEOUT_SECON
 OPENAI_COMPATIBLE_READ_TIMEOUT_ENV = "OPENAI_COMPATIBLE_READ_TIMEOUT_SECONDS"
 OPENAI_COMPATIBLE_MAX_TOKENS_ENV = "OPENAI_COMPATIBLE_MAX_TOKENS"
 OPENAI_COMPATIBLE_ALLOW_PRIVATE_HTTP_ENV = "OPENAI_COMPATIBLE_SQL_ALLOW_PRIVATE_HTTP"
+OPENAI_COMPATIBLE_HTTP_HOST_ENV = "OPENAI_COMPATIBLE_SQL_HTTP_HOST"
 
 DEFAULT_CREDENTIAL_NAME = "OPENAI_COMPATIBLE_SQL_API_KEY"
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5
@@ -43,6 +44,7 @@ class OpenAiCompatibleConfiguration:
     temperature: float = DEFAULT_TEMPERATURE
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
     allow_private_http: bool = False
+    http_host: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -65,6 +67,10 @@ class OpenAiCompatibleConfiguration:
                 allow_private_http=self.allow_private_http,
             ),
         )
+        if self.http_host is not None:
+            object.__setattr__(self, "http_host", _validated_http_host(self.http_host))
+            if not self.allow_private_http or urlsplit(self.api_base_url).scheme != "http":
+                raise OpenAiCompatibleConfigurationError("Host HTTP customizado exige HTTP privado.")
         _positive_int(self.connect_timeout_seconds, "connect_timeout_seconds", 300)
         _positive_int(self.read_timeout_seconds, "read_timeout_seconds", 300)
         _positive_int(self.max_tokens, "max_tokens", 200_000)
@@ -125,6 +131,7 @@ def load_openai_compatible_configuration(
         allow_private_http=bool(
             _optional_bool(source, OPENAI_COMPATIBLE_ALLOW_PRIVATE_HTTP_ENV)
         ),
+        http_host=_optional(source, OPENAI_COMPATIBLE_HTTP_HOST_ENV),
     )
 
 
@@ -246,3 +253,16 @@ def _positive_int(value: object, field_name: str, maximum: int) -> None:
         raise OpenAiCompatibleConfigurationError(
             f"{field_name} invalido."
         )
+
+
+def _validated_http_host(value: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > 253:
+        raise OpenAiCompatibleConfigurationError("Host HTTP invalido.")
+    if any(ord(ch) < 33 or ord(ch) > 126 for ch in value):
+        raise OpenAiCompatibleConfigurationError("Host HTTP invalido.")
+    if any(ch in value for ch in "/\\:@?#[]%"):
+        raise OpenAiCompatibleConfigurationError("Host HTTP invalido.")
+    labels = value.split(".")
+    if any(not label or len(label) > 63 or label[0] == "-" or label[-1] == "-" or not all(ch.isascii() and (ch.isalnum() or ch == "-") for ch in label) for label in labels):
+        raise OpenAiCompatibleConfigurationError("Host HTTP invalido.")
+    return value

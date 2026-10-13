@@ -70,15 +70,19 @@ class OpenAiCompatibleClient:
             "Bearer " + secret.reveal_for_transport()
         )
 
+        headers = [
+            HttpHeader("Content-Type", public_value="application/json"),
+            HttpHeader("Accept", public_value="application/json"),
+            HttpHeader("Authorization", sensitive_value=bearer),
+        ]
+        if self._configuration.http_host is not None:
+            headers.append(HttpHeader("Host", public_value=self._configuration.http_host))
+
         result = self._http.send(
             HttpTransportRequest(
                 method="POST",
                 url=build_chat_completions_url(self._configuration),
-                headers=(
-                    HttpHeader("Content-Type", public_value="application/json"),
-                    HttpHeader("Accept", public_value="application/json"),
-                    HttpHeader("Authorization", sensitive_value=bearer),
-                ),
+                headers=tuple(headers),
                 body=body,
                 connect_timeout_seconds=self._configuration.connect_timeout_seconds,
                 read_timeout_seconds=self._configuration.read_timeout_seconds,
