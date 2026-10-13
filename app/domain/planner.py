@@ -707,6 +707,7 @@ def project_planning_context(
     }
     _include_dimension_columns(relevant_columns, dimension_projection)
     _include_metric_columns(relevant_columns, planned_metrics)
+    _include_temporal_column(relevant_columns, temporal_series)
 
     return {
         "context_version": context.get("version", ""),
@@ -3467,6 +3468,31 @@ def _include_dimension_columns(
         ):
             continue
         table_columns.append({"name": column})
+
+
+def _include_temporal_column(
+    relevant_columns: dict[str, list[Any]],
+    temporal_series: ProjectedTemporalSeries | None,
+) -> None:
+    """Expose only the date column already authorized by the planner catalog."""
+    if not isinstance(temporal_series, Mapping):
+        return
+    table = temporal_series.get("date_table")
+    column = temporal_series.get("date_column")
+    if not (
+        isinstance(table, str)
+        and table.strip()
+        and isinstance(column, str)
+        and column.strip()
+    ):
+        return
+    columns = relevant_columns.setdefault(table, [])
+    if not any(
+        isinstance(item, Mapping)
+        and str(item.get("name", "")).casefold() == column.casefold()
+        for item in columns
+    ):
+        columns.append({"name": column})
 
 
 def _include_metric_columns(

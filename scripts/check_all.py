@@ -131,6 +131,10 @@ STEPS = [
         [sys.executable, "testar_sql_generation.py"],
     ),
     (
+        "testar_shadow_context_candidate_readonly.py",
+        [sys.executable, "testar_shadow_context_candidate_readonly.py"],
+    ),
+    (
         "testar_google_gemini_sql_generator.py",
         [sys.executable, "testar_google_gemini_sql_generator.py"],
     ),

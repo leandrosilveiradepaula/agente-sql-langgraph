@@ -1147,6 +1147,134 @@ def test_planned_filter_nao_aceita_campos_fisicos() -> None:
         raise AssertionError("planned_filter fisico deveria falhar")
 
 
+
+def _complete_temporal_query_plan() -> dict:
+    from testar_planner import _intent_metric_evidence, _metric_context
+
+    context = _metric_context()
+    context["component_configs"]["temporal_planning"] = {
+        "component": "temporal_planning",
+        "required_intents": ["generic_test_intent"],
+        "date_binding_strategy": "unique_metric_source_catalog_date",
+        "granularities": [
+            {"grain": "month", "terms": ["monthly"]},
+            {"grain": "quarter", "terms": ["quarterly"]},
+        ],
+    }
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.96,
+        normalized_question="Show monthly amount",
+        intent_resolution_result=_intent_metric_evidence(term="amount"),
+    )
+    assert result["status"] == "planned", result.get("error_code")
+    return result["query_plan"]
+
+
+def test_temporal_generation_receives_authorized_series() -> None:
+    plan = _complete_temporal_query_plan()
+    request = build_sql_generation_request(plan)
+    context = request["generation_context"]
+    series = context["temporal_series"]
+    assert series["operation_type"] == "time_series"
+    assert series["time_grain"] == "month"
+    assert series["date_table"] == "schema_test.fact_metrics"
+    assert series["date_column"] == "event_date"
+    assert series["metric_refs"] == [
+        plan["planning_context"]["planned_metrics"][0]["metric_ref"]
+    ]
+    assert any(
+        column["name"] == "event_date"
+        for column in context["catalog_columns"]["schema_test.fact_metrics"]
+    )
+    assert any(
+        instruction["name"] == "temporal_series"
+        for instruction in request["instructions"]
+    )
+    assert "component_configs" not in context
+    assert request_fingerprint(request) == request_fingerprint(
+        build_sql_generation_request(plan)
+    )
+
+
+def test_legacy_generation_does_not_gain_temporal_assumptions() -> None:
+    request = build_sql_generation_request(_query_plan())
+    assert "temporal_series" not in request["generation_context"]
+    assert not any(
+        instruction["name"] == "temporal_series"
+        for instruction in request["instructions"]
+    )
+
+
+def test_temporal_generation_rejects_unauthorized_bindings() -> None:
+    plan = _complete_temporal_query_plan()
+    mutations = [
+        lambda value: value["planning_context"]["temporal_series"].update(
+            {"date_table": "schema_test.other_table"}
+        ),
+        lambda value: value["planning_context"]["temporal_series"].update(
+            {"date_column": "unknown_date"}
+        ),
+        lambda value: value["planning_context"]["temporal_series"].update(
+            {"metric_refs": ["unknown-metric"]}
+        ),
+        lambda value: value["planning_context"]["relevant_columns"][
+            "schema_test.fact_metrics"
+        ].__setitem__(
+            slice(None),
+            [
+                column
+                for column in value["planning_context"]["relevant_columns"][
+                    "schema_test.fact_metrics"
+                ]
+                if column.get("name") != "event_date"
+            ],
+        ),
+    ]
+    for mutate in mutations:
+        altered = deepcopy(plan)
+        mutate(altered)
+        try:
+            build_sql_generation_request(altered)
+        except SqlGenerationInputError as error:
+            assert "temporal_series" in str(error)
+        else:
+            raise AssertionError("unauthorized temporal binding must fail closed")
+
+
+def test_temporal_generation_rejects_missing_required_series() -> None:
+    plan = _query_plan()
+    plan["planning_context"]["diagnostics"]["temporal_diagnostic"] = {
+        "required": True,
+        "status": "incomplete",
+    }
+    assert plan["planning_context"]["temporal_series"] is None
+    try:
+        build_sql_generation_request(plan)
+    except SqlGenerationInputError as error:
+        assert "temporal_series obrigatoria" in str(error)
+    else:
+        raise AssertionError("missing required temporal series must fail closed")
+
+
+def test_temporal_generation_rejects_invalid_grain_and_terms() -> None:
+    plan = _complete_temporal_query_plan()
+    for field, invalid in [
+        ("time_grain", ""),
+        ("period_reference_terms", {"raw_period": "unexpected"}),
+    ]:
+        altered = deepcopy(plan)
+        altered["planning_context"]["temporal_series"][field] = invalid
+        try:
+            build_sql_generation_request(altered)
+        except SqlGenerationInputError as error:
+            assert "temporal_series" in str(error)
+        else:
+            raise AssertionError("incomplete temporal projection must be rejected")
+
+
+
 if __name__ == "__main__":
     main()
     extra_tests = [
@@ -1157,6 +1285,11 @@ if __name__ == "__main__":
         ("binding ambiguo fail closed", test_binding_ambiguo_falha_fechada),
         ("filtros deterministicos", test_filtros_sao_deterministicos_e_ignoram_nao_referenciados),
         ("planned filter sem campos fisicos", test_planned_filter_nao_aceita_campos_fisicos),
+        ("temporal propagation", test_temporal_generation_receives_authorized_series),
+        ("legacy temporal opt-in", test_legacy_generation_does_not_gain_temporal_assumptions),
+        ("temporal unauthorized bindings", test_temporal_generation_rejects_unauthorized_bindings),
+        ("temporal invalid metadata", test_temporal_generation_rejects_invalid_grain_and_terms),
+        ("temporal missing required series", test_temporal_generation_rejects_missing_required_series),
     ]
     for index, (name, test_function) in enumerate(extra_tests, start=44):
         test_function()
