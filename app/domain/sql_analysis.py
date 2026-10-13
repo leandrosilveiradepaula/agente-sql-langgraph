@@ -7,7 +7,7 @@ from copy import deepcopy
 from typing import Any, Literal, TypedDict
 
 
-SQL_ANALYZER_VERSION = "v1.2.0-structured-in-predicates"
+SQL_ANALYZER_VERSION = "v1.2.1-typed-temporal-literals"
 
 TokenKind = Literal[
     "word",
@@ -280,6 +280,8 @@ _TEMPORAL_PART_WORDS = {
     "year",
     "years",
 }
+
+_TYPED_TEMPORAL_LITERAL_PREFIXES = frozenset({"date", "time", "timestamp"})
 
 _TEMPORAL_PART_FUNCTIONS = {
     "date_add",
@@ -1029,6 +1031,12 @@ def _predicate_literal(
     token = tokens[index]
     if token["kind"] == "string":
         return "string", token["value"][1:-1].replace("''", "'"), index + 1
+    # ANSI temporal literals are an atomic right operand, e.g. DATE '2026-01-01'.
+    # Preserve the original value for contract comparisons; do not interpret
+    # DATE as a column or loosen validation for arbitrary identifiers.
+    if _is_typed_temporal_literal_prefix(tokens, index):
+        literal = tokens[index + 1]
+        return "string", literal["value"][1:-1].replace("''", "'"), index + 2
     if token["kind"] == "number":
         raw = token["value"]
         value: int | float = float(raw) if "." in raw else int(raw)
@@ -2408,11 +2416,24 @@ def _is_structural_literal_token(tokens: list[SqlToken], index: int) -> bool:
     norm = token["normalized"]
     if token["kind"] == "string":
         return True
+    if _is_typed_temporal_literal_prefix(tokens, index):
+        return True
     if token["kind"] != "word" or norm not in _TEMPORAL_PART_WORDS:
         return False
     if _is_interval_unit(tokens, index):
         return True
     return _is_temporal_function_part_argument(tokens, index)
+
+
+def _is_typed_temporal_literal_prefix(tokens: list[SqlToken], index: int) -> bool:
+    # The type name only acts as a literal prefix when directly followed by
+    # a quoted SQL string; bare or double-quoted identifiers remain columns.
+    return (
+        0 <= index < len(tokens) - 1
+        and tokens[index]["kind"] == "word"
+        and tokens[index]["normalized"] in _TYPED_TEMPORAL_LITERAL_PREFIXES
+        and tokens[index + 1]["kind"] == "string"
+    )
 
 
 def _is_interval_unit(tokens: list[SqlToken], index: int) -> bool:
