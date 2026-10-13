@@ -122,6 +122,22 @@ def build_query_plan(
             "error_message": rejection.message,
         }
 
+    if not _explicit_metric_bindings_complete(projection):
+        failed_selection = deepcopy(selection)
+        failed_selection["status"] = "rejected"
+        failed_selection["error_code"] = "PLANNING_METRIC_BINDING_INCOMPLETE"
+        failed_selection["error_message"] = (
+            "Metrica explicitamente solicitada sem vinculo semantico completo."
+        )
+        return {
+            "status": "rejected",
+            "query_plan": None,
+            "selection_result": failed_selection,
+            "projection": projection,
+            "error_code": "PLANNING_METRIC_BINDING_INCOMPLETE",
+            "error_message": failed_selection["error_message"],
+        }
+
     if not _analytical_operand_bindings_complete(projection):
         failed_selection = deepcopy(selection)
         failed_selection["status"] = "rejected"
@@ -178,6 +194,37 @@ def build_query_plan(
         "error_code": None,
         "error_message": None,
     }
+
+
+def _explicit_metric_bindings_complete(projection: Mapping[str, Any]) -> bool:
+    """Fail closed only for explicit metric evidence that cannot be fully bound.
+
+    Neither physical business columns nor terms are embedded in this gate.
+    Unknown metrics remain an evaluation failure, never a generator fallback.
+    """
+    diagnostics = projection.get("diagnostics", {})
+    if not isinstance(diagnostics, Mapping):
+        return False
+    metric_diagnostic = diagnostics.get("planned_metric_diagnostic", {})
+    if not isinstance(metric_diagnostic, Mapping):
+        return False
+    if metric_diagnostic.get("metric_requested") is not True:
+        return True
+    metrics = projection.get("planned_metrics")
+    if not isinstance(metrics, list) or not metrics:
+        return False
+    for key in ("unresolved_terms", "invalid_metadata_terms"):
+        value = metric_diagnostic.get(key, [])
+        if not isinstance(value, list) or value:
+            return False
+    # A planner may have discarded otherwise valid metrics due to a
+    # conflicting global cardinality or an incomplete metric binding.
+    return all(
+        isinstance(metric, Mapping)
+        and isinstance(metric.get("metric_ref"), str)
+        and bool(metric["metric_ref"].strip())
+        for metric in metrics
+    )
 
 
 def _temporal_bindings_complete(projection: Mapping[str, Any]) -> bool:
