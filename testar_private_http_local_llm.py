@@ -10,7 +10,7 @@ from app.infrastructure.http.http_contracts import (
     HttpHeader,
     HttpTransportRequest,
 )
-from app.integrations.watson.flow_limits import WatsonFlowContractError
+from app.infrastructure.contracts import InfrastructureContractError
 
 
 class PrivateHttpLocalLlmTests(unittest.TestCase):
@@ -68,7 +68,7 @@ class PrivateHttpLocalLlmTests(unittest.TestCase):
             )
 
     def test_transport_rejects_public_http_even_with_opt_in(self):
-        with self.assertRaises(WatsonFlowContractError):
+        with self.assertRaises(InfrastructureContractError):
             HttpTransportRequest(
                 method="POST",
                 url="http://8.8.8.8/api/chat/completions",
@@ -82,7 +82,7 @@ class PrivateHttpLocalLlmTests(unittest.TestCase):
             )
 
     def test_transport_rejects_hostname_http_even_with_opt_in(self):
-        with self.assertRaises(WatsonFlowContractError):
+        with self.assertRaises(InfrastructureContractError):
             HttpTransportRequest(
                 method="POST",
                 url="http://example.test/api/chat/completions",
