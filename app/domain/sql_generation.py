@@ -5,13 +5,13 @@ import json
 import math
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from app.domain.planning import QueryPlan
 
 
 SQL_GENERATION_CONTRACT_VERSION = (
-    "v1.1.0-planned-filter-generation"
+    "v1.2.0-temporal-series-generation"
 )
 MAX_SQL_RESPONSE_LENGTH = 20000
 
@@ -102,6 +102,17 @@ class FilterBinding(TypedDict):
     scope: str
 
 
+class TemporalSeries(TypedDict):
+    operation_type: str
+    time_grain: str
+    date_table: str
+    date_column: str
+    metric_refs: list[str]
+    period_reference_terms: list[str]
+    mapping_source: str
+    detection_source: str
+
+
 class SqlGenerationContext(TypedDict):
     context_version: str
     context_fingerprint: str
@@ -117,6 +128,7 @@ class SqlGenerationContext(TypedDict):
     operational_entities: list[dict[str, Any]]
     dre_mappings: list[dict[str, Any]]
     grouping_dimensions: list[GroupingDimension]
+    temporal_series: NotRequired[TemporalSeries]
     analytical_operations: list[AnalyticalOperation]
     planned_metrics: list[PlannedMetric]
     planned_filters: list[PlannedFilter]
@@ -330,6 +342,20 @@ def build_sql_generation_request(
         planned_metrics=planned_metrics,
         has_grouping_dimensions=bool(grouping_dimensions),
     )
+    authorized_tables = _sorted_mappings(
+        planning_context.get("required_tables", []),
+        text_fields=("schema_name", "table_name"),
+        priority_field="priority",
+    )
+    catalog_columns = _stable_columns(
+        planning_context.get("relevant_columns", {})
+    )
+    temporal_series = _temporal_series(
+        planning_context.get("temporal_series"),
+        planned_metrics=planned_metrics,
+        authorized_tables=authorized_tables,
+        catalog_columns=catalog_columns,
+    )
     instructions: list[SqlGenerationInstruction] = [
         {
             "name": "output_format",
@@ -428,6 +454,27 @@ def build_sql_generation_request(
             }
         )
 
+    if temporal_series is not None:
+        instructions.append(
+            {
+                "name": "temporal_series",
+                "content": (
+                    "Quando temporal_series estiver presente, construa a "
+                    "serie por sua time_grain usando exclusivamente "
+                    "date_table.date_column como eixo temporal. "
+                    "Use somente as planned_metrics referenciadas por "
+                    "metric_refs, e respeite as regras de agregacao "
+                    "do contexto. Nao invente coluna de data, "
+                    "granularidade, metrica ou limites de periodo. "
+                    "period_reference_terms sao evidencia semantica, "
+                    "nao filtros fisicos: aplique filtros temporais "
+                    "somente quando autorizados pelos planned_filters "
+                    "e filter_bindings ou regras explicitamente "
+                    "selecionadas."
+                ),
+            }
+        )
+
     request: SqlGenerationRequest = {
         "contract_version": SQL_GENERATION_CONTRACT_VERSION,
         "generation_context": {
@@ -459,17 +506,11 @@ def build_sql_generation_request(
                 text_fields=("rule_group", "rule_name"),
                 priority_field="priority",
             ),
-            "authorized_tables": _sorted_mappings(
-                planning_context.get("required_tables", []),
-                text_fields=("schema_name", "table_name"),
-                priority_field="priority",
-            ),
+            "authorized_tables": authorized_tables,
             "allowed_schemas": _sorted_text_list(
                 planning_context.get("allowed_schemas", [])
             ),
-            "catalog_columns": _stable_columns(
-                planning_context.get("relevant_columns", {})
-            ),
+            "catalog_columns": catalog_columns,
             "authorized_joins": _sorted_mappings(
                 planning_context.get("authorized_joins", []),
                 text_fields=("source_table",),
@@ -504,6 +545,9 @@ def build_sql_generation_request(
         "instructions": instructions,
         "output_constraints": list(_OUTPUT_CONSTRAINTS),
     }
+
+    if temporal_series is not None:
+        request["generation_context"]["temporal_series"] = temporal_series
 
     _validate_request(request)
     return deepcopy(request)
@@ -813,6 +857,13 @@ def _validate_request(
     if not isinstance(context.get("catalog_columns"), Mapping):
         raise SqlGenerationInputError(
             "generation_context.catalog_columns deve ser objeto."
+        )
+    if (
+        "temporal_series" in context
+        and not isinstance(context["temporal_series"], Mapping)
+    ):
+        raise SqlGenerationInputError(
+            "generation_context.temporal_series deve ser objeto."
         )
 
 
@@ -1124,6 +1175,121 @@ def _metrics_by_ref(
     for metric_ref in duplicates:
         output.pop(metric_ref, None)
     return output
+
+
+def _temporal_series(
+    value: Any,
+    *,
+    planned_metrics: list[PlannedMetric],
+    authorized_tables: list[dict[str, Any]],
+    catalog_columns: dict[str, list[dict[str, Any]]],
+) -> TemporalSeries | None:
+    """Validate a temporal projection without guessing business metadata.
+
+    The source table, metric references and date column must already exist
+    in the authorized plan. Missing or inconsistent metadata is an error,
+    not a cue for the provider to derive an alternative.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise SqlGenerationInputError("temporal_series deve ser objeto.")
+
+    operation_type = _optional_clean_text(value.get("operation_type"))
+    grain = _optional_clean_text(value.get("time_grain"))
+    date_table = _optional_clean_text(value.get("date_table"))
+    date_column = _optional_clean_text(value.get("date_column"))
+    if (
+        operation_type != "time_series"
+        or not grain or not date_table or not date_column
+    ):
+        raise SqlGenerationInputError("temporal_series incompleta.")
+
+    refs_raw = value.get("metric_refs")
+    if (
+        not isinstance(refs_raw, list)
+        or not refs_raw
+        or not all(
+            isinstance(ref, str) and bool(ref.strip())
+            and ref == ref.strip()
+            for ref in refs_raw
+        )
+        or len(set(refs_raw)) != len(refs_raw)
+    ):
+        raise SqlGenerationInputError("temporal_series.metric_refs invalidos.")
+
+    metric_index = {
+        metric["metric_ref"]: metric
+        for metric in planned_metrics
+        if isinstance(metric.get("metric_ref"), str)
+    }
+    if (
+        set(refs_raw) != set(metric_index)
+        or any(
+            metric_index[ref]["target_table"].casefold() != date_table.casefold()
+            for ref in refs_raw
+        )
+    ):
+        raise SqlGenerationInputError(
+            "temporal_series.metric_refs sem vinculacao autorizada."
+        )
+
+    source_tables = [
+        table for table in authorized_tables
+        if str(table.get("qualified_name", "")).casefold()
+        == date_table.casefold()
+    ]
+    if len(source_tables) != 1:
+        raise SqlGenerationInputError(
+            "temporal_series.date_table nao autorizada."
+        )
+
+    date_columns = source_tables[0].get("date_columns")
+    valid_dates: set[str] = set()
+    if isinstance(date_columns, list):
+        for column in date_columns:
+            if isinstance(column, str) and column.strip():
+                valid_dates.add(column.strip().casefold())
+            elif isinstance(column, Mapping):
+                name = column.get("name")
+                if isinstance(name, str) and name.strip():
+                    valid_dates.add(name.strip().casefold())
+    if date_column.casefold() not in valid_dates:
+        raise SqlGenerationInputError(
+            "temporal_series.date_column ausente no catalogo de datas."
+        )
+
+    columns = [
+        column for table, table_columns in catalog_columns.items()
+        if table.casefold() == date_table.casefold()
+        for column in table_columns
+    ]
+    if not any(
+        str(column.get("name", "")).casefold() == date_column.casefold()
+        for column in columns
+    ):
+        raise SqlGenerationInputError(
+            "temporal_series.date_column ausente nas colunas autorizadas."
+        )
+
+    terms_raw = value.get("period_reference_terms", [])
+    if not isinstance(terms_raw, list) or not all(
+        isinstance(term, str) and bool(term.strip())
+        for term in terms_raw
+    ):
+        raise SqlGenerationInputError(
+            "temporal_series.period_reference_terms invalidos."
+        )
+    return {
+        "operation_type": "time_series",
+        "time_grain": grain,
+        "date_table": date_table,
+        "date_column": date_column,
+        "metric_refs": sorted(refs_raw, key=str.casefold),
+        "period_reference_terms": sorted(set(terms_raw), key=str.casefold),
+        "mapping_source": _optional_clean_text(value.get("mapping_source")),
+        "detection_source": _optional_clean_text(value.get("detection_source")),
+    }
 
 
 def _planned_metrics(value: Any) -> list[PlannedMetric]:
