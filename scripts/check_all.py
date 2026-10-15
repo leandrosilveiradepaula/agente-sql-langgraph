@@ -65,6 +65,7 @@ STEPS = [
     ("testar_planner_explicit_metric_gate.py", [sys.executable, "testar_planner_explicit_metric_gate.py"]),
     ("testar_temporal_explicit_date_binding.py", [sys.executable, "testar_temporal_explicit_date_binding.py"]),
     ("testar_temporal_context_validation.py", [sys.executable, "testar_temporal_context_validation.py"]),
+    ("testar_temporal_catalog_without_columns.py", [sys.executable, "testar_temporal_catalog_without_columns.py"]),
     ("testar_shadow_full_flow_live_opt_in.py", [sys.executable, "testar_shadow_full_flow_live_opt_in.py"]),
     (
         "testar_planned_filters_e2e.py",
