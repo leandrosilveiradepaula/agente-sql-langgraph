@@ -1319,7 +1319,7 @@ def _validate_temporal_planning_config(
             for item in table.get("columns", [])
             if isinstance(item, Mapping)
         }
-        if column not in dates or column not in columns:
+        if column not in dates or (columns and column not in columns):
             issue("TEMPORAL_DATE_COLUMN_UNAUTHORIZED", where)
 
 

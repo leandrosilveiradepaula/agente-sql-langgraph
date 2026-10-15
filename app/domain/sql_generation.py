@@ -1279,7 +1279,7 @@ def _temporal_series(
         if table.casefold() == date_table.casefold()
         for column in table_columns
     ]
-    if not any(
+    if columns and not any(
         str(column.get("name", "")).casefold() == date_column.casefold()
         for column in columns
     ):
