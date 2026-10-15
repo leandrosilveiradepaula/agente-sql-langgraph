@@ -350,6 +350,25 @@ def build_sql_generation_request(
     catalog_columns = _stable_columns(
         planning_context.get("relevant_columns", {})
     )
+    # Pre-provider authorization: never send unapproved physical filter targets
+    # to an external SQL model, even when no SQL would later pass the gate.
+    authorized_filter_tables = {
+        str(table.get("qualified_name", "")).strip().casefold()
+        for table in authorized_tables
+        if isinstance(table, Mapping)
+    }
+    for binding in filter_bindings:
+        table_name = binding["target_table"].casefold()
+        col_name = binding["target_column"].casefold()
+        visible_columns = {
+            str(column.get("name", "")).strip().casefold()
+            for column in catalog_columns.get(binding["target_table"], [])
+            if isinstance(column, Mapping)
+        }
+        if table_name not in authorized_filter_tables or col_name not in visible_columns:
+            raise SqlGenerationInputError(
+                "filter_binding aponta para coluna nao autorizada no plano."
+            )
     temporal_series = _temporal_series(
         planning_context.get("temporal_series"),
         planned_metrics=planned_metrics,
