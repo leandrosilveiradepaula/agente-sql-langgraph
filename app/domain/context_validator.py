@@ -823,6 +823,25 @@ def _validate_table_catalog(
         else:
             full_names[qualified_key] = path
 
+        hint = item.get("ai_hint")
+        if isinstance(hint, Mapping) and "authorized_filter_columns" in hint:
+            values = hint["authorized_filter_columns"]
+            if (
+                not isinstance(values, list)
+                or any(not _is_non_empty_text(value) for value in values)
+                or len({
+                    str(value).strip().casefold()
+                    for value in values
+                }) != len(values)
+            ):
+                _add_issue(
+                    errors,
+                    code="TABLE_FILTER_COLUMNS_INVALID",
+                    message="authorized_filter_columns deve conter nomes unicos.",
+                    path=f"{path}.ai_hint.authorized_filter_columns",
+                    details={},
+                )
+
         bare_names.setdefault(bare_key, []).append(qualified_name)
 
     return {
