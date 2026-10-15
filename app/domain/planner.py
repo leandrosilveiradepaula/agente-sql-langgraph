@@ -297,12 +297,17 @@ def _project_temporal_series(
         issues.append("metric_source_table_missing_or_ambiguous")
 
     strategy = config.get("date_binding_strategy")
-    if strategy != "unique_metric_source_catalog_date":
+    allowed_strategies = {
+        "unique_metric_source_catalog_date",
+        "configured_metric_source_date",
+    }
+    if strategy not in allowed_strategies:
         issues.append("unsupported_date_binding_strategy")
 
     date_table: str | None = None
     date_column: str | None = None
-    if len(source_tables) == 1 and strategy == "unique_metric_source_catalog_date":
+    binding_source = "table_catalog.date_columns"
+    if len(source_tables) == 1 and strategy in allowed_strategies:
         source = next(iter(source_tables))
         matches_table = [
             table for table in required_tables
@@ -328,12 +333,69 @@ def _project_temporal_series(
                             issues.append("invalid_date_catalog")
                     else:
                         issues.append("invalid_date_catalog")
-                if len({name.casefold() for name in names}) != 1:
-                    issues.append(
-                        "ambiguous_date_columns" if names else "date_column_missing"
-                    )
+                normalized_dates = {name.casefold(): name for name in names}
+
+                if strategy == "unique_metric_source_catalog_date":
+                    if len(normalized_dates) != 1:
+                        issues.append(
+                            "ambiguous_date_columns" if names
+                            else "date_column_missing"
+                        )
+                    else:
+                        date_column = next(iter(normalized_dates.values()))
                 else:
-                    date_column = next(iter(names))
+                    binding_source = "component_configs.temporal_planning.date_bindings"
+                    raw_bindings = config.get("date_bindings")
+                    concepts = {
+                        str(metric.get("metric_concept", "")).strip().casefold()
+                        for metric in planned_metrics
+                        if isinstance(metric, Mapping)
+                    }
+                    if not isinstance(raw_bindings, list) or not raw_bindings:
+                        issues.append("date_bindings_missing_or_invalid")
+                    elif len(concepts) != 1 or "" in concepts:
+                        issues.append("metric_concept_missing_or_ambiguous")
+                    else:
+                        requested_concept = next(iter(concepts))
+                        candidates: list[str] = []
+                        invalid_binding = False
+                        for binding in raw_bindings:
+                            if not isinstance(binding, Mapping):
+                                invalid_binding = True
+                                continue
+                            fields = (
+                                binding.get("metric_concept"),
+                                binding.get("target_table"),
+                                binding.get("target_column"),
+                            )
+                            if not all(
+                                isinstance(value, str) and value.strip()
+                                for value in fields
+                            ):
+                                invalid_binding = True
+                                continue
+                            concept, target_table, target_column = (
+                                value.strip() for value in fields
+                            )
+                            if (
+                                concept.casefold() == requested_concept
+                                and target_table.casefold() == source
+                            ):
+                                candidates.append(target_column)
+                        if invalid_binding:
+                            issues.append("date_bindings_missing_or_invalid")
+                        if not candidates:
+                            issues.append("date_binding_not_found")
+                        elif len(candidates) != 1:
+                            issues.append("date_binding_ambiguous")
+                        elif candidates[0].casefold() not in normalized_dates:
+                            issues.append("date_binding_not_in_catalog")
+                        else:
+                            date_column = normalized_dates[
+                                candidates[0].casefold()
+                            ]
+
+                if date_column is not None:
                     date_table = str(table.get("qualified_name", ""))
                     columns = table.get("columns", [])
                     allowed_columns = {
@@ -341,7 +403,12 @@ def _project_temporal_series(
                         for col in columns
                         if isinstance(col, Mapping) and col.get("name")
                     } if isinstance(columns, list) else set()
-                    if allowed_columns and date_column.casefold() not in allowed_columns:
+                    if (
+                        strategy == "configured_metric_source_date"
+                        and not allowed_columns
+                    ):
+                        issues.append("date_column_not_in_allowed_catalog")
+                    elif allowed_columns and date_column.casefold() not in allowed_columns:
                         issues.append("date_column_not_in_allowed_catalog")
 
     if issues:
@@ -362,14 +429,14 @@ def _project_temporal_series(
         "date_column": date_column or "",
         "metric_refs": metric_refs,
         "period_reference_terms": period_terms,
-        "mapping_source": "table_catalog.date_columns",
+        "mapping_source": binding_source,
         "detection_source": "versioned_temporal_planning_config",
     }, {
         "required": True,
         "status": "resolved",
         "matched_granularities": sorted(matches),
         "matched_grain_terms": sorted(matches[grain]),
-        "date_binding_source": "table_catalog.date_columns",
+        "date_binding_source": binding_source,
         "planned_metric_count": len(metric_refs),
     }
 
