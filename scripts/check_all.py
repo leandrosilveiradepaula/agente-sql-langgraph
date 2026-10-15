@@ -63,6 +63,7 @@ STEPS = [
     ),
     ("testar_planner.py", [sys.executable, "testar_planner.py"]),
     ("testar_planner_explicit_metric_gate.py", [sys.executable, "testar_planner_explicit_metric_gate.py"]),
+    ("testar_shadow_full_flow_live_opt_in.py", [sys.executable, "testar_shadow_full_flow_live_opt_in.py"]),
     (
         "testar_planned_filters_e2e.py",
         [sys.executable, "testar_planned_filters_e2e.py"],

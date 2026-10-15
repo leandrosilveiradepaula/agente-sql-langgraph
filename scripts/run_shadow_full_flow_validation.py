@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -118,6 +119,15 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", required=True)
     args = parser.parse_args()
+
+    # Explicit opt-in is required because this runner invokes the real SQL
+    # generator and persists shadow evidence. Never treat it as offline.
+    if os.environ.get("SHADOW_FULL_FLOW_ALLOW_LIVE_LLM") != "true":
+        print("ABORTED: live LLM calls require SHADOW_FULL_FLOW_ALLOW_LIVE_LLM=true.")
+        return 3
+    if os.environ.get("LANGGRAPH_ALLOW_REAL_SQL_EXECUTION") != "false":
+        print("ABORTED: real SQL execution must remain disabled.")
+        return 4
 
     runtime = create_shadow_test_runtime()
     if runtime.config.allow_real_sql_execution:
