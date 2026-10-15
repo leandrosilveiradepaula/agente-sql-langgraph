@@ -771,6 +771,9 @@ def project_planning_context(
     _include_dimension_columns(relevant_columns, dimension_projection)
     _include_metric_columns(relevant_columns, planned_metrics)
     _include_temporal_column(relevant_columns, temporal_series)
+    _include_authorized_filter_columns(
+        relevant_columns, resolved_filter_bindings, required_tables
+    )
 
     return {
         "context_version": context.get("version", ""),
@@ -3604,6 +3607,56 @@ def _include_temporal_column(
         for item in columns
     ):
         columns.append({"name": column})
+
+
+def _include_authorized_filter_columns(
+    relevant_columns: dict[str, list[Any]],
+    bindings: list[ProjectedFilterBinding],
+    required_tables: list[ProjectedTable],
+) -> None:
+    """Expose only selected, catalog-authorized filter columns.
+
+    An optional whitelist under table_catalog.ai_hint.authorized_filter_columns
+    permits versioned filter attributes without pretending they are keys or
+    metrics. This procedure never copies a column from a binding by itself.
+    """
+    tables = {
+        str(table.get("qualified_name", "")).strip().casefold(): table
+        for table in required_tables
+        if isinstance(table, Mapping)
+    }
+    for binding in bindings:
+        source = str(binding.get("target_table", "")).strip()
+        column = str(binding.get("target_column", "")).strip()
+        selected = tables.get(source.casefold())
+        if not source or not column or selected is None:
+            continue
+
+        allowlist = set()
+        for field in ("primary_key", "key_columns", "metric_columns", "date_columns"):
+            allowlist.update(name.casefold() for name in _string_list(selected.get(field)))
+        for record in selected.get("columns", []):
+            if isinstance(record, Mapping):
+                name = record.get("name")
+                if isinstance(name, str) and name.strip():
+                    allowlist.add(name.strip().casefold())
+        hint = selected.get("ai_hint")
+        if isinstance(hint, Mapping):
+            allowlist.update(
+                name.casefold()
+                for name in _string_list(hint.get("authorized_filter_columns"))
+            )
+        if column.casefold() not in allowlist:
+            continue
+
+        table_name = str(selected["qualified_name"])
+        columns = relevant_columns.setdefault(table_name, [])
+        if not any(
+            isinstance(record, Mapping)
+            and str(record.get("name", "")).casefold() == column.casefold()
+            for record in columns
+        ):
+            columns.append({"name": column})
 
 
 def _include_metric_columns(
