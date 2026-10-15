@@ -19,7 +19,7 @@ fi
 if [[ -z "$N8N_CONTAINER" ]]; then
   mapfile -t candidates < <(
     docker ps --format '{{.Names}} {{.Image}}' |
-      awk 'tolower($1) ~ /n8n/ || tolower($2) ~ /n8n/ {print $1}'
+      awk 'tolower($2) ~ /(^|\/)n8n([:@]|$)/ {print $1}'
   )
   if [[ "${#candidates[@]}" != 1 ]]; then
     echo "N8N_CONTAINER_COUNT=${#candidates[@]}"
@@ -45,30 +45,48 @@ if [[ "${#shared_networks[@]}" == 0 ]]; then
   exit 6
 fi
 
-# Node is part of n8n's own runtime. Run a GET health probe only.
-# A timeout prevents this check from delaying any official orchestration.
-if ! docker exec   -e "SHADOW_PROBE_URL=http://${SHADOW_CONTAINER}:8000/health"   "$N8N_CONTAINER" node -e '
+# Validate connectivity and the negative S2S boundary from n8n's Node runtime.
+# Does not pass any secret to n8n and makes GET-only requests.
+if ! docker exec \
+  -e "SHADOW_PROBE_BASE=http://${SHADOW_CONTAINER}:8000" \
+  "$N8N_CONTAINER" node -e '
     (async () => {
+      const base = process.env.SHADOW_PROBE_BASE;
       try {
-        const response = await fetch(process.env.SHADOW_PROBE_URL, {
+        const healthResponse = await fetch(base + "/health", {
           method: "GET",
           signal: AbortSignal.timeout(5000),
         });
-        const health = await response.json();
+        const health = await healthResponse.json();
         if (
-          response.status !== 200 ||
+          healthResponse.status !== 200 ||
           health.status !== "ok" ||
           health.real_sql_execution !== false
         ) {
-          process.stdout.write("N8N_TO_SHADOW_HTTP=FAIL\\n");
+          console.log("N8N_TO_SHADOW_HTTP=FAIL");
           process.exitCode = 1;
           return;
         }
-        process.stdout.write("N8N_TO_SHADOW_HTTP=PASS\\n");
-        process.stdout.write("REAL_SQL_EXECUTION=false\\n");
-        process.stdout.write("LLM_CALLS=0\\n");
+        console.log("N8N_TO_SHADOW_HTTP=PASS");
+
+        const deniedResponse = await fetch(
+          base + "/v1/internal/shadow-runs/invalid!",
+          {method: "GET", signal: AbortSignal.timeout(5000)}
+        );
+        const deniedBody = await deniedResponse.json();
+        if (
+          deniedResponse.status !== 401 ||
+          deniedBody.error?.code !== "UNAUTHORIZED_SERVICE"
+        ) {
+          console.log("N8N_TO_SHADOW_AUTH_BOUNDARY=FAIL");
+          process.exitCode = 1;
+          return;
+        }
+        console.log("N8N_TO_SHADOW_AUTH_BOUNDARY=DENIED");
+        console.log("REAL_SQL_EXECUTION=false");
+        console.log("LLM_CALLS=0");
       } catch (_) {
-        process.stdout.write("N8N_TO_SHADOW_HTTP=FAIL\\n");
+        console.log("N8N_TO_SHADOW_HTTP=FAIL");
         process.exitCode = 1;
       }
     })();
