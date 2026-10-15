@@ -5,6 +5,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CASES_FILE="${1:-${ROOT_DIR}/scripts/validation/demo_finance_generalization_cases.json}"
 CONTAINER="${SHADOW_CONTAINER:-agente-sql-langgraph-shadow-test-langgraph-shadow-test-1}"
 
+# This runner invokes the real LLM and writes evidence; require deliberate opt-in.
+if [[ "${SHADOW_FULL_FLOW_ALLOW_LIVE_LLM:-}" != "true" ]]; then
+  echo "ABORTED: set SHADOW_FULL_FLOW_ALLOW_LIVE_LLM=true to authorize live provider calls."
+  exit 6
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "ERROR: docker is required."
   exit 2
