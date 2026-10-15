@@ -19,6 +19,30 @@ from app.graph.state import AgentError, GraphState
 from app.ports.sql_generator import SqlGenerator
 
 
+def _explicit_metric_bindings_complete(projection: Mapping) -> bool:
+    diagnostics = projection.get("diagnostics", {})
+    if not isinstance(diagnostics, Mapping):
+        return False
+    metric_diagnostic = diagnostics.get("planned_metric_diagnostic", {})
+    if not isinstance(metric_diagnostic, Mapping):
+        return False
+    if metric_diagnostic.get("metric_requested") is not True:
+        return True
+    metrics = projection.get("planned_metrics")
+    if not isinstance(metrics, list) or not metrics:
+        return False
+    for key in ("unresolved_terms", "invalid_metadata_terms"):
+        value = metric_diagnostic.get(key, [])
+        if not isinstance(value, list) or value:
+            return False
+    return all(
+        isinstance(metric, Mapping)
+        and isinstance(metric.get("metric_ref"), str)
+        and bool(metric["metric_ref"].strip())
+        for metric in metrics
+    )
+
+
 def create_generate_sql_node(
     sql_generator: SqlGenerator,
 ) -> Callable[[GraphState], GraphState]:
@@ -44,6 +68,26 @@ def create_generate_sql_node(
                 state,
                 result,
                 final_status="infrastructure_error",
+            )
+
+        planning_context = query_plan.get("planning_context")
+        if (
+            isinstance(planning_context, Mapping)
+            and not _explicit_metric_bindings_complete(planning_context)
+        ):
+            result = create_error_result(
+                status="rejected",
+                code="SQL_GENERATION_PLAN_INVALID",
+                message="Metrica explicitamente solicitada sem vinculo semantico completo.",
+                request=None,
+                provider_result=None,
+                reason="explicit_metric_binding_incomplete",
+                attempt=attempt,
+            )
+            return _error_state(
+                state,
+                result,
+                final_status="rejected",
             )
 
         try:

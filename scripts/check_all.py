@@ -62,6 +62,7 @@ STEPS = [
         [sys.executable, "testar_classify_intent.py"],
     ),
     ("testar_planner.py", [sys.executable, "testar_planner.py"]),
+    ("testar_planner_explicit_metric_gate.py", [sys.executable, "testar_planner_explicit_metric_gate.py"]),
     (
         "testar_planned_filters_e2e.py",
         [sys.executable, "testar_planned_filters_e2e.py"],
