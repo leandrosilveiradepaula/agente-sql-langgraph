@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Callable, cast
 
-from app.domain.planner import _explicit_metric_bindings_complete
 from app.domain.planning import QueryPlan
 from app.domain.sql_generation import (
     SqlGenerationInputError,
@@ -18,6 +17,30 @@ from app.domain.sql_generation import (
 )
 from app.graph.state import AgentError, GraphState
 from app.ports.sql_generator import SqlGenerator
+
+
+def _explicit_metric_bindings_complete(projection: Mapping) -> bool:
+    diagnostics = projection.get("diagnostics", {})
+    if not isinstance(diagnostics, Mapping):
+        return False
+    metric_diagnostic = diagnostics.get("planned_metric_diagnostic", {})
+    if not isinstance(metric_diagnostic, Mapping):
+        return False
+    if metric_diagnostic.get("metric_requested") is not True:
+        return True
+    metrics = projection.get("planned_metrics")
+    if not isinstance(metrics, list) or not metrics:
+        return False
+    for key in ("unresolved_terms", "invalid_metadata_terms"):
+        value = metric_diagnostic.get(key, [])
+        if not isinstance(value, list) or value:
+            return False
+    return all(
+        isinstance(metric, Mapping)
+        and isinstance(metric.get("metric_ref"), str)
+        and bool(metric["metric_ref"].strip())
+        for metric in metrics
+    )
 
 
 def create_generate_sql_node(
