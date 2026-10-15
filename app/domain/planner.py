@@ -403,12 +403,7 @@ def _project_temporal_series(
                         for col in columns
                         if isinstance(col, Mapping) and col.get("name")
                     } if isinstance(columns, list) else set()
-                    if (
-                        strategy == "configured_metric_source_date"
-                        and not allowed_columns
-                    ):
-                        issues.append("date_column_not_in_allowed_catalog")
-                    elif allowed_columns and date_column.casefold() not in allowed_columns:
+                    if allowed_columns and date_column.casefold() not in allowed_columns:
                         issues.append("date_column_not_in_allowed_catalog")
 
     if issues:
