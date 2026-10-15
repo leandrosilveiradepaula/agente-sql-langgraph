@@ -66,6 +66,7 @@ STEPS = [
     ("testar_temporal_explicit_date_binding.py", [sys.executable, "testar_temporal_explicit_date_binding.py"]),
     ("testar_temporal_context_validation.py", [sys.executable, "testar_temporal_context_validation.py"]),
     ("testar_temporal_catalog_without_columns.py", [sys.executable, "testar_temporal_catalog_without_columns.py"]),
+    ("testar_semantic_context_audit_readonly.py", [sys.executable, "testar_semantic_context_audit_readonly.py"]),
     ("testar_shadow_full_flow_live_opt_in.py", [sys.executable, "testar_shadow_full_flow_live_opt_in.py"]),
     (
         "testar_planned_filters_e2e.py",
