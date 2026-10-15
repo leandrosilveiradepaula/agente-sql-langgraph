@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Callable, cast
 
+from app.domain.planner import _explicit_metric_bindings_complete
 from app.domain.planning import QueryPlan
 from app.domain.sql_generation import (
     SqlGenerationInputError,
@@ -44,6 +45,26 @@ def create_generate_sql_node(
                 state,
                 result,
                 final_status="infrastructure_error",
+            )
+
+        planning_context = query_plan.get("planning_context")
+        if (
+            isinstance(planning_context, Mapping)
+            and not _explicit_metric_bindings_complete(planning_context)
+        ):
+            result = create_error_result(
+                status="rejected",
+                code="SQL_GENERATION_PLAN_INVALID",
+                message="Metrica explicitamente solicitada sem vinculo semantico completo.",
+                request=None,
+                provider_result=None,
+                reason="explicit_metric_binding_incomplete",
+                attempt=attempt,
+            )
+            return _error_state(
+                state,
+                result,
+                final_status="rejected",
             )
 
         try:
