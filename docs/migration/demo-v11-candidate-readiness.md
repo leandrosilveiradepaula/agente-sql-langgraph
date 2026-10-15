@@ -1,0 +1,53 @@
+# Pré-verificação somente leitura para contexto candidato
+
+O utilitário `scripts/preflight_semantic_candidate_readonly.py` inspeciona apenas
+o contexto semântico versionado carregado do PostgreSQL pelo leitor de contexto.
+Não faz consulta à base financeira, não chama LLM, não executa SQL financeiro,
+não importa benchmark e não persiste alterações.
+
+Para uso operacional, a credencial de contexto existente deve continuar com
+permissões apenas de leitura e `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`.
+
+Exemplo no ambiente existente (sem imprimir DSN):
+
+```bash
+LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false python -m scripts.preflight_semantic_candidate_readonly \
+  --version demo-finance-v10 \
+  --simulate-temporal-strategy unique_metric_source_catalog_date
+```
+
+`--simulate-temporal-strategy` avalia uma hipótese operacional **sem modificar**
+o snapshot, banco, SQL ou versão ativa. Uma data ambígua produz
+`TEMPORAL_DATE_AMBIGUOUS`; a ferramenta nunca escolhe uma data automaticamente.
+Para verificar a configuração já persistida da candidata, execute sem o
+argumento de simulação. O parâmetro opcional `--expected-fingerprint` bloqueia
+resultados em caso de mudança inesperada do contexto.
+
+`checks_passed` significa **somente consistência dos metadados verificados**.
+Não comprova a existência física de tabelas/colunas, fórmula financeira, joins
+completos, correção contábil, segurança de execução ou prontidão para ativação.
+`activation_authorized=false` é fixo. Erros estruturais e ambiguidades
+bloqueiam o relatório. As contagens ajudam a reconhecer contextos incompletos,
+não substituem a auditoria física e semântica.
+
+## Gates antes de criar ou promover demo-finance-v11
+
+1. Auditar versão e fingerprint do ambiente, sem mudar `SEMANTIC_AGENT_VERSION`.
+2. Confirmar fisicamente as colunas e caminhos de join com uma operação de
+   inventário **somente leitura**, feita pela credencial autorizada.
+3. Identificar, em contexto versionado, o significado contábil de cada
+   métrica, filtro obrigatório e coluna de competência/data de lançamento.
+4. Quando houver múltiplas datas por fonte, usar
+   `configured_metric_source_date` e `date_bindings` explícitos e auditados
+   em vez de `unique_metric_source_catalog_date`.
+5. Criar uma versão candidata imutável, validá-la com perguntas novas sem
+   injetar expectativas de avaliação no agente e sem execução SQL real.
+6. A aplicação de migração, a promoção de contexto e qualquer modificação
+   no workflow n8n oficial permanecem ações separadas.
+
+O arquivo histórico `scripts/migrations/021_prepare_demo_finance_context_v11.sql`
+utiliza `unique_metric_source_catalog_date`; não o execute por presunção de
+que as fontes têm uma única coluna temporal. A decisão deve ser evidenciada
+antes de escrever nova versão.
+
+O n8n continua OFFICIAL e o LangGraph continua SHADOW.
