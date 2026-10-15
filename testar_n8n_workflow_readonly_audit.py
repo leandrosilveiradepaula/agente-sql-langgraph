@@ -107,7 +107,7 @@ def test_safe_inventory_no_parameters_or_secrets():
 def test_many_matches_and_explicit_id():
     src = fixtures()
     result = capture(
-        render, src, matches=["workflow", "synthetic"],
+        render, src, matches=["unrelated", "synthetic"],
         workflow_id=None, max_workflows=12, max_nodes=90,
     )
     assert "N8N_WORKFLOW_MATCHES=2" in result
