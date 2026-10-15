@@ -13,7 +13,7 @@ def test_smoke_expected_http_contract_without_network() -> None:
     def fake_call(path, *, token=None):
         if path == "/health":
             return 200, {"status": "ok", "real_sql_execution": False}
-        if token is None or token == "invalid-synthetic-token":
+        if token is None or token == "test-wrong-credential":
             return 401, {"error": {"code": "UNAUTHORIZED_SERVICE"}}
         return 400, {"error": {"code": "SHADOW_RECORD_ID_INVALID"}}
     with patch.dict("os.environ", {"LANGGRAPH_ALLOW_REAL_SQL_EXECUTION": "false", "LANGGRAPH_S2S_TOKEN": "synthetic"}, clear=True):
