@@ -30,3 +30,47 @@ The isolated workflow can be deleted from the n8n UI by an authorized administra
 ## Scope
 
 This artifact does **not** prove a production n8n execution has invoked LangGraph, does not enable cutover, and does not modify `SEMANTIC_AGENT_VERSION` or Shadow's LLM selection. It is a separate, controlled integration fixture.
+
+
+## Audit read-only do workflow oficial (sem cutover)
+
+A prova manual n8n → LangGraph terminou em PASS. Antes de criar qualquer
+ramificação no workflow financeiro oficial, é preciso inspecionar **a versão
+real exportada da instância n8n**, já que o workflow de teste não mostra onde
+entra a pergunta no fluxo financeiro publicado.
+
+Execute na VPS, a partir do checkout deste repositório:
+
+```bash
+cd /docker/agente-sql-langgraph-repo
+bash scripts/run_n8n_workflow_audit_readonly.sh \
+  --match "financeiro" --match "ducklake" --match "sql"
+```
+
+A ferramenta executa somente `n8n export:workflow --all` para um arquivo
+temporário privado (permissões restritas), copia o arquivo para uma área
+temporária privada na VPS e imprime **apenas** nomes sanitizados, IDs, status
+e topologia. Não exporta credenciais, não envia parâmetros, código,
+SQL, URLs, webhooks, DSNs ou segredos ao ChatGPT/GitHub. Apaga os dois
+arquivos brutos ao sair, incluindo em caso de erro.
+
+Caso encontre vários workflows, execute novamente **somente** para selecionar
+o ID que corresponde ao workflow publicado:
+
+```bash
+bash scripts/run_n8n_workflow_audit_readonly.sh --workflow-id "ID_DO_WORKFLOW"
+```
+
+A saída inclui tipos de nós, arestas e flags de revisão de lógica inline.
+`review=true` significa apenas **possível hardcode ou comportamento a
+revisar**; não demonstra regra FORBIDDEN. As classes STRUCTURAL,
+TRANSITIONAL e FORBIDDEN exigem evidência do conteúdo antes de classificação
+final. O inventário não transfere conhecimento de negócio ao código novo.
+
+**Limites e gates:** o export contém a versão de workflow da base acessada
+pela CLI; confirme pela UI qual workflow e versão estão efetivamente
+publicados antes de planejar a inserção. O inventário estrutural não prova
+comportamento nem faz deploy. Nenhum workflow oficial é importado, editado,
+publicado, despublicado ou executado. A eventual integração deverá ser
+assíncrona, isolada e não bloquear/substituir a resposta oficial; n8n continua
+OFFICIAL e LangGraph permanece SHADOW com real_sql_execution=false.
