@@ -70,6 +70,7 @@ STEPS = [
     ("testar_metric_required_filter_bindings.py", [sys.executable, "testar_metric_required_filter_bindings.py"]),
     ("testar_filter_target_preprovider.py", [sys.executable, "testar_filter_target_preprovider.py"]),
     ("testar_catalog_filter_authorization.py", [sys.executable, "testar_catalog_filter_authorization.py"]),
+    ("testar_shadow_s2s_http_smoke.py", [sys.executable, "testar_shadow_s2s_http_smoke.py"]),
     ("testar_shadow_full_flow_live_opt_in.py", [sys.executable, "testar_shadow_full_flow_live_opt_in.py"]),
     (
         "testar_planned_filters_e2e.py",
