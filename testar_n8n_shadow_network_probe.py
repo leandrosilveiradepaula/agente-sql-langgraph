@@ -53,6 +53,10 @@ def test_network_probe_syntax_and_safety():
     assert "real_sql_execution !== false" in source
     assert "N8N_TO_SHADOW_CONNECTIVITY=PASS" in source
     assert "SHARED_NETWORK_COUNT=" in source
+    assert 'tolower($2) ~ /(^|\\/)n8n([:@]|$)/' in source
+    assert "N8N_TO_SHADOW_AUTH_BOUNDARY=DENIED" in source
+    assert 'console.log("N8N_TO_SHADOW_HTTP=PASS")' in source
+    assert 'process.stdout.write("N8N_TO_SHADOW_HTTP=PASS\\\\n")' not in source
     for forbidden in (
         "docker network connect",
         "docker network create",
