@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.domain.planner import _explicit_metric_bindings_complete
+from app.graph.nodes.generate_sql import _explicit_metric_bindings_complete
 
 
 def test_explicit_metric_binding_gate() -> None:
