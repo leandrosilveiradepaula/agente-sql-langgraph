@@ -45,7 +45,7 @@ def main() -> int:
         print("S2S_MISSING=FAIL")
         return 5
     print("S2S_MISSING=DENIED")
-    if call("/v1/internal/shadow-runs/invalid!", token="invalid-synthetic-token")[0] != 401:
+    if call("/v1/internal/shadow-runs/invalid!", token="test-wrong-credential")[0] != 401:
         print("S2S_INVALID=FAIL")
         return 6
     print("S2S_INVALID=DENIED")
