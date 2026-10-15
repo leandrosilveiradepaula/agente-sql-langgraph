@@ -500,6 +500,21 @@ def _validate_metric_binding_entity(
         errors=errors,
         allow_empty=True,
     )
+    required_filters = binding.get("required_filter_concepts", [])
+    if (
+        not isinstance(required_filters, list)
+        or any(not _is_non_empty_text(x) for x in required_filters)
+        or len({str(x).strip().casefold() for x in required_filters})
+        != len(required_filters)
+    ):
+        _add_issue(
+            errors,
+            code="METRIC_BINDING_REQUIRED_FILTERS_INVALID",
+            message="required_filter_concepts deve ser uma lista de conceitos unicos.",
+            path=f"{path}.business_rule.metric_binding.required_filter_concepts",
+            details={},
+        )
+
     if present is not None and absent is not None and present & absent:
         _add_issue(
             errors,

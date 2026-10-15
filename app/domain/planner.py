@@ -678,6 +678,7 @@ def project_planning_context(
     planned_filters, planned_filter_diagnostic = _detect_planned_filters(
         context=context,
         intent_resolution_result=intent_resolution_result,
+        planned_metrics=planned_metrics,
     )
     resolved_filter_bindings = _project_resolved_filter_bindings(
         entities=context.get("entities", []),
@@ -1689,9 +1690,13 @@ def _detect_planned_filters(
     *,
     context: ContextSnapshot,
     intent_resolution_result: Mapping[str, Any] | None,
+    planned_metrics: list[ProjectedPlannedMetric] | None = None,
 ) -> tuple[list[ProjectedPlannedFilter], dict[str, Any]]:
-    """Resolve obrigacoes de filtro sem copiar detalhes fisicos ao plano."""
+    """Resolve filtros textuais e dependencias obrigatorias de metricas.
 
+    Os conceitos exigidos por metricas provem exclusivamente de bindings
+    versionados; nomes de negocio e detalhes fisicos nunca entram no codigo.
+    """
     evidence_terms = _matched_semantic_terms(intent_resolution_result)
     aliases = _filter_concept_aliases(context.get("entities", []))
     detected: dict[str, tuple[str, str]] = {}
@@ -1699,6 +1704,17 @@ def _detect_planned_filters(
         concept = aliases.get(normalize_search_text(term))
         if concept is not None:
             detected.setdefault(concept.casefold(), (concept, term))
+
+    required_concepts: set[str] = set()
+    for metric in planned_metrics or []:
+        concepts = metric.get("required_filter_concepts", [])
+        if isinstance(concepts, list):
+            for concept in concepts:
+                if isinstance(concept, str) and concept.strip():
+                    required_concepts.add(concept.strip())
+                    detected.setdefault(
+                        concept.strip().casefold(), (concept.strip(), "")
+                    )
 
     planned: list[ProjectedPlannedFilter] = []
     unresolved: list[dict[str, str]] = []
@@ -1724,6 +1740,16 @@ def _detect_planned_filters(
             )
             continue
         binding = bindings[0]
+        if (
+            concept in required_concepts
+            and binding["required"] is not True
+        ):
+            unresolved.append({
+                "filter_concept": concept,
+                "matched_user_term": matched_term,
+                "reason": "metric_required_binding_not_required",
+            })
+            continue
         binding_ref = binding["binding_ref"]
         planned.append(
             {
@@ -1732,7 +1758,11 @@ def _detect_planned_filters(
                 "binding_ref": binding_ref,
                 "required": binding["required"],
                 "scope": binding["scope"],
-                "detection_source": "intent_semantic_evidence",
+                "detection_source": (
+                    "versioned_metric_binding"
+                    if concept in required_concepts
+                    else "intent_semantic_evidence"
+                ),
                 "mapping_source": "filter_binding",
                 "matched_user_term": matched_term,
                 "provenance": {
@@ -1751,6 +1781,9 @@ def _detect_planned_filters(
             key=str.casefold,
         ),
         "unresolved": unresolved,
+        "required_metric_filter_concepts": sorted(
+            required_concepts, key=str.casefold
+        ),
     }
 
 
@@ -2402,6 +2435,7 @@ def _metric_binding_metadata(
         "aggregate": None,
         "when_present": metric_binding["when_present"],
         "when_absent": metric_binding["when_absent"],
+        "required_filter_concepts": metric_binding["required_filter_concepts"],
         "priority": priority,
         "user_term": entity.get("user_term"),
     }, "resolved"
@@ -2433,7 +2467,13 @@ def _metric_binding_rule(
         and when_absent is not None
     ):
         return None
+    required_filter_concepts = _concept_condition_list(
+        binding.get("required_filter_concepts", []),
+        allow_empty=True,
+    )
     if set(when_present) & set(when_absent):
+        return None
+    if required_filter_concepts is None:
         return None
     return {
         "metric_concept": metric_concept,
@@ -2441,6 +2481,7 @@ def _metric_binding_rule(
         "target_column": target_column,
         "when_present": when_present,
         "when_absent": when_absent,
+        "required_filter_concepts": required_filter_concepts,
     }
 
 
@@ -2559,6 +2600,9 @@ def _planned_metric_from_binding(
             "when_absent": list(binding["when_absent"]),
         },
         "binding_source": "entity_alias",
+        "required_filter_concepts": list(
+            binding.get("required_filter_concepts", [])
+        ),
     }
 
 
@@ -2571,6 +2615,9 @@ def _metric_binding_diagnostic(
         "target_column": binding.get("target_column"),
         "when_present": list(binding.get("when_present", [])),
         "when_absent": list(binding.get("when_absent", [])),
+        "required_filter_concepts": list(
+            binding.get("required_filter_concepts", [])
+        ),
         "priority": binding.get("priority"),
     }
 

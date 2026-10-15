@@ -90,6 +90,24 @@ def create_generate_sql_node(
                 final_status="rejected",
             )
 
+        if isinstance(planning_context, Mapping):
+            diagnostic = planning_context.get("diagnostics", {})
+            filters = (
+                diagnostic.get("planned_filter_diagnostic", {})
+                if isinstance(diagnostic, Mapping) else {}
+            )
+            if isinstance(filters, Mapping) and filters.get("unresolved"):
+                result = create_error_result(
+                    status="rejected",
+                    code="SQL_GENERATION_PLAN_INVALID",
+                    message="Filtros semanticamente exigidos nao resolvidos.",
+                    request=None,
+                    provider_result=None,
+                    reason="required_filter_binding_incomplete",
+                    attempt=attempt,
+                )
+                return _error_state(state, result, final_status="rejected")
+
         try:
             request = build_sql_generation_request(
                 cast(QueryPlan, query_plan)
