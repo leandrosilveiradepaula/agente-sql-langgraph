@@ -1,0 +1,180 @@
+{
+  "name": "TEST ONLY - LangGraph Shadow Correlation (Manual)",
+  "nodes": [
+    {
+      "id": "ab95d11f-2311-47b3-9355-f4db14356231",
+      "name": "Manual Trigger - Isolated",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        180,
+        240
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "aba2c94b-60d5-47b1-9d79-ad7291162891",
+      "name": "Build Synthetic Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        430,
+        240
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Never submit a valid business question: this probe must stop before LLM.\nconst executionId = String($execution.id ?? Date.now());\nconst agentRunId = 'n8n-shadow-probe-' + executionId;\nreturn [{json: {\n  contract_version: '1',\n  agent_run_id: agentRunId,\n  question: '',\n  principal: {id: 'n8n-shadow-probe', profile: 'runtime_validation'},\n  correlation_metadata: {\n    source: 'isolated_n8n_manual_probe',\n    official_flow_modified: false\n  }\n}}];"
+      }
+    },
+    {
+      "id": "119e5f6c-c65b-40b3-8c58-0cfa9e511811",
+      "name": "Shadow Generate - Expected 422",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://agente-sql-langgraph-shadow-test-langgraph-shadow-test-1:8000/v1/internal/sql-agent/generate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "b602c226-3589-43c8-98c7-a32c258752a6",
+      "name": "Assert Pre-LLM Rejection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        930,
+        240
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const response = $input.first().json;\nconst expectedId = $('Build Synthetic Request').first().json.agent_run_id;\nconst body = response.body ?? {};\nconst codes = Array.isArray(body.errors) ? body.errors.map(e => e?.code) : [];\nif (\n  response.statusCode !== 422 ||\n  body.status !== 'rejected' ||\n  body.agent_run_id !== expectedId ||\n  body.sql != null ||\n  !codes.includes('INTERNAL_GENERATE_QUESTION_REQUIRED') ||\n  typeof body.run_id !== 'string' || !body.run_id\n) {\n  throw new Error('Shadow validation gate mismatch: abort evidence lookup');\n}\nreturn [{json:{agent_run_id: expectedId, run_id: body.run_id}}];"
+      }
+    },
+    {
+      "id": "0a587dae-7a22-4d34-a2c1-d8bbcd80a765",
+      "name": "Get Shadow Evidence",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1180,
+        240
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://agente-sql-langgraph-shadow-test-langgraph-shadow-test-1:8000/v1/internal/agent-runs/' + $json.agent_run_id + '/shadow-runs?limit=5' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "a43095a1-ea16-42cd-bc3d-cad2e082f9e2",
+      "name": "Assert Evidence Correlation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1430,
+        240
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const response = $input.first().json;\nconst expected = $('Assert Pre-LLM Rejection').first().json;\nconst body = response.body ?? {};\nconst matches = Array.isArray(body.items) ? body.items.filter(item =>\n  item.agent_run_id === expected.agent_run_id &&\n  item.run_id === expected.run_id &&\n  item.event_type === 'generate' &&\n  item.status === 'rejected' &&\n  typeof item.shadow_record_id === 'string' &&\n  item.shadow_record_id.length > 0\n) : [];\nif (response.statusCode !== 200 ||\n    body.agent_run_id !== expected.agent_run_id || matches.length !== 1) {\n  throw new Error('Shadow evidence is missing, mismatched or duplicated');\n}\nreturn [{json:{\n  result: 'PASS',\n  agent_run_id: expected.agent_run_id,\n  run_id: expected.run_id,\n  shadow_record_id: matches[0].shadow_record_id,\n  llm_calls: 0,\n  real_sql_execution: false,\n  official_flow_modified: false\n}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger - Isolated": {
+      "main": [
+        [
+          {
+            "node": "Build Synthetic Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Synthetic Request": {
+      "main": [
+        [
+          {
+            "node": "Shadow Generate - Expected 422",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shadow Generate - Expected 422": {
+      "main": [
+        [
+          {
+            "node": "Assert Pre-LLM Rejection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assert Pre-LLM Rejection": {
+      "main": [
+        [
+          {
+            "node": "Get Shadow Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Shadow Evidence": {
+      "main": [
+        [
+          {
+            "node": "Assert Evidence Correlation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false
+  },
+  "pinData": {},
+  "tags": []
+}
