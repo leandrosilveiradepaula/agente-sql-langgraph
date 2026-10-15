@@ -1011,6 +1011,16 @@ def main() -> None:
 
 def _plan_with_required_filter() -> dict:
     query_plan = _query_plan()
+    # The synthetic binding below must point to an authorized catalog column.
+    # Keep the pre-provider fail-closed check intact instead of bypassing it.
+    projection = query_plan["planning_context"]
+    source = "schema_test.table_test"
+    projection["required_tables"][0]["columns"].append(
+        {"name": "category_key", "data_type": "text"}
+    )
+    projection["relevant_columns"][source].append(
+        {"name": "category_key", "data_type": "text"}
+    )
     query_plan["planning_context"]["planned_filters"] = [
         {
             "filter_ref": "filter-synthetic",

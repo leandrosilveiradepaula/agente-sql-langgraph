@@ -1705,13 +1705,15 @@ def _detect_planned_filters(
         if concept is not None:
             detected.setdefault(concept.casefold(), (concept, term))
 
-    required_concepts: set[str] = set()
+    required_concepts: dict[str, str] = {}
     for metric in planned_metrics or []:
         concepts = metric.get("required_filter_concepts", [])
         if isinstance(concepts, list):
             for concept in concepts:
                 if isinstance(concept, str) and concept.strip():
-                    required_concepts.add(concept.strip())
+                    required_concepts.setdefault(
+                        concept.strip().casefold(), concept.strip()
+                    )
                     detected.setdefault(
                         concept.strip().casefold(), (concept.strip(), "")
                     )
@@ -1741,7 +1743,7 @@ def _detect_planned_filters(
             continue
         binding = bindings[0]
         if (
-            concept in required_concepts
+            concept.casefold() in required_concepts
             and binding["required"] is not True
         ):
             unresolved.append({
@@ -1760,7 +1762,7 @@ def _detect_planned_filters(
                 "scope": binding["scope"],
                 "detection_source": (
                     "versioned_metric_binding"
-                    if concept in required_concepts
+                    if concept.casefold() in required_concepts
                     else "intent_semantic_evidence"
                 ),
                 "mapping_source": "filter_binding",
@@ -1782,7 +1784,7 @@ def _detect_planned_filters(
         ),
         "unresolved": unresolved,
         "required_metric_filter_concepts": sorted(
-            required_concepts, key=str.casefold
+            required_concepts.values(), key=str.casefold
         ),
     }
 
