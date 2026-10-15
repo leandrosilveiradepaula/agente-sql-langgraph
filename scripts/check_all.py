@@ -72,6 +72,7 @@ STEPS = [
     ("testar_catalog_filter_authorization.py", [sys.executable, "testar_catalog_filter_authorization.py"]),
     ("testar_shadow_s2s_http_smoke.py", [sys.executable, "testar_shadow_s2s_http_smoke.py"]),
     ("testar_shadow_correlated_evidence_probe.py", [sys.executable, "testar_shadow_correlated_evidence_probe.py"]),
+    ("testar_n8n_shadow_network_probe.py", [sys.executable, "testar_n8n_shadow_network_probe.py"]),
     ("testar_shadow_full_flow_live_opt_in.py", [sys.executable, "testar_shadow_full_flow_live_opt_in.py"]),
     (
         "testar_planned_filters_e2e.py",
