@@ -116,10 +116,12 @@ WHERE source.agent_version = versions.source_version
 ON CONFLICT DO NOTHING;
 
 
--- The temporal planner contract is structural; intent name and vocabulary are
--- versioned domain context, not Python business conditions. A date field is
--- acceptable only when the selected metric source has one catalog date column.
--- Never substitute an arbitrary field when metadata is missing or ambiguous.
+-- The temporal planner contract is structural; business metadata belongs
+-- to this immutable, versioned candidate (not to Python or the n8n workflow).
+-- V10 evidence identifies a single budget date on the budget metric source.
+-- The realized metric source has multiple catalog date columns: do NOT infer
+-- a default. An unbound realized time series must reject before the LLM.
+-- This is candidate metadata only; its presence does not approve activation.
 INSERT INTO ai_ducklake_agent_rules (
   agent_version, rule_group, rule_name, rule_content, applies_to_intents,
   validation_hint, severity, priority, is_active
@@ -131,7 +133,14 @@ VALUES (
   jsonb_build_object(
     'component', 'temporal_planning',
     'required_intents', jsonb_build_array('trend'),
-    'date_binding_strategy', 'unique_metric_source_catalog_date',
+    'date_binding_strategy', 'configured_metric_source_date',
+    'date_bindings', jsonb_build_array(
+      jsonb_build_object(
+        'metric_concept', 'amount',
+        'target_table', 'demo_lakehouse.gold_orcamento',
+        'target_column', 'competencia'
+      )
+    ),
     'granularities', jsonb_build_array(
       jsonb_build_object(
         'grain', 'month',
