@@ -1201,6 +1201,126 @@ def _validate_component_configs(
             continue
         if component_name == "semantic_defaults":
             _validate_semantic_defaults_config(config, errors)
+        if component_name == "temporal_planning":
+            _validate_temporal_planning_config(config, snapshot, errors)
+
+
+
+def _validate_temporal_planning_config(
+    config: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    errors: list[ContextValidationIssue],
+) -> None:
+    path = "component_configs.temporal_planning"
+
+    def issue(code: str, subpath: str) -> None:
+        _add_issue(
+            errors,
+            code=code,
+            message="Configuracao temporal incompleta ou inconsistente.",
+            path=path + subpath,
+            details={},
+        )
+
+    intents = config.get("required_intents")
+    if (
+        not isinstance(intents, list)
+        or not intents
+        or any(not _is_non_empty_text(x) for x in intents)
+        or len({x.strip().casefold() for x in intents}) != len(intents)
+    ):
+        issue("TEMPORAL_INTENTS_INVALID", ".required_intents")
+    else:
+        defined = {
+            str(p.get("intent_name", "")).strip().casefold()
+            for p in snapshot.get("query_patterns", [])
+            if isinstance(p, Mapping)
+        }
+        if any(x.strip().casefold() not in defined for x in intents):
+            issue("TEMPORAL_INTENT_UNKNOWN", ".required_intents")
+
+    grains = config.get("granularities")
+    if not isinstance(grains, list) or not grains:
+        issue("TEMPORAL_GRAINS_INVALID", ".granularities")
+    else:
+        seen: set[str] = set()
+        for idx, grain in enumerate(grains):
+            if not isinstance(grain, Mapping):
+                issue("TEMPORAL_GRAIN_INVALID", f".granularities[{idx}]")
+                continue
+            value = grain.get("grain")
+            terms = grain.get("terms")
+            if not _is_non_empty_text(value) or not isinstance(terms, list) or not terms or any(not _is_non_empty_text(t) for t in terms):
+                issue("TEMPORAL_GRAIN_INVALID", f".granularities[{idx}]")
+                continue
+            norm = str(value).strip().casefold()
+            if norm in seen or len({t.strip().casefold() for t in terms}) != len(terms):
+                issue("TEMPORAL_GRAIN_DUPLICATE", f".granularities[{idx}]")
+            seen.add(norm)
+
+    strategy = config.get("date_binding_strategy")
+    if strategy not in {
+        "unique_metric_source_catalog_date",
+        "configured_metric_source_date",
+    }:
+        issue("TEMPORAL_STRATEGY_INVALID", ".date_binding_strategy")
+        return
+
+    if strategy != "configured_metric_source_date":
+        return
+
+    bindings = config.get("date_bindings")
+    if not isinstance(bindings, list) or not bindings:
+        issue("TEMPORAL_DATE_BINDINGS_INVALID", ".date_bindings")
+        return
+
+    tables: dict[str, Mapping[str, Any]] = {}
+    for table in snapshot.get("table_catalog", []):
+        if not isinstance(table, Mapping):
+            continue
+        name = str(table.get("schema_name", "")).strip()
+        subname = str(table.get("table_name", "")).strip()
+        if name and subname:
+            tables[(name + "." + subname).casefold()] = table
+
+    seen_bindings: set[tuple[str, str]] = set()
+    for idx, binding in enumerate(bindings):
+        where = f".date_bindings[{idx}]"
+        if not isinstance(binding, Mapping):
+            issue("TEMPORAL_DATE_BINDING_INVALID", where)
+            continue
+        fields = [
+            binding.get("metric_concept"),
+            binding.get("target_table"),
+            binding.get("target_column"),
+        ]
+        if not all(_is_non_empty_text(value) for value in fields):
+            issue("TEMPORAL_DATE_BINDING_INVALID", where)
+            continue
+        concept, source, column = [
+            str(value).strip().casefold() for value in fields
+        ]
+        key = (concept, source)
+        if key in seen_bindings:
+            issue("TEMPORAL_DATE_BINDING_AMBIGUOUS", where)
+        seen_bindings.add(key)
+
+        table = tables.get(source)
+        if table is None:
+            issue("TEMPORAL_DATE_TABLE_UNKNOWN", where)
+            continue
+        dates = {
+            str(item if isinstance(item, str) else item.get("name", "")).strip().casefold()
+            for item in table.get("date_columns", [])
+            if isinstance(item, (str, Mapping))
+        }
+        columns = {
+            str(item.get("name", "")).strip().casefold()
+            for item in table.get("columns", [])
+            if isinstance(item, Mapping)
+        }
+        if column not in dates or column not in columns:
+            issue("TEMPORAL_DATE_COLUMN_UNAUTHORIZED", where)
 
 
 def _validate_intent_resolution(
