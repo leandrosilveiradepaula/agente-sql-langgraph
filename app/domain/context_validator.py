@@ -1300,6 +1300,11 @@ def _validate_temporal_planning_config(
         issue("TEMPORAL_STRATEGY_INVALID", ".date_binding_strategy")
         return
 
+    if config.get("reference_selection") is not None:
+        _validate_temporal_reference_selection(
+            config["reference_selection"], strategy, snapshot, errors
+        )
+
     if strategy != "configured_metric_source_date":
         return
 
@@ -1355,6 +1360,128 @@ def _validate_temporal_planning_config(
         }
         if column not in dates or (columns and column not in columns):
             issue("TEMPORAL_DATE_COLUMN_UNAUTHORIZED", where)
+
+
+def _validate_temporal_reference_selection(
+    selection: Any,
+    strategy: Any,
+    snapshot: Mapping[str, Any],
+    errors: list[ContextValidationIssue],
+) -> None:
+    """Validate versioned temporal aliases and optional alternate bindings.
+
+    A recognized alternative with no binding is allowed as a fail-closed
+    guard: the planner must refuse to substitute the default reference.
+    """
+    path = "component_configs.temporal_planning.reference_selection"
+
+    def issue(code: str, subpath: str = "") -> None:
+        _add_issue(
+            errors,
+            code=code,
+            message="Referencia temporal invalida ou sem autorizacao de catalogo.",
+            path=path + subpath,
+            details={},
+        )
+
+    if strategy != "configured_metric_source_date":
+        issue("TEMPORAL_REFERENCE_STRATEGY_UNSUPPORTED")
+    if not isinstance(selection, Mapping) or set(selection) != {
+        "default_reference", "references"
+    }:
+        issue("TEMPORAL_REFERENCE_SELECTION_INVALID")
+        return
+    default = selection.get("default_reference")
+    entries = selection.get("references")
+    if (
+        not _is_non_empty_text(default)
+        or not isinstance(entries, list)
+        or not entries
+    ):
+        issue("TEMPORAL_REFERENCE_SELECTION_INVALID")
+        return
+    default_name = default.strip().casefold()
+    defined: set[str] = set()
+    terms_seen: set[str] = set()
+
+    tables = {
+        (str(item.get("schema_name", "")) + "." + str(item.get("table_name", ""))).casefold(): item
+        for item in snapshot.get("table_catalog", [])
+        if isinstance(item, Mapping)
+    }
+    for index, entry in enumerate(entries):
+        at = f".references[{index}]"
+        if not isinstance(entry, Mapping) or (
+            not {"reference", "terms"} <= set(entry)
+            or set(entry) - {"reference", "terms", "date_bindings"}
+        ):
+            issue("TEMPORAL_REFERENCE_ENTRY_INVALID", at)
+            continue
+        name, terms = entry.get("reference"), entry.get("terms")
+        if (
+            not _is_non_empty_text(name)
+            or not isinstance(terms, list)
+            or not terms
+            or any(not _is_non_empty_text(term) for term in terms)
+        ):
+            issue("TEMPORAL_REFERENCE_ENTRY_INVALID", at)
+            continue
+        key = name.strip().casefold()
+        if key in defined:
+            issue("TEMPORAL_REFERENCE_DUPLICATE", at)
+        defined.add(key)
+        for term in terms:
+            normalized = normalize_search_text(term)
+            if not normalized:
+                issue("TEMPORAL_REFERENCE_ENTRY_INVALID", at)
+            elif normalized in terms_seen:
+                issue("TEMPORAL_REFERENCE_TERM_DUPLICATE", at)
+            terms_seen.add(normalized)
+
+        if "date_bindings" not in entry:
+            continue
+        bindings = entry["date_bindings"]
+        if (
+            key == default_name
+            or not isinstance(bindings, list)
+            or not bindings
+        ):
+            issue("TEMPORAL_REFERENCE_BINDINGS_INVALID", at)
+            continue
+        seen_binding: set[tuple[str, str]] = set()
+        for binding_index, binding in enumerate(bindings):
+            target = at + f".date_bindings[{binding_index}]"
+            if not isinstance(binding, Mapping) or set(binding) != {
+                "metric_concept", "target_table", "target_column"
+            } or any(not _is_non_empty_text(value) for value in binding.values()):
+                issue("TEMPORAL_REFERENCE_BINDING_INVALID", target)
+                continue
+            concept = binding["metric_concept"].strip().casefold()
+            table_name = binding["target_table"].strip().casefold()
+            date_name = binding["target_column"].strip().casefold()
+            identity = (concept, table_name)
+            if identity in seen_binding:
+                issue("TEMPORAL_REFERENCE_BINDING_DUPLICATE", target)
+            seen_binding.add(identity)
+            table = tables.get(table_name)
+            if table is None:
+                issue("TEMPORAL_REFERENCE_DATE_UNAUTHORIZED", target)
+                continue
+            dates = {
+                str(value if isinstance(value, str) else value.get("name", "")).strip().casefold()
+                for value in table.get("date_columns", [])
+                if isinstance(value, (str, Mapping))
+            }
+            physical = {
+                str(value.get("name", "")).strip().casefold()
+                for value in table.get("columns", [])
+                if isinstance(value, Mapping)
+            }
+            if date_name not in dates or (physical and date_name not in physical):
+                issue("TEMPORAL_REFERENCE_DATE_UNAUTHORIZED", target)
+
+    if default_name not in defined:
+        issue("TEMPORAL_REFERENCE_DEFAULT_UNKNOWN")
 
 
 def _validate_intent_resolution(

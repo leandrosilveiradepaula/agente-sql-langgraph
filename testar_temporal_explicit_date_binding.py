@@ -6,12 +6,15 @@ from testar_planner import _synthetic_temporal_context
 
 def project(
     bindings, *, dates=None, strategy="configured_metric_source_date",
-    source_table="schema_test.table_test",
+    source_table="schema_test.table_test", question="Show monthly totals",
+    reference_selection=None,
 ):
     context = _synthetic_temporal_context()
     cfg = context["component_configs"]["temporal_planning"]
     cfg["date_binding_strategy"] = strategy
     cfg["date_bindings"] = bindings
+    if reference_selection is not None:
+        cfg["reference_selection"] = reference_selection
     table = dict(context["table_catalog"][0])
     table["qualified_name"] = source_table
     table["date_columns"] = dates if dates is not None else [
@@ -23,7 +26,7 @@ def project(
     return _project_temporal_series(
         context=context,
         intent_name="generic_test_intent",
-        normalized_question="Show monthly totals",
+        normalized_question=question,
         planned_metrics=[{
             "metric_ref": "synthetic-ref",
             "metric_concept": "measure",
@@ -93,6 +96,111 @@ def test_same_metric_concept_selects_the_correct_source_date() -> None:
     assert "date_binding_not_found" in diagnostic["issues"]
 
 
+def test_explicit_reference_never_silently_uses_default_date() -> None:
+    """Structural test: names and terms are generic synthetic metadata."""
+    selection = {
+        "default_reference": "period_A",
+        "references": [
+            {"reference": "period_A", "terms": ["transaction period"]},
+            {"reference": "period_B", "terms": ["posting date"]},
+        ],
+    }
+    baseline = [binding("event_date")]
+    for question in (
+        "Show monthly totals",
+        "Show monthly totals by transaction period",
+    ):
+        series, diagnostic = project(
+            baseline, question=question, reference_selection=selection
+        )
+        assert diagnostic["status"] == "resolved", diagnostic
+        assert series["date_column"] == "event_date"
+
+    for question, code in (
+        ("Show monthly totals by posting date", "temporal_reference_not_configured"),
+        (
+            "Show monthly totals by transaction period and posting date",
+            "temporal_reference_ambiguous",
+        ),
+    ):
+        series, diagnostic = project(
+            baseline, question=question, reference_selection=selection
+        )
+        assert series is None
+        assert diagnostic["status"] == "incomplete"
+        assert code in diagnostic["issues"], diagnostic
+
+    # An additional reference becomes resolvable by versioning a separate
+    # authorized binding, with no code changes or lookup of entire questions.
+    configured = {
+        **selection,
+        "references": [
+            selection["references"][0],
+            {
+                **selection["references"][1],
+                "date_bindings": [binding("created_at")],
+            },
+        ],
+    }
+    for entries in (
+        configured["references"], list(reversed(configured["references"]))
+    ):
+        series, diagnostic = project(
+            baseline,
+            question="Show monthly totals by posting date",
+            reference_selection={**configured, "references": entries},
+        )
+        assert diagnostic["status"] == "resolved", diagnostic
+        assert series["date_column"] == "created_at"
+        assert series["mapping_source"] == (
+            "component_configs.temporal_planning.reference_selection"
+        )
+
+    series, diagnostic = project(
+        baseline,
+        question="Show monthly totals by posting date",
+        reference_selection={
+            **configured,
+            "references": [
+                configured["references"][0],
+                {
+                    **configured["references"][1],
+                    "date_bindings": [binding("created_at", concept="other")],
+                },
+            ],
+        },
+    )
+    assert series is None
+    assert "date_binding_not_found" in diagnostic["issues"]
+
+
+def test_temporal_reference_metadata_fails_closed() -> None:
+    baseline = [binding("event_date")]
+    cases = [
+        {"default_reference": "a", "references": []},
+        {
+            "default_reference": "missing",
+            "references": [{"reference": "other", "terms": ["keyword"]}],
+        },
+        {
+            "default_reference": "one",
+            "references": [
+                {"reference": "one", "terms": ["overlap"]},
+                {"reference": "two", "terms": ["overlap"]},
+            ],
+        },
+        {"default_reference": "one", "references": [
+            {"reference": "one", "terms": ["one"], "date_bindings": [binding()]}
+        ]},
+    ]
+    for selection in cases:
+        series, diagnostic = project(
+            baseline, reference_selection=selection
+        )
+        assert series is None
+        assert "temporal_reference_metadata_invalid" in diagnostic["issues"]
+
+
 def test_legacy_strategy_remains_unchanged() -> None:
     series, diagnostic = project([], strategy="unique_metric_source_catalog_date")
     assert series is None
@@ -108,5 +216,7 @@ def test_legacy_strategy_remains_unchanged() -> None:
 if __name__ == "__main__":
     test_explicit_date_bindings()
     test_same_metric_concept_selects_the_correct_source_date()
+    test_explicit_reference_never_silently_uses_default_date()
+    test_temporal_reference_metadata_fails_closed()
     test_legacy_strategy_remains_unchanged()
     print("EXPLICIT_TEMPORAL_BINDING=PASS")

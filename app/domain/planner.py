@@ -218,6 +218,95 @@ def _temporal_bindings_complete(projection: Mapping[str, Any]) -> bool:
     )
 
 
+def _select_temporal_reference_bindings(
+    config: Mapping[str, Any],
+    normalized_question: str,
+) -> tuple[list[Mapping[str, Any]] | None, str | None]:
+    """Resolve an explicitly named time reference from versioned metadata.
+
+    Absence of an explicit reference keeps the existing source-specific date.
+    A different reference can only be used when its own physical bindings
+    have been explicitly configured; never substitute the default silently.
+    Names, source columns and synonyms belong exclusively to the context.
+    """
+    selection = config.get("reference_selection")
+    if selection is None:
+        return None, None
+    if not isinstance(selection, Mapping) or set(selection) != {
+        "default_reference", "references"
+    }:
+        return None, "temporal_reference_metadata_invalid"
+
+    default = selection.get("default_reference")
+    references = selection.get("references")
+    if not isinstance(default, str) or not default.strip():
+        return None, "temporal_reference_metadata_invalid"
+    if not isinstance(references, list) or not references:
+        return None, "temporal_reference_metadata_invalid"
+
+    default_name = default.strip().casefold()
+    configured: dict[str, Mapping[str, Any]] = {}
+    term_owner: dict[str, str] = {}
+    matches: set[str] = set()
+    question = normalize_search_text(normalized_question)
+
+    for item in references:
+        if (
+            not isinstance(item, Mapping)
+            or not {"reference", "terms"} <= set(item)
+            or set(item) - {"reference", "terms", "date_bindings"}
+        ):
+            return None, "temporal_reference_metadata_invalid"
+        name = item.get("reference")
+        terms = item.get("terms")
+        if (
+            not isinstance(name, str) or not name.strip()
+            or not isinstance(terms, list) or not terms
+            or any(not isinstance(term, str) or not term.strip() for term in terms)
+        ):
+            return None, "temporal_reference_metadata_invalid"
+        canonical = name.strip().casefold()
+        if canonical in configured:
+            return None, "temporal_reference_metadata_invalid"
+        configured[canonical] = item
+
+        alternative = item.get("date_bindings")
+        if "date_bindings" in item and (
+            canonical == default_name
+            or not isinstance(alternative, list)
+            or not alternative
+            or any(not isinstance(binding, Mapping) for binding in alternative)
+        ):
+            return None, "temporal_reference_metadata_invalid"
+
+        for term in terms:
+            normalized_term = normalize_search_text(term)
+            if not normalized_term:
+                return None, "temporal_reference_metadata_invalid"
+            owner = term_owner.get(normalized_term)
+            if owner is not None and owner != canonical:
+                return None, "temporal_reference_metadata_invalid"
+            term_owner[normalized_term] = canonical
+            if re.search(
+                r"(?<!\w)" + re.escape(normalized_term) + r"(?!\w)",
+                question,
+            ):
+                matches.add(canonical)
+
+    if default_name not in configured:
+        return None, "temporal_reference_metadata_invalid"
+    if len(matches) > 1:
+        return None, "temporal_reference_ambiguous"
+
+    selected = next(iter(matches)) if matches else default_name
+    if selected == default_name:
+        return None, None
+    alternative = configured[selected].get("date_bindings")
+    if not isinstance(alternative, list) or not alternative:
+        return None, "temporal_reference_not_configured"
+    return alternative, None
+
+
 def _project_temporal_series(
     *,
     context: ContextSnapshot,
@@ -296,7 +385,15 @@ def _project_temporal_series(
     if len(source_tables) != 1:
         issues.append("metric_source_table_missing_or_ambiguous")
 
+    reference_bindings, reference_issue = _select_temporal_reference_bindings(
+        config, normalized_question
+    )
+    if reference_issue is not None:
+        issues.append(reference_issue)
+
     strategy = config.get("date_binding_strategy")
+    if reference_bindings is not None and strategy != "configured_metric_source_date":
+        issues.append("temporal_reference_metadata_invalid")
     allowed_strategies = {
         "unique_metric_source_catalog_date",
         "configured_metric_source_date",
@@ -344,8 +441,16 @@ def _project_temporal_series(
                     else:
                         date_column = next(iter(normalized_dates.values()))
                 else:
-                    binding_source = "component_configs.temporal_planning.date_bindings"
-                    raw_bindings = config.get("date_bindings")
+                    binding_source = (
+                        "component_configs.temporal_planning.reference_selection"
+                        if reference_bindings is not None
+                        else "component_configs.temporal_planning.date_bindings"
+                    )
+                    raw_bindings = (
+                        reference_bindings
+                        if reference_bindings is not None
+                        else config.get("date_bindings")
+                    )
                     concepts = {
                         str(metric.get("metric_concept", "")).strip().casefold()
                         for metric in planned_metrics

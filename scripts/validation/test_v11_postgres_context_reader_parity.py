@@ -23,6 +23,8 @@ from scripts.preview_semantic_candidate_readonly import (
     synthesize_candidate_snapshot,
 )
 from scripts.preflight_semantic_candidate_readonly import evaluate_candidate_readiness
+from app.domain.planner import _select_temporal_reference_bindings
+from app.domain.context_validator import _validate_temporal_planning_config
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -108,6 +110,37 @@ def run_check(mode: str) -> None:
         }
         assert source_bindings == metric_sources, "incomplete temporal coverage"
         assert len(metric_sources) >= 2, "fixture must exercise multiple sources"
+
+        # Real PostgreSQL reader must expose the exact versioned reference
+        # selector. Exercise explicit alternatives without a financial query.
+        temporal_cfg = candidate["component_configs"]["temporal_planning"]
+        reference_cfg = temporal_cfg["reference_selection"]
+        policy_reference = next(
+            entry["expected_record"]["rule_content"]["reference_selection"]
+            for entry in policy["allowed_new_rules"]
+            if entry["rule_group"] == "component_config"
+            and entry["rule_name"] == "temporal_planning_config"
+        )
+        assert reference_cfg == policy_reference
+        errors = []
+        _validate_temporal_planning_config(temporal_cfg, candidate, errors)
+        assert not errors, [item["code"] for item in errors]
+        default = reference_cfg["default_reference"]
+        alt = [
+            ref for ref in reference_cfg["references"]
+            if ref["reference"] != default
+        ]
+        assert alt, "fixture must recognize a non-default reference"
+        for alternative in alt:
+            assert "date_bindings" not in alternative
+            terms = alternative["terms"]
+            assert terms
+            bindings, issue = _select_temporal_reference_bindings(
+                temporal_cfg, "monthly " + terms[0]
+            )
+            assert bindings is None
+            assert issue == "temporal_reference_not_configured"
+        print("V11_TEMPORAL_REFERENCE_GUARD=PASS")
         print("V11_IN_MEMORY_CANDIDATE_FINGERPRINT=PASS")
 
     if not source.get("fingerprint") or not candidate.get("fingerprint"):

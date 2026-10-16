@@ -63,6 +63,33 @@ responder como se fosse competência. A cobertura de planejamento temporal,
 incluindo eventual consulta comparativa multiorigem, precisa de evidência de
 generalização independente antes de qualquer promoção.
 
+**Proteção de referência temporal explícita:** a candidata possui
+`reference_selection` no registro `temporal_planning_config` com os
+termos de referência versionados em `semantic_context/candidate_parity_demo_finance_v11.json`.
+O Planner distingue a referência contábil padrão de uma referência
+explicitamente solicitada pelo usuário. Se a pergunta de tendência mencionar
+uma referência alternativa sem `date_bindings` próprios (por exemplo, data
+de lançamento), o planejamento retorna
+`temporal_reference_not_configured` **antes da geração SQL**, em vez de
+substituir silenciosamente pela competência. Referências contraditórias
+retornam `temporal_reference_ambiguous`. Os termos, nomes das referências
+e futuras associações físicas pertencem ao contexto versionado, nunca a
+ifs de perguntas específicas.
+
+O contrato aceita `date_bindings` opcionais por referência alternativa,
+mas eles só podem ser usados se a fonte, métrica e coluna estiverem autorizadas
+pelo catálogo. Nesta candidata, a referência de data de lançamento é
+**reconhecida e bloqueada**, não habilitada; a associação contábil do
+realizado e orçamento continua por competência. A ausência de referência
+explícita mantém esse padrão para operações temporais abrangidas pela
+configuração, sem criar equivalência semântica com outra data.
+
+**Limitação:** o gate atual de referência vale para os intents definidos
+em `required_intents` na configuração temporal, não para todas as consultas
+possíveis. Isso precisa ser considerado na validação de cobertura e de
+perguntas inéditas; `metadata_checks_passed` não equivale a proteção global
+de toda operação que mencione uma data.
+
 **Gates de aprovação separados:** confirmar a definição financeira com
 responsável pelo dado, verificar o esquema físico e contratos de filtros/DRE,
 testar perguntas novas e equivalentes sem golden SQL no gerador, e revisar

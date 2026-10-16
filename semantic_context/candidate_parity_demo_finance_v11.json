@@ -55,7 +55,27 @@
                 "ano a ano"
               ]
             }
-          ]
+          ],
+          "reference_selection": {
+            "default_reference": "accounting_period",
+            "references": [
+              {
+                "reference": "accounting_period",
+                "terms": [
+                  "competência",
+                  "por competência",
+                  "pela competência"
+                ]
+              },
+              {
+                "reference": "posting_date",
+                "terms": [
+                  "data de lançamento",
+                  "data do lançamento"
+                ]
+              }
+            ]
+          }
         },
         "applies_to_intents": [
           "trend"
