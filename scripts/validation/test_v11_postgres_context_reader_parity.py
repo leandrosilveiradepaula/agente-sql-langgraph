@@ -23,7 +23,10 @@ from scripts.preview_semantic_candidate_readonly import (
     synthesize_candidate_snapshot,
 )
 from scripts.preflight_semantic_candidate_readonly import evaluate_candidate_readiness
-from app.domain.planner import _select_temporal_reference_bindings
+from app.domain.planner import (
+    _cross_intent_temporal_reference_issue,
+    _select_temporal_reference_bindings,
+)
 from app.domain.context_validator import _validate_temporal_planning_config
 
 
@@ -140,6 +143,19 @@ def run_check(mode: str) -> None:
             )
             assert bindings is None
             assert issue == "temporal_reference_not_configured"
+            cross_intent_issue = _cross_intent_temporal_reference_issue(
+                context=candidate,
+                intent_name="synthetic_unconfigured_intent",
+                normalized_question="totals " + terms[0],
+            )
+            assert cross_intent_issue == "temporal_reference_not_configured"
+            default_intent_issue = _cross_intent_temporal_reference_issue(
+                context=candidate,
+                intent_name=temporal_cfg["required_intents"][0],
+                normalized_question="totals " + terms[0],
+            )
+            assert default_intent_issue is None
+        print("V11_TEMPORAL_REFERENCE_CROSS_INTENT_GUARD=PASS")
         print("V11_TEMPORAL_REFERENCE_GUARD=PASS")
         print("V11_IN_MEMORY_CANDIDATE_FINGERPRINT=PASS")
 
