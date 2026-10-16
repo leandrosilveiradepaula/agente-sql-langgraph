@@ -77,6 +77,49 @@ def test_expectations_never_enter_semantic_or_planner_calls() -> None:
     assert "expected_intent" not in str(result)
 
 
+def test_semantic_scores_are_diagnostic_only_and_do_not_expose_aliases() -> None:
+    def resolved_with_evidence(question, context):
+        result = mock_intent(question, context)
+        result.update({
+            "reason": "minimum_score_not_reached",
+            "candidates": [{"intent_name": "synthetic_intent", "score": 25}],
+            "best_candidate": {
+                "score": 25,
+                "matches": [{"pattern": "private-alias-do-not-leak"}],
+            },
+            "second_candidate": {"score": 18},
+            "resolver_configuration": {
+                "minimum_score": 40,
+                "ambiguity_margin": 10,
+            },
+            "intent_catalog": {
+                "entries_evaluated": 4,
+                "evaluations": [{"secret": "private-catalog-do-not-leak"}],
+            },
+            "semantic_defaults": {"applied": [{"concept": "private-default"}]},
+        })
+        result["applied"] = False
+        result["intent"] = None
+        return result
+
+    with patch(
+        "scripts.evaluate_memory_candidate_generalization_readonly.resolve_intent",
+        side_effect=resolved_with_evidence,
+    ):
+        result = observe_plan(mock_snapshot(), "Test monthly totals")
+
+    assert result["intent_resolution_reason"] == "minimum_score_not_reached"
+    assert result["candidate_count"] == 1
+    assert result["best_candidate_score"] == 25
+    assert result["second_candidate_score"] == 18
+    assert result["minimum_score"] == 40
+    assert result["ambiguity_margin"] == 10
+    assert result["intent_catalog_entries_evaluated"] == 4
+    assert result["semantic_defaults_applied_count"] == 1
+    assert "private-" not in str(result)
+    assert "Test monthly totals" not in str(result)
+
+
 def test_failed_expectations_are_evaluation_only_and_sanitized() -> None:
     suite = {
         "cases": [{
@@ -180,6 +223,7 @@ def test_runner_aborts_before_reader_when_real_sql_flag_is_not_false() -> None:
 if __name__ == "__main__":
     test_expectations_never_enter_semantic_or_planner_calls()
     test_failed_expectations_are_evaluation_only_and_sanitized()
+    test_semantic_scores_are_diagnostic_only_and_do_not_expose_aliases()
     test_malformed_suite_rejected_before_any_semantic_call()
     test_real_planner_rejects_unhandled_reference_for_novel_intent()
     test_runner_aborts_before_reader_when_real_sql_flag_is_not_false()
