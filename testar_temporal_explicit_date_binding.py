@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.domain.planner import _project_temporal_series
-from testar_planner import _synthetic_temporal_context
+from app.domain.planner import _project_temporal_series, build_query_plan
+from testar_planner import _synthetic_temporal_context, _pattern
 
 
 def project(
@@ -201,6 +201,119 @@ def test_temporal_reference_metadata_fails_closed() -> None:
         assert "temporal_reference_metadata_invalid" in diagnostic["issues"]
 
 
+def test_explicit_alternative_rejected_outside_temporal_intent() -> None:
+    """Other intents must not silently replace an explicit date reference."""
+    context = _synthetic_temporal_context()
+    other = _pattern(pattern_name="independent_intent_pattern")
+    other["intent_name"] = "independent_intent"
+    context["query_patterns"].append(other)
+    reference = {
+        "default_reference": "financial_period",
+        "references": [
+            {"reference": "financial_period", "terms": ["by period"]},
+            {"reference": "event_date", "terms": ["by posting date"]},
+        ],
+    }
+    cfg = context["component_configs"]["temporal_planning"]
+    cfg["date_binding_strategy"] = "configured_metric_source_date"
+    cfg["date_bindings"] = [binding()]
+    cfg["reference_selection"] = reference
+
+    # Test intent is absent from configured required_intents. Even if this
+    # intent could produce a query, named alternate references are unsafe.
+    for question in (
+        "Show value by posting date",
+        "Show a ranking of value by posting date",
+        "Compare amount by posting date",
+        "Show value by period and by posting date",
+    ):
+        plan = build_query_plan(
+            context=context,
+            intent_name="independent_intent",
+            intent_confidence=0.95,
+            normalized_question=question,
+        )
+        assert plan["status"] == "rejected", (question, plan)
+        assert plan["error_code"] == "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED"
+        assert plan["query_plan"] is None
+        assert plan["projection"] is None
+
+    # Even when a date binding is configured for the alternative, it is not
+    # automatically applied by intents with no temporal projector.
+    cfg["reference_selection"] = {
+        **reference,
+        "references": [
+            reference["references"][0],
+            {
+                **reference["references"][1],
+                "date_bindings": [binding("event_date")],
+            },
+        ],
+    }
+    plan = build_query_plan(
+        context=context,
+        intent_name="independent_intent",
+        intent_confidence=0.95,
+        normalized_question="Show value by posting date",
+    )
+    assert plan["status"] == "rejected"
+    assert plan["error_code"] == "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED"
+
+    # The gate is semantic rather than unconditional: unrelated questions
+    # and the configured default date do not trigger this rejection.
+    for question in ("Show value by period", "Show value across teams"):
+        plan = build_query_plan(
+            context=context,
+            intent_name="independent_intent",
+            intent_confidence=0.95,
+            normalized_question=question,
+        )
+        assert plan["error_code"] != "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED"
+
+
+def test_cross_intent_reference_gate_is_context_driven() -> None:
+    from app.domain.planner import _cross_intent_temporal_reference_issue
+
+    context = _synthetic_temporal_context()
+    cfg = context["component_configs"]["temporal_planning"]
+    cfg["reference_selection"] = {
+        "default_reference": "alpha",
+        "references": [
+            {"reference": "alpha", "terms": ["time alpha"]},
+            {"reference": "beta", "terms": ["time beta"]},
+        ],
+    }
+
+    # The gate uses only configured terms and applies to new phrasings.
+    for question in (
+        "Results by time beta",
+        "Breakdown OF values with time beta",
+    ):
+        issue = _cross_intent_temporal_reference_issue(
+            context=context,
+            intent_name="unconfigured_intent",
+            normalized_question=question,
+        )
+        assert issue == "temporal_reference_not_configured"
+
+    assert _cross_intent_temporal_reference_issue(
+        context=context,
+        intent_name="unconfigured_intent",
+        normalized_question="Results by time alpha",
+    ) is None
+    assert _cross_intent_temporal_reference_issue(
+        context=context,
+        intent_name="generic_test_intent",
+        normalized_question="Results by time beta",
+    ) is None
+    context["component_configs"].pop("temporal_planning")
+    assert _cross_intent_temporal_reference_issue(
+        context=context,
+        intent_name="unconfigured_intent",
+        normalized_question="Results by time beta",
+    ) is None
+
+
 def test_legacy_strategy_remains_unchanged() -> None:
     series, diagnostic = project([], strategy="unique_metric_source_catalog_date")
     assert series is None
@@ -218,5 +331,7 @@ if __name__ == "__main__":
     test_same_metric_concept_selects_the_correct_source_date()
     test_explicit_reference_never_silently_uses_default_date()
     test_temporal_reference_metadata_fails_closed()
+    test_explicit_alternative_rejected_outside_temporal_intent()
+    test_cross_intent_reference_gate_is_context_driven()
     test_legacy_strategy_remains_unchanged()
     print("EXPLICIT_TEMPORAL_BINDING=PASS")
