@@ -1,72 +1,59 @@
 {
-  "suite": "demo-finance-v12-independent-semantic-counterexamples",
-  "purpose": "Evaluation only. This suite is not a vocabulary source or a generator prompt. Positive and negative paraphrases test explicit operations, generic grouping, scenario compatibility, and fail-closed dates.",
+  "suite": "demo-finance-v12-independent-operations-and-counterexamples",
+  "purpose": "Evaluation-only independent paraphrases and counterexamples; expectations are checked after resolving and planning; they are not used as generator context, policy terms, examples, or thresholds.",
   "cases": [
     {
-      "question": "Como os lançamentos realizados evoluíram ao longo dos trimestres por competência?",
+      "question": "Apresente a variação dos valores realizados de um trimestre para outro por competência.",
+      "expected_intent": "trend"
+    },
+    {
+      "question": "Acompanhe o valor realizado mês após mês pela competência.",
       "expected_intent": "trend",
       "expected_plan_status": "planned"
     },
     {
-      "question": "Apresente a progressão mensal do orçamento por competência.",
-      "expected_intent": "trend",
-      "expected_plan_status": "planned"
+      "question": "Quero comparar a evolução do orçamento ao longo dos trimestres por competência.",
+      "expected_intent": "trend"
     },
     {
-      "question": "Exiba o movimento dos valores mês a mês pela data do lançamento.",
-      "expected_intent": "trend",
-      "expected_plan_status": "rejected",
-      "expected_error_code": "PLANNING_TEMPORAL_BINDING_INCOMPLETE",
-      "expected_temporal_issue": "temporal_reference_not_configured"
+      "question": "Mostre como os gastos oscilaram ao longo dos meses por competência.",
+      "expected_intent": "trend"
     },
     {
-      "question": "Ordenar as unidades do maior para o menor valor realizado por competência.",
-      "expected_intent": "ranking",
-      "expected_plan_status": "planned"
+      "question": "Ordene as unidades pelo valor realizado por competência.",
+      "expected_intent": "ranking"
     },
     {
-      "question": "Ordene as marcas por valor realizado usando a data de lançamento.",
+      "question": "Poderia ordenar as marcas pelo valor realizado considerando data de lançamento?",
       "expected_intent": "ranking",
       "expected_plan_status": "rejected",
       "expected_error_code": "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED"
     },
     {
-      "question": "Quais centros de custo têm os maiores valores orçados por competência?",
-      "expected_intent": "ranking",
-      "expected_plan_status": "planned"
+      "question": "Liste o valor realizado por centro de custo e competência.",
+      "expected_intent": "realized_analysis"
     },
     {
-      "question": "Liste o realizado por unidade de negócio por competência.",
-      "expected_intent": "realized_analysis",
-      "expected_plan_status": "planned"
+      "question": "Apresente os lançamentos realizados agrupados por unidade de negócio.",
+      "expected_intent": "realized_analysis"
     },
     {
-      "question": "Mostre o orçamento por centro de custo por competência.",
-      "expected_intent": "budget_analysis",
-      "expected_plan_status": "planned"
+      "question": "Compare orçamento com valor realizado no ano passado por competência.",
+      "expected_intent": "actual_vs_budget"
     },
     {
-      "question": "Compare os valores realizados e orçados por centro de custo no ano passado.",
-      "expected_intent": "actual_vs_budget",
-      "expected_plan_status": "planned"
+      "question": "Qual o valor orçado por unidade de negócio e competência?",
+      "expected_intent": "budget_analysis"
     },
     {
-      "question": "Mostre a evolução do realizado por competência e pela data do lançamento, mês a mês.",
+      "question": "Faça um ranking das unidades pelo maior valor realizado por competência.",
+      "expected_intent": "ranking"
+    },
+    {
+      "question": "Mostre a tendência do realizado pela data de lançamento ao longo dos meses.",
       "expected_intent": "trend",
       "expected_plan_status": "rejected",
-      "expected_error_code": "PLANNING_TEMPORAL_BINDING_INCOMPLETE",
-      "expected_temporal_issue": "temporal_reference_ambiguous"
-    },
-    {
-      "question": "Demonstre o total realizado para as unidades no último trimestre.",
-      "expected_intent": "realized_analysis",
-      "expected_plan_status": "planned"
-    },
-    {
-      "question": "Apresente a comparação entre o orçamento e a execução pela data do lançamento.",
-      "expected_intent": "actual_vs_budget",
-      "expected_plan_status": "rejected",
-      "expected_error_code": "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED"
+      "expected_error_code": "PLANNING_TEMPORAL_BINDING_INCOMPLETE"
     }
   ]
 }
