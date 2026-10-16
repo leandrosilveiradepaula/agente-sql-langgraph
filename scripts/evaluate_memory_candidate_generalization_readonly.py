@@ -32,9 +32,117 @@ _CASE_KEYS = frozenset({
 })
 
 
+def summarize_resolution_evidence(resolved: Mapping[str, Any]) -> dict[str, Any]:
+    """Numerical/structural attribution from actual resolver output.
+
+    The report omits full questions, normalized text, signal patterns,
+    configured terms, matched tokens, descriptions and SQL. No expected
+    intent or test assertion is passed here.
+    """
+    config = resolved.get("resolver_configuration")
+    config = config if isinstance(config, Mapping) else {}
+    raw_candidates = resolved.get("candidates")
+    candidates = raw_candidates if isinstance(raw_candidates, list) else []
+    raw_catalog = resolved.get("intent_catalog")
+    catalog = raw_catalog if isinstance(raw_catalog, Mapping) else {}
+    raw_evaluations = catalog.get("evaluations")
+    evaluations = raw_evaluations if isinstance(raw_evaluations, list) else []
+    fallback = resolved.get("token_fallback")
+    fallback = fallback if isinstance(fallback, Mapping) else {}
+    defaults = resolved.get("semantic_defaults")
+    defaults = defaults if isinstance(defaults, Mapping) else {}
+
+    def safe_count(value: Any) -> int:
+        return len(value) if isinstance(value, list) else 0
+
+    def numeric(value: Any) -> float | None:
+        return (
+            float(value)
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+            else None
+        )
+
+    evidence_candidates: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        matches = candidate.get("matches")
+        matches = matches if isinstance(matches, list) else []
+        catalog_match_count = sum(
+            1 for item in matches
+            if isinstance(item, Mapping)
+            and item.get("match_strategy") == "intent_catalog_rule"
+        )
+        evidence_candidates.append({
+            "intent": candidate.get("intent_name"),
+            "score": numeric(candidate.get("score")),
+            "positive_score": numeric(candidate.get("positive_score")),
+            "negative_score": numeric(candidate.get("negative_score")),
+            "matched_signal_count": len(matches) - catalog_match_count,
+            "matched_catalog_scoring_rules": catalog_match_count,
+        })
+
+    catalog_evidence: list[dict[str, Any]] = []
+    for entry in evaluations:
+        if not isinstance(entry, Mapping):
+            continue
+        rules = entry.get("rules")
+        rules = rules if isinstance(rules, list) else []
+        rule_evidence: list[dict[str, Any]] = []
+        for index, rule in enumerate(rules):
+            if not isinstance(rule, Mapping):
+                continue
+            concepts = rule.get("concepts")
+            concepts = concepts if isinstance(concepts, list) else []
+            rule_evidence.append({
+                "rule_index": index + 1,
+                "effect": rule.get("effect"),
+                "satisfied": rule.get("satisfied") is True,
+                "matched_concept_count": rule.get("matched_concept_count"),
+                "minimum_concept_matches": rule.get("minimum_concept_matches"),
+                "concepts": [
+                    {
+                        "concept": concept.get("concept_name"),
+                        "satisfied": concept.get("satisfied") is True,
+                        "matched_term_count": concept.get("matched_term_count"),
+                        "minimum_term_matches": concept.get("minimum_term_matches"),
+                    }
+                    for concept in concepts
+                    if isinstance(concept, Mapping)
+                ],
+            })
+        catalog_evidence.append({
+            "intent": entry.get("intent_name"),
+            "eligible": entry.get("eligible") is True,
+            "excluded": entry.get("excluded") is True,
+            "required_rule_count": entry.get("require_rule_count"),
+            "satisfied_required_rule_count": entry.get(
+                "satisfied_require_rule_count"
+            ),
+            "catalog_positive_score": numeric(entry.get("positive_score")),
+            "catalog_negative_score": numeric(entry.get("negative_score")),
+            "rules": rule_evidence,
+        })
+
+    return {
+        "reason": resolved.get("reason"),
+        "minimum_score": numeric(config.get("minimum_score")),
+        "ambiguity_margin": numeric(config.get("ambiguity_margin")),
+        "candidate_count": len(evidence_candidates),
+        "candidates": evidence_candidates,
+        "token_fallback_enabled": fallback.get("enabled") is True,
+        "token_fallback_used": fallback.get("used_for_selected_intent") is True,
+        "semantic_default_count": safe_count(defaults.get("applied")),
+        "semantic_defaults_suppressed_count": safe_count(defaults.get("suppressed")),
+        "catalog_entries_evaluated": len(catalog_evidence),
+        "catalog_evidence": catalog_evidence,
+    }
+
+
 def observe_plan(snapshot: Mapping[str, Any], question: str) -> dict[str, Any]:
     """Compute observations without access to expected results or other cases."""
     resolved = resolve_intent(question, snapshot["intent_resolution"])
+    evidence = summarize_resolution_evidence(resolved)
     intent = resolved.get("intent")
     status, error_code = "intent_not_resolved", None
     projection: Mapping[str, Any] | None = None
@@ -75,6 +183,7 @@ def observe_plan(snapshot: Mapping[str, Any], question: str) -> dict[str, Any]:
             if isinstance(issue, str)
         }) if isinstance(diagnostic.get("issues", []), list) else [],
         "planned_metric_count": len(metric_count),
+        "_resolver_evidence": evidence,
     }
 
 
@@ -102,6 +211,7 @@ def evaluate_suite(
             raise ValueError("evaluation case must contain a question and assertions")
 
         observed = observe_plan(snapshot, question)
+        resolution_evidence = observed.pop("_resolver_evidence", None)
         # Nothing from expectations was passed to observe_plan, resolve_intent,
         # build_query_plan, an LLM, a SQL generator or the candidate snapshot.
         failures: list[str] = []
@@ -127,12 +237,15 @@ def evaluate_suite(
             failures.append("temporal_issue")
         ok = not failures
         passed += int(ok)
-        observations.append({
+        record = {
             "case_index": index,
             "passed": ok,
             "failed_assertions": failures,
             **observed,
-        })
+        }
+        if not ok and resolution_evidence is not None:
+            record["resolution_evidence"] = resolution_evidence
+        observations.append(record)
 
     return {
         "status": "evaluation_passed" if passed == len(cases) else "evaluation_failed",
