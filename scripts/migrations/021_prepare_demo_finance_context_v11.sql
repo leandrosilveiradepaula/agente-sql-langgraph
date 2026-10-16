@@ -256,7 +256,10 @@ BEGIN
         e.business_rule::jsonb->'metric_binding'->>'metric_concept',
         e.canonical_value
       ) = configured_date->>'metric_concept'
-      AND e.target_table = configured_date->>'target_table';
+      AND COALESCE(
+        NULLIF(e.business_rule::jsonb->'metric_binding'->>'target_table', ''),
+        e.target_table
+      ) = configured_date->>'target_table';
 
     IF source_matches <> 1 THEN
       RAISE EXCEPTION
