@@ -24,6 +24,8 @@ def test_shell_syntax_and_invalid_arguments_fail_before_docker() -> None:
             ["../outside.json"],
             ["semantic_context/../../file.json"],
             ["semantic_context/valid.json", "not-a-sha"],
+            ["semantic_context/valid.json", "", "../../unsafe.json"],
+            ["semantic_context/valid.json", "", "scripts/validation/../outside.json"],
         ):
             result = subprocess.run(
                 [bash, str(RUNNER.relative_to(ROOT)), *bad],
@@ -46,7 +48,8 @@ def test_only_existing_runtime_and_readonly_gate() -> None:
     assert 'os.environ.get("CONTEXT_POSTGRES_DSN")' in text
     assert 'docker exec -w "$STAGE"' in text
     assert 'PYTHONDONTWRITEBYTECODE=1' in text
-    assert "python -m scripts.preview_semantic_candidate_readonly" in text
+    assert 'PYTHON_MODULE="scripts.preview_semantic_candidate_readonly"' in text
+    assert '"$CONTAINER" python -m "$PYTHON_MODULE"' in text
     for forbidden in (
         "docker compose up",
         "docker build",
@@ -65,6 +68,11 @@ def test_only_existing_runtime_and_readonly_gate() -> None:
 def test_reviewed_git_source_is_ephemeral_and_safe() -> None:
     text = script_text()
     assert 'git -C "$ROOT_DIR" archive --format=tar HEAD' in text
+    assert '"${ARCHIVE_PATHS[@]}"' in text
+    assert '"$SUITE_RELATIVE"' in text
+    assert 'scripts/evaluate_memory_candidate_generalization_readonly.py' in text
+    assert 'PYTHON_MODULE="scripts.evaluate_memory_candidate_generalization_readonly"' in text
+    assert 'args+=(--cases "$STAGE/$SUITE_RELATIVE")' in text
     assert '"$POLICY_RELATIVE"' in text
     assert 'git -C "$ROOT_DIR" branch --show-current' in text
     assert 'git -C "$ROOT_DIR" cat-file -e "HEAD:$POLICY_RELATIVE"' in text
@@ -77,7 +85,8 @@ def test_reviewed_git_source_is_ephemeral_and_safe() -> None:
     assert "trap cleanup EXIT" in text
     assert "shutil.rmtree(p,ignore_errors=True)" in text
     assert '-e "PYTHONPATH=$STAGE"' in text
-    assert "app \\\n" in text
+    assert 'ARCHIVE_PATHS=(' in text
+    assert '  app\n' in text
     assert "scripts/preview_semantic_candidate_readonly.py" in text
     assert "scripts/audit_semantic_candidate_parity_readonly.py" in text
     assert "scripts/preflight_semantic_candidate_readonly.py" in text

@@ -8,6 +8,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 POLICY_RELATIVE="${1:-}"
 EXPECTED_SOURCE_FINGERPRINT="${2:-}"
+SUITE_RELATIVE="${3:-}"
 CONTAINER="${SHADOW_CONTAINER:-agente-sql-langgraph-shadow-test-langgraph-shadow-test-1}"
 
 if [[ ! "$POLICY_RELATIVE" =~ ^semantic_context/[A-Za-z0-9._-]+\.json$ ]]; then
@@ -19,12 +20,22 @@ if [[ -n "$EXPECTED_SOURCE_FINGERPRINT" ]] \
   echo "ABORTED: expected source fingerprint must be a lowercase SHA-256 value."
   exit 2
 fi
+if [[ -n "$SUITE_RELATIVE" ]] \
+    && [[ ! "$SUITE_RELATIVE" =~ ^scripts/validation/[A-Za-z0-9._-]+\.json$ ]]; then
+  echo "ABORTED: evaluation suite must be a tracked JSON under scripts/validation."
+  exit 2
+fi
 if [[ "$(git -C "$ROOT_DIR" branch --show-current)" != "main" ]]; then
   echo "ABORTED: run from a reviewed main checkout, not a feature branch."
   exit 3
 fi
 if ! git -C "$ROOT_DIR" cat-file -e "HEAD:$POLICY_RELATIVE" 2>/dev/null; then
   echo "ABORTED: policy is not present in the reviewed git commit."
+  exit 3
+fi
+if [[ -n "$SUITE_RELATIVE" ]] \
+    && ! git -C "$ROOT_DIR" cat-file -e "HEAD:$SUITE_RELATIVE" 2>/dev/null; then
+  echo "ABORTED: evaluation suite is not present in reviewed commit."
   exit 3
 fi
 if ! command -v docker >/dev/null 2>&1; then
@@ -101,22 +112,34 @@ PY
 )"
 
 echo "SOURCE_COMMIT=$(git -C "$ROOT_DIR" rev-parse HEAD)"
-echo "PREVIEW_MODE=read_only_ephemeral_source"
+ARCHIVE_PATHS=(
+  app
+  scripts/preview_semantic_candidate_readonly.py
+  scripts/audit_semantic_candidate_parity_readonly.py
+  scripts/preflight_semantic_candidate_readonly.py
+  "$POLICY_RELATIVE"
+)
+PYTHON_MODULE="scripts.preview_semantic_candidate_readonly"
+args=(--policy "$STAGE/$POLICY_RELATIVE")
+if [[ -n "$SUITE_RELATIVE" ]]; then
+  ARCHIVE_PATHS+=(
+    scripts/evaluate_memory_candidate_generalization_readonly.py
+    "$SUITE_RELATIVE"
+  )
+  PYTHON_MODULE="scripts.evaluate_memory_candidate_generalization_readonly"
+  args+=(--cases "$STAGE/$SUITE_RELATIVE")
+  echo "PREVIEW_MODE=read_only_inmemory_semantic_evaluation"
+else
+  echo "PREVIEW_MODE=read_only_ephemeral_source"
+fi
 
-git -C "$ROOT_DIR" archive --format=tar HEAD \
-  app \
-  scripts/preview_semantic_candidate_readonly.py \
-  scripts/audit_semantic_candidate_parity_readonly.py \
-  scripts/preflight_semantic_candidate_readonly.py \
-  "$POLICY_RELATIVE" \
+git -C "$ROOT_DIR" archive --format=tar HEAD "${ARCHIVE_PATHS[@]}" \
   | docker exec -i "$CONTAINER" python -c "$EXTRACTOR" "$STAGE"
 
-args=(--policy "$STAGE/$POLICY_RELATIVE")
 if [[ -n "$EXPECTED_SOURCE_FINGERPRINT" ]]; then
   args+=(--expected-source-fingerprint "$EXPECTED_SOURCE_FINGERPRINT")
 fi
 docker exec -w "$STAGE" \
   -e "PYTHONPATH=$STAGE" \
   -e "PYTHONDONTWRITEBYTECODE=1" \
-  "$CONTAINER" python -m scripts.preview_semantic_candidate_readonly \
-  "${args[@]}"
+  "$CONTAINER" python -m "$PYTHON_MODULE" "${args[@]}"

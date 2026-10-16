@@ -70,6 +70,7 @@ STEPS = [
     ("testar_semantic_candidate_readiness.py", [sys.executable, "testar_semantic_candidate_readiness.py"]),
     ("testar_semantic_candidate_parity_readonly.py", [sys.executable, "testar_semantic_candidate_parity_readonly.py"]),
     ("testar_memory_candidate_preflight.py", [sys.executable, "testar_memory_candidate_preflight.py"]),
+    ("testar_memory_candidate_generalization.py", [sys.executable, "testar_memory_candidate_generalization.py"]),
     ("testar_shadow_semantic_preflight_runner.py", [sys.executable, "testar_shadow_semantic_preflight_runner.py"]),
     ("testar_demo_finance_v11_temporal_candidate.py", [sys.executable, "testar_demo_finance_v11_temporal_candidate.py"]),
     ("testar_metric_required_filter_bindings.py", [sys.executable, "testar_metric_required_filter_bindings.py"]),

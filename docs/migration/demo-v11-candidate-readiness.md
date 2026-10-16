@@ -200,6 +200,47 @@ threshold, escolher automaticamente datas ou executar a migração. Tratar
 acesso ao container/DSN correto ou sem permissões de leitura, o diagnóstico
 falha fechado e não tenta outras credenciais ou acessos.
 
+## Ensaiar perguntas novas sem gravar a candidata
+
+Para testar classificação de intenção e planejamento dinâmico no contexto
+**virtual** v11, passe um terceiro argumento ao runner existente, apontando
+para uma suíte JSON rastreada em `scripts/validation/`. O mesmo processo
+isolado da VPS lê apenas a v10 pelo `PostgresContextRepository`, constrói a
+v11 em memória e recusa a execução se os metadados da candidata estiverem
+bloqueados.
+
+```bash
+bash scripts/run_shadow_semantic_candidate_preflight.sh \
+  semantic_context/candidate_parity_demo_finance_v11.json \
+  6414f782ada30bebdaca423d327c8ff008d81f199f89918ed9c3b17d1c141a68 \
+  scripts/validation/demo_finance_v11_novel_temporal_cases.json
+```
+
+A suíte traz perguntas **novas, não armazenadas como regras ou SQLs**, incluindo
+paráfrases e referências temporais explícitas de diferentes intenções. É
+apenas um instrumento de avaliação: `expected_intent`,
+`expected_plan_status`, `expected_error_code` e
+`expected_temporal_issue` são comparados **depois** de
+`resolve_intent(question, snapshot["intent_resolution"])` e
+`build_query_plan`. Esses valores não entram no contexto, na chamada do
+resolver, no Planner, em prompt, provider ou geração de SQL.
+
+O resultado apresenta `case_index`, intenção/status/códigos observados,
+asserções não atendidas e total aprovado, sem reproduzir perguntas,
+metadados de cliente ou credenciais. O processo pode terminar com
+`evaluation_failed`: essa é uma **evidência para investigar generalização**,
+não permissão para criar um if textual, reduzir threshold, escolher uma SQL
+de benchmark ou copiar um padrão ao código. Corrigir causas
+generalizáveis no contexto versionado ou em lógica estrutural.
+
+Por padrão, sem o terceiro argumento, o runner mantém a saída anterior de
+`metadata_checks_passed`. Ambos os modos mantêm
+`LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`, `persisted_candidate=false`,
+`llm_calls=0`, `activation_authorized=false`. A execução é **somente
+classificação e planejamento**, não valida SQL física, segurança de consulta,
+DRE, filtros financeiros ou resultados de valores, e não substitui validação
+em Shadow, governança ou aprovação humana.
+
 ## Auditoria de paridade entre snapshots (somente leitura)
 
 O arquivo versionado `semantic_context/candidate_parity_demo_finance_v11.json`
