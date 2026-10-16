@@ -170,4 +170,123 @@ VALUES (
   TRUE
 );
 
+
+-- Transactional integrity gate. A partial clone or an unsupported declared
+-- date binding is never committed; no existing context version is modified.
+DO $v11_candidate_integrity$
+DECLARE
+  section record;
+  copied_source bigint;
+  copied_target bigint;
+  temporal_cfg jsonb;
+  configured_date jsonb;
+  source_matches bigint;
+  catalog_matches bigint;
+BEGIN
+  FOR section IN
+    SELECT * FROM (VALUES
+      ('ai_ducklake_agent_rules', 'is_active'),
+      ('ai_ducklake_entity_aliases', 'is_active'),
+      ('ai_ducklake_dre_mapping', 'is_active'),
+      ('ai_ducklake_sql_patterns', 'is_active'),
+      ('ai_ducklake_table_catalog', 'is_allowed')
+    ) AS records(table_name, active_column)
+  LOOP
+    EXECUTE format(
+      'SELECT COUNT(*) FROM %I WHERE agent_version = $1 AND %I = TRUE',
+      section.table_name, section.active_column
+    ) INTO copied_source USING 'demo-finance-v10';
+    EXECUTE format(
+      'SELECT COUNT(*) FROM %I WHERE agent_version = $1 AND %I = TRUE',
+      section.table_name, section.active_column
+    ) INTO copied_target USING 'demo-finance-v11';
+
+    -- Only one new rule is expected: the candidate temporal configuration.
+    IF section.table_name = 'ai_ducklake_agent_rules' THEN
+      copied_target := copied_target - 1;
+    END IF;
+    IF copied_source = 0 OR copied_source <> copied_target THEN
+      RAISE EXCEPTION
+        'Candidate v11 clone integrity mismatch in % (transaction rolled back)',
+        section.table_name;
+    END IF;
+  END LOOP;
+
+  IF (
+    SELECT COUNT(*)
+    FROM ai_ducklake_agent_rules
+    WHERE agent_version = 'demo-finance-v11'
+      AND rule_group = 'component_config'
+      AND rule_name = 'temporal_planning_config'
+      AND is_active = TRUE
+  ) <> 1 THEN
+    RAISE EXCEPTION
+      'Candidate v11 must contain exactly one temporal planning configuration';
+  END IF;
+
+  SELECT rule_content::jsonb INTO temporal_cfg
+  FROM ai_ducklake_agent_rules
+  WHERE agent_version = 'demo-finance-v11'
+    AND rule_group = 'component_config'
+    AND rule_name = 'temporal_planning_config'
+    AND is_active = TRUE;
+
+  IF temporal_cfg->>'date_binding_strategy' <> 'configured_metric_source_date'
+     OR jsonb_typeof(temporal_cfg->'date_bindings') <> 'array'
+     OR jsonb_array_length(temporal_cfg->'date_bindings') = 0 THEN
+    RAISE EXCEPTION 'Candidate v11 date binding metadata is missing';
+  END IF;
+
+  FOR configured_date IN
+    SELECT value
+    FROM jsonb_array_elements(temporal_cfg->'date_bindings')
+  LOOP
+    IF NULLIF(BTRIM(configured_date->>'metric_concept'), '') IS NULL
+       OR NULLIF(BTRIM(configured_date->>'target_table'), '') IS NULL
+       OR NULLIF(BTRIM(configured_date->>'target_column'), '') IS NULL THEN
+      RAISE EXCEPTION 'Candidate v11 contains an incomplete date binding';
+    END IF;
+
+    SELECT COUNT(*) INTO source_matches
+    FROM ai_ducklake_entity_aliases e
+    WHERE e.agent_version = 'demo-finance-v11'
+      AND e.entity_type = 'metric_binding'
+      AND e.is_active = TRUE
+      AND COALESCE(
+        e.business_rule::jsonb->'metric_binding'->>'metric_concept',
+        e.canonical_value
+      ) = configured_date->>'metric_concept'
+      AND COALESCE(
+        NULLIF(e.business_rule::jsonb->'metric_binding'->>'target_table', ''),
+        e.target_table
+      ) = configured_date->>'target_table';
+
+    IF source_matches <> 1 THEN
+      RAISE EXCEPTION
+        'Candidate v11 temporal metric binding is missing or ambiguous';
+    END IF;
+
+    SELECT COUNT(*) INTO catalog_matches
+    FROM ai_ducklake_table_catalog t
+    WHERE t.agent_version = 'demo-finance-v11'
+      AND t.is_allowed = TRUE
+      AND (t.schema_name || '.' || t.table_name)
+        = configured_date->>'target_table'
+      AND EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(
+          COALESCE(to_jsonb(t.date_columns), '[]'::jsonb)
+        ) AS declared(value)
+        WHERE declared.value = to_jsonb(configured_date->>'target_column')
+           OR declared.value->>'name' = configured_date->>'target_column'
+      );
+
+    IF catalog_matches <> 1 THEN
+      RAISE EXCEPTION
+        'Candidate v11 temporal date is not authorized by the catalog';
+    END IF;
+  END LOOP;
+END
+$v11_candidate_integrity$;
+
 COMMIT;
