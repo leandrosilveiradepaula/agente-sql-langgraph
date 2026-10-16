@@ -63,10 +63,10 @@ if ! docker exec "$CONTAINER" python -c \
   exit 6
 fi
 
-STAGE="$(docker exec "$CONTAINER" python -c 'import tempfile;print(tempfile.mkdtemp(prefix="semantic_candidate_readonly_"))')"
+STAGE="$(docker exec "$CONTAINER" python -c 'import tempfile;print(tempfile.mkdtemp(prefix="semantic_overlay_readonly_"))')"
 cleanup() {
   docker exec "$CONTAINER" python -c \
-    'import pathlib,shutil,sys; p=pathlib.Path(sys.argv[1]); assert p.parent == pathlib.Path("/tmp") and p.name.startswith("semantic_candidate_readonly_"); shutil.rmtree(p,ignore_errors=True)' \
+    'import pathlib,shutil,sys; p=pathlib.Path(sys.argv[1]); assert p.parent == pathlib.Path("/tmp") and p.name.startswith("semantic_overlay_readonly_"); shutil.rmtree(p,ignore_errors=True)' \
     "$STAGE" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT

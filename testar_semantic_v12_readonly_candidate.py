@@ -25,6 +25,7 @@ def test_versioned_chain_and_evaluation_isolation() -> None:
     assert policy["source_version"] != policy["candidate_version"]
     assert all(change["operation"] in {
         "extend_concept_terms", "mirror_concept_terms", "clone_entity_alias",
+        "add_catalog_exclusion",
     } for change in policy["changes"])
     assert len(suite["cases"]) >= 8
     assert all(set(item) <= {
