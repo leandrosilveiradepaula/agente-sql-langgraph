@@ -1,0 +1,72 @@
+{
+  "suite": "demo-finance-v12-independent-semantic-counterexamples",
+  "purpose": "Evaluation only. This suite is not a vocabulary source or a generator prompt. Positive and negative paraphrases test explicit operations, generic grouping, scenario compatibility, and fail-closed dates.",
+  "cases": [
+    {
+      "question": "Como os lançamentos realizados evoluíram ao longo dos trimestres por competência?",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Apresente a progressão mensal do orçamento por competência.",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Exiba o movimento dos valores mês a mês pela data do lançamento.",
+      "expected_intent": "trend",
+      "expected_plan_status": "rejected",
+      "expected_error_code": "PLANNING_TEMPORAL_BINDING_INCOMPLETE",
+      "expected_temporal_issue": "temporal_reference_not_configured"
+    },
+    {
+      "question": "Ordenar as unidades do maior para o menor valor realizado por competência.",
+      "expected_intent": "ranking",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Ordene as marcas por valor realizado usando a data de lançamento.",
+      "expected_intent": "ranking",
+      "expected_plan_status": "rejected",
+      "expected_error_code": "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED"
+    },
+    {
+      "question": "Quais centros de custo têm os maiores valores orçados por competência?",
+      "expected_intent": "ranking",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Liste o realizado por unidade de negócio por competência.",
+      "expected_intent": "realized_analysis",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Mostre o orçamento por centro de custo por competência.",
+      "expected_intent": "budget_analysis",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Compare os valores realizados e orçados por centro de custo no ano passado.",
+      "expected_intent": "actual_vs_budget",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Mostre a evolução do realizado por competência e pela data do lançamento, mês a mês.",
+      "expected_intent": "trend",
+      "expected_plan_status": "rejected",
+      "expected_error_code": "PLANNING_TEMPORAL_BINDING_INCOMPLETE",
+      "expected_temporal_issue": "temporal_reference_ambiguous"
+    },
+    {
+      "question": "Demonstre o total realizado para as unidades no último trimestre.",
+      "expected_intent": "realized_analysis",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Apresente a comparação entre o orçamento e a execução pela data do lançamento.",
+      "expected_intent": "actual_vs_budget",
+      "expected_plan_status": "rejected",
+      "expected_error_code": "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED"
+    }
+  ]
+}

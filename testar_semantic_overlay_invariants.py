@@ -127,6 +127,56 @@ def test_alias_clone_does_not_modify_existing_signal() -> None:
     assert validate_context_snapshot(candidate)["status"] == "valid"
 
 
+
+def test_exact_catalog_exclusion_is_versioned_and_immutable() -> None:
+    source = fixture()
+    original = deepcopy(source)
+    candidate = apply_semantic_overlay(source, overlay([{
+        "operation": "add_catalog_exclusion",
+        "source": selector("primary"),
+        "target_intent": "intent_test",
+        "rule_name": "synthetic_operation_guard",
+        "priority": 6,
+    }]))
+    assert source == original
+    assert candidate["fingerprint"] != source["fingerprint"]
+    assert candidate["counts"] == source["counts"]
+    assert candidate["rules"] == source["rules"]
+    assert candidate["table_catalog"] == source["table_catalog"]
+    rules = candidate["entities"][1]["business_rule"]["intent_catalog"]["rules"]
+    addition = [r for r in rules if r["rule_name"] == "synthetic_operation_guard"]
+    assert len(addition) == 1
+    assert addition[0]["effect"] == "exclude"
+    assert addition[0]["score"] is None
+    assert addition[0]["concepts"][0]["terms"] == ["compare"]
+    assert validate_context_snapshot(candidate)["status"] == "valid"
+
+
+def test_catalog_exclusion_rejects_implicit_or_ambiguous_mutations() -> None:
+    valid = {
+        "operation": "add_catalog_exclusion",
+        "source": selector("primary"),
+        "target_intent": "intent_test",
+        "rule_name": "synthetic_operation_guard",
+        "priority": 6,
+    }
+    for bad in (
+        {**valid, "target_intent": "missing_intent"},
+        {**valid, "rule_name": "primary"},
+        {**valid, "source": selector("missing")},
+        {**valid, "priority": True},
+        {**valid, "priority": 0},
+        {**valid, "score": 100},
+        {**valid, "effect": "positive_score"},
+    ):
+        try:
+            parse_overlay_policy(overlay([bad]))
+        except ValueError:
+            continue
+        assert_blocked(fixture(), overlay([bad]))
+
+
+
 def test_invalid_policies_fail_closed() -> None:
     for policy in (
         {},
@@ -161,6 +211,8 @@ if __name__ == "__main__":
     test_extend_terms_does_not_mutate_source()
     test_mirror_terms_requires_compatible_match_modes()
     test_alias_clone_does_not_modify_existing_signal()
+    test_exact_catalog_exclusion_is_versioned_and_immutable()
+    test_catalog_exclusion_rejects_implicit_or_ambiguous_mutations()
     test_invalid_policies_fail_closed()
     test_execution_gate_blocks_before_repository_access()
     print("SEMANTIC_OVERLAY_INVARIANTS=PASS")
