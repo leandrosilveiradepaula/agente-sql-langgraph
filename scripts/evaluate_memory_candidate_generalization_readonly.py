@@ -60,6 +60,22 @@ def observe_plan(snapshot: Mapping[str, Any], question: str) -> dict[str, Any]:
             if isinstance(candidate, Mapping):
                 diagnostic = candidate
 
+    # Aggregate resolver evidence without returning questions, matched aliases,
+    # configured rules or prompt material. These fields are observational only.
+    candidates = resolved.get("candidates", [])
+    candidates = candidates if isinstance(candidates, list) else []
+    best = resolved.get("best_candidate")
+    second = resolved.get("second_candidate")
+    best = best if isinstance(best, Mapping) else {}
+    second = second if isinstance(second, Mapping) else {}
+    config = resolved.get("resolver_configuration")
+    config = config if isinstance(config, Mapping) else {}
+    catalog = resolved.get("intent_catalog")
+    catalog = catalog if isinstance(catalog, Mapping) else {}
+    defaults = resolved.get("semantic_defaults")
+    defaults = defaults if isinstance(defaults, Mapping) else {}
+    reason = resolved.get("reason")
+
     metric_count = projection.get("planned_metrics", []) if projection else []
     if not isinstance(metric_count, list):
         metric_count = []
@@ -67,6 +83,14 @@ def observe_plan(snapshot: Mapping[str, Any], question: str) -> dict[str, Any]:
     return {
         "intent": intent if isinstance(intent, str) else None,
         "intent_applied": resolved.get("applied") is True,
+        "intent_resolution_reason": reason if isinstance(reason, str) else None,
+        "candidate_count": len(candidates),
+        "best_candidate_score": best.get("score") if isinstance(best.get("score"), (int, float)) else None,
+        "second_candidate_score": second.get("score") if isinstance(second.get("score"), (int, float)) else None,
+        "minimum_score": config.get("minimum_score") if isinstance(config.get("minimum_score"), (int, float)) else None,
+        "ambiguity_margin": config.get("ambiguity_margin") if isinstance(config.get("ambiguity_margin"), (int, float)) else None,
+        "intent_catalog_entries_evaluated": catalog.get("entries_evaluated") if isinstance(catalog.get("entries_evaluated"), int) else None,
+        "semantic_defaults_applied_count": len(defaults.get("applied", [])) if isinstance(defaults.get("applied"), list) else 0,
         "plan_status": status,
         "plan_error_code": error_code,
         "temporal_status": diagnostic.get("status", "not_applicable"),
