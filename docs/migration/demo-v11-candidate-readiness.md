@@ -53,8 +53,13 @@ sem revisão das regras financeiras, da origem física e da evidência.
 
 A workflow `v11-disposable-postgres.yml` executa a migração contra PostgreSQL
 local descartável com metadados e dados inteiramente sintéticos. Verifica
-sucesso, rejeição de reexecução e rollback em três cenários adversos, além da
-preservação de um destino já existente. O teste **não comprova** a integridade
+sucesso, rejeição de reexecução e rollback em cenários adversos, além da
+preservação de um destino já existente. O gate de integridade compara os
+registros clonados em ambas as direções com `EXCEPT ALL`, excluindo apenas o
+identificador de versão e a regra temporal adicional. Assim, uma cópia que
+altera campos sem mudar a contagem também é rejeitada. O teste de integração
+induz essa corrupção sintética e confirma o rollback.
+ O teste **não comprova** a integridade
 do PostgreSQL financeiro real, dos joins ou das regras contábeis.
 
 O n8n continua OFFICIAL e o LangGraph continua SHADOW.
