@@ -66,14 +66,17 @@ do PostgreSQL financeiro real, dos joins ou das regras contábeis.
 
 O arquivo versionado `semantic_context/candidate_parity_demo_finance_v11.json`
 declara a versão de origem, a candidata e **somente** as novas regras de
-metadados permitidas. O motor genérico
+metadados permitidas, incluindo o registro completo esperado (conteúdo,
+intenções aplicáveis, prioridade, severidade e demais metadados). A regra
+adicional também é comparada integralmente; autorizar seu nome não autoriza
+alterações arbitrárias no conteúdo. O motor genérico
 `scripts/audit_semantic_candidate_parity_readonly.py` carrega ambas as versões
 pelo leitor SELECT-only de contexto e verifica:
 
 - versões e fingerprints observados;
 - integridade estrutural dos dois snapshots;
 - igualdade de todo o conteúdo normalizado de regras, entidades, DRE, padrões
-  e catálogo, ignorando apenas a(s) regra(s) nova(s) explicitamente declarada(s);
+  e catálogo, isolando apenas a(s) regra(s) nova(s) cujo registro completo coincide com a política declarada;
 - ausência de alterações silenciosas mesmo com contagens iguais.
 
 Para executar **apenas depois** que uma candidata isolada tenha sido
