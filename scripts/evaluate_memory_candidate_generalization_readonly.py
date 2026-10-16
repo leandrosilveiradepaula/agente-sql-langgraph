@@ -63,6 +63,14 @@ def summarize_resolution_evidence(resolved: Mapping[str, Any]) -> dict[str, Any]
         number = float(value)
         return number if isfinite(number) else None
 
+    # Join internal candidate names to the catalog only transiently.
+    # The public report contains ordinal positions, never business labels.
+    catalog_positions = {
+        entry.get("intent_name"): index
+        for index, entry in enumerate(evaluations, start=1)
+        if isinstance(entry, Mapping)
+        and isinstance(entry.get("intent_name"), str)
+    }
     evidence_candidates: list[dict[str, Any]] = []
     for rank, candidate in enumerate(candidates, start=1):
         if not isinstance(candidate, Mapping):
@@ -76,6 +84,7 @@ def summarize_resolution_evidence(resolved: Mapping[str, Any]) -> dict[str, Any]
         )
         evidence_candidates.append({
             "candidate_rank": rank,
+            "catalog_entry_index": catalog_positions.get(candidate.get("intent_name")),
             "score": numeric(candidate.get("score")),
             "positive_score": numeric(candidate.get("positive_score")),
             "negative_score": numeric(candidate.get("negative_score")),
@@ -112,8 +121,21 @@ def summarize_resolution_evidence(resolved: Mapping[str, Any]) -> dict[str, Any]
                     if isinstance(concept, Mapping)
                 ],
             })
+        missing_required_concepts = [
+            {
+                "rule_index": rule["rule_index"],
+                "concept_indexes": [
+                    item["concept_index"]
+                    for item in rule["concepts"]
+                    if not item["satisfied"]
+                ],
+            }
+            for rule in rule_evidence
+            if rule["effect"] == "require" and not rule["satisfied"]
+        ]
         catalog_evidence.append({
             "entry_index": entry_index,
+            "missing_required_concepts": missing_required_concepts,
             "eligible": entry.get("eligible") is True,
             "excluded": entry.get("excluded") is True,
             "required_rule_count": entry.get("require_rule_count"),
