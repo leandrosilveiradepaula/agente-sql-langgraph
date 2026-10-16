@@ -55,7 +55,7 @@ if ! docker exec "$CONTAINER" python -c \
   exit 6
 fi
 
-STAGE="/tmp/semantic_candidate_readonly_$$_$(date +%s)"
+STAGE="$(docker exec "$CONTAINER" python -c 'import tempfile;print(tempfile.mkdtemp(prefix="semantic_candidate_readonly_"))')"
 cleanup() {
   docker exec "$CONTAINER" python -c \
     'import pathlib,shutil,sys; p=pathlib.Path(sys.argv[1]); assert p.parent == pathlib.Path("/tmp") and p.name.startswith("semantic_candidate_readonly_"); shutil.rmtree(p,ignore_errors=True)' \
@@ -72,7 +72,8 @@ import sys
 import tarfile
 
 root = pathlib.Path(sys.argv[1])
-root.mkdir(mode=0o700)
+if not root.is_dir() or (root.stat().st_mode & 0o777) != 0o700:
+    raise ValueError("private staging directory required")
 with tarfile.open(fileobj=sys.stdin.buffer, mode="r|*") as archive:
     for member in archive:
         relative = pathlib.PurePosixPath(member.name)
@@ -94,6 +95,8 @@ with tarfile.open(fileobj=sys.stdin.buffer, mode="r|*") as archive:
                 shutil.copyfileobj(source, output)
         else:
             raise ValueError("unsupported archived file type")
+# Prevent imports from resolving to an unrelated installed scripts package.
+(root / "scripts" / "__init__.py").touch(exist_ok=True)
 PY
 )"
 
