@@ -6,6 +6,13 @@ on:
       - "scripts/migrations/021_prepare_demo_finance_context_v11.sql"
       - "scripts/validation/v11_synthetic_postgres_fixture.sql"
       - "scripts/validation/test_v11_postgres_transaction.sh"
+      - "scripts/validation/test_v11_postgres_context_reader_parity.py"
+      - "scripts/preview_semantic_candidate_readonly.py"
+      - "scripts/audit_semantic_candidate_parity_readonly.py"
+      - "scripts/preflight_semantic_candidate_readonly.py"
+      - "semantic_context/candidate_parity_demo_finance_v11.json"
+      - "app/adapters/postgres/context_repository.py"
+      - "app/domain/context_normalizer.py"
       - ".github/workflows/v11-disposable-postgres.yml"
   push:
     branches:
@@ -14,6 +21,13 @@ on:
       - "scripts/migrations/021_prepare_demo_finance_context_v11.sql"
       - "scripts/validation/v11_synthetic_postgres_fixture.sql"
       - "scripts/validation/test_v11_postgres_transaction.sh"
+      - "scripts/validation/test_v11_postgres_context_reader_parity.py"
+      - "scripts/preview_semantic_candidate_readonly.py"
+      - "scripts/audit_semantic_candidate_parity_readonly.py"
+      - "scripts/preflight_semantic_candidate_readonly.py"
+      - "semantic_context/candidate_parity_demo_finance_v11.json"
+      - "app/adapters/postgres/context_repository.py"
+      - "app/domain/context_normalizer.py"
       - ".github/workflows/v11-disposable-postgres.yml"
   workflow_dispatch:
 

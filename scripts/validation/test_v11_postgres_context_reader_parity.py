@@ -18,6 +18,10 @@ from scripts.audit_semantic_candidate_parity_readonly import (
     compare_semantic_snapshots,
     parse_parity_policy,
 )
+from scripts.preview_semantic_candidate_readonly import (
+    evaluate_in_memory_preflight,
+    synthesize_candidate_snapshot,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -66,6 +70,18 @@ def run_check(mode: str) -> None:
     }
     source, candidate = snapshots["source_version"], snapshots["candidate_version"]
     report = compare_semantic_snapshots(source, candidate, policy)
+
+    if mode == "matching":
+        # Previewing an immutable clone of v10 must reproduce precisely the
+        # fingerprint observed after migration to v11 in ephemeral Postgres.
+        virtual = synthesize_candidate_snapshot(source, policy)
+        assert virtual["fingerprint"] == candidate["fingerprint"]
+        preview_report = evaluate_in_memory_preflight(source, policy)
+        assert preview_report["parity_status"] == "parity_match"
+        assert preview_report["candidate_fingerprint"] == candidate["fingerprint"]
+        assert preview_report["persisted_candidate"] is False
+        assert preview_report["activation_authorized"] is False
+        print("V11_IN_MEMORY_CANDIDATE_FINGERPRINT=PASS")
 
     if not source.get("fingerprint") or not candidate.get("fingerprint"):
         raise AssertionError("missing versioned fingerprints")
