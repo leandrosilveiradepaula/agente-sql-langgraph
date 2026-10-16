@@ -46,6 +46,12 @@ def test_transactional_clone_integrity_gate() -> None:
     sql = MIGRATION.read_text(encoding="utf-8")
     assert "DO $v11_candidate_integrity$" in sql
     assert "copied_source <> copied_target" in sql
+    # Same-count copies must still be compared field by field.
+    assert "to_jsonb(s) - ''agent_version''" in sql
+    assert "to_jsonb(t) - ''agent_version''" in sql
+    assert sql.count("EXCEPT ALL") == 2
+    assert "cloned_payload_differs" in sql
+    assert "clone payload mismatch" in sql
     assert "temporal metric binding is missing or ambiguous" in sql
     assert "temporal date is not authorized by the catalog" in sql
     assert "jsonb_array_elements(temporal_cfg->'date_bindings')" in sql
