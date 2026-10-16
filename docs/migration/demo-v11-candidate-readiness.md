@@ -235,9 +235,12 @@ e quantidade de sinais das intenções candidatas, `minimum_score` e
 `ambiguity_margin` vigentes no contexto, cobertura de conceitos de regras
 `require`/`exclude`/`positive_score` e presença de defaults/fallback.
 Ele não inclui texto original, termos encontrados ou não encontrados,
-expressões regulares, SQL, descrições de regra, payload bruto do
-resolvedor ou configurações de credenciais. Casos já aprovados não
-ganham o detalhe extra.
+expressões regulares, SQL, nomes de intenções candidatas,
+nomes de conceitos/regras, payload bruto do resolvedor ou configurações
+de credenciais. Candidatos, entradas e conceitos recebem apenas índices
+ordinais relativos ao catálogo normalizado da versão auditada. A associação
+com um nome de negócio exige acesso separado ao catálogo autorizado.
+Casos já aprovados não ganham o detalhe extra.
 
 Interpretar `minimum_score_not_reached` e `ambiguous_candidates`
 como **diagnósticos**, não permissão para diminuir score/margem. Ausência
@@ -247,7 +250,7 @@ de comparar várias perguntas semanticamente equivalentes e inéditas.
 Uma modificação de aliases, regras ou padrões herdados da v10 não pode
 ser disfarçada como paridade v11: necessita uma proposta de versão
 de contexto própria, novo fingerprint e auditoria independente.
- O processo pode terminar com
+O processo pode terminar com
 `evaluation_failed`: essa é uma **evidência para investigar generalização**,
 não permissão para criar um if textual, reduzir threshold, escolher uma SQL
 de benchmark ou copiar um padrão ao código. Corrigir causas
