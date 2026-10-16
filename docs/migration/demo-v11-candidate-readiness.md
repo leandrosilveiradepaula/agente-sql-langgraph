@@ -106,6 +106,39 @@ o fingerprint da v11 realmente criada pela migração de teste. Isso assegura
 que o ensaio reproduz o comportamento do normalizador e da cópia transacional,
 sem acessar a base financeira real.
 
+## Executar diagnóstico na VPS sem redeploy
+
+O executor `scripts/run_shadow_semantic_candidate_preflight.sh` lê um
+**manifesto versionado** do repositório e usa o ambiente do container Shadow
+existente, sem imprimir DSN nem reiniciar serviços. Ele verifica
+`LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`, exige checkout na `main`, copia
+somente código rastreado pelo commit para um diretório isolado em `/tmp`
+e remove os arquivos transitórios ao encerrar. O código usado no diagnóstico
+é aquele do commit exibido, não necessariamente o do serviço em execução;
+**o serviço em execução permanece intacto**.
+
+Depois de atualizar a `main` do checkout da VPS, execute:
+
+```bash
+bash scripts/run_shadow_semantic_candidate_preflight.sh \
+  semantic_context/candidate_parity_demo_finance_v11.json
+```
+
+Para repetir o diagnóstico com bloqueio de alterações da v10, informe como
+segundo argumento o fingerprint da origem aprovado na primeira coleta.
+Um fingerprint diferente interrompe a leitura. O resultado é um JSON
+sanitizado com versões, fingerprints, quantidades e códigos de inconsistência.
+Não cole nem registre valores de variáveis de ambiente, arquivos `.env` ou
+respostas brutas de provedores.
+
+O primeiro ensaio pode retornar `blocked` em vez de `metadata_checks_passed`:
+isso é evidência de metadados incompletos, **não** autorização para reduzir
+threshold, escolher automaticamente datas ou executar a migração. Tratar
+`candidate_readiness_blocking_codes` e
+`candidate_structural_error_codes` como itens para revisão semântica. Sem
+acesso ao container/DSN correto ou sem permissões de leitura, o diagnóstico
+falha fechado e não tenta outras credenciais ou acessos.
+
 ## Auditoria de paridade entre snapshots (somente leitura)
 
 O arquivo versionado `semantic_context/candidate_parity_demo_finance_v11.json`
