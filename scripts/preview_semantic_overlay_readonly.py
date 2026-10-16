@@ -215,6 +215,12 @@ def apply_semantic_overlay(
 
 
 def main() -> int:
+    # Fail before CLI parsing or any file/repository operation.
+    # A disabled real-execution gate is mandatory even for malformed requests.
+    if os.environ.get("LANGGRAPH_ALLOW_REAL_SQL_EXECUTION") != "false":
+        print("ABORTED: real SQL execution must remain disabled.")
+        return 3
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-policy", required=True)
     parser.add_argument("--overlay", required=True)
@@ -222,9 +228,6 @@ def main() -> int:
     parser.add_argument("--expected-source-fingerprint", required=True)
     args = parser.parse_args()
 
-    if os.environ.get("LANGGRAPH_ALLOW_REAL_SQL_EXECUTION") != "false":
-        print("ABORTED: real SQL execution must remain disabled.")
-        return 3
     try:
         base_policy = parse_parity_policy(
             json.loads(Path(args.base_policy).read_text(encoding="utf-8"))
