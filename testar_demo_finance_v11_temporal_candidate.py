@@ -42,6 +42,16 @@ def test_temporal_candidate_has_explicit_source_binding() -> None:
         sources.add(source)
 
 
+def test_transactional_clone_integrity_gate() -> None:
+    sql = MIGRATION.read_text(encoding="utf-8")
+    assert "DO $v11_candidate_integrity$" in sql
+    assert "copied_source <> copied_target" in sql
+    assert "temporal metric binding is missing or ambiguous" in sql
+    assert "temporal date is not authorized by the catalog" in sql
+    assert "jsonb_array_elements(temporal_cfg->'date_bindings')" in sql
+    assert sql.rstrip().endswith("COMMIT;")
+
+
 def test_candidate_remains_immutable_and_non_promoting() -> None:
     sql = MIGRATION.read_text(encoding="utf-8")
     assert "demo-finance-v11 already exists; immutable context not modified" in sql
@@ -53,4 +63,5 @@ def test_candidate_remains_immutable_and_non_promoting() -> None:
 if __name__ == "__main__":
     test_temporal_candidate_has_explicit_source_binding()
     test_candidate_remains_immutable_and_non_promoting()
+    test_transactional_clone_integrity_gate()
     print("DEMO_V11_TEMPORAL_CANDIDATE=PASS")
