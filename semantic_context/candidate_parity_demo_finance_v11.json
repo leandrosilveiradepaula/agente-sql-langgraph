@@ -1,0 +1,64 @@
+{
+  "source_version": "demo-finance-v10",
+  "candidate_version": "demo-finance-v11",
+  "allowed_new_rules": [
+    {
+      "rule_group": "component_config",
+      "rule_name": "temporal_planning_config",
+      "expected_record": {
+        "rule_group": "component_config",
+        "rule_name": "temporal_planning_config",
+        "rule_content": {
+          "component": "temporal_planning",
+          "required_intents": [
+            "trend"
+          ],
+          "date_binding_strategy": "configured_metric_source_date",
+          "date_bindings": [
+            {
+              "metric_concept": "amount",
+              "target_table": "demo_lakehouse.gold_orcamento",
+              "target_column": "competencia"
+            }
+          ],
+          "granularities": [
+            {
+              "grain": "month",
+              "terms": [
+                "mensal",
+                "mensalmente",
+                "por mês",
+                "mês a mês",
+                "a cada mês"
+              ]
+            },
+            {
+              "grain": "quarter",
+              "terms": [
+                "trimestral",
+                "trimestralmente",
+                "por trimestre",
+                "trimestre a trimestre",
+                "trimestres"
+              ]
+            },
+            {
+              "grain": "year",
+              "terms": [
+                "anualmente",
+                "por ano",
+                "ano a ano"
+              ]
+            }
+          ]
+        },
+        "applies_to_intents": [
+          "trend"
+        ],
+        "validation_hint": null,
+        "severity": "error",
+        "priority": 20
+      }
+    }
+  ]
+}
