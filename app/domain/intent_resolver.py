@@ -420,9 +420,12 @@ def resolve_intent(
         and best_candidate["score"] >= minimum_score
     )
 
+    # Only candidates eligible for selection can create ambiguity.
+    # A below-threshold alternative cannot veto an eligible candidate.
     ambiguous = bool(
-        best_candidate
+        reached_minimum_score
         and second_candidate
+        and second_candidate["score"] >= minimum_score
         and best_candidate["intent_name"]
         != second_candidate["intent_name"]
         and (
@@ -434,14 +437,12 @@ def resolve_intent(
 
     applied = reached_minimum_score and not ambiguous
 
-    if applied:
-        reason: IntentResolutionReason = (
-            "configured_intent_selected"
-        )
+    if not reached_minimum_score:
+        reason: IntentResolutionReason = "minimum_score_not_reached"
     elif ambiguous:
         reason = "ambiguous_candidates"
     else:
-        reason = "minimum_score_not_reached"
+        reason = "configured_intent_selected"
 
     used_token_fallback = bool(
         applied
