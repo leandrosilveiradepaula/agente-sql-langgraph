@@ -1,0 +1,10 @@
+{
+  "source_version": "demo-finance-v10",
+  "candidate_version": "demo-finance-v11",
+  "allowed_new_rules": [
+    {
+      "rule_group": "component_config",
+      "rule_name": "temporal_planning_config"
+    }
+  ]
+}
