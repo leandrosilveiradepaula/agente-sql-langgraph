@@ -12,27 +12,26 @@ EXPECTED_SOURCE_FINGERPRINT="${3:-}"
 SUITE_RELATIVE="${4:-}"
 CONTAINER="${SHADOW_CONTAINER:-agente-sql-langgraph-shadow-test-langgraph-shadow-test-1}"
 
-for policy in "$BASE_RELATIVE" "$OVERLAY_RELATIVE"; do
-  if [[ ! "$policy" =~ ^semantic_context/[A-Za-z0-9._-]+\.json$ ]]; then
-    echo "ABORTED: both policies must be tracked JSON under semantic_context."
-    exit 2
-  fi
-done
+if [[ ! "$BASE_RELATIVE" =~ ^semantic_context/[A-Za-z0-9._-]+\.json$ ]] \
+    || [[ ! "$OVERLAY_RELATIVE" =~ ^semantic_context/[A-Za-z0-9._-]+\.json$ ]]; then
+  echo "ABORTED: supply tracked base and overlay policies under semantic_context."
+  exit 2
+fi
 if [[ ! "$EXPECTED_SOURCE_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]; then
-  echo "ABORTED: expected v10 source fingerprint is required."
+  echo "ABORTED: an expected v10 source fingerprint is required."
   exit 2
 fi
 if [[ ! "$SUITE_RELATIVE" =~ ^scripts/validation/[A-Za-z0-9._-]+\.json$ ]]; then
-  echo "ABORTED: evaluation suite must be tracked JSON under scripts/validation."
+  echo "ABORTED: tracked evaluation suite under scripts/validation is required."
   exit 2
 fi
 if [[ "$(git -C "$ROOT_DIR" branch --show-current)" != "main" ]]; then
-  echo "ABORTED: use reviewed main checkout."
+  echo "ABORTED: run from a reviewed main checkout, not a feature branch."
   exit 3
 fi
 for tracked in "$BASE_RELATIVE" "$OVERLAY_RELATIVE" "$SUITE_RELATIVE"; do
   if ! git -C "$ROOT_DIR" cat-file -e "HEAD:$tracked" 2>/dev/null; then
-    echo "ABORTED: reviewed policy or suite missing from main."
+    echo "ABORTED: reviewed git commit does not contain every input."
     exit 3
   fi
 done
@@ -64,10 +63,10 @@ if ! docker exec "$CONTAINER" python -c \
   exit 6
 fi
 
-STAGE="$(docker exec "$CONTAINER" python -c 'import tempfile;print(tempfile.mkdtemp(prefix="semantic_overlay_readonly_"))')"
+STAGE="$(docker exec "$CONTAINER" python -c 'import tempfile;print(tempfile.mkdtemp(prefix="semantic_candidate_readonly_"))')"
 cleanup() {
   docker exec "$CONTAINER" python -c \
-    'import pathlib,shutil,sys; p=pathlib.Path(sys.argv[1]); assert p.parent == pathlib.Path("/tmp") and p.name.startswith("semantic_overlay_readonly_"); shutil.rmtree(p,ignore_errors=True)' \
+    'import pathlib,shutil,sys; p=pathlib.Path(sys.argv[1]); assert p.parent == pathlib.Path("/tmp") and p.name.startswith("semantic_candidate_readonly_"); shutil.rmtree(p,ignore_errors=True)' \
     "$STAGE" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -110,18 +109,19 @@ PY
 )"
 
 echo "SOURCE_COMMIT=$(git -C "$ROOT_DIR" rev-parse HEAD)"
-echo "PREVIEW_MODE=read_only_virtual_semantic_overlay"
 ARCHIVE_PATHS=(
   app
   scripts/preview_semantic_candidate_readonly.py
+  scripts/preview_semantic_overlay_readonly.py
   scripts/audit_semantic_candidate_parity_readonly.py
   scripts/preflight_semantic_candidate_readonly.py
   scripts/evaluate_memory_candidate_generalization_readonly.py
-  scripts/preview_semantic_overlay_readonly.py
   "$BASE_RELATIVE"
   "$OVERLAY_RELATIVE"
   "$SUITE_RELATIVE"
 )
+
+echo "PREVIEW_MODE=read_only_ephemeral_semantic_overlay"
 
 git -C "$ROOT_DIR" archive --format=tar HEAD "${ARCHIVE_PATHS[@]}" \
   | docker exec -i "$CONTAINER" python -c "$EXTRACTOR" "$STAGE"
