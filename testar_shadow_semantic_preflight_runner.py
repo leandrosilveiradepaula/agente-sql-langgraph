@@ -17,7 +17,7 @@ def test_shell_syntax_and_invalid_arguments_fail_before_docker() -> None:
     text = script_text()
     bash = shutil.which("bash")
     if bash is not None:
-        checked = subprocess.run([bash, "-n", str(RUNNER)], capture_output=True, text=True)
+        checked = subprocess.run([bash, "-n", str(RUNNER.relative_to(ROOT))], cwd=ROOT, capture_output=True, text=True)
         assert checked.returncode == 0, checked.stderr
         for bad in (
             [],
@@ -26,7 +26,7 @@ def test_shell_syntax_and_invalid_arguments_fail_before_docker() -> None:
             ["semantic_context/valid.json", "not-a-sha"],
         ):
             result = subprocess.run(
-                [bash, str(RUNNER), *bad],
+                [bash, str(RUNNER.relative_to(ROOT)), *bad],
                 cwd=ROOT,
                 capture_output=True,
                 text=True,
