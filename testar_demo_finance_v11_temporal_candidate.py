@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -42,6 +43,32 @@ def test_temporal_candidate_has_explicit_source_binding() -> None:
         sources.add(source)
 
 
+def test_temporal_binding_sql_equals_versioned_policy() -> None:
+    """No financial table/date expectations are embedded in test code."""
+    root = Path(__file__).resolve().parent
+    sql = MIGRATION.read_text(encoding="utf-8")
+    policy = json.loads(
+        (root / "semantic_context/candidate_parity_demo_finance_v11.json")
+        .read_text(encoding="utf-8")
+    )
+    component = [
+        rule["expected_record"]["rule_content"]
+        for rule in policy["allowed_new_rules"]
+        if rule["rule_group"] == "component_config"
+        and rule["rule_name"] == "temporal_planning_config"
+    ]
+    assert len(component) == 1
+    expected = component[0]["date_bindings"]
+    assert isinstance(expected, list) and expected
+    sql_bindings = _configured_date_bindings(sql)
+    policy_bindings = [
+        (binding["metric_concept"], binding["target_table"], binding["target_column"])
+        for binding in expected
+    ]
+    assert sql_bindings == policy_bindings
+    assert len({(concept.casefold(), table.casefold()) for concept, table, _ in sql_bindings}) == len(sql_bindings)
+
+
 def test_transactional_clone_integrity_gate() -> None:
     sql = MIGRATION.read_text(encoding="utf-8")
     assert "DO $v11_candidate_integrity$" in sql
@@ -54,6 +81,8 @@ def test_transactional_clone_integrity_gate() -> None:
     assert "clone payload mismatch" in sql
     assert "temporal metric binding is missing or ambiguous" in sql
     assert "temporal date is not authorized by the catalog" in sql
+    assert "metric sources lack explicit temporal bindings" in sql
+    assert "temporal date bindings are ambiguous" in sql
     assert "jsonb_array_elements(temporal_cfg->'date_bindings')" in sql
     assert sql.rstrip().endswith("COMMIT;")
 
@@ -68,6 +97,7 @@ def test_candidate_remains_immutable_and_non_promoting() -> None:
 
 if __name__ == "__main__":
     test_temporal_candidate_has_explicit_source_binding()
+    test_temporal_binding_sql_equals_versioned_policy()
     test_candidate_remains_immutable_and_non_promoting()
     test_transactional_clone_integrity_gate()
     print("DEMO_V11_TEMPORAL_CANDIDATE=PASS")

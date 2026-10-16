@@ -46,10 +46,33 @@ não substituem a auditoria física e semântica.
    no workflow n8n oficial permanecem ações separadas.
 
 O arquivo `scripts/migrations/021_prepare_demo_finance_context_v11.sql`
-usa `configured_metric_source_date` e inclui somente o binding temporal
-versionado cuja origem foi documentada. As fontes sem binding temporal explícito
-continuam bloqueadas para séries temporais. Não aplicar nem ativar a candidata
-sem revisão das regras financeiras, da origem física e da evidência.
+usa `configured_metric_source_date` com dois bindings explícitos para a
+métrica `amount` (um por fonte): o orçamento usa `competencia`, enquanto o
+realizado também propõe `competencia` como referência de competência contábil
+para DRE e comparação com orçamento. A origem v10 confirma que as duas fontes
+declaram essa coluna; o realizado também declara `data_lancamento`. Nenhuma
+escolha é feita pela quantidade de datas: ambas as associações vêm do
+manifesto semântico versionado, e a cópia em PostgreSQL verifica que cada
+métrica possui exatamente um binding temporal autorizado.
+
+**Limite de interpretação:** a configuração não transforma `data_lancamento`
+em sinônimo de `competencia`, nem prova a semântica contábil por consultar o
+catálogo. Uma pergunta explicitamente sobre data de lançamento precisa de
+seleção de referência temporal própria (ainda não demonstrada); não é lícito
+responder como se fosse competência. A cobertura de planejamento temporal,
+incluindo eventual consulta comparativa multiorigem, precisa de evidência de
+generalização independente antes de qualquer promoção.
+
+**Gates de aprovação separados:** confirmar a definição financeira com
+responsável pelo dado, verificar o esquema físico e contratos de filtros/DRE,
+testar perguntas novas e equivalentes sem golden SQL no gerador, e revisar
+evidências Shadow. Não aplicar ou ativar a candidata somente porque o
+pré-validador retorna `metadata_checks_passed`.
+
+O CI inclui cenários de rejeição para data não autorizada em uma fonte,
+binding declarado sem métrica, métrica adicional sem binding explícito,
+fonte ambígua, clonagem com payload alterado e reexecução da mesma versão.
+Todos os registros usados são sintéticos.
 
 A workflow `v11-disposable-postgres.yml` executa a migração contra PostgreSQL
 local descartável com metadados e dados inteiramente sintéticos. Verifica

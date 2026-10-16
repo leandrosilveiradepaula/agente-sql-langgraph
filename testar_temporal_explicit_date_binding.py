@@ -4,13 +4,16 @@ from app.domain.planner import _project_temporal_series
 from testar_planner import _synthetic_temporal_context
 
 
-def project(bindings, *, dates=None, strategy="configured_metric_source_date"):
+def project(
+    bindings, *, dates=None, strategy="configured_metric_source_date",
+    source_table="schema_test.table_test",
+):
     context = _synthetic_temporal_context()
     cfg = context["component_configs"]["temporal_planning"]
     cfg["date_binding_strategy"] = strategy
     cfg["date_bindings"] = bindings
     table = dict(context["table_catalog"][0])
-    table["qualified_name"] = "schema_test.table_test"
+    table["qualified_name"] = source_table
     table["date_columns"] = dates if dates is not None else [
         "event_date", "created_at",
     ]
@@ -24,7 +27,7 @@ def project(bindings, *, dates=None, strategy="configured_metric_source_date"):
         planned_metrics=[{
             "metric_ref": "synthetic-ref",
             "metric_concept": "measure",
-            "target_table": "schema_test.table_test",
+            "target_table": source_table,
             "target_column": "value",
         }],
         required_tables=[table],
@@ -59,6 +62,37 @@ def test_explicit_date_bindings() -> None:
         assert expected in diagnostic["issues"], (expected, diagnostic)
 
 
+def test_same_metric_concept_selects_the_correct_source_date() -> None:
+    # Synthetic metric sources can share a concept without sharing time columns.
+    # Binding order must not influence selection.
+    declared = [
+        binding("created_at", table="schema_test.second_source"),
+        binding("event_date", table="schema_test.first_source"),
+    ]
+    for source, column in (
+        ("schema_test.first_source", "event_date"),
+        ("schema_test.second_source", "created_at"),
+    ):
+        for configured in (declared, list(reversed(declared))):
+            series, diagnostic = project(
+                configured, source_table=source,
+            )
+            assert diagnostic["status"] == "resolved", diagnostic
+            assert series["date_table"] == source
+            assert series["date_column"] == column
+            assert series["mapping_source"] == (
+                "component_configs.temporal_planning.date_bindings"
+            )
+
+    # A request for an unconfigured third metric source must not fall back
+    # to a date binding declared for another source.
+    series, diagnostic = project(
+        declared, source_table="schema_test.unconfigured_source"
+    )
+    assert series is None
+    assert "date_binding_not_found" in diagnostic["issues"]
+
+
 def test_legacy_strategy_remains_unchanged() -> None:
     series, diagnostic = project([], strategy="unique_metric_source_catalog_date")
     assert series is None
@@ -73,5 +107,6 @@ def test_legacy_strategy_remains_unchanged() -> None:
 
 if __name__ == "__main__":
     test_explicit_date_bindings()
+    test_same_metric_concept_selects_the_correct_source_date()
     test_legacy_strategy_remains_unchanged()
     print("EXPLICIT_TEMPORAL_BINDING=PASS")

@@ -106,6 +106,34 @@ init_case test_v11_missing_date
 psql_safe -c "UPDATE test_v11_missing_date.ai_ducklake_table_catalog SET date_columns='[]'::jsonb WHERE table_name='gold_orcamento';"
 expected_failure test_v11_missing_date
 
+# A second metric source may expose more than one date. An explicit configured
+# date must still be authorized; the migration cannot fall back to another.
+init_case test_v11_unapproved_date
+psql_safe -c "UPDATE test_v11_unapproved_date.ai_ducklake_table_catalog
+ SET date_columns='[\"data_lancamento\"]'::jsonb
+ WHERE table_name='gold_lancamentos_contabeis';"
+expected_failure test_v11_unapproved_date
+
+# Removing any declared source cannot leave a dangling binding in the policy.
+init_case test_v11_missing_realized_binding
+psql_safe -c "DELETE FROM test_v11_missing_realized_binding.ai_ducklake_entity_aliases
+ WHERE user_term='realized-synthetic';"
+expected_failure test_v11_missing_realized_binding
+
+# A third synthetic concept must never borrow the date configured for another
+# concept on the same physical table: all metric sources need exact coverage.
+init_case test_v11_unmapped_metric_source
+psql_safe -c "INSERT INTO test_v11_unmapped_metric_source.ai_ducklake_entity_aliases (
+ agent_version, entity_type, user_term, canonical_value,
+ target_table, target_column, sql_filter_hint, business_rule, priority, is_active
+) SELECT agent_version, entity_type, 'unmapped-synthetic', 'different_measure',
+ target_table, target_column, sql_filter_hint,
+ jsonb_set(business_rule,'{metric_binding,metric_concept}', '\"different_measure\"'::jsonb),
+ priority, is_active
+ FROM test_v11_unmapped_metric_source.ai_ducklake_entity_aliases
+ WHERE user_term='realized-synthetic';"
+expected_failure test_v11_unmapped_metric_source
+
 # The source and target can have the same number of rows but different
 # content. The BEFORE INSERT trigger mutates only copied v11 fixture data.
 init_case test_v11_mutated_payload
