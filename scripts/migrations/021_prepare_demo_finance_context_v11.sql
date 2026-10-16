@@ -169,6 +169,23 @@ VALUES (
           'anualmente', 'por ano', 'ano a ano'
         )
       )
+    ),
+    'reference_selection', jsonb_build_object(
+      'default_reference', 'accounting_period',
+      'references', jsonb_build_array(
+        jsonb_build_object(
+          'reference', 'accounting_period',
+          'terms', jsonb_build_array(
+            'competência', 'por competência', 'pela competência'
+          )
+        ),
+        jsonb_build_object(
+          'reference', 'posting_date',
+          'terms', jsonb_build_array(
+            'data de lançamento', 'data do lançamento'
+          )
+        )
+      )
     )
   )::text,
   jsonb_build_array('trend'),
