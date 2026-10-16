@@ -66,6 +66,38 @@ init_case test_v11_missing_date
 psql_safe -c "UPDATE test_v11_missing_date.ai_ducklake_table_catalog SET date_columns='[]'::jsonb WHERE table_name='gold_orcamento';"
 expected_failure test_v11_missing_date
 
+# The source and target can have the same number of rows but different
+# content. The BEFORE INSERT trigger mutates only copied v11 fixture data.
+init_case test_v11_mutated_payload
+psql_safe <<'SQL'
+CREATE FUNCTION test_v11_mutated_payload.mutate_copied_payload()
+RETURNS trigger LANGUAGE plpgsql AS $body$
+BEGIN
+ IF NEW.agent_version = 'demo-finance-v11'
+    AND NEW.rule_group = 'synthetic' THEN
+   NEW.rule_content := '{"tampered":true}';
+ END IF;
+ RETURN NEW;
+END
+$body$;
+CREATE TRIGGER mutate_copied_payload
+BEFORE INSERT ON test_v11_mutated_payload.ai_ducklake_agent_rules
+FOR EACH ROW EXECUTE FUNCTION test_v11_mutated_payload.mutate_copied_payload();
+SQL
+expected_failure test_v11_mutated_payload
+
+# Multiple metric bindings for one concept/source are not an authorized
+# choice even when the catalog's temporal column is unique.
+init_case test_v11_ambiguous_metric
+psql_safe -c "INSERT INTO test_v11_ambiguous_metric.ai_ducklake_entity_aliases (
+ agent_version,entity_type,user_term,canonical_value,target_table,target_column,
+ sql_filter_hint,business_rule,priority,is_active
+) SELECT agent_version,entity_type,'budget-synthetic-duplicate',canonical_value,
+ target_table,target_column,sql_filter_hint,business_rule,priority,is_active
+ FROM test_v11_ambiguous_metric.ai_ducklake_entity_aliases
+ WHERE user_term='budget-synthetic' AND agent_version='demo-finance-v10';"
+expected_failure test_v11_ambiguous_metric
+
 init_case test_v11_target_exists
 psql_safe -c "INSERT INTO test_v11_target_exists.ai_ducklake_agent_rules SELECT 'demo-finance-v11',rule_group,rule_name,rule_content,applies_to_intents,validation_hint,severity,priority,is_active FROM test_v11_target_exists.ai_ducklake_agent_rules WHERE agent_version='demo-finance-v10';"
 if apply_case test_v11_target_exists >/dev/null 2>&1; then
