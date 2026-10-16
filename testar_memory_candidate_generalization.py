@@ -176,11 +176,25 @@ def test_failed_resolution_evidence_explains_scores_without_leaking_terms() -> N
             "suppressed": [{"secret": sensitive}],
         },
     }
+    # Client-controlled labels are never echoed in an evaluation report.
+    resolved["candidates"][0]["intent_name"] = sensitive
+    resolved["intent_catalog"]["evaluations"][0]["intent_name"] = sensitive
+    resolved["intent_catalog"]["evaluations"][0]["rules"][0]["concepts"][0][
+        "concept_name"
+    ] = sensitive
     report = summarize_resolution_evidence(resolved)
     assert report["reason"] == "ambiguous_candidates"
     assert report["minimum_score"] == 95
     assert report["ambiguity_margin"] == 15
     assert report["candidate_count"] == 2
+    assert report["candidates"][0]["candidate_rank"] == 1
+    assert "intent" not in report["candidates"][0]
+    assert report["catalog_evidence"][0]["entry_index"] == 1
+    assert "intent" not in report["catalog_evidence"][0]
+    assert report["catalog_evidence"][0]["rules"][0]["concepts"][0][
+        "concept_index"
+    ] == 1
+    assert "concept" not in report["catalog_evidence"][0]["rules"][0]["concepts"][0]
     assert report["candidates"][0]["matched_signal_count"] == 1
     assert report["candidates"][0]["matched_catalog_scoring_rules"] == 1
     assert report["catalog_evidence"][0]["required_rule_count"] == 2
@@ -238,6 +252,26 @@ def test_detailed_evidence_appears_only_for_failed_evaluation() -> None:
     assert output["observations"][1]["resolution_evidence"]["minimum_score"] == 100
     assert output["observations"][1]["resolution_evidence"]["reason"] == diagnostic["reason"]
     assert "Unseen monthly totals" not in str(output)
+
+
+def test_diagnostic_nonfinite_scores_are_redacted() -> None:
+    report = summarize_resolution_evidence({
+        "reason": "minimum_score_not_reached",
+        "resolver_configuration": {
+            "minimum_score": float("inf"),
+            "ambiguity_margin": float("nan"),
+        },
+        "candidates": [
+            {"intent_name": "sensitive", "score": float("inf"),
+             "positive_score": float("nan"), "negative_score": False},
+        ],
+    })
+    assert report["minimum_score"] is None
+    assert report["ambiguity_margin"] is None
+    assert report["candidates"][0]["score"] is None
+    assert report["candidates"][0]["positive_score"] is None
+    assert report["candidates"][0]["negative_score"] is None
+    assert "sensitive" not in str(report)
 
 
 def test_no_candidate_resolution_diagnostic_is_fail_closed() -> None:
@@ -332,6 +366,7 @@ if __name__ == "__main__":
     test_failed_resolution_evidence_explains_scores_without_leaking_terms()
     test_detailed_evidence_appears_only_for_failed_evaluation()
     test_no_candidate_resolution_diagnostic_is_fail_closed()
+    test_diagnostic_nonfinite_scores_are_redacted()
     test_malformed_suite_rejected_before_any_semantic_call()
     test_real_planner_rejects_unhandled_reference_for_novel_intent()
     test_runner_aborts_before_reader_when_real_sql_flag_is_not_false()

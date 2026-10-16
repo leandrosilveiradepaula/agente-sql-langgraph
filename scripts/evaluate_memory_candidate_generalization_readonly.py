@@ -10,6 +10,7 @@ This module imports no provider, SQL generator, SQL executor or benchmark.
 import argparse
 import json
 import os
+from math import isfinite
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,8 @@ def summarize_resolution_evidence(resolved: Mapping[str, Any]) -> dict[str, Any]
     """Numerical/structural attribution from actual resolver output.
 
     The report omits full questions, normalized text, signal patterns,
-    configured terms, matched tokens, descriptions and SQL. No expected
+    configured terms, matched tokens, intent/concept names, descriptions
+    and SQL. Ordinal indexes refer to the normalized catalog. No expected
     intent or test assertion is passed here.
     """
     config = resolved.get("resolver_configuration")
@@ -56,14 +58,13 @@ def summarize_resolution_evidence(resolved: Mapping[str, Any]) -> dict[str, Any]
         return len(value) if isinstance(value, list) else 0
 
     def numeric(value: Any) -> float | None:
-        return (
-            float(value)
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
-            else None
-        )
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return None
+        number = float(value)
+        return number if isfinite(number) else None
 
     evidence_candidates: list[dict[str, Any]] = []
-    for candidate in candidates:
+    for rank, candidate in enumerate(candidates, start=1):
         if not isinstance(candidate, Mapping):
             continue
         matches = candidate.get("matches")
@@ -74,7 +75,7 @@ def summarize_resolution_evidence(resolved: Mapping[str, Any]) -> dict[str, Any]
             and item.get("match_strategy") == "intent_catalog_rule"
         )
         evidence_candidates.append({
-            "intent": candidate.get("intent_name"),
+            "candidate_rank": rank,
             "score": numeric(candidate.get("score")),
             "positive_score": numeric(candidate.get("positive_score")),
             "negative_score": numeric(candidate.get("negative_score")),
@@ -83,7 +84,7 @@ def summarize_resolution_evidence(resolved: Mapping[str, Any]) -> dict[str, Any]
         })
 
     catalog_evidence: list[dict[str, Any]] = []
-    for entry in evaluations:
+    for entry_index, entry in enumerate(evaluations, start=1):
         if not isinstance(entry, Mapping):
             continue
         rules = entry.get("rules")
@@ -102,17 +103,17 @@ def summarize_resolution_evidence(resolved: Mapping[str, Any]) -> dict[str, Any]
                 "minimum_concept_matches": rule.get("minimum_concept_matches"),
                 "concepts": [
                     {
-                        "concept": concept.get("concept_name"),
+                        "concept_index": concept_index,
                         "satisfied": concept.get("satisfied") is True,
                         "matched_term_count": concept.get("matched_term_count"),
                         "minimum_term_matches": concept.get("minimum_term_matches"),
                     }
-                    for concept in concepts
+                    for concept_index, concept in enumerate(concepts, start=1)
                     if isinstance(concept, Mapping)
                 ],
             })
         catalog_evidence.append({
-            "intent": entry.get("intent_name"),
+            "entry_index": entry_index,
             "eligible": entry.get("eligible") is True,
             "excluded": entry.get("excluded") is True,
             "required_rule_count": entry.get("require_rule_count"),
