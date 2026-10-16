@@ -62,6 +62,16 @@ induz essa corrupção sintética e confirma o rollback.
  O teste **não comprova** a integridade
 do PostgreSQL financeiro real, dos joins ou das regras contábeis.
 
+A integração sintética também carrega v10/v11 pelo **mesmo leitor
+`PostgresContextRepository` do LangGraph**, com uma credencial efêmera
+restrita a `USAGE` de schema e `SELECT` nas cinco coleções semânticas.
+O CI verifica explicitamente a ausência de `INSERT`, `UPDATE` e `DELETE`
+nesse papel. Os snapshots normalizados são comparados contra o manifesto
+versionado de paridade da v11. Uma alteração silenciosa em metadado da regra
+nova e outra em uma entidade clonada são induzidas apenas no banco descartável
+e devem resultar em bloqueio. O teste não utiliza benchmark, credenciais da
+VPS, base financeira real, provedor LLM nem execução SQL financeira.
+
 ## Auditoria de paridade entre snapshots (somente leitura)
 
 O arquivo versionado `semantic_context/candidate_parity_demo_finance_v11.json`
