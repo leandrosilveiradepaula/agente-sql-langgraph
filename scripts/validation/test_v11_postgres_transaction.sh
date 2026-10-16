@@ -54,6 +54,46 @@ fi
 assert_count test_v11_good 8
 echo "PASS: replay rejected without mutation"
 
+# Validate the migration through the actual PostgreSQL context repository and
+# versioned parity policy, not only through synthetic row-count SQL assertions.
+# The audit uses a separate SELECT-only role with no mutation permissions.
+psql_safe -c "CREATE ROLE synthetic_parity_reader LOGIN PASSWORD 'example';"
+psql_safe -c "GRANT USAGE ON SCHEMA test_v11_good TO synthetic_parity_reader;"
+psql_safe -c "GRANT SELECT ON ALL TABLES IN SCHEMA test_v11_good TO synthetic_parity_reader;"
+permissions="$(psql -X -A -t -v ON_ERROR_STOP=1 -c "
+ SELECT COUNT(*) = 5 AND COALESCE(bool_and(
+    has_table_privilege('synthetic_parity_reader', format('%I.%I', schemaname, tablename), 'SELECT')
+    AND NOT has_table_privilege('synthetic_parity_reader', format('%I.%I', schemaname, tablename), 'INSERT')
+    AND NOT has_table_privilege('synthetic_parity_reader', format('%I.%I', schemaname, tablename), 'UPDATE')
+    AND NOT has_table_privilege('synthetic_parity_reader', format('%I.%I', schemaname, tablename), 'DELETE')
+ ), false)
+ FROM pg_tables WHERE schemaname = 'test_v11_good';
+" | tr -d '[:space:]')"
+if [[ "$permissions" != "t" ]]; then
+ echo "FAIL: synthetic context reader has unexpected privileges"
+ exit 1
+fi
+run_parity_reader() {
+ PGUSER=synthetic_parity_reader PGPASSWORD=example PYTHONPATH="$ROOT" \
+   python -m scripts.validation.test_v11_postgres_context_reader_parity --mode "$1"
+}
+run_parity_reader matching
+
+# Mutate only the disposable v11 metadata while keeping the full record count
+# and the temporal config intact, then confirm the reader catches both drifts.
+psql_safe -c "UPDATE test_v11_good.ai_ducklake_agent_rules
+ SET priority = priority + 1
+ WHERE agent_version = 'demo-finance-v11'
+ AND rule_group = 'component_config'
+ AND rule_name = 'temporal_planning_config';"
+run_parity_reader rule_mutation
+psql_safe -c "UPDATE test_v11_good.ai_ducklake_entity_aliases
+ SET user_term = user_term || '-modified'
+ WHERE agent_version = 'demo-finance-v11'
+ AND user_term = 'budget-synthetic';"
+run_parity_reader entity_mutation
+echo "PASS: normalized context parity fails closed on both synthetic drifts"
+
 init_case test_v11_missing_source
 psql_safe -c "DELETE FROM test_v11_missing_source.ai_ducklake_agent_rules WHERE agent_version='demo-finance-v10';"
 expected_failure test_v11_missing_source
