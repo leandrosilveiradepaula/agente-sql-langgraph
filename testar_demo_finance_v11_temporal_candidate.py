@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 MIGRATION = (
@@ -8,17 +9,37 @@ MIGRATION = (
 )
 
 
+def _configured_date_bindings(sql: str) -> list[tuple[str, str, str]]:
+    """Inspect only the versioned candidate SQL; no business names in tests."""
+    section = sql.split("'date_bindings', jsonb_build_array(", 1)[1].split(
+        "'granularities'", 1
+    )[0]
+    records = re.findall(
+        r"jsonb_build_object\(\s*"
+        r"'metric_concept',\s*'([^']+)'\s*,\s*"
+        r"'target_table',\s*'([^']+)'\s*,\s*"
+        r"'target_column',\s*'([^']+)'\s*\)",
+        section,
+    )
+    assert section.count("jsonb_build_object(") == len(records)
+    return records
+
+
 def test_temporal_candidate_has_explicit_source_binding() -> None:
     sql = MIGRATION.read_text(encoding="utf-8")
     assert "'date_binding_strategy', 'configured_metric_source_date'" in sql
     assert "'date_bindings', jsonb_build_array(" in sql
-    assert "'metric_concept', 'amount'" in sql
-    assert "'target_table', 'demo_lakehouse.gold_orcamento'" in sql
-    assert "'target_column', 'competencia'" in sql
     assert "'date_binding_strategy', 'unique_metric_source_catalog_date'" not in sql
-    assert "'demo_lakehouse.gold_lancamentos_contabeis'" not in sql.split(
-        "'date_bindings', jsonb_build_array(", 1
-    )[1].split("'granularities'", 1)[0]
+    bindings = _configured_date_bindings(sql)
+    assert bindings
+    sources: set[tuple[str, str]] = set()
+    for concept, table, column in bindings:
+        assert concept.strip() and table.strip() and column.strip()
+        assert table.count(".") == 1
+        assert re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", column)
+        source = (concept.casefold(), table.casefold())
+        assert source not in sources, "duplicate temporal binding per metric source"
+        sources.add(source)
 
 
 def test_candidate_remains_immutable_and_non_promoting() -> None:
