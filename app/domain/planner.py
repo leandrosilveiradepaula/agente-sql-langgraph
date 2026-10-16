@@ -100,6 +100,30 @@ def build_query_plan(
             "selection planned sem selected_pattern."
         )
 
+    # An explicitly selected temporal reference must never be ignored by an
+    # intent that is outside the configured temporal-planning scope.
+    # This runs after intent/pattern resolution and before any SQL generation.
+    temporal_reference_issue = _cross_intent_temporal_reference_issue(
+        context=context,
+        intent_name=intent_name,
+        normalized_question=normalized_question,
+    )
+    if temporal_reference_issue is not None:
+        failed_selection = deepcopy(selection)
+        failed_selection["status"] = "rejected"
+        failed_selection["error_code"] = "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED"
+        failed_selection["error_message"] = (
+            "Referencia temporal explicita sem suporte seguro para esta intencao."
+        )
+        return {
+            "status": "rejected",
+            "query_plan": None,
+            "selection_result": failed_selection,
+            "projection": None,
+            "error_code": "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED",
+            "error_message": failed_selection["error_message"],
+        }
+
     try:
         projection = project_planning_context(
             context=context,
@@ -216,6 +240,52 @@ def _temporal_bindings_complete(projection: Mapping[str, Any]) -> bool:
         and len(bound_refs) == len(set(bound_refs))
         and set(bound_refs) == refs
     )
+
+
+def _cross_intent_temporal_reference_issue(
+    *,
+    context: Mapping[str, Any],
+    intent_name: str | None,
+    normalized_question: str,
+) -> str | None:
+    """Reject recognized alternate time references outside their safe scope.
+
+    The context defines every name, alias, and supported intent. This gate
+    never guesses a date from a query phrase or the physical table catalog.
+    Scoped intents keep their existing full temporal-planning validator.
+    """
+    configs = context.get("component_configs")
+    if not isinstance(configs, Mapping):
+        return None
+    config = configs.get("temporal_planning")
+    if not isinstance(config, Mapping) or "reference_selection" not in config:
+        return None
+
+    required_intents = config.get("required_intents")
+    in_scope = (
+        isinstance(intent_name, str)
+        and isinstance(required_intents, list)
+        and intent_name.strip().casefold() in {
+            item.strip().casefold()
+            for item in required_intents
+            if isinstance(item, str) and item.strip()
+        }
+    )
+    if in_scope:
+        # The temporal projector validates explicit references, ambiguity,
+        # source-specific date bindings, and catalog authorization.
+        return None
+
+    alternate_bindings, issue = _select_temporal_reference_bindings(
+        config, normalized_question
+    )
+    if issue is not None:
+        return issue
+    if alternate_bindings is not None:
+        # Even a configured alternate binding is not guaranteed to be applied
+        # by a non-temporal intent. Never silently generate on its default date.
+        return "temporal_reference_outside_planning_scope"
+    return None
 
 
 def _select_temporal_reference_bindings(
