@@ -26,6 +26,18 @@ _COLLECTIONS = (
     "table_catalog",
 )
 
+# Structural rule shape returned by the normalized Postgres context reader.
+# Concrete rule content belongs exclusively in the versioned parity policy.
+_RULE_FIELDS = {
+    "rule_group",
+    "rule_name",
+    "rule_content",
+    "applies_to_intents",
+    "validation_hint",
+    "severity",
+    "priority",
+}
+
 
 def _rule_key(item: Mapping[str, Any]) -> tuple[str, str]:
     return (
@@ -54,16 +66,36 @@ def parse_parity_policy(value: Any) -> dict[str, Any]:
     additions: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
     for item in raw_additions:
-        if not isinstance(item, Mapping) or set(item) != {"rule_group", "rule_name"}:
-            raise ValueError("allowed rule selector invalid")
+        if not isinstance(item, Mapping) or set(item) != {
+            "rule_group", "rule_name", "expected_record"
+        }:
+            raise ValueError("allowed rule entry must declare its exact expected record")
         group, name = item["rule_group"], item["rule_name"]
         if not isinstance(group, str) or not group.strip() or not isinstance(name, str) or not name.strip():
             raise ValueError("allowed rule selector must have non-empty strings")
         key = (group.strip().casefold(), name.strip().casefold())
         if key in seen:
             raise ValueError("duplicate rule selector")
+        expected = item["expected_record"]
+        if not isinstance(expected, Mapping) or set(expected) != _RULE_FIELDS:
+            raise ValueError("expected record has an invalid structural shape")
+        if _rule_key(expected) != key:
+            raise ValueError("expected rule identity differs from selector")
+        if (
+            not isinstance(expected.get("rule_content"), Mapping)
+            or not isinstance(expected.get("applies_to_intents"), list)
+            or not all(isinstance(x, str) for x in expected["applies_to_intents"])
+            or not isinstance(expected.get("severity"), str)
+            or not isinstance(expected.get("priority"), int)
+            or isinstance(expected.get("priority"), bool)
+        ):
+            raise ValueError("expected record is incomplete or improperly typed")
         seen.add(key)
-        additions.append({"rule_group": group.strip(), "rule_name": name.strip()})
+        additions.append({
+            "rule_group": group.strip(),
+            "rule_name": name.strip(),
+            "expected_record": dict(expected),
+        })
     return {
         "source_version": source.strip(),
         "candidate_version": candidate.strip(),
@@ -98,8 +130,10 @@ def compare_semantic_snapshots(
         errors.add("FINGERPRINT_MISSING")
 
     allowed = {
-        _rule_key(item): 0 for item in parsed["allowed_new_rules"]
+        _rule_key(item): item["expected_record"]
+        for item in parsed["allowed_new_rules"]
     }
+    allowed_counts = {key: 0 for key in allowed}
     source_rules = source.get("rules")
     candidate_rules = candidate.get("rules")
     candidate_filtered = candidate_rules
@@ -115,10 +149,12 @@ def compare_semantic_snapshots(
         for rule in candidate_rules:
             key = _rule_key(rule)
             if key in allowed:
-                allowed[key] += 1
+                allowed_counts[key] += 1
+                if _record_counts([rule]) != _record_counts([allowed[key]]):
+                    errors.add("ALLOWED_RULE_PAYLOAD_MISMATCH")
             else:
                 candidate_filtered.append(rule)
-        if any(count != 1 for count in allowed.values()):
+        if any(count != 1 for count in allowed_counts.values()):
             errors.add("ALLOWED_RULE_MISSING_OR_DUPLICATED")
 
     for collection in _COLLECTIONS:
