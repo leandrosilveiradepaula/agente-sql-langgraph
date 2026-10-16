@@ -227,7 +227,27 @@ resolver, no Planner, em prompt, provider ou geração de SQL.
 
 O resultado apresenta `case_index`, intenção/status/códigos observados,
 asserções não atendidas e total aprovado, sem reproduzir perguntas,
-metadados de cliente ou credenciais. O processo pode terminar com
+metadados completos de cliente ou credenciais.
+
+Quando uma pergunta divergir, o objeto `resolution_evidence` acrescenta
+evidência **sanitizada** do resolvedor: motivo de não classificação, scores
+e quantidade de sinais das intenções candidatas, `minimum_score` e
+`ambiguity_margin` vigentes no contexto, cobertura de conceitos de regras
+`require`/`exclude`/`positive_score` e presença de defaults/fallback.
+Ele não inclui texto original, termos encontrados ou não encontrados,
+expressões regulares, SQL, descrições de regra, payload bruto do
+resolvedor ou configurações de credenciais. Casos já aprovados não
+ganham o detalhe extra.
+
+Interpretar `minimum_score_not_reached` e `ambiguous_candidates`
+como **diagnósticos**, não permissão para diminuir score/margem. Ausência
+de evidência para um conceito pode justificar revisão de vocabulário ou
+relacionamentos **no catálogo semântico versionado**, somente depois
+de comparar várias perguntas semanticamente equivalentes e inéditas.
+Uma modificação de aliases, regras ou padrões herdados da v10 não pode
+ser disfarçada como paridade v11: necessita uma proposta de versão
+de contexto própria, novo fingerprint e auditoria independente.
+ O processo pode terminar com
 `evaluation_failed`: essa é uma **evidência para investigar generalização**,
 não permissão para criar um if textual, reduzir threshold, escolher uma SQL
 de benchmark ou copiar um padrão ao código. Corrigir causas
