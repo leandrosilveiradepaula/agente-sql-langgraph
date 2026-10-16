@@ -84,11 +84,22 @@ realizado e orçamento continua por competência. A ausência de referência
 explícita mantém esse padrão para operações temporais abrangidas pela
 configuração, sem criar equivalência semântica com outra data.
 
-**Limitação:** o gate atual de referência vale para os intents definidos
-em `required_intents` na configuração temporal, não para todas as consultas
-possíveis. Isso precisa ser considerado na validação de cobertura e de
-perguntas inéditas; `metadata_checks_passed` não equivale a proteção global
-de toda operação que mencione uma data.
+**Cobertura entre intenções:** o Planner rejeita também uma
+**referência temporal alternativa explicitamente reconhecida** quando a
+intenção selecionada está fora de `required_intents`, usando
+`PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED`. Mesmo uma associação física
+alternativa configurada não é aplicada silenciosamente em uma intenção que
+não possua projeção temporal apropriada. Dentro das intenções abrangidas, a
+validação temporal completa permanece responsável por verificar métrica,
+fonte, granularidade e coluna de data.
+
+**Limitação:** a proteção é genérica, mas identifica somente termos
+registrados na configuração versionada e requer uma intenção/padrão
+selecionado. Ela não comprova que toda pergunta de data foi entendida, nem
+valida o significado financeiro de `competencia` ou `data_lancamento`.
+O resultado `metadata_checks_passed` não substitui testes com perguntas
+inéditas, evidência física do DuckLake, revisão DRE/filtros ou autorização
+humana de promoção.
 
 **Gates de aprovação separados:** confirmar a definição financeira com
 responsável pelo dado, verificar o esquema físico e contratos de filtros/DRE,
