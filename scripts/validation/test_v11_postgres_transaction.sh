@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Only run against ephemeral CI-local PostgreSQL, never client or runtime databases.
+if [[ "$V11_DISPOSABLE_POSTGRES_TEST" != "true" || "$PGHOST" != "127.0.0.1" || "$PGPORT" != "5432" || "$PGDATABASE" != "synthetic_ci" || "$LANGGRAPH_ALLOW_REAL_SQL_EXECUTION" != "false" ]]; then
+  echo "ABORTED: CI-local disposable PostgreSQL and disabled SQL execution required"
+  exit 2
+fi
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+FIXTURE="$ROOT/scripts/validation/v11_synthetic_postgres_fixture.sql"
+MIGRATION="$ROOT/scripts/migrations/021_prepare_demo_finance_context_v11.sql"
+psql_safe() { psql -X -q -v ON_ERROR_STOP=1 "$@"; }
+count_target() {
+ local schema="$1"
+ psql -X -A -t -v ON_ERROR_STOP=1 -c "
+ SELECT (
+ SELECT COUNT(*) FROM \"$schema\".ai_ducklake_agent_rules WHERE agent_version='demo-finance-v11'
+ ) + (
+ SELECT COUNT(*) FROM \"$schema\".ai_ducklake_entity_aliases WHERE agent_version='demo-finance-v11'
+ ) + (
+ SELECT COUNT(*) FROM \"$schema\".ai_ducklake_dre_mapping WHERE agent_version='demo-finance-v11'
+ ) + (
+ SELECT COUNT(*) FROM \"$schema\".ai_ducklake_sql_patterns WHERE agent_version='demo-finance-v11'
+ ) + (
+ SELECT COUNT(*) FROM \"$schema\".ai_ducklake_table_catalog WHERE agent_version='demo-finance-v11'
+ );" | tr -d '[:space:]'
+}
+assert_count() {
+ local actual
+ actual="$(count_target "$1")"
+ if [[ "$actual" != "$2" ]]; then
+   echo "FAIL: $1 target rows $actual expected $2"
+   exit 1
+ fi
+}
+init_case() { psql_safe -v context_schema="$1" -f "$FIXTURE" >/dev/null; }
+apply_case() { psql_safe -v context_schema="$1" -f "$MIGRATION" >/dev/null; }
+expected_failure() {
+ if apply_case "$1" >/dev/null 2>&1; then
+   echo "FAIL: $1 unexpectedly succeeded"
+   exit 1
+ fi
+ assert_count "$1" 0
+ echo "PASS: $1 atomic rollback"
+}
+
+init_case test_v11_good
+apply_case test_v11_good
+assert_count test_v11_good 8
+echo "PASS: valid synthetic candidate"
+if apply_case test_v11_good >/dev/null 2>&1; then
+ echo "FAIL: duplicate candidate accepted"
+ exit 1
+fi
+assert_count test_v11_good 8
+echo "PASS: replay rejected without mutation"
+
+init_case test_v11_missing_source
+psql_safe -c "DELETE FROM test_v11_missing_source.ai_ducklake_agent_rules WHERE agent_version='demo-finance-v10';"
+expected_failure test_v11_missing_source
+
+init_case test_v11_missing_binding
+psql_safe -c "DELETE FROM test_v11_missing_binding.ai_ducklake_entity_aliases WHERE user_term='budget-synthetic';"
+expected_failure test_v11_missing_binding
+
+init_case test_v11_missing_date
+psql_safe -c "UPDATE test_v11_missing_date.ai_ducklake_table_catalog SET date_columns='[]'::jsonb WHERE table_name='gold_orcamento';"
+expected_failure test_v11_missing_date
+
+init_case test_v11_target_exists
+psql_safe -c "INSERT INTO test_v11_target_exists.ai_ducklake_agent_rules SELECT 'demo-finance-v11',rule_group,rule_name,rule_content,applies_to_intents,validation_hint,severity,priority,is_active FROM test_v11_target_exists.ai_ducklake_agent_rules WHERE agent_version='demo-finance-v10';"
+if apply_case test_v11_target_exists >/dev/null 2>&1; then
+ echo "FAIL: existing target accepted"
+ exit 1
+fi
+assert_count test_v11_target_exists 1
+echo "PASS: pre-existing target preserved"
+echo "V11_DISPOSABLE_POSTGRES_TEST=PASS"
