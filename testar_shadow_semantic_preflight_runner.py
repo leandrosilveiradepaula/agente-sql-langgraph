@@ -68,7 +68,9 @@ def test_reviewed_git_source_is_ephemeral_and_safe() -> None:
     assert '"$POLICY_RELATIVE"' in text
     assert 'git -C "$ROOT_DIR" branch --show-current' in text
     assert 'git -C "$ROOT_DIR" cat-file -e "HEAD:$POLICY_RELATIVE"' in text
-    assert 'root.mkdir(mode=0o700)' in text
+    assert 'tempfile.mkdtemp(prefix="semantic_candidate_readonly_")' in text
+    assert 'private staging directory required' in text
+    assert '(root / "scripts" / "__init__.py").touch(exist_ok=True)' in text
     assert 'relative.is_absolute() or ".." in relative.parts' in text
     assert "unsupported archived file type" in text
     assert 'target.open("xb")' in text
