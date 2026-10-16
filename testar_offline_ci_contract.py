@@ -51,7 +51,7 @@ def main() -> None:
         assert checker in text
     assert "upload-artifact" not in lowered
     assert "IBM_CLOUD_API_KEY" not in text
-    print("testar_offline_ci_contract.py: 28/28 OK")
+    print("testar_offline_ci_contract.py: PASS")
 
 
 if __name__ == "__main__":
