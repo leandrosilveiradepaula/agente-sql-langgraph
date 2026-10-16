@@ -243,7 +243,14 @@ com um nome de negócio exige acesso separado ao catálogo autorizado.
 Casos já aprovados não ganham o detalhe extra.
 
 Interpretar `minimum_score_not_reached` e `ambiguous_candidates`
-como **diagnósticos**, não permissão para diminuir score/margem. Ausência
+como **diagnósticos**, não permissão para diminuir score/margem.
+O resolvedor avalia primeiro a elegibilidade pelo score mínimo;
+dois candidatos abaixo do mínimo resultam em `minimum_score_not_reached`
+mesmo quando empatados. A margem de ambiguidade compara apenas
+candidatos que atingiram o score mínimo configurado. Quando dois
+candidatos elegíveis continuam próximos, a rejeição
+`ambiguous_candidates` é preservada. A decisão é estrutural,
+sem nomes de intenções ou vocabulário financeiro no Python. Ausência
 de evidência para um conceito pode justificar revisão de vocabulário ou
 relacionamentos **no catálogo semântico versionado**, somente depois
 de comparar várias perguntas semanticamente equivalentes e inéditas.

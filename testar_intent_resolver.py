@@ -313,6 +313,86 @@ def test_rejeita_pontuacao_abaixo_do_minimo_sem_fallback_legado() -> None:
     )
 
 
+
+def test_sem_candidato_elegivel_ambiguidade_nao_mascara_score() -> None:
+    result = resolve_intent(
+        "alpha beta",
+        _context(
+            [
+                _signal(intent_name="intent_a", pattern="alpha", score=80),
+                _signal(intent_name="intent_b", pattern="beta", score=80),
+            ],
+            config=_config(minimum_score=100, ambiguity_margin=30),
+        ),
+    )
+    assert result["applied"] is False
+    assert result["reason"] == "minimum_score_not_reached"
+    assert len(result["candidates"]) == 2
+
+
+def test_segundo_candidato_abaixo_do_minimo_nao_veta_vencedor() -> None:
+    result = resolve_intent(
+        "alpha beta",
+        _context(
+            [
+                _signal(intent_name="intent_a", pattern="alpha", score=110),
+                _signal(intent_name="intent_b", pattern="beta", score=90),
+            ],
+            config=_config(minimum_score=100, ambiguity_margin=30),
+        ),
+    )
+    assert result["applied"] is True
+    assert result["reason"] == "configured_intent_selected"
+    assert result["intent"] == "intent_a"
+    assert result["second_candidate"]["score"] == 90
+
+
+def test_catalogo_composto_nao_cria_ambiguidade_com_inapto() -> None:
+    catalog = [
+        _catalog_entry(
+            intent_name="intent_a",
+            rules=[_rule(
+                rule_name="rule_a", effect="positive_score",
+                concepts=[_concept(concept_name="concept_a", terms=["alpha"])],
+                score=110,
+            )],
+        ),
+        _catalog_entry(
+            intent_name="intent_b",
+            rules=[_rule(
+                rule_name="rule_b", effect="positive_score",
+                concepts=[_concept(concept_name="concept_b", terms=["beta"])],
+                score=90,
+            )],
+        ),
+    ]
+    result = resolve_intent(
+        "alpha beta",
+        _context(
+            [], intent_catalog=catalog,
+            config=_config(minimum_score=100, ambiguity_margin=30),
+        ),
+    )
+    assert result["applied"] is True
+    assert result["intent"] == "intent_a"
+    assert result["intent_catalog"]["entries_evaluated"] == 2
+
+
+def test_candidatos_qualificados_proximos_continuam_ambiguos() -> None:
+    result = resolve_intent(
+        "alpha beta",
+        _context(
+            [
+                _signal(intent_name="intent_a", pattern="alpha", score=120),
+                _signal(intent_name="intent_b", pattern="beta", score=115),
+            ],
+            config=_config(minimum_score=100, ambiguity_margin=30),
+        ),
+    )
+    assert result["applied"] is False
+    assert result["reason"] == "ambiguous_candidates"
+
+
 def test_rejeita_candidatos_ambiguos() -> None:
     result = resolve_intent(
         "alpha beta",
@@ -1733,6 +1813,22 @@ def main() -> None:
         (
             "rejeita pontuação abaixo do mínimo",
             test_rejeita_pontuacao_abaixo_do_minimo_sem_fallback_legado,
+        ),
+        (
+            "candidatos abaixo do minimo nao geram ambiguidade",
+            test_sem_candidato_elegivel_ambiguidade_nao_mascara_score,
+        ),
+        (
+            "concorrente inapto nao veta vencedor",
+            test_segundo_candidato_abaixo_do_minimo_nao_veta_vencedor,
+        ),
+        (
+            "catalogo composto aplica elegibilidade antes de margem",
+            test_catalogo_composto_nao_cria_ambiguidade_com_inapto,
+        ),
+        (
+            "dois candidatos elegiveis proximos continuam ambiguos",
+            test_candidatos_qualificados_proximos_continuam_ambiguos,
         ),
         (
             "rejeita candidatos ambíguos",

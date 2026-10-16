@@ -187,6 +187,37 @@ def test_rejeita_pontuacao_insuficiente() -> None:
     ] == "minimum_score_not_reached"
 
 
+
+def test_diagnostico_grafo_prefere_minimo_a_ambiguidade_inapta() -> None:
+    state = _state(
+        question="alpha beta",
+        config=_config(minimum_score=100, ambiguity_margin=30),
+        signals=[
+            _signal(intent_name="intent_a", pattern="alpha", score=80),
+            _signal(intent_name="intent_b", pattern="beta", score=80),
+        ],
+    )
+    result = classify_intent(state)
+    assert result["final_status"] == "rejected"
+    assert "INTENT_RESOLUTION_MINIMUM_SCORE_NOT_REACHED" in _error_codes(result)
+    assert "INTENT_RESOLUTION_AMBIGUOUS" not in _error_codes(result)
+
+
+def test_grafo_nao_rejeita_candidato_unico_acima_do_minimo() -> None:
+    state = _state(
+        question="alpha beta",
+        config=_config(minimum_score=100, ambiguity_margin=30),
+        signals=[
+            _signal(intent_name="intent_a", pattern="alpha", score=110),
+            _signal(intent_name="intent_b", pattern="beta", score=90),
+        ],
+    )
+    result = classify_intent(state)
+    assert result["intent"] == "intent_a"
+    assert result["final_status"] == "processing"
+    assert result["intent_resolution_result"]["reason"] == "configured_intent_selected"
+
+
 def test_rejeita_ambiguidade() -> None:
     state = _state(
         question="Prepare alpha report",
@@ -390,6 +421,14 @@ def main() -> None:
         (
             "rejeita pontuação insuficiente",
             test_rejeita_pontuacao_insuficiente,
+        ),
+        (
+            "prioriza pontuacao minima no grafo",
+            test_diagnostico_grafo_prefere_minimo_a_ambiguidade_inapta,
+        ),
+        (
+            "nao rejeita candidato unico elegivel",
+            test_grafo_nao_rejeita_candidato_unico_acima_do_minimo,
         ),
         (
             "rejeita ambiguidade",
