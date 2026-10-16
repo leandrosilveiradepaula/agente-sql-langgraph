@@ -62,4 +62,39 @@ induz essa corrupção sintética e confirma o rollback.
  O teste **não comprova** a integridade
 do PostgreSQL financeiro real, dos joins ou das regras contábeis.
 
+## Auditoria de paridade entre snapshots (somente leitura)
+
+O arquivo versionado `semantic_context/candidate_parity_demo_finance_v11.json`
+declara a versão de origem, a candidata e **somente** as novas regras de
+metadados permitidas. O motor genérico
+`scripts/audit_semantic_candidate_parity_readonly.py` carrega ambas as versões
+pelo leitor SELECT-only de contexto e verifica:
+
+- versões e fingerprints observados;
+- integridade estrutural dos dois snapshots;
+- igualdade de todo o conteúdo normalizado de regras, entidades, DRE, padrões
+  e catálogo, ignorando apenas a(s) regra(s) nova(s) explicitamente declarada(s);
+- ausência de alterações silenciosas mesmo com contagens iguais.
+
+Para executar **apenas depois** que uma candidata isolada tenha sido
+persistida e estiver disponível para leitura (não a promove):
+
+```bash
+LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false python -m scripts.audit_semantic_candidate_parity_readonly \
+  --policy semantic_context/candidate_parity_demo_finance_v11.json
+```
+
+A verificação exige a credencial `CONTEXT_POSTGRES_DSN` restrita a SELECT.
+É possível fornecer `--expected-source-fingerprint` para impedir a validação
+se a origem mudar desde a aprovação. Os resultados não imprimem DSN, SQL de
+negócio, regras individuais ou dados financeiros; incluem versões,
+fingerprints e apenas códigos/resumos de diferenças.
+
+`parity_match` não significa autorização de ativação: o código mantém
+`activation_authorized=false`, `financial_validation_complete=false` e
+`real_sql_execution=false`. O inventário físico, as fórmulas financeiras e
+as perguntas inéditas são gates independentes. Na ausência de uma v11
+persistida ou de credenciais somente leitura, o comando falha fechado,
+sem tentar criar tabelas, executar migração, alternar runtime ou acessar benchmark.
+
 O n8n continua OFFICIAL e o LangGraph continua SHADOW.
