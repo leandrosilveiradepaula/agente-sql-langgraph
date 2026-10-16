@@ -4,6 +4,8 @@ from copy import deepcopy
 from unittest.mock import patch
 
 from app.domain.context_normalizer import normalize_context_snapshot
+from app.domain.context_validator import validate_context_snapshot
+from testar_context_validator import _raw_snapshot
 from scripts.preview_semantic_overlay_readonly import (
     apply_semantic_overlay,
     main,
@@ -12,52 +14,45 @@ from scripts.preview_semantic_overlay_readonly import (
 
 
 def fixture() -> dict:
-    raw = {
-        "semantic_agent_version": "synthetic-v1",
-        "semantic_context_source": "offline_fixture",
-        "regras": [],
-        "entidades": [
-            {
-                "entity_type": "intent_definition",
-                "canonical_value": "synthetic_intent",
-                "user_term": "synthetic_intent",
-                "business_rule": {
-                    "intent_catalog": {
-                        "rules": [
-                            {
-                                "rule_name": "primary",
-                                "effect": "positive_score",
-                                "score": 120,
-                                "concepts": [
-                                    {"concept_name": "operation", "terms": ["compare"], "match_mode": "phrase"}
-                                ],
-                            },
-                            {
-                                "rule_name": "exclusion",
-                                "effect": "exclude",
-                                "concepts": [
-                                    {"concept_name": "operation", "terms": ["compare"], "match_mode": "phrase"}
-                                ],
-                            },
-                        ],
-                    }
-                },
-                "priority": 1,
-            },
-            {
-                "entity_type": "operation_alias",
-                "canonical_value": "compare",
-                "user_term": "compare",
-                "business_rule": {},
-                "priority": 1,
-            },
-        ],
-        "dre": [],
-        "padroes": [],
-        "catalogo": [],
+    # Reuse the validated structural contract rather than inventing an
+    # incomplete synthetic context that fails before overlay logic runs.
+    raw = _raw_snapshot()
+    rules = raw["entidades"][1]["business_rule"]["intent_catalog"]["rules"]
+    rules.extend([
+        {
+            "rule_name": "primary",
+            "effect": "positive_score",
+            "score": 120,
+            "priority": 4,
+            "minimum_concept_matches": 1,
+            "concepts": [{
+                "concept_name": "operation",
+                "terms": ["compare"],
+                "match_mode": "contains",
+                "minimum_term_matches": 1,
+            }],
+        },
+        {
+            "rule_name": "exclusion",
+            "effect": "exclude",
+            "score": None,
+            "priority": 5,
+            "minimum_concept_matches": 1,
+            "concepts": [{
+                "concept_name": "operation",
+                "terms": ["compare"],
+                "match_mode": "contains",
+                "minimum_term_matches": 1,
+            }],
+        },
+    ])
+    raw["semantic_agent_version"] = "synthetic-v1"
+    source = normalize_context_snapshot(raw)
+    result = validate_context_snapshot(source)
+    assert result["status"] == "valid", {
+        item["code"] for item in result["errors"]
     }
-    return normalize_context_snapshot(raw)
-
+    return source
 
 def overlay(changes: list[dict]) -> dict:
     return {
@@ -69,7 +64,7 @@ def overlay(changes: list[dict]) -> dict:
 
 def selector(rule: str) -> dict:
     return {
-        "intent_name": "synthetic_intent",
+        "intent_name": "intent_test",
         "rule_name": rule,
         "concept_name": "operation",
     }
@@ -102,16 +97,34 @@ def test_extend_terms_does_not_mutate_source() -> None:
 def test_mirror_terms_requires_compatible_match_modes() -> None:
     source = fixture()
     candidate = apply_semantic_overlay(source, overlay([{
-        "operation": "mirror_concept_terms",
-        "source": selector("primary"),
-        "target": selector("exclusion"),
-    }, {
         "operation": "extend_concept_terms",
         "selector": selector("primary"),
         "terms": ["contrast"],
+    }, {
+        "operation": "mirror_concept_terms",
+        "source": selector("primary"),
+        "target": selector("exclusion"),
     }]))
     assert candidate["version"] == "synthetic-v2"
     assert source["version"] == "synthetic-v1"
+
+
+def test_alias_clone_does_not_modify_existing_signal() -> None:
+    source = fixture()
+    original = deepcopy(source)
+    candidate = apply_semantic_overlay(source, overlay([{
+        "operation": "clone_entity_alias",
+        "source": {
+            "entity_type": "intent_signal",
+            "user_term": "generic analysis",
+            "canonical_value": "intent_test",
+        },
+        "new_user_term": "alternative analysis",
+    }]))
+    assert source == original
+    assert len(candidate["entities"]) == len(source["entities"]) + 1
+    assert candidate["counts"]["entities"] == source["counts"]["entities"] + 1
+    assert validate_context_snapshot(candidate)["status"] == "valid"
 
 
 def test_invalid_policies_fail_closed() -> None:
@@ -122,10 +135,10 @@ def test_invalid_policies_fail_closed() -> None:
         overlay([{"operation": "extend_concept_terms", "selector": selector("missing"), "terms": ["contrast"]}]),
         overlay([{"operation": "extend_concept_terms", "selector": selector("primary"), "terms": ["compare"]}]),
         overlay([{"operation": "clone_entity_alias", "source": {
-            "entity_type": "operation_alias",
-            "user_term": "compare",
-            "canonical_value": "compare",
-        }, "new_user_term": "compare"}]),
+            "entity_type": "intent_signal",
+            "user_term": "generic analysis",
+            "canonical_value": "intent_test",
+        }, "new_user_term": "generic analysis"}]),
     ):
         try:
             parse_overlay_policy(policy)
@@ -147,6 +160,7 @@ def test_execution_gate_blocks_before_repository_access() -> None:
 if __name__ == "__main__":
     test_extend_terms_does_not_mutate_source()
     test_mirror_terms_requires_compatible_match_modes()
+    test_alias_clone_does_not_modify_existing_signal()
     test_invalid_policies_fail_closed()
     test_execution_gate_blocks_before_repository_access()
     print("SEMANTIC_OVERLAY_INVARIANTS=PASS")
