@@ -288,7 +288,7 @@ def _select_temporal_reference_bindings(
                 return None, "temporal_reference_metadata_invalid"
             term_owner[normalized_term] = canonical
             if re.search(
-                r"(?<!\\w)" + re.escape(normalized_term) + r"(?!\\w)",
+                r"(?<!\w)" + re.escape(normalized_term) + r"(?!\w)",
                 question,
             ):
                 matches.add(canonical)
