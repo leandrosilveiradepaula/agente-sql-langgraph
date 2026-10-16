@@ -22,6 +22,7 @@ from scripts.preview_semantic_candidate_readonly import (
     evaluate_in_memory_preflight,
     synthesize_candidate_snapshot,
 )
+from scripts.preflight_semantic_candidate_readonly import evaluate_candidate_readiness
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -81,6 +82,32 @@ def run_check(mode: str) -> None:
         assert preview_report["candidate_fingerprint"] == candidate["fingerprint"]
         assert preview_report["persisted_candidate"] is False
         assert preview_report["activation_authorized"] is False
+
+        # Every synthetic source must have a distinct, explicitly authorized
+        # temporal binding; no source is selected by catalog order.
+        readiness = evaluate_candidate_readiness(candidate)
+        assert readiness["status"] == "checks_passed", (
+            readiness["blocking_issues"]
+        )
+        source_bindings = {
+            (
+                binding["metric_concept"].casefold(),
+                binding["target_table"].casefold(),
+            )
+            for binding in candidate["component_configs"]["temporal_planning"][
+                "date_bindings"
+            ]
+        }
+        metric_sources = {
+            (
+                entity["business_rule"]["metric_binding"]["metric_concept"].casefold(),
+                entity["business_rule"]["metric_binding"]["target_table"].casefold(),
+            )
+            for entity in candidate["entities"]
+            if entity.get("entity_type") == "metric_binding"
+        }
+        assert source_bindings == metric_sources, "incomplete temporal coverage"
+        assert len(metric_sources) >= 2, "fixture must exercise multiple sources"
         print("V11_IN_MEMORY_CANDIDATE_FINGERPRINT=PASS")
 
     if not source.get("fingerprint") or not candidate.get("fingerprint"):
