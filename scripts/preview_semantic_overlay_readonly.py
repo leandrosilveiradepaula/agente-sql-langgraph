@@ -9,6 +9,7 @@ SQL generation, provider, runtime activation or database mutation occurs here.
 import argparse
 import json
 import os
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
@@ -88,6 +89,21 @@ def parse_overlay_policy(value: Any) -> dict[str, Any]:
                 "source": _selector(raw["source"], alias_keys),
                 "new_user_term": _required_text(raw["new_user_term"]),
             })
+        elif operation == "add_catalog_exclusion":
+            if set(raw) != {
+                "operation", "source", "target_intent", "rule_name", "priority",
+            }:
+                raise ValueError("invalid catalog exclusion")
+            priority = raw["priority"]
+            if type(priority) is not int or not 1 <= priority <= 10000:
+                raise ValueError("invalid exclusion priority")
+            changes.append({
+                "operation": operation,
+                "source": _selector(raw["source"], concept_keys),
+                "target_intent": _required_text(raw["target_intent"]),
+                "rule_name": _required_text(raw["rule_name"]),
+                "priority": priority,
+            })
         else:
             raise ValueError("unsupported semantic overlay operation")
     return {
@@ -128,6 +144,27 @@ def _one_concept(
     return candidates[0]
 
 
+def _one_intent_rules(
+    entities: list[dict[str, Any]], intent_name: str,
+) -> list[dict[str, Any]]:
+    matching = []
+    for entity in entities:
+        if (
+            entity.get("entity_type") != "intent_definition"
+            or entity.get("canonical_value") != intent_name
+        ):
+            continue
+        business = entity.get("business_rule")
+        catalog = business.get("intent_catalog") if isinstance(business, Mapping) else None
+        rules = catalog.get("rules") if isinstance(catalog, Mapping) else None
+        if not isinstance(rules, list) or not all(isinstance(rule, dict) for rule in rules):
+            raise ValueError("invalid target intent catalog")
+        matching.append(rules)
+    if len(matching) != 1:
+        raise ValueError("exclusion target intent must match exactly once")
+    return matching[0]
+
+
 def _one_entity(
     entities: list[dict[str, Any]], selector: Mapping[str, str],
 ) -> dict[str, Any]:
@@ -147,8 +184,9 @@ def apply_semantic_overlay(
     policy = parse_overlay_policy(overlay)
     if source.get("version") != policy["source_version"]:
         raise ValueError("semantic overlay source version mismatch")
-    if not isinstance(source.get("fingerprint"), str) or len(source["fingerprint"]) != 64:
-        raise ValueError("semantic source fingerprint missing")
+    fingerprint = source.get("fingerprint")
+    if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+        raise ValueError("semantic source fingerprint missing or malformed")
     raw: dict[str, Any] = {
         "semantic_agent_version": policy["candidate_version"],
         "semantic_context_source": source.get("source"),
@@ -190,6 +228,26 @@ def apply_semantic_overlay(
             if source_concept["terms"] == target_concept.get("terms"):
                 raise ValueError("semantic mirror has no effective change")
             target_concept["terms"] = deepcopy(source_concept["terms"])
+        elif operation == "add_catalog_exclusion":
+            concept = deepcopy(_one_concept(entities, change["source"]))
+            concept.pop("normalized_terms", None)
+            if not isinstance(concept.get("terms"), list) or not concept["terms"]:
+                raise ValueError("exclusion source concept lacks vocabulary")
+            rules = _one_intent_rules(entities, change["target_intent"])
+            if any(
+                str(rule.get("rule_name", "")).casefold()
+                == change["rule_name"].casefold()
+                for rule in rules
+            ):
+                raise ValueError("catalog exclusion already exists")
+            rules.append({
+                "rule_name": change["rule_name"],
+                "effect": "exclude",
+                "concepts": [concept],
+                "minimum_concept_matches": 1,
+                "score": None,
+                "priority": change["priority"],
+            })
         else:
             original = _one_entity(entities, change["source"])
             label = change["new_user_term"]
