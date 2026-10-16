@@ -45,9 +45,16 @@ não substituem a auditoria física e semântica.
 6. A aplicação de migração, a promoção de contexto e qualquer modificação
    no workflow n8n oficial permanecem ações separadas.
 
-O arquivo histórico `scripts/migrations/021_prepare_demo_finance_context_v11.sql`
-utiliza `unique_metric_source_catalog_date`; não o execute por presunção de
-que as fontes têm uma única coluna temporal. A decisão deve ser evidenciada
-antes de escrever nova versão.
+O arquivo `scripts/migrations/021_prepare_demo_finance_context_v11.sql`
+usa `configured_metric_source_date` e inclui somente o binding temporal
+versionado cuja origem foi documentada. As fontes sem binding temporal explícito
+continuam bloqueadas para séries temporais. Não aplicar nem ativar a candidata
+sem revisão das regras financeiras, da origem física e da evidência.
+
+A workflow `v11-disposable-postgres.yml` executa a migração contra PostgreSQL
+local descartável com metadados e dados inteiramente sintéticos. Verifica
+sucesso, rejeição de reexecução e rollback em três cenários adversos, além da
+preservação de um destino já existente. O teste **não comprova** a integridade
+do PostgreSQL financeiro real, dos joins ou das regras contábeis.
 
 O n8n continua OFFICIAL e o LangGraph continua SHADOW.

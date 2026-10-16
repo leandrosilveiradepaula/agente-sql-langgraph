@@ -1,0 +1,54 @@
+name: V11 disposable PostgreSQL migration
+
+on:
+  pull_request:
+    paths:
+      - "scripts/migrations/021_prepare_demo_finance_context_v11.sql"
+      - "scripts/validation/v11_synthetic_postgres_fixture.sql"
+      - "scripts/validation/test_v11_postgres_transaction.sh"
+      - ".github/workflows/v11-disposable-postgres.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/migrations/021_prepare_demo_finance_context_v11.sql"
+      - "scripts/validation/v11_synthetic_postgres_fixture.sql"
+      - "scripts/validation/test_v11_postgres_transaction.sh"
+      - ".github/workflows/v11-disposable-postgres.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-disposable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: synthetic_ci
+          POSTGRES_PASSWORD: local_fixture_only
+          POSTGRES_DB: synthetic_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U synthetic_ci -d synthetic_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: synthetic_ci
+      PGPASSWORD: local_fixture_only
+      PGDATABASE: synthetic_ci
+      V11_DISPOSABLE_POSTGRES_TEST: "true"
+      LANGGRAPH_ALLOW_REAL_SQL_EXECUTION: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+      - name: Validate candidate transaction (synthetic data only)
+        run: bash scripts/validation/test_v11_postgres_transaction.sh
