@@ -72,6 +72,40 @@ nova e outra em uma entidade clonada são induzidas apenas no banco descartável
 e devem resultar em bloqueio. O teste não utiliza benchmark, credenciais da
 VPS, base financeira real, provedor LLM nem execução SQL financeira.
 
+## Prévia da v11 em memória, antes de qualquer migração
+
+O arquivo `scripts/preview_semantic_candidate_readonly.py` faz um ensaio
+com **somente a versão de origem disponível no PostgreSQL**. Lê a v10 com
+credencial SELECT-only, constrói uma v11 hipotética inteiramente em memória,
+e adiciona exclusivamente os registros completos autorizados pelo manifesto
+versionado. Em seguida calcula novo fingerprint, exige paridade exata com a
+origem e executa as validações estruturais e de prontidão temporal.
+
+```bash
+LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false \
+  python -m scripts.preview_semantic_candidate_readonly \
+  --policy semantic_context/candidate_parity_demo_finance_v11.json \
+  --expected-source-fingerprint <fingerprint-previamente-auditado>
+```
+
+O argumento `--expected-source-fingerprint` é recomendado para impedir a
+continuação após mudanças não revisadas na origem. O código recusa colisões
+com regras ou componentes já existentes: não substitui metadados herdados
+silenciosamente. Os relatórios contêm somente versões, fingerprints,
+contagens e códigos de diagnóstico; não imprimem nomes de clientes, regras
+integrais, DSN ou respostas financeiras.
+
+O ensaio **não cria a versão no PostgreSQL**. Se houver bindings temporais
+sem data explicitamente configurada, retorna `blocked` com códigos para
+auditoria. Um eventual `metadata_checks_passed` significa apenas que os
+metadados verificados em memória passaram: não autoriza promover, executar
+SQL ou dispensar validações financeiras independentes.
+
+A workflow PostgreSQL descartável compara o fingerprint dessa prévia contra
+o fingerprint da v11 realmente criada pela migração de teste. Isso assegura
+que o ensaio reproduz o comportamento do normalizador e da cópia transacional,
+sem acessar a base financeira real.
+
 ## Auditoria de paridade entre snapshots (somente leitura)
 
 O arquivo versionado `semantic_context/candidate_parity_demo_finance_v11.json`
