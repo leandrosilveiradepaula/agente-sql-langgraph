@@ -15,7 +15,14 @@ def main() -> None:
     assert "branches:\n      - master" not in text
     assert "workflow_dispatch:" in text
     assert "windows-latest" in text
+    assert "actions/checkout@v5" in text
+    assert "actions/setup-python@v6" in text
+    assert "actions/checkout@v4" not in text
+    assert "actions/setup-python@v5" not in text
     assert "actions/setup-python" in text
+    postgres_ci = Path(".github/workflows/v11-disposable-postgres.yml").read_text(encoding="utf-8")
+    assert "actions/checkout@v5" in postgres_ci
+    assert "actions/checkout@v4" not in postgres_ci
     assert 'python-version: "3.11"' in text
     assert "fetch-depth: 0" in text
     assert "permissions:" in text and "contents: read" in text
