@@ -280,15 +280,15 @@ def test_diagnostic_nonfinite_scores_are_redacted() -> None:
 
 
 def test_candidate_catalog_indices_are_stable_without_labels() -> None:
-    secret = "customer-private-intent"
+    private_label = "synthetic-private-intent"
     resolved = {
         "candidates": [
-            {"intent_name": secret, "score": 120, "matches": []},
+            {"intent_name": private_label, "score": 120, "matches": []},
             {"intent_name": "unlisted", "score": 110, "matches": []},
         ],
         "intent_catalog": {"evaluations": [
             {"intent_name": "other", "rules": []},
-            {"intent_name": secret, "rules": [
+            {"intent_name": private_label, "rules": [
                 {"effect": "require", "satisfied": False, "concepts": [
                     {"satisfied": True}, {"satisfied": False}
                 ]}
@@ -301,7 +301,7 @@ def test_candidate_catalog_indices_are_stable_without_labels() -> None:
     assert diagnostic["catalog_evidence"][1]["missing_required_concepts"] == [
         {"rule_index": 1, "concept_indexes": [2]}
     ]
-    assert secret not in str(diagnostic)
+    assert private_label not in str(diagnostic)
     assert "unlisted" not in str(diagnostic)
 
 
