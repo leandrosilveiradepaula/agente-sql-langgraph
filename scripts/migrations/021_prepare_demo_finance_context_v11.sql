@@ -182,6 +182,7 @@ DECLARE
   configured_date jsonb;
   source_matches bigint;
   catalog_matches bigint;
+  cloned_payload_differs boolean;
 BEGIN
   FOR section IN
     SELECT * FROM (VALUES
@@ -208,6 +209,41 @@ BEGIN
     IF copied_source = 0 OR copied_source <> copied_target THEN
       RAISE EXCEPTION
         'Candidate v11 clone integrity mismatch in % (transaction rolled back)',
+        section.table_name;
+    END IF;
+
+    -- Counting rows cannot detect a changed field or a silent conflict.
+    -- Compare both directions including duplicate multiplicities; strip only
+    -- agent_version and exclude the single new v11 temporal configuration.
+    EXECUTE format(
+      'WITH original AS (
+         SELECT to_jsonb(s) - ''agent_version'' AS payload
+         FROM %I AS s
+         WHERE s.agent_version = $1 AND s.%I = TRUE
+       ), cloned AS (
+         SELECT to_jsonb(t) - ''agent_version'' AS payload
+         FROM %I AS t
+         WHERE t.agent_version = $2 AND t.%I = TRUE %s
+       ), differences AS (
+         (SELECT payload FROM original EXCEPT ALL SELECT payload FROM cloned)
+         UNION ALL
+         (SELECT payload FROM cloned EXCEPT ALL SELECT payload FROM original)
+       )
+       SELECT EXISTS (SELECT 1 FROM differences)',
+      section.table_name,
+      section.active_column,
+      section.table_name,
+      section.active_column,
+      CASE
+        WHEN section.table_name = 'ai_ducklake_agent_rules'
+        THEN 'AND NOT (t.rule_group = ''component_config'' AND t.rule_name = ''temporal_planning_config'')'
+        ELSE ''
+      END
+    ) INTO cloned_payload_differs
+    USING 'demo-finance-v10', 'demo-finance-v11';
+    IF cloned_payload_differs THEN
+      RAISE EXCEPTION
+        'Candidate v11 clone payload mismatch in % (transaction rolled back)',
         section.table_name;
     END IF;
   END LOOP;
