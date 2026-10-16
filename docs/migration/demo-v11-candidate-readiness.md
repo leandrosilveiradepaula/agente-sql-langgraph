@@ -225,6 +225,16 @@ apenas um instrumento de avaliação: `expected_intent`,
 `build_query_plan`. Esses valores não entram no contexto, na chamada do
 resolver, no Planner, em prompt, provider ou geração de SQL.
 
+A avaliação real de 12 perguntas em 16/10/2026 observou 7 aprovações,
+três intents não aplicadas e duas divergências de classificação apesar de
+rejeição temporal segura. A evidência não autoriza ajustar thresholds ou
+cadastrar frases de teste como regras. Para distinguir ausência de sinal,
+candidato abaixo do mínimo e ambiguidade, o relatório também apresenta
+**somente contagens, códigos e scores observados**: reason, quantidade de
+candidatos, scores dos dois primeiros, mínimo e margem configurados,
+quantidade de avaliações de catálogo e defaults aplicados. Não publica termos
+que deram match, conteúdo do catálogo, aliases ou perguntas.
+
 O resultado apresenta `case_index`, intenção/status/códigos observados,
 asserções não atendidas e total aprovado, sem reproduzir perguntas,
 metadados de cliente ou credenciais. O processo pode terminar com
