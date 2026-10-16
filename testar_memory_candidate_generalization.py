@@ -7,6 +7,7 @@ from scripts.evaluate_memory_candidate_generalization_readonly import (
     evaluate_suite,
     main,
     observe_plan,
+    summarize_resolution_evidence,
 )
 from testar_planner import _pattern, _synthetic_temporal_context
 
@@ -103,6 +104,154 @@ def test_failed_expectations_are_evaluation_only_and_sanitized() -> None:
     assert "SOMETHING_ELSE" not in str(result)
 
 
+def test_failed_resolution_evidence_explains_scores_without_leaking_terms() -> None:
+    """All token/term/SQL payloads are excluded from structural diagnostics."""
+    sensitive = "sensitive-user-phrase-not-for-output"
+    resolved = {
+        "reason": "ambiguous_candidates",
+        "resolver_configuration": {
+            "minimum_score": 95,
+            "ambiguity_margin": 15,
+            "example_question": sensitive,
+        },
+        "candidates": [
+            {
+                "intent_name": "generic_first",
+                "score": 130,
+                "positive_score": 130,
+                "negative_score": 0,
+                "matches": [
+                    {
+                        "pattern": sensitive,
+                        "match_strategy": "configured_signal",
+                        "match_details": {"raw_tokens": [sensitive]},
+                    },
+                    {
+                        "pattern": sensitive,
+                        "match_strategy": "intent_catalog_rule",
+                    },
+                ],
+            },
+            {
+                "intent_name": "generic_second",
+                "score": 125,
+                "positive_score": 125,
+                "negative_score": 0,
+                "matches": [{"pattern": sensitive, "match_strategy": "other"}],
+            },
+        ],
+        "intent_catalog": {
+            "evaluations": [{
+                "intent_name": "generic_first",
+                "eligible": False,
+                "excluded": True,
+                "require_rule_count": 2,
+                "satisfied_require_rule_count": 1,
+                "positive_score": 25,
+                "negative_score": 0,
+                "rules": [{
+                    "rule_name": sensitive,
+                    "effect": "require",
+                    "satisfied": False,
+                    "matched_concept_count": 1,
+                    "minimum_concept_matches": 2,
+                    "concepts": [{
+                        "concept_name": "operation_type",
+                        "satisfied": False,
+                        "matched_term_count": 0,
+                        "minimum_term_matches": 1,
+                        "terms": [{"term": sensitive}],
+                        "semantic_signals": [{"matched_tokens": [sensitive]}],
+                    }],
+                }],
+            }],
+        },
+        "token_fallback": {
+            "enabled": True,
+            "used_for_selected_intent": False,
+            "configuration": {"sensitive": sensitive},
+        },
+        "semantic_defaults": {
+            "applied": [{"concept_name": sensitive}],
+            "suppressed": [{"secret": sensitive}],
+        },
+    }
+    report = summarize_resolution_evidence(resolved)
+    assert report["reason"] == "ambiguous_candidates"
+    assert report["minimum_score"] == 95
+    assert report["ambiguity_margin"] == 15
+    assert report["candidate_count"] == 2
+    assert report["candidates"][0]["matched_signal_count"] == 1
+    assert report["candidates"][0]["matched_catalog_scoring_rules"] == 1
+    assert report["catalog_evidence"][0]["required_rule_count"] == 2
+    assert report["catalog_evidence"][0]["excluded"] is True
+    assert report["catalog_evidence"][0]["rules"][0]["concepts"][0][
+        "matched_term_count"
+    ] == 0
+    assert report["semantic_default_count"] == 1
+    assert report["semantic_defaults_suppressed_count"] == 1
+    assert sensitive not in str(report)
+    for secret_field in (
+        "pattern", "term", "normalized_term", "matched_tokens",
+        "semantic_signals", "sql", "raw_question", "description",
+        "rule_name", "secret",
+    ):
+        assert f"'{secret_field}':" not in str(report)
+
+
+def test_detailed_evidence_appears_only_for_failed_evaluation() -> None:
+    suite = {"cases": [
+        {
+            "question": "Test monthly totals",
+            "expected_intent": "synthetic_intent",
+            "expected_plan_status": "rejected",
+        },
+        {
+            "question": "Unseen monthly totals",
+            "expected_intent": "different_intent",
+        },
+    ]}
+    diagnostic = {"reason": "minimum_score_not_reached"}
+    with patch(
+        "scripts.evaluate_memory_candidate_generalization_readonly.resolve_intent",
+        return_value={
+            "applied": True,
+            "intent": "synthetic_intent",
+            "intent_confidence": 0.9,
+            "normalized_question": "Test monthly totals",
+            "reason": "minimum_score_not_reached",
+            "resolver_configuration": {"minimum_score": 100, "ambiguity_margin": 20},
+            "candidates": [],
+            "intent_catalog": {"evaluations": []},
+        }
+    ), patch(
+        "scripts.evaluate_memory_candidate_generalization_readonly.build_query_plan",
+        return_value={
+            "status": "rejected",
+            "error_code": "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED",
+            "projection": None,
+        },
+    ):
+        output = evaluate_suite(mock_snapshot(), suite)
+    assert output["passed"] == 1 and output["failed"] == 1
+    assert "resolution_evidence" not in output["observations"][0]
+    assert output["observations"][1]["resolution_evidence"]["minimum_score"] == 100
+    assert output["observations"][1]["resolution_evidence"]["reason"] == diagnostic["reason"]
+    assert "Unseen monthly totals" not in str(output)
+
+
+def test_no_candidate_resolution_diagnostic_is_fail_closed() -> None:
+    result = summarize_resolution_evidence({
+        "reason": "minimum_score_not_reached",
+        "resolver_configuration": {"minimum_score": 100},
+        "candidates": [],
+        "intent_catalog": {"evaluations": []},
+    })
+    assert result["candidate_count"] == 0
+    assert result["reason"] == "minimum_score_not_reached"
+    assert result["catalog_entries_evaluated"] == 0
+
+
 def test_malformed_suite_rejected_before_any_semantic_call() -> None:
     malformed = [
         {},
@@ -180,6 +329,9 @@ def test_runner_aborts_before_reader_when_real_sql_flag_is_not_false() -> None:
 if __name__ == "__main__":
     test_expectations_never_enter_semantic_or_planner_calls()
     test_failed_expectations_are_evaluation_only_and_sanitized()
+    test_failed_resolution_evidence_explains_scores_without_leaking_terms()
+    test_detailed_evidence_appears_only_for_failed_evaluation()
+    test_no_candidate_resolution_diagnostic_is_fail_closed()
     test_malformed_suite_rejected_before_any_semantic_call()
     test_real_planner_rejects_unhandled_reference_for_novel_intent()
     test_runner_aborts_before_reader_when_real_sql_flag_is_not_false()
