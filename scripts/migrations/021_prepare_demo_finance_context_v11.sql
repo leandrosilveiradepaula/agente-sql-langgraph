@@ -118,10 +118,13 @@ ON CONFLICT DO NOTHING;
 
 -- The temporal planner contract is structural; business metadata belongs
 -- to this immutable, versioned candidate (not to Python or the n8n workflow).
--- V10 evidence identifies a single budget date on the budget metric source.
--- The realized metric source has multiple catalog date columns: do NOT infer
--- a default. An unbound realized time series must reject before the LLM.
--- This is candidate metadata only; its presence does not approve activation.
+-- V10 catalog evidence confirms competencia on both realized and budget
+-- metric sources, while realized also declares data_lancamento. The proposed
+-- accounting period reference for DRE and realized/budget comparison is
+-- explicitly versioned below: never infer from the available date columns.
+-- Operational analysis by posting date is a distinct semantic reference;
+-- this configuration does not authorize silently substituting one for another.
+-- This is candidate metadata only; it does not approve activation.
 INSERT INTO ai_ducklake_agent_rules (
   agent_version, rule_group, rule_name, rule_content, applies_to_intents,
   validation_hint, severity, priority, is_active
@@ -138,6 +141,11 @@ VALUES (
       jsonb_build_object(
         'metric_concept', 'amount',
         'target_table', 'demo_lakehouse.gold_orcamento',
+        'target_column', 'competencia'
+      ),
+      jsonb_build_object(
+        'metric_concept', 'amount',
+        'target_table', 'demo_lakehouse.gold_lancamentos_contabeis',
         'target_column', 'competencia'
       )
     ),
@@ -183,6 +191,8 @@ DECLARE
   source_matches bigint;
   catalog_matches bigint;
   cloned_payload_differs boolean;
+  unbound_metric_sources bigint;
+  duplicated_temporal_sources bigint;
 BEGIN
   FOR section IN
     SELECT * FROM (VALUES
@@ -271,6 +281,44 @@ BEGIN
      OR jsonb_typeof(temporal_cfg->'date_bindings') <> 'array'
      OR jsonb_array_length(temporal_cfg->'date_bindings') = 0 THEN
     RAISE EXCEPTION 'Candidate v11 date binding metadata is missing';
+  END IF;
+
+  -- A configured source cannot have two competing reference dates; a
+  -- missing source must not be silently rescued by another source.
+  SELECT COUNT(*) INTO duplicated_temporal_sources
+  FROM (
+    SELECT
+      LOWER(BTRIM(value->>'metric_concept')) AS metric_concept,
+      LOWER(BTRIM(value->>'target_table')) AS target_table
+    FROM jsonb_array_elements(temporal_cfg->'date_bindings')
+    GROUP BY 1, 2
+    HAVING COUNT(*) > 1
+  ) duplicates;
+  IF duplicated_temporal_sources <> 0 THEN
+    RAISE EXCEPTION 'Candidate v11 temporal date bindings are ambiguous';
+  END IF;
+
+  SELECT COUNT(*) INTO unbound_metric_sources
+  FROM ai_ducklake_entity_aliases e
+  WHERE e.agent_version = 'demo-finance-v11'
+    AND e.entity_type = 'metric_binding'
+    AND e.is_active = TRUE
+    AND NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(temporal_cfg->'date_bindings') AS d(value)
+      WHERE LOWER(BTRIM(d.value->>'metric_concept')) =
+        LOWER(BTRIM(COALESCE(
+          e.business_rule::jsonb->'metric_binding'->>'metric_concept',
+          e.canonical_value
+        )))
+        AND LOWER(BTRIM(d.value->>'target_table')) =
+          LOWER(BTRIM(COALESCE(
+            NULLIF(e.business_rule::jsonb->'metric_binding'->>'target_table', ''),
+            e.target_table
+          )))
+    );
+  IF unbound_metric_sources <> 0 THEN
+    RAISE EXCEPTION 'Candidate v11 metric sources lack explicit temporal bindings';
   END IF;
 
   FOR configured_date IN
