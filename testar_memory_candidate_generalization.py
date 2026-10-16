@@ -184,6 +184,11 @@ def test_failed_resolution_evidence_explains_scores_without_leaking_terms() -> N
     ] = sensitive
     report = summarize_resolution_evidence(resolved)
     assert report["reason"] == "ambiguous_candidates"
+    assert report["candidates"][0]["catalog_entry_index"] == 1
+    assert report["candidates"][1]["catalog_entry_index"] is None
+    assert report["catalog_evidence"][0]["missing_required_concepts"] == [
+        {"rule_index": 1, "concept_indexes": [1]}
+    ]
     assert report["minimum_score"] == 95
     assert report["ambiguity_margin"] == 15
     assert report["candidate_count"] == 2
@@ -272,6 +277,32 @@ def test_diagnostic_nonfinite_scores_are_redacted() -> None:
     assert report["candidates"][0]["positive_score"] is None
     assert report["candidates"][0]["negative_score"] is None
     assert "sensitive" not in str(report)
+
+
+def test_candidate_catalog_indices_are_stable_without_labels() -> None:
+    secret = "customer-private-intent"
+    resolved = {
+        "candidates": [
+            {"intent_name": secret, "score": 120, "matches": []},
+            {"intent_name": "unlisted", "score": 110, "matches": []},
+        ],
+        "intent_catalog": {"evaluations": [
+            {"intent_name": "other", "rules": []},
+            {"intent_name": secret, "rules": [
+                {"effect": "require", "satisfied": False, "concepts": [
+                    {"satisfied": True}, {"satisfied": False}
+                ]}
+            ]},
+        ]},
+    }
+    diagnostic = summarize_resolution_evidence(resolved)
+    assert diagnostic["candidates"][0]["catalog_entry_index"] == 2
+    assert diagnostic["candidates"][1]["catalog_entry_index"] is None
+    assert diagnostic["catalog_evidence"][1]["missing_required_concepts"] == [
+        {"rule_index": 1, "concept_indexes": [2]}
+    ]
+    assert secret not in str(diagnostic)
+    assert "unlisted" not in str(diagnostic)
 
 
 def test_no_candidate_resolution_diagnostic_is_fail_closed() -> None:
@@ -366,6 +397,7 @@ if __name__ == "__main__":
     test_failed_resolution_evidence_explains_scores_without_leaking_terms()
     test_detailed_evidence_appears_only_for_failed_evaluation()
     test_no_candidate_resolution_diagnostic_is_fail_closed()
+    test_candidate_catalog_indices_are_stable_without_labels()
     test_diagnostic_nonfinite_scores_are_redacted()
     test_malformed_suite_rejected_before_any_semantic_call()
     test_real_planner_rejects_unhandled_reference_for_novel_intent()
