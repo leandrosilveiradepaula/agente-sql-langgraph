@@ -68,6 +68,7 @@ STEPS = [
     ("testar_temporal_catalog_without_columns.py", [sys.executable, "testar_temporal_catalog_without_columns.py"]),
     ("testar_semantic_context_audit_readonly.py", [sys.executable, "testar_semantic_context_audit_readonly.py"]),
     ("testar_semantic_candidate_readiness.py", [sys.executable, "testar_semantic_candidate_readiness.py"]),
+    ("testar_demo_finance_v11_temporal_candidate.py", [sys.executable, "testar_demo_finance_v11_temporal_candidate.py"]),
     ("testar_metric_required_filter_bindings.py", [sys.executable, "testar_metric_required_filter_bindings.py"]),
     ("testar_filter_target_preprovider.py", [sys.executable, "testar_filter_target_preprovider.py"]),
     ("testar_catalog_filter_authorization.py", [sys.executable, "testar_catalog_filter_authorization.py"]),
