@@ -215,7 +215,10 @@ def test_detailed_evidence_appears_only_for_failed_evaluation() -> None:
     with patch(
         "scripts.evaluate_memory_candidate_generalization_readonly.resolve_intent",
         return_value={
-            **mock_intent("Test monthly totals", mock_snapshot()),
+            "applied": True,
+            "intent": "synthetic_intent",
+            "intent_confidence": 0.9,
+            "normalized_question": "Test monthly totals",
             "reason": "minimum_score_not_reached",
             "resolver_configuration": {"minimum_score": 100, "ambiguity_margin": 20},
             "candidates": [],
