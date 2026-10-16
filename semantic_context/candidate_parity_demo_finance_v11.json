@@ -19,6 +19,11 @@
               "metric_concept": "amount",
               "target_table": "demo_lakehouse.gold_orcamento",
               "target_column": "competencia"
+            },
+            {
+              "metric_concept": "amount",
+              "target_table": "demo_lakehouse.gold_lancamentos_contabeis",
+              "target_column": "competencia"
             }
           ],
           "granularities": [
