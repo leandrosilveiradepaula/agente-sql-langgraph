@@ -86,6 +86,37 @@ def parse_overlay_policy(value: Any) -> dict[str, Any]:
             changes.append({
                 "operation": operation, "selector": selector, "terms": cleaned,
             })
+        elif operation == "configure_concept_negation":
+            if set(raw) != {"operation", "policy"}:
+                raise ValueError("invalid negation policy extension")
+            policy = raw["policy"]
+            if not isinstance(policy, Mapping) or set(policy) != {
+                "cue_phrases", "concept_names", "max_gap_tokens",
+            }:
+                raise ValueError("invalid negation policy shape")
+            for field, limit in (("cue_phrases", 64), ("concept_names", 32)):
+                terms = policy[field]
+                if (
+                    not isinstance(terms, list)
+                    or not 1 <= len(terms) <= limit
+                    or any(not isinstance(term, str) or not term.strip()
+                           for term in terms)
+                ):
+                    raise ValueError("invalid negation policy terms")
+                cleaned = [
+                    normalize_search_text(term) if field == "cue_phrases"
+                    else term.strip().casefold() for term in terms
+                ]
+                if any(not term for term in cleaned) or len(cleaned) != len(set(cleaned)):
+                    raise ValueError("duplicate negation policy terms")
+            gap = policy["max_gap_tokens"]
+            if type(gap) is not int or not 0 <= gap <= 3:
+                raise ValueError("invalid negation scope distance")
+            changes.append({"operation": operation, "policy": {
+                "cue_phrases": list(policy["cue_phrases"]),
+                "concept_names": list(policy["concept_names"]),
+                "max_gap_tokens": gap,
+            }})
         elif operation == "mirror_concept_terms":
             if set(raw) != {"operation", "source", "target"}:
                 raise ValueError("invalid semantic mirror")
@@ -242,9 +273,10 @@ def _extend_temporal_granularity(
     grain["terms"] = [*existing, *terms]
 
 
-def _assert_temporal_rule_scope(
+def _assert_overlay_rule_scope(
     before: list[dict[str, Any]], after: list[dict[str, Any]],
     allowed_grains: Mapping[tuple[str, str], set[str]],
+    permitted_negation_rules: set[tuple[str, str]],
 ) -> None:
     """Ensure no component metadata changes except appended grain terms."""
     if len(before) != len(after):
@@ -257,6 +289,21 @@ def _assert_temporal_rule_scope(
             current.get("rule_group"), current.get("rule_name"),
         ):
             raise ValueError("temporal overlay changed rule identity")
+        if identity in permitted_negation_rules:
+            reviewed = deepcopy(current)
+            new_content = reviewed.get("rule_content")
+            previous_content = previous.get("rule_content")
+            if (
+                not isinstance(new_content, dict)
+                or not isinstance(previous_content, Mapping)
+                or "negation_scope" in previous_content
+                or "negation_scope" not in new_content
+            ):
+                raise ValueError("invalid versioned negation configuration")
+            new_content.pop("negation_scope")
+            if reviewed != previous:
+                raise ValueError("negation overlay changed protected resolver metadata")
+            continue
         permitted = allowed_grains.get(identity)
         if not permitted:
             if previous != current:
@@ -321,6 +368,7 @@ def apply_semantic_overlay(
 
     entities = raw["entidades"]
     allowed_temporal_rule_grains: dict[tuple[str, str], set[str]] = {}
+    allowed_negation_rules: set[tuple[str, str]] = set()
     for change in policy["changes"]:
         operation = change["operation"]
         if operation == "extend_concept_terms":
@@ -344,6 +392,21 @@ def apply_semantic_overlay(
             allowed_temporal_rule_grains.setdefault(identity, set()).add(
                 selector["grain"]
             )
+        elif operation == "configure_concept_negation":
+            matches = [
+                rule for rule in raw["regras"]
+                if isinstance(rule.get("rule_content"), Mapping)
+                and rule["rule_content"].get("component") == "intent_resolver"
+            ]
+            if len(matches) != 1:
+                raise ValueError("resolver negation component must match once")
+            target = matches[0]
+            content = target["rule_content"]
+            if "negation_scope" in content:
+                raise ValueError("resolver negation policy already configured")
+            content["negation_scope"] = deepcopy(change["policy"])
+            identity = (target["rule_group"], target["rule_name"])
+            allowed_negation_rules.add(identity)
         elif operation == "mirror_concept_terms":
             source_concept = _one_concept(entities, change["source"])
             target_concept = _one_concept(entities, change["target"])
@@ -395,8 +458,9 @@ def apply_semantic_overlay(
     for key in ("dre_mappings", "query_patterns", "table_catalog"):
         if source[key] != candidate[key]:
             raise ValueError("overlay unexpectedly changed protected collection")
-    _assert_temporal_rule_scope(
+    _assert_overlay_rule_scope(
         source["rules"], candidate["rules"], allowed_temporal_rule_grains,
+        allowed_negation_rules,
     )
     if validate_context_snapshot(candidate)["status"] != "valid":
         raise ValueError("semantic overlay failed context validation")
