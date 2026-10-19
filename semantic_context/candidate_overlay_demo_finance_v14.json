@@ -1,0 +1,163 @@
+{
+  "source_version": "demo-finance-v11",
+  "candidate_version": "demo-finance-v14",
+  "changes": [
+    {
+      "operation": "extend_concept_terms",
+      "selector": {
+        "intent_name": "trend",
+        "rule_name": "trend_primary",
+        "concept_name": "trend"
+      },
+      "terms": [
+        "mês a mês",
+        "trimestre a trimestre",
+        "ano a ano",
+        "ao longo dos meses",
+        "ao longo dos trimestres",
+        "ao longo dos anos",
+        "progressão"
+      ]
+    },
+    {
+      "operation": "mirror_concept_terms",
+      "source": {
+        "intent_name": "trend",
+        "rule_name": "trend_primary",
+        "concept_name": "trend"
+      },
+      "target": {
+        "intent_name": "realized_analysis",
+        "rule_name": "realized_trend_operation_exclusion",
+        "concept_name": "trend"
+      }
+    },
+    {
+      "operation": "add_catalog_exclusion",
+      "source": {
+        "intent_name": "trend",
+        "rule_name": "trend_primary",
+        "concept_name": "trend"
+      },
+      "target_intent": "budget_analysis",
+      "rule_name": "budget_explicit_trend_exclusion",
+      "priority": 1
+    },
+    {
+      "operation": "add_catalog_exclusion",
+      "source": {
+        "intent_name": "ranking",
+        "rule_name": "ranking_operation_primary",
+        "concept_name": "analytical_operation"
+      },
+      "target_intent": "realized_analysis",
+      "rule_name": "realized_explicit_ranking_exclusion",
+      "priority": 2
+    },
+    {
+      "operation": "clone_entity_alias",
+      "source": {
+        "entity_type": "analytical_operation",
+        "user_term": "ranking",
+        "canonical_value": "ranking"
+      },
+      "new_user_term": "ordenar"
+    },
+    {
+      "operation": "clone_entity_alias",
+      "source": {
+        "entity_type": "analytical_operation",
+        "user_term": "ranking",
+        "canonical_value": "ranking"
+      },
+      "new_user_term": "ordene"
+    },
+    {
+      "operation": "extend_concept_terms",
+      "selector": {
+        "intent_name": "ranking",
+        "rule_name": "ranking_operation_primary",
+        "concept_name": "analytical_operation"
+      },
+      "terms": [
+        "ordenar",
+        "ordene",
+        "ordenação",
+        "ordenando",
+        "ordenados",
+        "ordenadas"
+      ]
+    },
+    {
+      "operation": "mirror_concept_terms",
+      "source": {
+        "intent_name": "ranking",
+        "rule_name": "ranking_operation_primary",
+        "concept_name": "analytical_operation"
+      },
+      "target": {
+        "intent_name": "realized_analysis",
+        "rule_name": "realized_explicit_ranking_exclusion",
+        "concept_name": "analytical_operation"
+      }
+    },
+    {
+      "operation": "add_catalog_exclusion",
+      "source": {
+        "intent_name": "ranking",
+        "rule_name": "ranking_operation_primary",
+        "concept_name": "analytical_operation"
+      },
+      "target_intent": "budget_analysis",
+      "rule_name": "budget_explicit_ranking_exclusion",
+      "priority": 2
+    },
+    {
+      "operation": "clone_entity_alias",
+      "source": {
+        "entity_type": "analytical_operation",
+        "user_term": "ranking",
+        "canonical_value": "ranking"
+      },
+      "new_user_term": "ordenação"
+    },
+    {
+      "operation": "clone_entity_alias",
+      "source": {
+        "entity_type": "analytical_operation",
+        "user_term": "ranking",
+        "canonical_value": "ranking"
+      },
+      "new_user_term": "ordenando"
+    },
+    {
+      "operation": "clone_entity_alias",
+      "source": {
+        "entity_type": "analytical_operation",
+        "user_term": "ranking",
+        "canonical_value": "ranking"
+      },
+      "new_user_term": "ordenados"
+    },
+    {
+      "operation": "clone_entity_alias",
+      "source": {
+        "entity_type": "analytical_operation",
+        "user_term": "ranking",
+        "canonical_value": "ranking"
+      },
+      "new_user_term": "ordenadas"
+    },
+    {
+      "operation": "extend_temporal_granularity_terms",
+      "selector": {
+        "rule_name": "temporal_planning_config",
+        "grain": "month"
+      },
+      "terms": [
+        "meses",
+        "mensais"
+      ]
+    }
+  ]
+}
