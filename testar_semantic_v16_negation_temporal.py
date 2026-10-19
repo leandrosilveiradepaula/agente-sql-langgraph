@@ -121,6 +121,31 @@ def test_negation_only_applies_when_versioned_and_opted_in() -> None:
     assert intent(candidate, "show trajectory with no dataset") == "intent_test"
 
 
+def test_negated_concept_cannot_reappear_via_semantic_defaults() -> None:
+    source = _synthetic_source()
+    candidate = apply_semantic_overlay(source, _policy())
+    semantics = deepcopy(candidate["intent_resolution"])
+    semantics["semantic_defaults"] = {
+        "component": "semantic_defaults",
+        "rules": [{
+            "rule_name": "default_operation",
+            "when_present": ["dataset_marker"],
+            "when_absent": [],
+            "produce": ["operation_marker"],
+            "priority": 1,
+        }],
+    }
+    resolved = resolve_intent(
+        "show dataset without computing trajectory", semantics,
+    )
+    assert resolved["intent"] == "scenario_intent"
+    assert not resolved["semantic_defaults"]["applied"]
+    assert any(
+        item["reason"] == "negated_concept_cannot_be_defaulted"
+        for item in resolved["semantic_defaults"]["suppressed"]
+    )
+
+
 def test_invalid_negation_policies_are_rejected_without_mutation() -> None:
     source = _synthetic_source()
     old = deepcopy(source)
@@ -211,6 +236,7 @@ def test_real_sql_execution_prevented_before_repository_access() -> None:
 
 if __name__ == "__main__":
     test_negation_only_applies_when_versioned_and_opted_in()
+    test_negated_concept_cannot_reappear_via_semantic_defaults()
     test_invalid_negation_policies_are_rejected_without_mutation()
     test_validator_rejects_malformed_stored_negation_config()
     test_v16_remains_cumulative_and_does_not_embed_questions()
