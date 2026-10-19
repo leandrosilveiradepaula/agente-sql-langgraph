@@ -50,19 +50,34 @@ def test_v13_preserves_prior_overlay_as_immutable_prefix() -> None:
 
 
 def test_new_semantics_are_configured_and_exclusions_follow_the_source() -> None:
+    # Business intent labels, rule names and aliases belong to versioned JSON,
+    # never to Python assertions. Check semantic relationships structurally.
     old, new = _policies()
     additions = new["changes"][len(old["changes"]):]
-    extension = next(
+    extensions = [
         change for change in additions
         if change["operation"] == "extend_concept_terms"
-    )
+    ]
+    assert len(extensions) == 1
+    extension = extensions[0]
     selector = extension["selector"]
-    assert selector == {
-        "intent_name": "ranking",
-        "rule_name": "ranking_operation_primary",
-        "concept_name": "analytical_operation",
+
+    earlier_aliases = [
+        change for change in old["changes"]
+        if change["operation"] == "clone_entity_alias"
+    ]
+    assert earlier_aliases
+    prototypes = {
+        json.dumps(change["source"], sort_keys=True)
+        for change in earlier_aliases
     }
-    assert {"ordenar", "ordene"} <= set(extension["terms"])
+    assert len(prototypes) == 1
+    original_vocabulary = {
+        change["new_user_term"] for change in earlier_aliases
+    }
+    extended_vocabulary = set(extension["terms"])
+    assert original_vocabulary <= extended_vocabulary
+    assert extended_vocabulary - original_vocabulary
 
     mirrors = [
         change for change in additions
@@ -70,11 +85,8 @@ def test_new_semantics_are_configured_and_exclusions_follow_the_source() -> None
     ]
     assert len(mirrors) == 1
     assert mirrors[0]["source"] == selector
-    assert mirrors[0]["target"] == {
-        "intent_name": "realized_analysis",
-        "rule_name": "realized_explicit_ranking_exclusion",
-        "concept_name": "analytical_operation",
-    }
+    assert mirrors[0]["target"]["intent_name"] != selector["intent_name"]
+    assert mirrors[0]["target"]["concept_name"] == selector["concept_name"]
 
     guards = [
         change for change in additions
@@ -82,15 +94,21 @@ def test_new_semantics_are_configured_and_exclusions_follow_the_source() -> None
     ]
     assert len(guards) == 1
     assert guards[0]["source"] == selector
-    assert guards[0]["target_intent"] == "budget_analysis"
-    assert guards[0]["rule_name"] == "budget_explicit_ranking_exclusion"
+    assert guards[0]["target_intent"] != selector["intent_name"]
+    assert guards[0]["target_intent"] != mirrors[0]["target"]["intent_name"]
 
-    aliases = {
-        change["new_user_term"]
-        for change in additions
+    cloned_aliases = [
+        change for change in additions
         if change["operation"] == "clone_entity_alias"
-    }
-    assert aliases == set(extension["terms"]) - {"ordenar", "ordene"}
+    ]
+    assert cloned_aliases
+    assert all(
+        json.dumps(change["source"], sort_keys=True) in prototypes
+        for change in cloned_aliases
+    )
+    assert {
+        change["new_user_term"] for change in cloned_aliases
+    } == extended_vocabulary - original_vocabulary
 
 
 def test_independent_evaluation_is_not_runtime_context() -> None:
