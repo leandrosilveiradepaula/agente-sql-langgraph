@@ -1,0 +1,100 @@
+{
+  "suite": "demo-finance-v13-operation-vs-scenario-independent-controls",
+  "purpose": "Evaluation-only independent paraphrases and counterexamples for ordering versus scenario grouping, comparisons, temporal trends and temporal guards. Expectations are never read by resolver/planner/SQL generator and are checked only after observing the result.",
+  "cases": [
+    {
+      "question": "Apresente os centros de custo ordenados por valor realizado por competência.",
+      "expected_intent": "ranking",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Ordene as marcas pelo valor realizado por competência.",
+      "expected_intent": "ranking",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Quero uma ordenação das unidades de negócio segundo o orçamento.",
+      "expected_intent": "ranking"
+    },
+    {
+      "question": "Organize os valores realizados por marca em uma ordenação.",
+      "expected_intent": "ranking"
+    },
+    {
+      "question": "Coloque as unidades de negócio ordenadas pelo valor orçado por competência.",
+      "expected_intent": "ranking",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Ordenar os centros de custo pelo valor realizado por competência.",
+      "expected_intent": "ranking",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Mostre o orçamento por centro de custo no último trimestre.",
+      "expected_intent": "budget_analysis"
+    },
+    {
+      "question": "Liste os valores orçados de cada unidade de negócio por competência.",
+      "expected_intent": "budget_analysis",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Mostre o valor realizado de cada unidade de negócio por competência.",
+      "expected_intent": "realized_analysis",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Apresente o valor realizado por centro de custo no último ano.",
+      "expected_intent": "realized_analysis"
+    },
+    {
+      "question": "Compare orçamento e realizado para cada unidade de negócio por competência.",
+      "expected_intent": "actual_vs_budget",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Descreva a evolução dos valores realizados ao longo dos meses por competência.",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Quero a visão mensal do orçamento por marca.",
+      "expected_intent": "budget_analysis"
+    },
+    {
+      "question": "Liste valores realizados por trimestre.",
+      "expected_intent": "realized_analysis"
+    },
+    {
+      "question": "Quais marcas apresentam o menor valor orçado no período?",
+      "expected_intent": "ranking"
+    },
+    {
+      "question": "Quais centros de custo têm maior valor realizado por competência?",
+      "expected_intent": "ranking",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Ordene as marcas por valor realizado usando a data de lançamento.",
+      "expected_intent": "ranking",
+      "expected_plan_status": "rejected",
+      "expected_error_code": "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED"
+    },
+    {
+      "question": "Faça um ranking de marcas segundo o valor orçado por competência.",
+      "expected_intent": "ranking",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Mostre evolução dos realizados por competência e data de lançamento.",
+      "expected_intent": "trend",
+      "expected_plan_status": "rejected",
+      "expected_error_code": "PLANNING_TEMPORAL_BINDING_INCOMPLETE"
+    },
+    {
+      "question": "Mostre os totais do orçamento por mês.",
+      "expected_intent": "budget_analysis"
+    }
+  ]
+}
