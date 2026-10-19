@@ -73,6 +73,19 @@ def parse_overlay_policy(value: Any) -> dict[str, Any]:
             changes.append({
                 "operation": operation, "selector": selector, "terms": cleaned,
             })
+        elif operation == "extend_temporal_granularity_terms":
+            if set(raw) != {"operation", "selector", "terms"}:
+                raise ValueError("invalid temporal term extension")
+            selector = _selector(raw["selector"], {"rule_name", "grain"})
+            terms = raw["terms"]
+            if not isinstance(terms, list) or not 1 <= len(terms) <= 64:
+                raise ValueError("invalid temporal term extension list")
+            cleaned = [_required_text(term) for term in terms]
+            if len({normalize_search_text(term) for term in cleaned}) != len(cleaned):
+                raise ValueError("duplicate temporal term extension")
+            changes.append({
+                "operation": operation, "selector": selector, "terms": cleaned,
+            })
         elif operation == "mirror_concept_terms":
             if set(raw) != {"operation", "source", "target"}:
                 raise ValueError("invalid semantic mirror")
@@ -177,6 +190,113 @@ def _one_entity(
     return matched[0]
 
 
+def _one_temporal_granularity(
+    rules: list[dict[str, Any]], selector: Mapping[str, str],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Select one named, versioned temporal component and one grain."""
+    matches = [
+        rule for rule in rules
+        if rule.get("rule_group") == "component_config"
+        and rule.get("rule_name") == selector["rule_name"]
+        and isinstance(rule.get("rule_content"), Mapping)
+        and rule["rule_content"].get("component") == "temporal_planning"
+    ]
+    if len(matches) != 1:
+        raise ValueError("temporal configuration selector must match once")
+    grains = matches[0]["rule_content"].get("granularities")
+    if not isinstance(grains, list) or any(
+        not isinstance(grain, dict) for grain in grains
+    ):
+        raise ValueError("temporal granularities must be a list of objects")
+    selected = [
+        grain for grain in grains
+        if grain.get("grain") == selector["grain"]
+    ]
+    if len(selected) != 1:
+        raise ValueError("temporal grain selector must match exactly once")
+    return selected[0], grains
+
+
+def _extend_temporal_granularity(
+    rules: list[dict[str, Any]], selector: Mapping[str, str],
+    terms: list[str],
+) -> None:
+    grain, grains = _one_temporal_granularity(rules, selector)
+    existing = grain.get("terms")
+    if not isinstance(existing, list) or not all(
+        isinstance(term, str) and term.strip() for term in existing
+    ):
+        raise ValueError("invalid temporal grain terms")
+    # A term may not belong to two distinct granularities: that could make
+    # an otherwise unambiguous time request reject due to conflicting grains.
+    occupied: set[str] = set()
+    for item in grains:
+        values = item.get("terms")
+        if not isinstance(values, list) or not all(
+            isinstance(term, str) and term.strip() for term in values
+        ):
+            raise ValueError("invalid configured temporal vocabulary")
+        occupied.update(normalize_search_text(term) for term in values)
+    if any(normalize_search_text(term) in occupied for term in terms):
+        raise ValueError("temporal extension collides with configured vocabulary")
+    grain["terms"] = [*existing, *terms]
+
+
+def _assert_temporal_rule_scope(
+    before: list[dict[str, Any]], after: list[dict[str, Any]],
+    allowed_grains: Mapping[tuple[str, str], set[str]],
+) -> None:
+    """Ensure no component metadata changes except appended grain terms."""
+    if len(before) != len(after):
+        raise ValueError("temporal overlay changed rule count")
+    for previous, current in zip(before, after, strict=True):
+        identity = (
+            previous.get("rule_group"), previous.get("rule_name"),
+        )
+        if identity != (
+            current.get("rule_group"), current.get("rule_name"),
+        ):
+            raise ValueError("temporal overlay changed rule identity")
+        permitted = allowed_grains.get(identity)
+        if not permitted:
+            if previous != current:
+                raise ValueError("overlay changed protected rule")
+            continue
+        reviewed = deepcopy(current)
+        old = previous.get("rule_content")
+        new = reviewed.get("rule_content")
+        if not isinstance(old, Mapping) or not isinstance(new, dict):
+            raise ValueError("invalid temporal component content")
+        old_grains = old.get("granularities")
+        new_grains = new.get("granularities")
+        if not isinstance(old_grains, list) or not isinstance(new_grains, list):
+            raise ValueError("temporal config lost granularities")
+        if len(old_grains) != len(new_grains):
+            raise ValueError("temporal overlay changed grain count")
+        seen: set[str] = set()
+        for prior, altered in zip(old_grains, new_grains, strict=True):
+            if not isinstance(prior, Mapping) or not isinstance(altered, dict):
+                raise ValueError("invalid temporal grain metadata")
+            grain = prior.get("grain")
+            if grain != altered.get("grain"):
+                raise ValueError("temporal overlay changed grain identity")
+            if grain not in permitted:
+                continue
+            existing = prior.get("terms")
+            extended = altered.get("terms")
+            if (
+                not isinstance(existing, list)
+                or not isinstance(extended, list)
+                or len(extended) <= len(existing)
+                or extended[:len(existing)] != existing
+            ):
+                raise ValueError("temporal extension must append new terms")
+            altered["terms"] = deepcopy(existing)
+            seen.add(str(grain))
+        if seen != permitted or reviewed != previous:
+            raise ValueError("overlay changed protected temporal metadata")
+
+
 def apply_semantic_overlay(
     source: Mapping[str, Any], overlay: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -200,6 +320,7 @@ def apply_semantic_overlay(
         raw[raw_key] = deepcopy(records)
 
     entities = raw["entidades"]
+    allowed_temporal_rule_grains: dict[tuple[str, str], set[str]] = {}
     for change in policy["changes"]:
         operation = change["operation"]
         if operation == "extend_concept_terms":
@@ -216,6 +337,13 @@ def apply_semantic_overlay(
             if not additions:
                 raise ValueError("semantic term extension has no effective change")
             concept["terms"] = [*existing, *additions]
+        elif operation == "extend_temporal_granularity_terms":
+            selector = change["selector"]
+            _extend_temporal_granularity(raw["regras"], selector, change["terms"])
+            identity = ("component_config", selector["rule_name"])
+            allowed_temporal_rule_grains.setdefault(identity, set()).add(
+                selector["grain"]
+            )
         elif operation == "mirror_concept_terms":
             source_concept = _one_concept(entities, change["source"])
             target_concept = _one_concept(entities, change["target"])
@@ -264,9 +392,12 @@ def apply_semantic_overlay(
     candidate = normalize_context_snapshot(raw)
     if candidate["fingerprint"] == source["fingerprint"]:
         raise ValueError("semantic candidate is identical to source")
-    for key in ("rules", "dre_mappings", "query_patterns", "table_catalog"):
+    for key in ("dre_mappings", "query_patterns", "table_catalog"):
         if source[key] != candidate[key]:
             raise ValueError("overlay unexpectedly changed protected collection")
+    _assert_temporal_rule_scope(
+        source["rules"], candidate["rules"], allowed_temporal_rule_grains,
+    )
     if validate_context_snapshot(candidate)["status"] != "valid":
         raise ValueError("semantic overlay failed context validation")
     return candidate
