@@ -162,6 +162,113 @@ def summarize_resolution_evidence(resolved: Mapping[str, Any]) -> dict[str, Any]
     }
 
 
+# Only protocol-level binding statuses are allowed into evaluation evidence.
+# Never emit metric/condition names, source tables, SQL or user vocabulary.
+_PUBLIC_BINDING_STATUSES = frozenset({
+    "resolved",
+    "unresolved",
+    "not_applicable",
+    "invalid_metadata",
+    "ambiguous_metric_concept",
+    "metric_binding_not_applicable",
+    "metric_binding_ambiguous",
+    "metric_binding_below_minimum",
+    "metric_binding_above_maximum",
+    "metric_binding_ref_missing",
+    "metric_binding_duplicate_ref",
+    "metric_binding_concept_mismatch",
+    "metric_binding_cardinality_conflict",
+})
+
+
+def summarize_planned_metric_evidence(
+    projection: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Reduce planner binding evidence to counts and structural statuses.
+
+    The projection itself can include business names and physical metadata.
+    None is returned. This is evaluation-only, never a planning input.
+    """
+    if not isinstance(projection, Mapping):
+        return None
+    diagnostics = projection.get("diagnostics")
+    if not isinstance(diagnostics, Mapping):
+        return None
+    metric = diagnostics.get("planned_metric_diagnostic")
+    if not isinstance(metric, Mapping):
+        return None
+
+    def count(value: Any) -> int:
+        return len(value) if isinstance(value, list) else 0
+
+    def status(value: Any) -> str:
+        return (
+            value if isinstance(value, str)
+            and value in _PUBLIC_BINDING_STATUSES
+            else "other"
+        )
+
+    inference = metric.get("binding_inference")
+    inference = inference if isinstance(inference, Mapping) else {}
+    failures = metric.get("binding_failures")
+    failures = failures if isinstance(failures, list) else []
+    nested = []
+    for failure in failures:
+        if not isinstance(failure, Mapping):
+            continue
+        bindings = failure.get("binding_diagnostics")
+        if isinstance(bindings, list):
+            nested.extend(item for item in bindings if isinstance(item, Mapping))
+    inferred_bindings = inference.get("binding_diagnostics")
+    if not nested and isinstance(inferred_bindings, list):
+        nested.extend(item for item in inferred_bindings if isinstance(item, Mapping))
+
+    rejected_conditions = {
+        "when_present_missing": 0,
+        "when_absent_present": 0,
+        "invalid_metadata": 0,
+        "invalid_physical_target": 0,
+    }
+    required_missing = 0
+    forbidden_present = 0
+    configured_count = 0
+    applicable_count = 0
+    for entry in nested:
+        configured = entry.get("configured_count")
+        applicable = entry.get("applicable_count")
+        if type(configured) is int and configured >= 0:
+            configured_count += configured
+        if type(applicable) is int and applicable >= 0:
+            applicable_count += applicable
+        rejected = entry.get("rejected")
+        if not isinstance(rejected, list):
+            continue
+        for item in rejected:
+            if not isinstance(item, Mapping):
+                continue
+            reason = item.get("reason")
+            if isinstance(reason, str) and reason in rejected_conditions:
+                rejected_conditions[reason] += 1
+            required_missing += count(item.get("missing_present"))
+            forbidden_present += count(item.get("blocked_absent"))
+
+    return {
+        "metric_requested": metric.get("metric_requested") is True,
+        "matched_metric_term_count": count(metric.get("matched_terms")),
+        "unresolved_metric_term_count": count(metric.get("unresolved_terms")),
+        "invalid_metadata_metric_term_count": count(metric.get("invalid_metadata_terms")),
+        "binding_context_concept_count": count(metric.get("binding_context_concepts")),
+        "binding_failure_count": len(failures),
+        "binding_inference_status": status(inference.get("status")),
+        "global_binding_status": status(metric.get("global_binding_status")),
+        "configured_binding_count": configured_count,
+        "applicable_binding_count": applicable_count,
+        "rejected_binding_reasons": rejected_conditions,
+        "missing_required_binding_condition_count": required_missing,
+        "conflicting_absent_binding_condition_count": forbidden_present,
+    }
+
+
 def observe_plan(snapshot: Mapping[str, Any], question: str) -> dict[str, Any]:
     """Compute observations without access to expected results or other cases."""
     resolved = resolve_intent(question, snapshot["intent_resolution"])
@@ -198,6 +305,7 @@ def observe_plan(snapshot: Mapping[str, Any], question: str) -> dict[str, Any]:
     return {
         "intent": intent if isinstance(intent, str) else None,
         "intent_applied": resolved.get("applied") is True,
+        "planned_metric_evidence": summarize_planned_metric_evidence(projection),
         "plan_status": status,
         "plan_error_code": error_code,
         "temporal_status": diagnostic.get("status", "not_applicable"),
