@@ -1233,11 +1233,64 @@ def _validate_component_configs(
                 details={"received_type": type(config).__name__},
             )
             continue
+        if component_name == "intent_resolver":
+            _validate_versioned_concept_negation(config, snapshot, errors)
         if component_name == "semantic_defaults":
             _validate_semantic_defaults_config(config, errors)
         if component_name == "temporal_planning":
             _validate_temporal_planning_config(config, snapshot, errors)
 
+
+
+def _validate_versioned_concept_negation(
+    config: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    errors: list[ContextValidationIssue],
+) -> None:
+    """Check the optional language-level negation policy in versioned context."""
+    policy = config.get("negation_scope")
+    if policy is None:
+        return
+    path = "component_configs.intent_resolver.negation_scope"
+
+    def issue(code: str, field: str) -> None:
+        _add_issue(
+            errors,
+            code=code,
+            message="Configuração de negação conceitual inválida.",
+            path=path + field,
+            details={},
+        )
+
+    if not isinstance(policy, Mapping) or set(policy) != {
+        "cue_phrases", "concept_names", "max_gap_tokens",
+    }:
+        issue("NEGATION_SCOPE_INVALID", "")
+        return
+    for field, limit in (("cue_phrases", 64), ("concept_names", 32)):
+        values = policy.get(field)
+        if (
+            not isinstance(values, list)
+            or not 1 <= len(values) <= limit
+            or any(not _is_non_empty_text(item) for item in values)
+        ):
+            issue("NEGATION_SCOPE_TERMS_INVALID", f".{field}")
+            continue
+        normalized = [
+            normalize_search_text(str(item))
+            if field == "cue_phrases" else str(item).strip().casefold()
+            for item in values
+        ]
+        if any(not term for term in normalized) or len(set(normalized)) != len(normalized):
+            issue("NEGATION_SCOPE_TERMS_DUPLICATE", f".{field}")
+        if field == "concept_names":
+            unknown = set(normalized) - _semantic_concept_universe(snapshot)
+            if unknown:
+                issue("NEGATION_SCOPE_UNKNOWN_CONCEPT", f".{field}")
+
+    gap = policy.get("max_gap_tokens")
+    if type(gap) is not int or not 0 <= gap <= 3:
+        issue("NEGATION_SCOPE_GAP_INVALID", ".max_gap_tokens")
 
 
 def _validate_temporal_planning_config(

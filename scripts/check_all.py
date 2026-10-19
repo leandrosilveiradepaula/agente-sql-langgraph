@@ -78,6 +78,7 @@ STEPS = [
     ("testar_semantic_v13_readonly_candidate.py", [sys.executable, "testar_semantic_v13_readonly_candidate.py"]),
     ("testar_semantic_v14_readonly_candidate.py", [sys.executable, "testar_semantic_v14_readonly_candidate.py"]),
     ("testar_semantic_v15_readonly_candidate.py", [sys.executable, "testar_semantic_v15_readonly_candidate.py"]),
+    ("testar_semantic_v16_negation_temporal.py", [sys.executable, "testar_semantic_v16_negation_temporal.py"]),
     ("testar_semantic_version_comparison_readonly.py", [sys.executable, "testar_semantic_version_comparison_readonly.py"]),
     ("testar_shadow_semantic_overlay_runner.py", [sys.executable, "testar_shadow_semantic_overlay_runner.py"]),
     ("testar_shadow_semantic_preflight_runner.py", [sys.executable, "testar_shadow_semantic_preflight_runner.py"]),

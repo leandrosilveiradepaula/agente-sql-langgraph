@@ -322,6 +322,12 @@ def resolve_intent(
         for index, signal in enumerate(raw_signals)
     ]
     catalog = _validated_catalog(raw_catalog)
+    negation_scope = _validated_negation_scope_config(
+        config.get("negation_scope")
+    )
+    suppressed_concepts = _negated_catalog_concept_names(
+        question, catalog, negation_scope,
+    )
 
     normalized_question = normalize_search_text(question)
     token_fallback_config = _effective_token_fallback(config)
@@ -349,7 +355,6 @@ def resolve_intent(
 
         if not match_result["matched"]:
             continue
-
         candidate = _get_or_create_candidate(
             candidate_map,
             signal["intent_name"],
@@ -386,12 +391,14 @@ def resolve_intent(
         _evaluate_catalog_entry(
             normalized_question,
             entry,
+            suppressed_concepts=suppressed_concepts,
         )
         for entry in catalog
     ]
     semantic_defaults = _apply_semantic_defaults(
         catalog_evaluations,
         semantic_defaults_config,
+        suppressed_concepts=suppressed_concepts,
     )
 
     blocked_intents: set[str] = set()
@@ -509,6 +516,105 @@ def resolve_intent(
         },
         "resolver_version": RESOLVER_VERSION,
     }
+
+
+def _validated_negation_scope_config(value: Any) -> dict[str, Any] | None:
+    """Validate the optional, versioned linguistic scope of concept negation.
+
+    Cue phrases and the names of concepts that can be suppressed are supplied
+    by semantic context. There are no intent, metric or customer labels here.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or set(value) != {
+        "cue_phrases", "concept_names", "max_gap_tokens",
+    }:
+        raise IntentResolverInputError("negation_scope has invalid shape")
+    normalized: dict[str, list[str]] = {}
+    for field, limit in (("cue_phrases", 64), ("concept_names", 32)):
+        values = value.get(field)
+        if (
+            not isinstance(values, list)
+            or not 1 <= len(values) <= limit
+            or any(not isinstance(item, str) or not item.strip() for item in values)
+        ):
+            raise IntentResolverInputError("invalid negation_scope entries")
+        labels = [
+            normalize_search_text(item) if field == "cue_phrases"
+            else item.strip().casefold()
+            for item in values
+        ]
+        if any(not label for label in labels) or len(labels) != len(set(labels)):
+            raise IntentResolverInputError("duplicate/empty negation_scope entries")
+        normalized[field] = labels
+    gap = value.get("max_gap_tokens")
+    if type(gap) is not int or not 0 <= gap <= 3:
+        raise IntentResolverInputError("invalid negation_scope distance")
+    return {**normalized, "max_gap_tokens": gap}
+
+
+def _has_configured_negated_term(
+    question: str, normalized_term: str,
+    policy: Mapping[str, Any],
+) -> bool:
+    """Check a negating cue immediately before a vocabulary match.
+
+    Punctuation splits scopes. Token boundaries prevent substring matches.
+    A short, configured gap permits auxiliary verbs between cue and term.
+    """
+    target = tokenize_search_text(normalized_term)
+    if not target or len(target) > 8:
+        return False
+    cues = [
+        tokenize_search_text(phrase)
+        for phrase in policy["cue_phrases"]
+    ]
+    max_gap = policy["max_gap_tokens"]
+    for clause in re.split(r"[,;.!?\n]+", question):
+        words = tokenize_search_text(normalize_search_text(clause))
+        for start in range(len(words) - len(target) + 1):
+            if words[start:start + len(target)] != target:
+                continue
+            for cue in cues:
+                if not cue:
+                    continue
+                for gap in range(max_gap + 1):
+                    end = start - gap
+                    begin = end - len(cue)
+                    if begin >= 0 and words[begin:end] == cue:
+                        return True
+    return False
+
+
+def _negated_catalog_concept_names(
+    question: str,
+    catalog: list[IntentCatalogEntry],
+    policy: Mapping[str, Any] | None,
+) -> set[str]:
+    """Conservatively suppress the whole configured concept on explicit denial.
+
+    A negated operation must not separately trigger a positive score or an
+    exclusion that blocks the user's affirmative scenario. No implicit
+    business vocabulary is provided by the engine.
+    """
+    if policy is None:
+        return set()
+    enabled = set(policy["concept_names"])
+    suppressed: set[str] = set()
+    for entry in catalog:
+        for rule in entry["rules"]:
+            for concept in rule["concepts"]:
+                name = concept["concept_name"].casefold()
+                if name not in enabled or name in suppressed:
+                    continue
+                if concept["match_mode"] == "regex":
+                    continue
+                if any(
+                    _has_configured_negated_term(question, term, policy)
+                    for term in concept["normalized_terms"]
+                ):
+                    suppressed.add(name)
+    return suppressed
 
 
 def _validated_config(
@@ -1139,11 +1245,14 @@ def _update_candidate_priority(
 def _evaluate_catalog_entry(
     normalized_question: str,
     entry: IntentCatalogEntry,
+    *,
+    suppressed_concepts: set[str] | None = None,
 ) -> IntentCatalogEntryEvaluation:
     rule_evaluations = [
         _evaluate_catalog_rule(
             normalized_question,
             rule,
+            suppressed_concepts=suppressed_concepts,
         )
         for rule in entry["rules"]
     ]
@@ -1197,6 +1306,8 @@ def _evaluate_catalog_entry(
 def _evaluate_catalog_rule(
     normalized_question: str,
     rule: IntentCatalogRule,
+    *,
+    suppressed_concepts: set[str] | None = None,
 ) -> IntentCatalogRuleEvaluation:
     protected_token_indexes = _protected_dimension_token_indexes(
         normalized_question,
@@ -1207,6 +1318,7 @@ def _evaluate_catalog_rule(
             normalized_question,
             concept,
             protected_token_indexes=protected_token_indexes,
+            suppressed_concepts=suppressed_concepts,
         )
         for concept in rule["concepts"]
     ]
@@ -1236,6 +1348,8 @@ def _evaluate_catalog_rule(
 def _apply_semantic_defaults(
     catalog_evaluations: list[IntentCatalogEntryEvaluation],
     config: SemanticDefaultsConfig | None,
+    *,
+    suppressed_concepts: set[str] | None = None,
 ) -> SemanticDefaultsDiagnostic:
     if config is None:
         return {"requested": False, "applied": [], "suppressed": []}
@@ -1270,6 +1384,14 @@ def _apply_semantic_defaults(
 
         for concept in rule["produce"]:
             concept_key = concept.casefold()
+            if concept_key in (suppressed_concepts or set()):
+                suppressed.append({
+                    "rule_name": rule["rule_name"],
+                    "reason": "negated_concept_cannot_be_defaulted",
+                    "concept_name": concept,
+                    "priority": rule["priority"],
+                })
+                continue
             if concept_key in explicit_concepts:
                 suppressed.append(
                     {
@@ -1398,7 +1520,28 @@ def _evaluate_catalog_concept(
     concept: IntentCatalogConcept,
     *,
     protected_token_indexes: set[int] | None = None,
+    suppressed_concepts: set[str] | None = None,
 ) -> IntentCatalogConceptEvaluation:
+    if concept["concept_name"].casefold() in (suppressed_concepts or set()):
+        return {
+            "concept_name": concept["concept_name"],
+            "match_mode": concept["match_mode"],
+            "minimum_term_matches": concept["minimum_term_matches"],
+            "matched_term_count": 0,
+            "satisfied": False,
+            "terms": [
+                {
+                    "term": term,
+                    "normalized_term": norm,
+                    "matched": False,
+                    "match_details": None,
+                }
+                for term, norm in zip(
+                    concept["terms"], concept["normalized_terms"], strict=True
+                )
+            ],
+            "semantic_signals": [],
+        }
     term_evaluations: list[IntentCatalogTermEvaluation] = []
     semantic_signals: list[SemanticSignal] = []
     protected = protected_token_indexes or set()
