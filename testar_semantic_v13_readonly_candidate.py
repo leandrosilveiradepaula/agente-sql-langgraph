@@ -167,7 +167,15 @@ def test_synthetic_operations_override_scenarios_without_lower_threshold() -> No
         _synthetic_definition("scenario_intent", "scenario", "scenario",
                               with_exclusion=True),
     ])
+    # Every synthetic intent must also be declared by an active pattern;
+    # the validator requires the intent catalog to reference authorized intents.
+    for intent_name in ("operation_intent", "scenario_intent"):
+        pattern = deepcopy(raw["padroes"][0])
+        pattern["intent_name"] = intent_name
+        pattern["pattern_name"] = f"{intent_name}_pattern"
+        raw["padroes"].append(pattern)
     raw["context_counts"]["entidades"] = len(raw["entidades"])
+    raw["context_counts"]["padroes"] = len(raw["padroes"])
     source = normalize_context_snapshot(raw)
     assert validate_context_snapshot(source)["status"] == "valid"
     before = deepcopy(source)
