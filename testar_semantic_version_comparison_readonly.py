@@ -9,6 +9,7 @@ from unittest.mock import patch
 from scripts.compare_shadow_semantic_overlays_readonly import (
     ComparisonPreflightError,
     _extract_report,
+    _reviewed_engine_revision,
     _validated_paths,
     compare,
 )
@@ -78,6 +79,41 @@ def _process(report: dict, rc: int = 1) -> subprocess.CompletedProcess:
         stdout="Authorization: PRIVATE_CREDENTIAL\n" + json.dumps(report),
         stderr="PRIVATE_CREDENTIAL",
     )
+
+
+def test_evaluator_revision_is_attested_not_guessed() -> None:
+    good_sha = "a" * 40
+    proc = subprocess.CompletedProcess(
+        args=["git", "rev-parse", "HEAD"],
+        returncode=0,
+        stdout=good_sha + "\n",
+        stderr="",
+    )
+    with patch(
+        "scripts.compare_shadow_semantic_overlays_readonly.subprocess.run",
+        return_value=proc,
+    ) as run:
+        assert _reviewed_engine_revision() == good_sha
+        args, kwargs = run.call_args
+        assert args[0] == ["git", "rev-parse", "HEAD"]
+        assert kwargs["capture_output"] is True
+        assert kwargs["check"] is False
+        assert kwargs["timeout"] <= 5
+
+    for revision in ("no-git", "abcde", "b" * 64):
+        bad = subprocess.CompletedProcess(
+            args=["git"], returncode=0,
+            stdout=revision, stderr="",
+        )
+        with patch(
+            "scripts.compare_shadow_semantic_overlays_readonly.subprocess.run",
+            return_value=bad,
+        ):
+            try:
+                _reviewed_engine_revision()
+            except ComparisonPreflightError:
+                continue
+            raise AssertionError("unverifiable evaluator accepted")
 
 
 def test_invalid_paths_and_implicit_suites_reject_without_subprocess() -> None:
@@ -179,6 +215,7 @@ def test_cli_rejects_malformed_inputs_before_subprocess() -> None:
 
 
 if __name__ == "__main__":
+    test_evaluator_revision_is_attested_not_guessed()
     test_invalid_paths_and_implicit_suites_reject_without_subprocess()
     test_observations_and_governance_are_mandatory()
     test_compare_reports_regressions_without_leaking_inputs()
