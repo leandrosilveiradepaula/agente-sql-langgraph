@@ -578,7 +578,7 @@ def _has_configured_negated_term(
         for phrase in policy["cue_phrases"]
     ]
     max_gap = policy["max_gap_tokens"]
-    for clause in re.split(r"[,;.!?\\n]+", question):
+    for clause in re.split(r"[,;.!?\n]+", question):
         words = tokenize_search_text(normalize_search_text(clause))
         for start in range(len(words) - len(target) + 1):
             if words[start:start + len(target)] != target:
