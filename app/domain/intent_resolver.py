@@ -355,15 +355,6 @@ def resolve_intent(
 
         if not match_result["matched"]:
             continue
-        if (
-            negation_scope is not None
-            and signal["match_mode"] != "regex"
-            and _has_configured_negated_term(
-                question, signal["normalized_pattern"], negation_scope,
-            )
-        ):
-            continue
-
         candidate = _get_or_create_candidate(
             candidate_map,
             signal["intent_name"],
