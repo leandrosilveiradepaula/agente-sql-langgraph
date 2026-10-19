@@ -117,6 +117,23 @@ def parse_overlay_policy(value: Any) -> dict[str, Any]:
                 "concept_names": list(policy["concept_names"]),
                 "max_gap_tokens": gap,
             }})
+        elif operation == "extend_negation_scope_concepts":
+            if set(raw) != {"operation", "concept_names"}:
+                raise ValueError("invalid negation scope extension")
+            names = raw["concept_names"]
+            if (
+                not isinstance(names, list)
+                or not 1 <= len(names) <= 32
+                or any(not isinstance(name, str) or not name.strip() for name in names)
+            ):
+                raise ValueError("invalid negation extension concepts")
+            normalized = [name.strip().casefold() for name in names]
+            if len(set(normalized)) != len(normalized):
+                raise ValueError("duplicate negation extension concepts")
+            changes.append({
+                "operation": operation,
+                "concept_names": [name.strip() for name in names],
+            })
         elif operation == "mirror_concept_terms":
             if set(raw) != {"operation", "source", "target"}:
                 raise ValueError("invalid semantic mirror")
@@ -407,6 +424,34 @@ def apply_semantic_overlay(
             content["negation_scope"] = deepcopy(change["policy"])
             identity = (target["rule_group"], target["rule_name"])
             allowed_negation_rules.add(identity)
+        elif operation == "extend_negation_scope_concepts":
+            matches = [
+                rule for rule in raw["regras"]
+                if isinstance(rule.get("rule_content"), Mapping)
+                and rule["rule_content"].get("component") == "intent_resolver"
+            ]
+            if len(matches) != 1:
+                raise ValueError("resolver negation extension selector ambiguous")
+            target = matches[0]
+            policy_config = target["rule_content"].get("negation_scope")
+            if not isinstance(policy_config, dict):
+                raise ValueError("negation scope must be configured first")
+            existing = policy_config.get("concept_names")
+            if not isinstance(existing, list) or not all(
+                isinstance(name, str) and name.strip() for name in existing
+            ):
+                raise ValueError("invalid negation scope concepts")
+            known = {name.strip().casefold() for name in existing}
+            added = [name.strip() for name in change["concept_names"]]
+            if (
+                len(existing) + len(added) > 32
+                or any(name.casefold() in known for name in added)
+            ):
+                raise ValueError("negation extension conflicts with existing policy")
+            policy_config["concept_names"] = [*existing, *added]
+            identity = (target["rule_group"], target["rule_name"])
+            if identity not in allowed_negation_rules:
+                raise ValueError("negation extension has no authorized base policy")
         elif operation == "mirror_concept_terms":
             source_concept = _one_concept(entities, change["source"])
             target_concept = _one_concept(entities, change["target"])
