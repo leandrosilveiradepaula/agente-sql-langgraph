@@ -75,6 +75,7 @@ STEPS = [
     ("testar_contextual_single_metric_inference.py", [sys.executable, "testar_contextual_single_metric_inference.py"]),
     ("testar_semantic_overlay_invariants.py", [sys.executable, "testar_semantic_overlay_invariants.py"]),
     ("testar_semantic_v12_readonly_candidate.py", [sys.executable, "testar_semantic_v12_readonly_candidate.py"]),
+    ("testar_semantic_v13_readonly_candidate.py", [sys.executable, "testar_semantic_v13_readonly_candidate.py"]),
     ("testar_shadow_semantic_overlay_runner.py", [sys.executable, "testar_shadow_semantic_overlay_runner.py"]),
     ("testar_shadow_semantic_preflight_runner.py", [sys.executable, "testar_shadow_semantic_preflight_runner.py"]),
     ("testar_demo_finance_v11_temporal_candidate.py", [sys.executable, "testar_demo_finance_v11_temporal_candidate.py"]),
