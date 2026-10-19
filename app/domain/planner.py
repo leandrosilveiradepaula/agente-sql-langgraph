@@ -1686,9 +1686,14 @@ def _detect_planned_metrics(
             continue
         metrics.extend(resolved_metrics)
 
+    # A semantic operation can imply a metric even without a literal metric
+    # word. Reuse the versioned binding predicates for both cardinalities,
+    # but only when there is configured contextual evidence; ambiguous or
+    # inapplicable bindings remain unresolved (never guess a physical column).
     if (
         not evidence_terms
-        and operation_cardinality.get("mode") == "multiple"
+        and binding_context_concepts
+        and operation_cardinality.get("mode") in {"single", "multiple"}
     ):
         inferred_metrics, inference_diagnostic = (
             _infer_planned_metrics_from_binding_context(
