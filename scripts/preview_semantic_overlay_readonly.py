@@ -134,6 +134,15 @@ def parse_overlay_policy(value: Any) -> dict[str, Any]:
                 "operation": operation,
                 "concept_names": [name.strip() for name in names],
             })
+        elif operation == "add_negation_intent_gate":
+            if set(raw) != {"operation", "selector"}:
+                raise ValueError("invalid negation intent gate extension")
+            changes.append({
+                "operation": operation,
+                "selector": _selector(
+                    raw["selector"], {"intent_name", "concept_name"},
+                ),
+            })
         elif operation == "mirror_concept_terms":
             if set(raw) != {"operation", "source", "target"}:
                 raise ValueError("invalid semantic mirror")
@@ -452,6 +461,49 @@ def apply_semantic_overlay(
             identity = (target["rule_group"], target["rule_name"])
             if identity not in allowed_negation_rules:
                 raise ValueError("negation extension has no authorized base policy")
+        elif operation == "add_negation_intent_gate":
+            matches = [
+                rule for rule in raw["regras"]
+                if isinstance(rule.get("rule_content"), Mapping)
+                and rule["rule_content"].get("component") == "intent_resolver"
+            ]
+            if len(matches) != 1:
+                raise ValueError("intent gate resolver configuration is ambiguous")
+            target = matches[0]
+            identity = (target["rule_group"], target["rule_name"])
+            if identity not in allowed_negation_rules:
+                raise ValueError("intent gate requires authorized negation context")
+            negation = target["rule_content"].get("negation_scope")
+            if not isinstance(negation, dict):
+                raise ValueError("negation gate requires a policy object")
+            selector = change["selector"]
+            name = selector["concept_name"].casefold()
+            authorized = negation.get("concept_names", [])
+            if not isinstance(authorized, list) or name not in {
+                str(x).strip().casefold() for x in authorized
+            }:
+                raise ValueError("negation gate concept not authorized")
+            rules = _one_intent_rules(entities, selector["intent_name"])
+            if not any(
+                rule.get("effect") in {"positive_score", "require"}
+                and any(
+                    concept.get("concept_name", "").casefold() == name
+                    for concept in rule.get("concepts", [])
+                    if isinstance(concept, Mapping)
+                )
+                for rule in rules
+            ):
+                raise ValueError("negation gate target operation not configured")
+            gates = negation.setdefault("intent_gates", [])
+            if not isinstance(gates, list) or len(gates) >= 32 or any(
+                isinstance(gate, Mapping)
+                and str(gate.get("intent_name", "")).casefold()
+                    == selector["intent_name"].casefold()
+                and str(gate.get("concept_name", "")).casefold() == name
+                for gate in gates
+            ):
+                raise ValueError("negation intent gate duplicate or limit reached")
+            gates.append(deepcopy(selector))
         elif operation == "mirror_concept_terms":
             source_concept = _one_concept(entities, change["source"])
             target_concept = _one_concept(entities, change["target"])
