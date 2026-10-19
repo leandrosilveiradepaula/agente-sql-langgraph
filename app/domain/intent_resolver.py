@@ -407,6 +407,7 @@ def resolve_intent(
     semantic_defaults = _apply_semantic_defaults(
         catalog_evaluations,
         semantic_defaults_config,
+        suppressed_concepts=suppressed_concepts,
     )
 
     blocked_intents: set[str] = set()
@@ -1356,6 +1357,8 @@ def _evaluate_catalog_rule(
 def _apply_semantic_defaults(
     catalog_evaluations: list[IntentCatalogEntryEvaluation],
     config: SemanticDefaultsConfig | None,
+    *,
+    suppressed_concepts: set[str] | None = None,
 ) -> SemanticDefaultsDiagnostic:
     if config is None:
         return {"requested": False, "applied": [], "suppressed": []}
@@ -1390,6 +1393,14 @@ def _apply_semantic_defaults(
 
         for concept in rule["produce"]:
             concept_key = concept.casefold()
+            if concept_key in (suppressed_concepts or set()):
+                suppressed.append({
+                    "rule_name": rule["rule_name"],
+                    "reason": "negated_concept_cannot_be_defaulted",
+                    "concept_name": concept,
+                    "priority": rule["priority"],
+                })
+                continue
             if concept_key in explicit_concepts:
                 suppressed.append(
                     {
