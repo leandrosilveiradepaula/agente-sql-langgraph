@@ -29,6 +29,22 @@ class ComparisonPreflightError(ValueError):
     pass
 
 
+def _reviewed_engine_revision() -> str:
+    """Attest the evaluator git commit to avoid misleading cross-run comparisons."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT, capture_output=True, text=True,
+            check=False, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ComparisonPreflightError("cannot attest evaluator revision") from exc
+    revision = proc.stdout.strip()
+    if proc.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ComparisonPreflightError("invalid evaluator git revision")
+    return revision
+
+
 def _validated_paths(
     base: str, left: str, right: str,
     suites: list[str], fingerprint: str,
@@ -265,6 +281,7 @@ def main() -> int:
     parser.add_argument("--suite", action="append", required=True)
     args = parser.parse_args()
     try:
+        revision = _reviewed_engine_revision()
         report = compare(
             args.base_policy, args.left, args.right,
             args.suite, args.expected_source_fingerprint,
@@ -276,6 +293,11 @@ def main() -> int:
         print("COMPARISON_ERROR_TYPE:", type(exc).__name__)
         return 3
 
+    print("EVALUATOR_GIT_SHA:", revision)
+    print(
+        "NOTE: zero regressions compares contexts on this same evaluator; "
+        "it does not validate behavior against older engine commits."
+    )
     for result in report["suite_results"]:
         print(
             "SUITE", result["suite"],
