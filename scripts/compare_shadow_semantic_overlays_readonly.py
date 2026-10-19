@@ -18,8 +18,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = "scripts/run_shadow_semantic_overlay_preflight.sh"
-POLICY_PATH = re.compile(r"^semantic_context/[A-Za-z0-9._-]+\\.json$")
-SUITE_PATH = re.compile(r"^scripts/validation/[A-Za-z0-9._-]+\\.json$")
+POLICY_PATH = re.compile(r"^semantic_context/[A-Za-z0-9._-]+\.json$")
+SUITE_PATH = re.compile(r"^scripts/validation/[A-Za-z0-9._-]+\.json$")
 FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
 MAX_SUITE_FILES = 12
 RUN_TIMEOUT_SECONDS = 180
