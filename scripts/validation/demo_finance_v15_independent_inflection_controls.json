@@ -1,0 +1,135 @@
+{
+  "suite": "demo-finance-v15-independent-trend-verb-and-operation-controls",
+  "purpose": "Independent post-resolution/post-planning evaluation only. Includes nontrend aggregation, ranking, comparison, temporal-grain and ambiguous-date counterexamples. No case expectations are used by resolver, planner, context builder, or generator.",
+  "cases": [
+    {
+      "question": "Como evoluiu o valor realizado mensalmente por competência?",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Como evoluíram os valores realizados trimestre a trimestre por competência?",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "De que forma o valor orçado evoluiu ao longo dos meses por competência?",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Apresente os valores realizados evoluindo mês a mês por competência.",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Como o valor realizado evoluía mensalmente por competência?",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Como os valores realizados evoluíam ao longo dos trimestres por competência?",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Mostre a evolução mensal do valor orçado por competência.",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Mostre a progressão anual dos valores realizados por competência.",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "De que forma o valor realizado evoluiu mês a mês pela data de lançamento?",
+      "expected_intent": "trend",
+      "expected_plan_status": "rejected",
+      "expected_error_code": "PLANNING_TEMPORAL_BINDING_INCOMPLETE"
+    },
+    {
+      "question": "Como evoluíram os valores realizados por competência e pela data de lançamento mensalmente?",
+      "expected_intent": "trend",
+      "expected_plan_status": "rejected",
+      "expected_error_code": "PLANNING_TEMPORAL_BINDING_INCOMPLETE"
+    },
+    {
+      "question": "Mostre o realizado por unidade de negócio por competência.",
+      "expected_intent": "realized_analysis",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Quero os valores realizados por centro de custo, agrupados por mês.",
+      "expected_intent": "realized_analysis"
+    },
+    {
+      "question": "Apresente os valores orçados por unidade por competência.",
+      "expected_intent": "budget_analysis",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Mostre o orçamento por centro de custo no último trimestre.",
+      "expected_intent": "budget_analysis",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Liste os valores realizados por mês.",
+      "expected_intent": "realized_analysis"
+    },
+    {
+      "question": "Liste o orçamento total mês a mês, sem calcular evolução.",
+      "expected_intent": "budget_analysis"
+    },
+    {
+      "question": "Ordene os centros de custo pelo valor realizado no ano passado.",
+      "expected_intent": "ranking",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Ordene as unidades pelo maior valor orçado por competência.",
+      "expected_intent": "ranking",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Quais marcas têm o menor valor realizado por competência?",
+      "expected_intent": "ranking",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Compare orçamento e realizado por unidade de negócio por competência.",
+      "expected_intent": "actual_vs_budget",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Compare o valor orçado com o realizado no ano passado.",
+      "expected_intent": "actual_vs_budget"
+    },
+    {
+      "question": "Compare os valores orçados e realizados por data de lançamento.",
+      "expected_intent": "actual_vs_budget",
+      "expected_plan_status": "rejected",
+      "expected_error_code": "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED"
+    },
+    {
+      "question": "Apresente o valor realizado por centro de custo no ano passado.",
+      "expected_intent": "realized_analysis"
+    },
+    {
+      "question": "Apresente a série mensal do valor realizado por competência.",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Descreva a variação trimestral dos valores orçados por competência.",
+      "expected_intent": "trend",
+      "expected_plan_status": "planned"
+    },
+    {
+      "question": "Mostre o realizado mês a mês pela data do lançamento.",
+      "expected_intent": "trend",
+      "expected_plan_status": "rejected",
+      "expected_error_code": "PLANNING_TEMPORAL_BINDING_INCOMPLETE"
+    }
+  ]
+}
