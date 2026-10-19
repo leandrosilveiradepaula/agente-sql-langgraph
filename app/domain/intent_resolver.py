@@ -406,6 +406,9 @@ def resolve_intent(
         semantic_defaults_config,
         suppressed_concepts=fully_negated_concepts,
     )
+    _apply_configured_negation_intent_gates(
+        catalog_evaluations, catalog, negated_terms, negation_scope,
+    )
 
     blocked_intents: set[str] = set()
     for evaluation in catalog_evaluations:
@@ -532,9 +535,10 @@ def _validated_negation_scope_config(value: Any) -> dict[str, Any] | None:
     """
     if value is None:
         return None
-    if not isinstance(value, Mapping) or set(value) != {
-        "cue_phrases", "concept_names", "max_gap_tokens",
-    }:
+    required = {"cue_phrases", "concept_names", "max_gap_tokens"}
+    if not isinstance(value, Mapping) or not required <= set(value) or (
+        set(value) - required - {"intent_gates"}
+    ):
         raise IntentResolverInputError("negation_scope has invalid shape")
     normalized: dict[str, list[str]] = {}
     for field, limit in (("cue_phrases", 64), ("concept_names", 32)):
@@ -556,7 +560,36 @@ def _validated_negation_scope_config(value: Any) -> dict[str, Any] | None:
     gap = value.get("max_gap_tokens")
     if type(gap) is not int or not 0 <= gap <= 3:
         raise IntentResolverInputError("invalid negation_scope distance")
-    return {**normalized, "max_gap_tokens": gap}
+    gates = value.get("intent_gates", [])
+    if (
+        not isinstance(gates, list) or len(gates) > 32
+        or any(not isinstance(gate, Mapping)
+               or set(gate) != {"intent_name", "concept_name"}
+               or any(not isinstance(v, str) or not v.strip()
+                      for v in gate.values())
+               for gate in gates)
+    ):
+        raise IntentResolverInputError("invalid scoped intent gates")
+    normalized_gates = [
+        {
+            "intent_name": gate["intent_name"].strip().casefold(),
+            "concept_name": gate["concept_name"].strip().casefold(),
+        }
+        for gate in gates
+    ]
+    gate_keys = {
+        (gate["intent_name"], gate["concept_name"])
+        for gate in normalized_gates
+    }
+    if len(gate_keys) != len(normalized_gates) or any(
+        gate["concept_name"] not in normalized["concept_names"]
+        for gate in normalized_gates
+    ):
+        raise IntentResolverInputError("invalid negation gate associations")
+    return {
+        **normalized, "max_gap_tokens": gap,
+        "intent_gates": normalized_gates,
+    }
 
 
 def _has_configured_negated_term(
@@ -623,6 +656,60 @@ def _negated_catalog_concept_terms(
                     if _has_configured_negated_term(question, term, policy):
                         suppressed.setdefault(name, set()).add(term)
     return suppressed
+
+
+def _apply_configured_negation_intent_gates(
+    evaluations: list[IntentCatalogEntryEvaluation],
+    catalog: list[IntentCatalogEntry],
+    denied_terms: Mapping[str, set[str]],
+    policy: Mapping[str, Any] | None,
+) -> None:
+    """Deny an intent only when its configured operation was denied.
+
+    A denied operation may still leave the intent with unrelated scores
+    (scenarios, measures or dimensions). This gate protects eligibility
+    independently of scoring while allowing any affirmative occurrence of
+    the very same operation concept for that intent. The intent/concept
+    associations must be supplied by versioned semantic context.
+    """
+    if policy is None:
+        return
+    gates = policy.get("intent_gates", [])
+    for gate in gates:
+        intent_name = gate["intent_name"]
+        concept_name = gate["concept_name"]
+        denied = denied_terms.get(concept_name, set())
+        if not denied:
+            continue
+        for entry, evaluation in zip(catalog, evaluations, strict=True):
+            if entry["intent_name"].casefold() != intent_name:
+                continue
+            denied_in_positive_rule = False
+            affirmative_in_positive_rule = False
+            for rule, rule_eval in zip(
+                entry["rules"], evaluation["rules"], strict=True
+            ):
+                if rule["effect"] not in {"positive_score", "require"}:
+                    continue
+                for concept, concept_eval in zip(
+                    rule["concepts"], rule_eval["concepts"], strict=True
+                ):
+                    if concept["concept_name"].casefold() != concept_name:
+                        continue
+                    if any(
+                        term in denied for term in concept["normalized_terms"]
+                    ):
+                        denied_in_positive_rule = True
+                    if any(
+                        term_eval["matched"] is True
+                        and term_eval["normalized_term"] not in denied
+                        for term_eval in concept_eval["terms"]
+                    ):
+                        affirmative_in_positive_rule = True
+            if denied_in_positive_rule and not affirmative_in_positive_rule:
+                evaluation["eligible"] = False
+                evaluation["excluded"] = True
+            break
 
 
 def _validated_config(
