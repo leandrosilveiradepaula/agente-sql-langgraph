@@ -325,7 +325,7 @@ def resolve_intent(
     negation_scope = _validated_negation_scope_config(
         config.get("negation_scope")
     )
-    suppressed_concepts = _negated_catalog_concept_names(
+    negated_terms = _negated_catalog_concept_terms(
         question, catalog, negation_scope,
     )
 
@@ -391,14 +391,20 @@ def resolve_intent(
         _evaluate_catalog_entry(
             normalized_question,
             entry,
-            suppressed_concepts=suppressed_concepts,
+            negated_terms=negated_terms,
         )
         for entry in catalog
     ]
+    # Defaults cannot reinstate a concept when every matched occurrence was
+    # explicitly denied. A distinct affirmative occurrence remains admissible.
+    fully_negated_concepts = (
+        set(negated_terms)
+        - _explicitly_satisfied_concept_names(catalog_evaluations)
+    )
     semantic_defaults = _apply_semantic_defaults(
         catalog_evaluations,
         semantic_defaults_config,
-        suppressed_concepts=suppressed_concepts,
+        suppressed_concepts=fully_negated_concepts,
     )
 
     blocked_intents: set[str] = set()
@@ -557,24 +563,25 @@ def _has_configured_negated_term(
     question: str, normalized_term: str,
     policy: Mapping[str, Any],
 ) -> bool:
-    """Check a negating cue immediately before a vocabulary match.
+    """Suppress a matched lexical term only if it has no affirmative use.
 
-    Punctuation splits scopes. Token boundaries prevent substring matches.
-    A short, configured gap permits auxiliary verbs between cue and term.
+    A negation cue must precede an exact token sequence within the same
+    punctuation-delimited clause and the configured token-distance bound.
+    Distinct affirmative occurrences must not be suppressed globally.
     """
     target = tokenize_search_text(normalized_term)
     if not target or len(target) > 8:
         return False
-    cues = [
-        tokenize_search_text(phrase)
-        for phrase in policy["cue_phrases"]
-    ]
+    cues = [tokenize_search_text(phrase) for phrase in policy["cue_phrases"]]
     max_gap = policy["max_gap_tokens"]
+    negated = False
+    affirmative = False
     for clause in re.split(r"[,;.!?\n]+", question):
         words = tokenize_search_text(normalize_search_text(clause))
         for start in range(len(words) - len(target) + 1):
             if words[start:start + len(target)] != target:
                 continue
+            denied = False
             for cue in cues:
                 if not cue:
                     continue
@@ -582,38 +589,39 @@ def _has_configured_negated_term(
                     end = start - gap
                     begin = end - len(cue)
                     if begin >= 0 and words[begin:end] == cue:
-                        return True
-    return False
+                        denied = True
+                        break
+                if denied:
+                    break
+            negated |= denied
+            affirmative |= not denied
+    return negated and not affirmative
 
 
-def _negated_catalog_concept_names(
+def _negated_catalog_concept_terms(
     question: str,
     catalog: list[IntentCatalogEntry],
     policy: Mapping[str, Any] | None,
-) -> set[str]:
-    """Conservatively suppress the whole configured concept on explicit denial.
+) -> dict[str, set[str]]:
+    """Return negated configured terms by concept, not whole concept names.
 
-    A negated operation must not separately trigger a positive score or an
-    exclusion that blocks the user's affirmative scenario. No implicit
-    business vocabulary is provided by the engine.
+    The vocabulary and eligible concepts come from versioned metadata only.
+    This keeps an affirmative operation available when another operation
+    shares a concept name but is expressly denied in the same request.
     """
     if policy is None:
-        return set()
+        return {}
     enabled = set(policy["concept_names"])
-    suppressed: set[str] = set()
+    suppressed: dict[str, set[str]] = {}
     for entry in catalog:
         for rule in entry["rules"]:
             for concept in rule["concepts"]:
                 name = concept["concept_name"].casefold()
-                if name not in enabled or name in suppressed:
+                if name not in enabled or concept["match_mode"] == "regex":
                     continue
-                if concept["match_mode"] == "regex":
-                    continue
-                if any(
-                    _has_configured_negated_term(question, term, policy)
-                    for term in concept["normalized_terms"]
-                ):
-                    suppressed.add(name)
+                for term in concept["normalized_terms"]:
+                    if _has_configured_negated_term(question, term, policy):
+                        suppressed.setdefault(name, set()).add(term)
     return suppressed
 
 
@@ -1246,13 +1254,13 @@ def _evaluate_catalog_entry(
     normalized_question: str,
     entry: IntentCatalogEntry,
     *,
-    suppressed_concepts: set[str] | None = None,
+    negated_terms: Mapping[str, set[str]] | None = None,
 ) -> IntentCatalogEntryEvaluation:
     rule_evaluations = [
         _evaluate_catalog_rule(
             normalized_question,
             rule,
-            suppressed_concepts=suppressed_concepts,
+            negated_terms=negated_terms,
         )
         for rule in entry["rules"]
     ]
@@ -1307,7 +1315,7 @@ def _evaluate_catalog_rule(
     normalized_question: str,
     rule: IntentCatalogRule,
     *,
-    suppressed_concepts: set[str] | None = None,
+    negated_terms: Mapping[str, set[str]] | None = None,
 ) -> IntentCatalogRuleEvaluation:
     protected_token_indexes = _protected_dimension_token_indexes(
         normalized_question,
@@ -1318,7 +1326,7 @@ def _evaluate_catalog_rule(
             normalized_question,
             concept,
             protected_token_indexes=protected_token_indexes,
-            suppressed_concepts=suppressed_concepts,
+            negated_terms=negated_terms,
         )
         for concept in rule["concepts"]
     ]
@@ -1520,37 +1528,28 @@ def _evaluate_catalog_concept(
     concept: IntentCatalogConcept,
     *,
     protected_token_indexes: set[int] | None = None,
-    suppressed_concepts: set[str] | None = None,
+    negated_terms: Mapping[str, set[str]] | None = None,
 ) -> IntentCatalogConceptEvaluation:
-    if concept["concept_name"].casefold() in (suppressed_concepts or set()):
-        return {
-            "concept_name": concept["concept_name"],
-            "match_mode": concept["match_mode"],
-            "minimum_term_matches": concept["minimum_term_matches"],
-            "matched_term_count": 0,
-            "satisfied": False,
-            "terms": [
-                {
-                    "term": term,
-                    "normalized_term": norm,
-                    "matched": False,
-                    "match_details": None,
-                }
-                for term, norm in zip(
-                    concept["terms"], concept["normalized_terms"], strict=True
-                )
-            ],
-            "semantic_signals": [],
-        }
     term_evaluations: list[IntentCatalogTermEvaluation] = []
     semantic_signals: list[SemanticSignal] = []
     protected = protected_token_indexes or set()
 
+    denied = (negated_terms or {}).get(
+        concept["concept_name"].casefold(), set(),
+    )
     for raw_term, normalized_term in zip(
         concept["terms"],
         concept["normalized_terms"],
         strict=True,
     ):
+        if normalized_term in denied:
+            term_evaluations.append({
+                "term": raw_term,
+                "normalized_term": normalized_term,
+                "matched": False,
+                "match_details": None,
+            })
+            continue
         if _requires_semantic_token_match(concept):
             match_result = _match_catalog_term_semantically(
                 normalized_question,
