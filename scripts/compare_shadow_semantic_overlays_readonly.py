@@ -130,12 +130,61 @@ def _success_indexes(report: Mapping[str, Any]) -> set[int]:
 
 
 def _sanitized_failures(report: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Expose only numeric rule positions and finite scores, never terms."""
     result = []
     for item in report["evaluation"]["observations"]:
         if item["passed"]:
             continue
         resolution = item.get("resolution_evidence") or {}
         metric = item.get("planned_metric_evidence") or {}
+        candidates = (
+            resolution.get("candidates", [])
+            if isinstance(resolution, Mapping) else []
+        )
+        catalog = (
+            resolution.get("catalog_evidence", [])
+            if isinstance(resolution, Mapping) else []
+        )
+        top_candidates = []
+        for candidate in candidates[:3] if isinstance(candidates, list) else []:
+            if not isinstance(candidate, Mapping):
+                continue
+            score = candidate.get("score")
+            if (
+                type(score) not in (int, float)
+                or not -100000 <= score <= 100000
+            ):
+                continue
+            top_candidates.append({
+                "catalog_index": candidate.get("catalog_entry_index")
+                if type(candidate.get("catalog_entry_index")) is int else None,
+                "score": score,
+                "signal_count": candidate.get("matched_signal_count")
+                if type(candidate.get("matched_signal_count")) is int else None,
+            })
+        partial_rules = []
+        for entry in catalog if isinstance(catalog, list) else []:
+            if not isinstance(entry, Mapping):
+                continue
+            for rule in entry.get("rules", []):
+                if not isinstance(rule, Mapping):
+                    continue
+                matched = rule.get("matched_concept_count")
+                required = rule.get("minimum_concept_matches")
+                if not (
+                    rule.get("effect") == "positive_score"
+                    and type(matched) is int and type(required) is int
+                    and 0 < matched < required
+                ):
+                    continue
+                partial_rules.append({
+                    "catalog_index": entry.get("entry_index")
+                    if type(entry.get("entry_index")) is int else None,
+                    "rule_index": rule.get("rule_index")
+                    if type(rule.get("rule_index")) is int else None,
+                    "matched": matched,
+                    "required": required,
+                })
         result.append({
             "case": item["case_index"],
             "intent": item.get("intent"),
@@ -150,6 +199,10 @@ def _sanitized_failures(report: Mapping[str, Any]) -> list[dict[str, Any]]:
                 metric.get("binding_inference_status")
                 if isinstance(metric, Mapping) else None
             ),
+            "metric_count": item.get("planned_metric_count")
+            if type(item.get("planned_metric_count")) is int else None,
+            "top_candidates": top_candidates,
+            "partial_scoring_rules": partial_rules[:8],
         })
     return result
 
