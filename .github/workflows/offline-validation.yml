@@ -74,3 +74,23 @@ jobs:
             }
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+
+  shadow-image-import-smoke:
+    name: Shadow image non-root import smoke on Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Reproduce restrictive checkout permissions
+        run: |
+          chmod 700 app/test_runtime
+          chmod 600 app/test_runtime/sql_agent_test_app.py
+          chmod 600 app/test_runtime/composition.py
+      - name: Build real Shadow image
+        run: docker build -f deploy/docker/Dockerfile.shadow-test -t shadow-import-check .
+      - name: Assert non-root runtime can import the ASGI factory
+        run: |
+          docker run --rm --network none \
+            --entrypoint python shadow-import-check \
+            -c 'import os; assert os.geteuid() != 0; from app.test_runtime.sql_agent_test_app import create_app; print("SHADOW_IMPORT_OK")'

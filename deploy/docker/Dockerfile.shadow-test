@@ -14,6 +14,11 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 COPY app ./app
 
+# Docker COPY retains source file modes. A root-owned 0600 module or 0700
+# directory from the VPS checkout would crash non-root Uvicorn on import.
+# Keep source files root-owned and not writable by the runtime user.
+RUN chmod -R a+rX /app/app
+
 USER langgraph
 
 EXPOSE 8000
