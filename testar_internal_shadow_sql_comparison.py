@@ -145,7 +145,7 @@ def test_authenticated_http_and_response_fingerprint():
         compare_shadow_sql_use_case=use_case,
     )
     protected = protect_internal_service_http_handler(
-        inner=handler, auth_config=InternalServiceAuthConfig(expected_token="offline-s2s-token")
+        inner=handler, auth_config=InternalServiceAuthConfig(expected_token="test-s2s-token")
     )
     request_body = json.dumps(request(sql)).encode("utf-8")
     message = {
@@ -154,7 +154,7 @@ def test_authenticated_http_and_response_fingerprint():
         "body": request_body,
     }
     assert protected.handle(message)["status_code"] == 401
-    message["headers"]["Authorization"] = "Bearer offline-s2s-token"
+    message["headers"]["Authorization"] = "Bearer test-s2s-token"
     result = protected.handle(message)
     assert result["status_code"] == 200, result
     parsed = json.loads(result["body"])
