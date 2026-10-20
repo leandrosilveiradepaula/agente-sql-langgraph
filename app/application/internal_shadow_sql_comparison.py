@@ -105,7 +105,11 @@ class CompareShadowSqlUseCase:
             for analysis in (official, shadow)
             for predicate in analysis.get("predicates", [])
         )
-        if normalized_match and not has_unsupported_predicates and not differences:
+        # Identical strict token streams outrank the parser's presentation-only
+        # facet differences (e.g. uppercase unquoted projection labels). Strict
+        # tokens preserve string and quoted-identifier case, unlike the legacy
+        # tokenizer normal form.
+        if normalized_match and not has_unsupported_predicates:
             verdict = "normalized_sql_match"
             differences = []
         elif differences:
