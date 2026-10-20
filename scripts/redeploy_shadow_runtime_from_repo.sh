@@ -53,7 +53,7 @@ cleanup_on_error() {
         sleep 2
       done
       restored_image="$(docker inspect "${CONTAINER}" --format '{{.Config.Image}}' 2>/dev/null || true)"
-      expected_image="$(sed -nE 's/^[[:space:]]*image:[[:space:]]*(agente-sql-langgraph-shadow-test:[^[:space:]]+).*/\\1/p' "${DEPLOY_DIR}/compose.yaml" | head -n 1)"
+      expected_image="$(sed -nE 's/^[[:space:]]*image:[[:space:]]*(agente-sql-langgraph-shadow-test:[^[:space:]]+).*/\1/p' "${DEPLOY_DIR}/compose.yaml" | head -n 1)"
       restored_commit="$(docker inspect "${CONTAINER}" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n 's/^LANGGRAPH_COMMIT=//p' | tail -n 1)"
       expected_commit="$(sed -n 's/^LANGGRAPH_COMMIT=//p' "${ENV_FILE}" | tail -n 1)"
       restored_sql="$(docker inspect "${CONTAINER}" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n 's/^LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=//p' | tail -n 1)"
