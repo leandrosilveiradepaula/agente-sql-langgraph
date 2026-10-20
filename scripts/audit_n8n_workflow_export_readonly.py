@@ -24,7 +24,7 @@ MAX_NODES = 2500
 MAX_PARAM_BYTES = 4 * 1024 * 1024
 # Human-readable names are deliberately NOT emitted: arbitrary workflow/node
 # names can contain secrets that no heuristic regex can reliably recognize.
-_ALLOWED_NODE_TYPE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+_ALLOWED_NODE_TYPE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-@/+")
 # Platform-only allowlist for output labels. Unknown plugin types are hashed,
 # never echoed: arbitrary type strings may also contain sensitive information.
 _SAFE_BUILTIN_CATEGORIES = frozenset({
