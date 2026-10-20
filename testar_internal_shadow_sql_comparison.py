@@ -33,7 +33,8 @@ class FakeRepository:
 
 
 def record(sql, *, tenant=None, status="success", generation_provider=None,
-           generation_model=None, repair_provider=None, repair_model=None):
+           generation_model=None, repair_provider=None, repair_model=None,
+           repaired_sql=None):
     principal = {"id": "operator-one", "profile": "admin"}
     if tenant:
         principal["organization_id"] = tenant
@@ -53,7 +54,7 @@ def record(sql, *, tenant=None, status="success", generation_provider=None,
         created_at="2026-01-01T00:00:00Z", completed_at="2026-01-01T00:00:01Z",
         status=status,
         request={"question": "Show total orders for last month", "principal": principal},
-        state={"generated_sql": sql, "current_sql": sql,
+        state={"generated_sql": sql, "current_sql": repaired_sql or sql,
                "context_fingerprint": "context-one", "context_version": "tenant-config-v1",
                **provider_result},
         response={"status": status, "gates": {}},
@@ -144,6 +145,45 @@ def test_signed_provider_model_attestation():
     assert unsafe_info["shadow_generator_model"] is None
     assert unsafe_info["generator_identity_attested"] is False
     assert "Bearer secret" not in json.dumps(unsafe)
+
+def test_repair_provider_identity_for_changed_sql():
+    sql = "SELECT item_id FROM entries WHERE category = 'Original'"
+    repaired = "SELECT item_id FROM entries WHERE category = 'Corrected'"
+    kwargs = {
+        "generation_provider": "provider-neutral",
+        "generation_model": "model-v3",
+        "repaired_sql": repaired,
+    }
+
+    incomplete = CompareShadowSqlUseCase(
+        repository=FakeRepository(record(sql, **kwargs))
+    ).execute(request(sql))
+    assert incomplete["status"] == "success", incomplete
+    details = incomplete["metadata"]["comparison"]
+    assert details["generator_identity_attested"] is True
+    assert details["repair_identity_attested"] is False
+    assert details["requires_reapproval"] is True
+    assert details["financial_parity_proven"] is False
+
+    complete = CompareShadowSqlUseCase(
+        repository=FakeRepository(
+            record(sql, repair_provider="provider-neutral",
+                   repair_model="model-v3", **kwargs)
+        )
+    ).execute(request(sql))
+    assert complete["status"] == "success", complete
+    details = complete["metadata"]["comparison"]
+    assert details["repair_identity_attested"] is True
+    assert details["shadow_repair_model"] == "model-v3"
+    assert details["requires_reapproval"] is True
+
+    # Model alone (without a provider) is not evidence of a repair model.
+    only_model = CompareShadowSqlUseCase(
+        repository=FakeRepository(
+            record(sql, repair_provider=None, repair_model="model-v3", **kwargs)
+        )
+    ).execute(request(sql))
+    assert only_model["metadata"]["comparison"]["repair_identity_attested"] is False
 
 def test_case_sensitive_sql_values_and_quoted_identifiers():
     # PostgreSQL text literals and quoted identifier names can be case-sensitive.
@@ -266,6 +306,7 @@ def test_authenticated_http_and_response_fingerprint():
 if __name__ == "__main__":
     test_structures_and_no_raw_data()
     test_signed_provider_model_attestation()
+    test_repair_provider_identity_for_changed_sql()
     test_case_sensitive_sql_values_and_quoted_identifiers()
     test_isolation_rejection()
     test_missing_corrupted_or_goldens()

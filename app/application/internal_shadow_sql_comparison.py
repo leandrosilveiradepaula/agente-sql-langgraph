@@ -182,7 +182,9 @@ def _recorded_provider_identity(record: Mapping[str, Any]) -> dict[str, str | No
     repair_model = _public_provider_id(
         metadata.get("sql_repair_result_provider_model")
     )
-    repair_present = bool(record.get("repaired_sql_proposal"))
+    repair_present = bool(record.get("repaired_sql_proposal")) or bool(
+        record.get("requires_reapproval")
+    )
     return {
         "shadow_generator_provider": generation_provider,
         "shadow_generator_model": generation_model,

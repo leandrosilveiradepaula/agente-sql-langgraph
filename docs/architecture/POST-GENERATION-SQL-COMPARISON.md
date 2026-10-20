@@ -90,3 +90,20 @@ nunca são incluídos tokens, chaves ou respostas brutas do provedor.
 **Limite:** nomes exatos de modelos/provedores podem diferir como alias
 operacional. Sem mapeamento de provedor versionado e autorizado, não
 transformar divergência de identificador em equivalência afirmada.
+
+### Precisão da prova de modelo
+
+O adaptador Gemini registra no resultado de geração o identificador de
+modelo da configuração utilizada na requisição bem-sucedida. Esse
+identificador não é, por si, uma confirmação independente da versão
+resolvida internamente pelo serviço remoto. Portanto, a igualdade com o
+registro do n8n **atesta igualdade dos identificadores registrados**, e
+não identidade criptográfica de weights, resultado nem equivalência da SQL.
+
+Quando existe SQL reparada ou `requires_reapproval=true`, também se
+exige identificação registrada do provedor **e** modelo do reparador.
+Sem ambos, marcar reparador `repair_identity_attested=false`; uma SQL
+reparada permanece sujeita a nova aprovação e jamais é executada por
+este comparador. Sem reparo requerido, essa condição é satisfeita de
+forma vacuamente verdadeira; não significa que um reparador tenha sido
+executado.
