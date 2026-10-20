@@ -11,7 +11,14 @@
 
 # MERGE_POLICY
 
-## Autoridade de merge
+## Regra atual: merge humano obrigatório
+
+O assistente pode inspecionar GitHub, criar branch/PR, rodar CI, corrigir
+arquivos e preparar a revisão. **Não executar o merge sem autorização
+explícita nesta tarefa.** A autorização para merge não inclui deploy,
+alteração de n8n, cutover, banco, credenciais nem privilégios.
+
+## Autoridade de merge — delegação histórica (não vigente)
 
 O usuario delega ao ChatGPT/revisor tecnico a decisao operacional de merge das microetapas deste projeto.
 
@@ -28,7 +35,7 @@ O ChatGPT pode aprovar e executar merge sem solicitar nova confirmacao a cada PR
 
 Se qualquer gate falhar, o merge deve ser bloqueado e a correcao deve ser solicitada antes de nova avaliacao.
 
-## Limite da delegacao
+## Limite da delegacao historica
 
 Esta delegacao vale para merge de codigo no repositorio. Ela nao autoriza deploy, cutover, alteracao de Supabase, n8n, Watson, PROD, credenciais, permissoes ou qualquer execucao externa. Essas acoes continuam exigindo autorizacao explicita e separada.
 
