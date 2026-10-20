@@ -25,6 +25,8 @@ MAX_PARAM_BYTES = 4 * 1024 * 1024
 # Human-readable names are deliberately NOT emitted: arbitrary workflow/node
 # names can contain secrets that no heuristic regex can reliably recognize.
 _ALLOWED_NODE_TYPE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+_JS_STRING = re.compile(r"""(?<!\\)(?:'[^'\n]{1,240}'|"[^"\n]{1,240}")""")
+_SQL_SHAPE = re.compile(r"\b(?:SELECT|WITH|FROM|JOIN|WHERE|GROUP\s+BY)\b", re.IGNORECASE)
 
 
 class WorkflowAuditError(ValueError):
@@ -45,6 +47,7 @@ def _canonical(value: Any) -> bytes:
 def _safe_name(value: Any, *, index: int) -> str:
     """Never emit workflow-owned text; stable identity comes from ID hashes."""
     return f"node-{index + 1:03d}"
+
 
 def load_workflow(path: Path) -> tuple[Mapping[str, Any], str]:
     """Read one explicit local export with strict size and shape controls."""
