@@ -145,7 +145,7 @@ class CompareShadowSqlUseCase:
         )
 
 
-_PROVIDER_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+/\\-]{0,127}\\Z")
+_PROVIDER_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+/-]{0,127}")
 
 
 def _public_provider_id(value: object) -> str | None:
