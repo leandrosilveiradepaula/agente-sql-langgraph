@@ -30,7 +30,11 @@ expected answers/SQL or benchmarks to the LangGraph request.
 ## Wiring / deploy gates (NOT performed by adding this file to GitHub)
 
 1. Review the workflow and run
-   \`python3 testar_n8n_parallel_shadow_workflow.py\` offline.
+   `python3 testar_n8n_parallel_shadow_workflow.py` offline. It compiles all
+   Code nodes and executes **synthetic** generate, approved-SQL relay,
+   malformed request, mismatched-ID and duplicate-evidence scenarios with
+   n8n expressions evaluated in a Node.js sandbox (no HTTP, LLM or SQL).
+   The test is also wired into the repository-wide offline CI.
 2. In a separate authorized n8n deployment, import the candidate as a
    **NEW** workflow. Never replace, publish over, or edit the 68-node
    OFFICIAL financial workflow.
