@@ -8,6 +8,7 @@ from app.application.internal_sql_agent_v1 import (
     ExecuteApprovedSqlShadowUseCase,
     GenerateSqlUseCase,
 )
+from app.application.internal_shadow_sql_comparison import CompareShadowSqlUseCase
 from app.application.internal_shadow_read_v1 import (
     GetShadowRunSafeViewUseCase,
     GetShadowRunVisualizationUseCase,
@@ -162,6 +163,9 @@ def create_shadow_test_runtime(
             shadow_repository=observed_repository,
             langgraph_version=config.langgraph_version,
             langgraph_commit=config.langgraph_commit,
+        ),
+        compare_shadow_sql_use_case=CompareShadowSqlUseCase(
+            repository=observed_repository,
         ),
         request_limits=request_limits,
         response_limits=response_limits,

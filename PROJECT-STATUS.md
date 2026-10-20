@@ -1,3 +1,18 @@
+## Comparador pós-geração proposto — 2026-10-20
+
+Implementação candidada: `POST /v1/internal/sql-agent/compare-shadow-sql`,
+atrás da autenticação interna S2S atual. Compara SQL **oficial já gerada**
+com a SQL LangGraph previamente persistida, usando o mesmo `agent_run_id`,
+`shadow_record_id`, pergunta e identidade de principal/tenant autorizados.
+Diferenças estruturais de tabelas, joins, filtros, projeções,
+agregações e ordenação são reportadas sem retornar a SQL, nomes
+físicos ou literais. A comparação não chama gerador, LLM nem executor.
+`normalized_sql_match` **não** significa paridade financeira.
+A falta de tenant identificado impede alegar isolamento completo.
+Integração no Produto e paridade financeira seguem pendentes.
+
+---
+
 # PROJECT-STATUS.md
 
 ## Estado operativo reconciliado em 2026-10-19

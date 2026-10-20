@@ -30,6 +30,11 @@ class GenerateSqlService(Protocol):
         ...
 
 
+class CompareShadowSqlService(Protocol):
+    def execute(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
+        ...
+
+
 class ExecuteApprovedSqlShadowService(Protocol):
     def execute(
         self,
@@ -39,12 +44,14 @@ class ExecuteApprovedSqlShadowService(Protocol):
 
 
 _GENERATE_ROUTE = "/v1/internal/sql-agent/generate"
+_COMPARE_SHADOW_SQL_ROUTE = "/v1/internal/sql-agent/compare-shadow-sql"
 _EXECUTE_APPROVED_SHADOW_ROUTE = (
     "/v1/internal/sql-agent/execute-approved-shadow"
 )
 _ALLOWED_ROUTES = {
     _GENERATE_ROUTE,
     _EXECUTE_APPROVED_SHADOW_ROUTE,
+    _COMPARE_SHADOW_SQL_ROUTE,
 }
 _STATUS_BY_HTTP_ERROR = {
     "HTTP_BODY_TOO_LARGE": 413,
@@ -63,6 +70,7 @@ class InternalSqlAgentV1HttpHandler:
         *,
         generate_use_case: GenerateSqlService,
         execute_approved_shadow_use_case: ExecuteApprovedSqlShadowService,
+        compare_shadow_sql_use_case: CompareShadowSqlService | None = None,
         request_limits: Mapping[str, Any] | None = None,
         response_limits: Mapping[str, Any] | None = None,
     ) -> None:
@@ -82,6 +90,7 @@ class InternalSqlAgentV1HttpHandler:
             response_limits = default_http_response_limits()
         self._generate = generate_use_case
         self._execute_shadow = execute_approved_shadow_use_case
+        self._compare_shadow_sql = compare_shadow_sql_use_case
         self._request_limits = validate_http_request_limits(request_limits)
         self._response_limits = validate_http_response_limits(response_limits)
 
@@ -102,6 +111,14 @@ class InternalSqlAgentV1HttpHandler:
                 response = self._generate.execute(
                     deepcopy(payload)  # type: ignore[arg-type]
                 )
+            elif path == _COMPARE_SHADOW_SQL_ROUTE:
+                if self._compare_shadow_sql is None:
+                    return self._error_response(
+                        "SHADOW_COMPARE_NOT_CONFIGURED",
+                        status_code=503,
+                        status="infrastructure_error",
+                    )
+                response = self._compare_shadow_sql.execute(deepcopy(payload))
             else:
                 response = self._execute_shadow.execute(
                     deepcopy(payload)  # type: ignore[arg-type]
@@ -174,12 +191,14 @@ def create_internal_sql_agent_v1_http_handler(
     *,
     generate_use_case: GenerateSqlService,
     execute_approved_shadow_use_case: ExecuteApprovedSqlShadowService,
+    compare_shadow_sql_use_case: CompareShadowSqlService | None = None,
     request_limits: Mapping[str, Any] | None = None,
     response_limits: Mapping[str, Any] | None = None,
 ) -> InternalSqlAgentV1HttpHandler:
     return InternalSqlAgentV1HttpHandler(
         generate_use_case=generate_use_case,
         execute_approved_shadow_use_case=execute_approved_shadow_use_case,
+        compare_shadow_sql_use_case=compare_shadow_sql_use_case,
         request_limits=request_limits,
         response_limits=response_limits,
     )
