@@ -1,3 +1,15 @@
+> **Escopo histórico e delimitado:** este arquivo descreve uma microetapa
+> de 2026-10-01 vinculada à issue #20. Não representa o roadmap atual
+> nem autoriza repetir a tarefa ou impor CMV/DRE como regra do motor genérico.
+> Só executá-la se explicitamente designada em uma tarefa vigente. Para
+> objetivo, hierarquia de contexto, portabilidade e três fases de conclusão,
+> consultar `AGENTS.md` e
+> `docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md`.
+> Nenhum cutover, benchmark 63, execução real, migração, alteração de n8n
+> ou merge é autorizado por esta nota.
+
+---
+
 # CURRENT TASK — dre_custos CMV-only microetapa 8
 
 ## Decisão registrada
