@@ -1,0 +1,212 @@
+{
+  "name": "CANDIDATE - Finance Agent Parallel LangGraph Shadow - n8n Orchestration v1",
+  "nodes": [
+    {
+      "id": "41a4b8e8-1000-4afd-a7ae-000000000001",
+      "name": "Webhook - Parallel Shadow",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        320
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "langgraph-shadow-parallel-v1",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "41a4b8e8-1000-4afd-a7ae-000000009999"
+    },
+    {
+      "id": "41a4b8e8-1000-4afd-a7ae-000000000002",
+      "name": "Validate Shadow Envelope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        320
+      ],
+      "parameters": {
+        "jsCode": "// Structural transport only: no customer rules, SQL templates or execution.\nconst raw = $input.first().json || {};\nconst payload = raw.body;\nconst record = value => value !== null && typeof value === 'object' && !Array.isArray(value);\nconst validText = (value, max) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;\nif (!record(payload) || payload.contract_version !== '1') {\n  throw new Error('SHADOW_ENVELOPE_CONTRACT_REJECTED');\n}\nconst correlation = payload.correlation_metadata;\nconst principal = payload.principal;\nif (!record(correlation) || !record(principal)) {\n  throw new Error('SHADOW_ENVELOPE_IDENTITY_REJECTED');\n}\nconst paths = {\n  generate: '/v1/internal/sql-agent/generate',\n  execute_approved: '/v1/internal/sql-agent/execute-approved-shadow'\n};\nconst routes = {\n  generate: '/api/generate-sql',\n  execute_approved: '/api/execute-watson'\n};\nconst event = correlation.event;\nif (!Object.prototype.hasOwnProperty.call(paths, event) ||\n    correlation.source !== 'nextjs_bff' || correlation.route !== routes[event] ||\n    !validText(correlation.request_id, 128) ||\n    !validText(correlation.timestamp, 64) ||\n    !validText(payload.agent_run_id, 128) ||\n    !validText(principal.id, 256) || !validText(principal.profile, 128)) {\n  throw new Error('SHADOW_ENVELOPE_CORRELATION_REJECTED');\n}\nconst outbound = {\n  contract_version: '1',\n  agent_run_id: payload.agent_run_id,\n  principal: {\n    id: principal.id,\n    profile: principal.profile,\n    ...(validText(principal.email, 320) ? {email: principal.email} : {})\n  },\n  correlation_metadata: {\n    source: correlation.source,\n    event,\n    route: correlation.route,\n    timestamp: correlation.timestamp,\n    request_id: correlation.request_id,\n    ...(validText(correlation.agent_version, 128)\n      ? {agent_version: correlation.agent_version} : {})\n  }\n};\nif (event === 'generate') {\n  if (!validText(payload.question, 16000)) {\n    throw new Error('SHADOW_ENVELOPE_QUESTION_REJECTED');\n  }\n  outbound.question = payload.question;\n} else {\n  if (!validText(payload.approved_sql, 262144)) {\n    throw new Error('SHADOW_ENVELOPE_APPROVED_SQL_REJECTED');\n  }\n  outbound.approved_sql = payload.approved_sql;\n}\nreturn [{json: {\n  event,\n  agent_run_id: payload.agent_run_id,\n  target_path: paths[event],\n  shadow_request: outbound\n}}];"
+      }
+    },
+    {
+      "id": "41a4b8e8-1000-4afd-a7ae-000000000003",
+      "name": "Acknowledge Shadow Receipt",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        720,
+        320
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({contract_version:'1', accepted:true, agent_run_id:$json.agent_run_id, event:$json.event}) }}",
+        "options": {
+          "responseCode": 202
+        }
+      }
+    },
+    {
+      "id": "41a4b8e8-1000-4afd-a7ae-000000000004",
+      "name": "Call LangGraph Shadow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        320
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.LANGGRAPH_SHADOW_INTERNAL_BASE_URL || '').replace(/\\/+$/, '') + $json.target_path }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.shadow_request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 180000
+        }
+      }
+    },
+    {
+      "id": "41a4b8e8-1000-4afd-a7ae-000000000005",
+      "name": "Validate LangGraph Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        320
+      ],
+      "parameters": {
+        "jsCode": "const transport = $input.first().json || {};\nconst response = transport.body || {};\nconst source = $('Validate Shadow Envelope').first().json;\nconst validObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);\nif (!validObject(response) ||\n    !(transport.statusCode === 200 || transport.statusCode === 422) ||\n    response.contract_version !== '1' ||\n    response.agent_run_id !== source.agent_run_id ||\n    typeof response.run_id !== 'string' || !response.run_id ||\n    !['success', 'rejected'].includes(response.status) ||\n    (transport.statusCode === 200 && response.status !== 'success') ||\n    (transport.statusCode === 422 && response.status !== 'rejected')) {\n  throw new Error('LANGGRAPH_SHADOW_GENERATE_RESPONSE_REJECTED');\n}\nreturn [{json: {\n  agent_run_id: source.agent_run_id,\n  event: source.event,\n  run_id: response.run_id,\n  status: response.status\n}}];"
+      }
+    },
+    {
+      "id": "41a4b8e8-1000-4afd-a7ae-000000000006",
+      "name": "Read Correlated Evidence",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        320
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($env.LANGGRAPH_SHADOW_INTERNAL_BASE_URL || '').replace(/\\/+$/, '') + '/v1/internal/agent-runs/' + encodeURIComponent($json.agent_run_id) + '/shadow-runs?limit=10' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "41a4b8e8-1000-4afd-a7ae-000000000007",
+      "name": "Assert Shadow Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        320
+      ],
+      "parameters": {
+        "jsCode": "const transport = $input.first().json || {};\nconst body = transport.body || {};\nconst source = $('Validate LangGraph Response').first().json;\nconst expectedType = source.event === 'generate' ? 'generate' : 'execute_approved_shadow';\nif (transport.statusCode !== 200 ||\n    !body || body.agent_run_id !== source.agent_run_id ||\n    !Array.isArray(body.items)) {\n  throw new Error('LANGGRAPH_SHADOW_EVIDENCE_LOOKUP_REJECTED');\n}\nconst records = body.items.filter(item =>\n  item && item.agent_run_id === source.agent_run_id &&\n  item.run_id === source.run_id &&\n  item.event_type === expectedType &&\n  item.status === source.status &&\n  typeof item.shadow_record_id === 'string' && item.shadow_record_id.length > 0\n);\nif (records.length !== 1) {\n  throw new Error('LANGGRAPH_SHADOW_EVIDENCE_CORRELATION_REJECTED');\n}\nreturn [{json: {\n  correlated: true,\n  agent_run_id: source.agent_run_id,\n  run_id: source.run_id,\n  shadow_record_id: records[0].shadow_record_id,\n  event: source.event,\n  status: source.status\n}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Parallel Shadow": {
+      "main": [
+        [
+          {
+            "node": "Validate Shadow Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Shadow Envelope": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge Shadow Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acknowledge Shadow Receipt": {
+      "main": [
+        [
+          {
+            "node": "Call LangGraph Shadow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call LangGraph Shadow": {
+      "main": [
+        [
+          {
+            "node": "Validate LangGraph Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate LangGraph Response": {
+      "main": [
+        [
+          {
+            "node": "Read Correlated Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Correlated Evidence": {
+      "main": [
+        [
+          {
+            "node": "Assert Shadow Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false
+  },
+  "tags": []
+}
