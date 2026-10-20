@@ -71,9 +71,11 @@ PRIVATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/n8n-published-audit.XXXXXXXX")" ||
 
 cleanup() {
   if [[ -n "$REMOTE_DIR" && "$REMOTE_DIR" == /tmp/n8n-published-audit.* ]]; then
-    docker exec -u node "$CONTAINER" sh -c \
+    if ! docker exec -u node "$CONTAINER" sh -c \
       'rm -f -- "$1/workflow.json"; rmdir -- "$1"' \
-      sh "$REMOTE_DIR" >/dev/null 2>&1 || true
+      sh "$REMOTE_DIR" >/dev/null 2>&1; then
+      printf 'N8N_PUBLISHED_AUDIT_WARNING=CONTAINER_PRIVATE_TEMP_CLEANUP_UNCONFIRMED\n' >&2
+    fi
   fi
   if [[ -n "$PRIVATE_DIR" && "$PRIVATE_DIR" == */n8n-published-audit.* ]]; then
     rm -rf -- "$PRIVATE_DIR" >/dev/null 2>&1 || true
