@@ -116,6 +116,7 @@ class CompareShadowSqlUseCase:
             verdict = "structural_differences"
         else:
             verdict = "inconclusive"
+        identity = _provider_identity_from_evidence(record)
         lineage = record.get("lineage", {})
         lineage = lineage if isinstance(lineage, Mapping) else {}
         return _response(
@@ -138,8 +139,50 @@ class CompareShadowSqlUseCase:
                 "real_sql_executed": False,
                 "requires_reapproval": bool(record.get("repaired_sql_proposal"))
                 or bool(record.get("requires_reapproval")),
+                **identity,
             },
         )
+
+
+def _provider_identity_from_evidence(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Attest only explicit identifiers persisted by the runtime, not defaults.
+
+    Never guess provider/model based on deployment config or rename aliases.
+    A repair proposal needs independently attested provider/model.
+    """
+    evidence = record.get("langgraph_evidence")
+    raw = evidence.get("provider_metadata") if isinstance(evidence, Mapping) else None
+    metadata = raw if isinstance(raw, Mapping) else {}
+
+    def clean(value: object) -> str | None:
+        if not isinstance(value, str) or not value.strip() or len(value) > 128:
+            return None
+        item = value.strip()
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:+/-")
+        if not item[0].isalnum() or any(c not in allowed for c in item):
+            return None
+        if any(marker in item.lower() for marker in ("bearer", "apikey", "api_key", "secret", "token")):
+            return None
+        return item
+
+    def pair(sources: tuple[str, ...]) -> tuple[str | None, str | None]:
+        for name in sources:
+            provider = clean(metadata.get(name + "_provider_name"))
+            model = clean(metadata.get(name + "_provider_model"))
+            if provider and model:
+                return provider, model
+        return None, None
+
+    generation = pair(("sql_generation_result", "generation_result"))
+    repair = pair(("sql_repair_result", "repair_result"))
+    return {
+        "shadow_generator_provider": generation[0],
+        "shadow_generator_model": generation[1],
+        "shadow_repair_provider": repair[0],
+        "shadow_repair_model": repair[1],
+        "generator_identity_attested": all(generation),
+        "repair_identity_attested": all(repair),
+    }
 
 
 def _valid_request(value: Mapping[str, Any]) -> bool:

@@ -156,6 +156,56 @@ def test_missing_corrupted_or_goldens():
     assert service.execute({**request(sql), "golden_answer": "no"})["errors"][0]["code"] == "SHADOW_COMPARE_REQUEST_INVALID"
 
 
+def test_persisted_provider_identity_without_alias_guessing():
+    sql = "SELECT id FROM records"
+    baseline = record(sql)
+    evidence = baseline["langgraph_evidence"]
+    # Provider metadata is part of signed evidence, so construct it at source.
+    from app.domain.shadow_evidence_types import build_generate_shadow_record
+    def with_provider(provider_metadata):
+        return build_generate_shadow_record(
+            shadow_record_id="shadow-1", agent_run_id="product-run-1", run_id="lg-run-1",
+            created_at="2026-01-01T00:00:00Z", completed_at="2026-01-01T00:00:01Z",
+            status="success",
+            request={"question": "Show total orders for last month",
+                     "principal": {"id": "operator-one", "profile": "admin"}},
+            state={"generated_sql": sql, "current_sql": sql,
+                   "sql_generation_result": {
+                       "provider_name": provider_metadata.get("generator_provider"),
+                       "provider_model": provider_metadata.get("generator_model")},
+                   "sql_repair_result": {
+                       "provider_name": provider_metadata.get("repair_provider"),
+                       "provider_model": provider_metadata.get("repair_model")}},
+            response={"status": "success", "gates": {}},
+        )
+    good = with_provider({
+        "generator_provider": "gemini", "generator_model": "gemini-2.5-flash",
+        "repair_provider": "gemini", "repair_model": "gemini-2.5-flash",
+    })
+    result = CompareShadowSqlUseCase(repository=FakeRepository(good)).execute(request(sql))
+    assert result["status"] == "success", result
+    data = result["metadata"]["comparison"]
+    assert data["shadow_generator_provider"] == "gemini"
+    assert data["shadow_generator_model"] == "gemini-2.5-flash"
+    assert data["generator_identity_attested"] is True
+    assert data["repair_identity_attested"] is True
+    assert data["financial_parity_proven"] is False
+    unknown = with_provider({"generator_provider": None, "generator_model": None})
+    result = CompareShadowSqlUseCase(repository=FakeRepository(unknown)).execute(request(sql))
+    assert result["status"] == "success", result
+    data = result["metadata"]["comparison"]
+    assert data["shadow_generator_provider"] is None
+    assert data["generator_identity_attested"] is False
+    # A value resembling a credential is never returned as a model identifier.
+    invalid = with_provider({"generator_provider": "gemini", "generator_model": "BearerSecret"})
+    result = CompareShadowSqlUseCase(repository=FakeRepository(invalid)).execute(request(sql))
+    assert result["status"] == "success", result
+    data = result["metadata"]["comparison"]
+    assert data["shadow_generator_model"] is None
+    assert data["generator_identity_attested"] is False
+    assert "BearerSecret" not in json.dumps(result)
+
+
 def test_distinct_contexts():
     for tenant, sql in (
         ("tenant-alpha", "SELECT AVG(score) FROM quality_events WHERE segment = 'regional'"),
@@ -207,5 +257,6 @@ if __name__ == "__main__":
     test_isolation_rejection()
     test_missing_corrupted_or_goldens()
     test_distinct_contexts()
+    test_persisted_provider_identity_without_alias_guessing()
     test_authenticated_http_and_response_fingerprint()
     print("POST_GENERATION_SQL_COMPARISON=PASS")
