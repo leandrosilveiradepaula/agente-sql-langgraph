@@ -64,3 +64,64 @@ os gates existentes; merge não equivale a deploy ou paridade.
 A validação de revisão de SQL diferencia, por exemplo, filtros textuais 'A'
 versus 'a' e identificadores citados "Amount" versus "amount".
 A normalização de palavras-chave não pode apagar essas diferenças.
+
+
+## Identidade do provedor/modelo (etapa de paridade Gemini)
+
+O comparador recupera os identificadores do **provedor e modelo realmente
+registrados** na evidência de geração, e opcionalmente do reparo. Resposta
+sanitizada: `shadow_generator_provider`, `shadow_generator_model`,
+`shadow_repair_provider`, `shadow_repair_model`,
+`generator_identity_attested` e `repair_identity_attested`.
+
+É uma verificação de proveniência, não seleção de LLM. O motor não
+recebe o provedor/modelo oficial como input para o gerador, não inventa
+aliases e não utiliza benchmark. A interface do Produto compara a
+identidade persistida no run oficial com os identificadores retornados
+aqui, **somente depois da geração**. Se qualquer parte faltar, informa
+`unattested`; se os identificadores não coincidirem literalmente,
+informa `identifier_mismatch`, não presume Gemini pelo padrão configurado.
+
+Quando há proposta de reparo, a identidade do reparador precisa estar
+registrada para atestar ambos; SQL reparada exige nova aprovação de
+qualquer modo. Os campos da resposta têm tamanho e alfabeto restritos;
+nunca são incluídos tokens, chaves ou respostas brutas do provedor.
+
+**Limite:** nomes exatos de modelos/provedores podem diferir como alias
+operacional. Sem mapeamento de provedor versionado e autorizado, não
+transformar divergência de identificador em equivalência afirmada.
+
+### Precisão da prova de modelo
+
+O adaptador Gemini registra no resultado de geração o identificador de
+modelo da configuração utilizada na requisição bem-sucedida. Esse
+identificador não é, por si, uma confirmação independente da versão
+resolvida internamente pelo serviço remoto. Portanto, a igualdade com o
+registro do n8n **atesta igualdade dos identificadores registrados**, e
+não identidade criptográfica de weights, resultado nem equivalência da SQL.
+
+Quando existe SQL reparada ou `requires_reapproval=true`, também se
+exige identificação registrada do provedor **e** modelo do reparador.
+Sem ambos, marcar reparador `repair_identity_attested=false`; uma SQL
+reparada permanece sujeita a nova aprovação e jamais é executada por
+este comparador. Sem reparo requerido, essa condição é satisfeita de
+forma vacuamente verdadeira; não significa que um reparador tenha sido
+executado.
+
+### Comparação literal de intenção detectada
+
+O endpoint aceita **opcionalmente** `official_detected_intent`, obtido
+pelo backend Produto da execução oficial depois de sua conclusão. A
+intenção da geração LangGraph vem exclusivamente de sua evidência
+persistida e fingerprint-validada. O resultado `intent_label_status`
+pode ser `identifiers_matched`, `identifier_mismatch` ou `unattested`.
+Não devolve nenhum nome/alias de intenção ao navegador, não altera a
+consulta SQL, não chama LLM, não usa benchmark e não interpreta diferenças
+de rótulos como prova de semânticas contábeis distintas. Equivalências
+de nomenclatura requerem catálogo versionado, não if/hardcode de motor.
+
+A exportação de 68 nós do fluxo oficial atualmente retorna a intenção,
+mas **não** seu plano completo por webhook; esta etapa atesta somente
+rótulo de intenção, não paridade de métricas/dimensões/plano. A validação
+de planejamento completo precisará de evidência adicional, liberada de
+forma operacional separada.

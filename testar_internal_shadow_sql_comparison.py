@@ -32,17 +32,32 @@ class FakeRepository:
     finalize = create
 
 
-def record(sql, *, tenant=None, status="success"):
+def record(sql, *, tenant=None, status="success", generation_provider=None,
+           generation_model=None, repair_provider=None, repair_model=None,
+           repaired_sql=None, shadow_intent=None):
     principal = {"id": "operator-one", "profile": "admin"}
     if tenant:
         principal["organization_id"] = tenant
+    provider_result = {}
+    if generation_provider is not None:
+        provider_result["sql_generation_result"] = {
+            "provider_name": generation_provider,
+            "provider_model": generation_model,
+        }
+    if repair_provider is not None:
+        provider_result["sql_repair_result"] = {
+            "provider_name": repair_provider,
+            "provider_model": repair_model,
+        }
     return build_generate_shadow_record(
         shadow_record_id="shadow-1", agent_run_id="product-run-1", run_id="lg-run-1",
         created_at="2026-01-01T00:00:00Z", completed_at="2026-01-01T00:00:01Z",
         status=status,
         request={"question": "Show total orders for last month", "principal": principal},
-        state={"generated_sql": sql, "current_sql": sql,
-               "context_fingerprint": "context-one", "context_version": "tenant-config-v1"},
+        state={"generated_sql": sql, "current_sql": repaired_sql or sql,
+               "context_fingerprint": "context-one", "context_version": "tenant-config-v1",
+               **({"intent": shadow_intent} if shadow_intent is not None else {}),
+               **provider_result},
         response={"status": status, "gates": {}},
     )
 
@@ -82,6 +97,94 @@ def test_structures_and_no_raw_data():
     assert "physical_tables" in tables["metadata"]["comparison"]["different_facets"]
     assert repo.writes == 0 and repo.reads == 3
 
+
+
+def test_signed_provider_model_attestation():
+    sql = "SELECT COUNT(*) FROM records"
+    repo = FakeRepository(record(
+        sql, tenant="tenant-X",
+        generation_provider="provider-neutral", generation_model="model-v3"
+    ))
+    output = CompareShadowSqlUseCase(repository=repo).execute(
+        request(sql, tenant="tenant-X")
+    )
+    assert output["status"] == "success", output
+    details = output["metadata"]["comparison"]
+    assert details["shadow_generator_provider"] == "provider-neutral"
+    assert details["shadow_generator_model"] == "model-v3"
+    assert details["shadow_repair_provider"] is None
+    assert details["shadow_repair_model"] is None
+    assert details["generator_identity_attested"] is True
+    assert details["repair_identity_attested"] is True
+    assert "token_usage" not in json.dumps(output)
+    assert "api_key" not in json.dumps(output)
+
+    # An unrecorded model must remain unattested, never filled from defaults.
+    no_model = CompareShadowSqlUseCase(repository=FakeRepository(
+        record(sql, generation_provider="provider-neutral")
+    )).execute(request(sql))
+    partial = no_model["metadata"]["comparison"]
+    assert partial["shadow_generator_model"] is None
+    assert partial["generator_identity_attested"] is False
+
+    # Tampering with signed provider/model evidence must invalidate the record.
+    repo.record["langgraph_evidence"]["provider_metadata"][
+        "sql_generation_result_provider_model"
+    ] = "model-tampered"
+    tampered = CompareShadowSqlUseCase(repository=repo).execute(
+        request(sql, tenant="tenant-X")
+    )
+    assert tampered["status"] == "rejected"
+    assert tampered["errors"][0]["code"] == "SHADOW_COMPARE_EVIDENCE_INVALID"
+
+    # A malicious free-form model value is neither reflected nor considered proof.
+    unsafe = CompareShadowSqlUseCase(repository=FakeRepository(
+        record(sql, generation_provider="provider-neutral", generation_model="Bearer secret")
+    )).execute(request(sql))
+    assert unsafe["status"] == "success"
+    unsafe_info = unsafe["metadata"]["comparison"]
+    assert unsafe_info["shadow_generator_model"] is None
+    assert unsafe_info["generator_identity_attested"] is False
+    assert "Bearer secret" not in json.dumps(unsafe)
+
+def test_repair_provider_identity_for_changed_sql():
+    sql = "SELECT item_id FROM entries WHERE category = 'Original'"
+    repaired = "SELECT item_id FROM entries WHERE category = 'Corrected'"
+    kwargs = {
+        "generation_provider": "provider-neutral",
+        "generation_model": "model-v3",
+        "repaired_sql": repaired,
+    }
+
+    incomplete = CompareShadowSqlUseCase(
+        repository=FakeRepository(record(sql, **kwargs))
+    ).execute(request(sql))
+    assert incomplete["status"] == "success", incomplete
+    details = incomplete["metadata"]["comparison"]
+    assert details["generator_identity_attested"] is True
+    assert details["repair_identity_attested"] is False
+    assert details["requires_reapproval"] is True
+    assert details["financial_parity_proven"] is False
+
+    complete = CompareShadowSqlUseCase(
+        repository=FakeRepository(
+            record(sql, repair_provider="provider-neutral",
+                   repair_model="model-v3", **kwargs)
+        )
+    ).execute(request(sql))
+    assert complete["status"] == "success", complete
+    details = complete["metadata"]["comparison"]
+    assert details["repair_identity_attested"] is True
+    assert details["shadow_repair_model"] == "model-v3"
+    assert details["requires_reapproval"] is True
+
+    # Model alone (without a provider) is not evidence of a repair model.
+    only_model = CompareShadowSqlUseCase(
+        repository=FakeRepository(
+            record(sql, repair_provider=None, repair_model="model-v3", **kwargs)
+        )
+    ).execute(request(sql))
+    assert only_model["metadata"]["comparison"]["repair_identity_attested"] is False
 
 def test_case_sensitive_sql_values_and_quoted_identifiers():
     # PostgreSQL text literals and quoted identifier names can be case-sensitive.
@@ -156,6 +259,42 @@ def test_missing_corrupted_or_goldens():
     assert service.execute({**request(sql), "golden_answer": "no"})["errors"][0]["code"] == "SHADOW_COMPARE_REQUEST_INVALID"
 
 
+def test_recorded_intent_label_pair_is_post_generation_only():
+    sql = "SELECT COUNT(*) FROM events"
+    service = CompareShadowSqlUseCase(
+        repository=FakeRepository(record(sql, shadow_intent="intent-example"))
+    )
+    exact = service.execute({
+        **request(sql), "official_detected_intent": "intent-example"
+    })
+    assert exact["status"] == "success", exact
+    assert exact["metadata"]["comparison"]["intent_label_status"] == "identifiers_matched"
+
+    different = service.execute({
+        **request(sql), "official_detected_intent": "different-intent"
+    })
+    assert different["status"] == "success", different
+    assert different["metadata"]["comparison"]["intent_label_status"] == "identifier_mismatch"
+    assert "intent-example" not in json.dumps(different)
+    assert "different-intent" not in json.dumps(different)
+    assert different["metadata"]["comparison"]["financial_parity_proven"] is False
+
+    missing_official = service.execute(request(sql))
+    assert missing_official["metadata"]["comparison"]["intent_label_status"] == "unattested"
+    missing_shadow = CompareShadowSqlUseCase(
+        repository=FakeRepository(record(sql))
+    ).execute({**request(sql), "official_detected_intent": "intent-example"})
+    assert missing_shadow["metadata"]["comparison"]["intent_label_status"] == "unattested"
+
+    # Extra benchmark/expected labels still cannot reach the generator.
+    for wrong in ("", "  ", "x" * 129):
+        rejected = service.execute({
+            **request(sql), "official_detected_intent": wrong
+        })
+        assert rejected["status"] == "rejected", rejected
+        assert rejected["errors"][0]["code"] == "SHADOW_COMPARE_REQUEST_INVALID"
+
+
 def test_distinct_contexts():
     for tenant, sql in (
         ("tenant-alpha", "SELECT AVG(score) FROM quality_events WHERE segment = 'regional'"),
@@ -203,6 +342,9 @@ def test_authenticated_http_and_response_fingerprint():
 
 if __name__ == "__main__":
     test_structures_and_no_raw_data()
+    test_signed_provider_model_attestation()
+    test_repair_provider_identity_for_changed_sql()
+    test_recorded_intent_label_pair_is_post_generation_only()
     test_case_sensitive_sql_values_and_quoted_identifiers()
     test_isolation_rejection()
     test_missing_corrupted_or_goldens()
