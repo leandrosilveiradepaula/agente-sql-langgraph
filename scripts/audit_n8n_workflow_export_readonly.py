@@ -12,7 +12,6 @@ Input is an explicit local JSON export, not a live n8n API request.
 import argparse
 import hashlib
 import json
-import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -22,13 +21,9 @@ from typing import Any, Mapping
 MAX_EXPORT_BYTES = 16 * 1024 * 1024
 MAX_NODES = 2500
 MAX_PARAM_BYTES = 4 * 1024 * 1024
-_SAFE_NODE_NAME = re.compile(r"^[\w \-()?!.,áàâãçéêíóôõúüÁÀÂÃÇÉÊÍÓÔÕÚÜ/+]{1,120}$")
-_SENSITIVE_NAME = re.compile(
-    r"(?i)(?:https?://|bearer\s+\S+|password\s*[:=]|secret\s*[:=]|"
-    r"token\s*[:=]|api[_ -]?key\s*[:=]|\bsk-[a-z0-9-]{8,})"
-)
-_JS_STRING = re.compile(r"""(?<!\\)(?:'[^'\n]{1,240}'|"[^"\n]{1,240}")""")
-_SQL_SHAPE = re.compile(r"\b(?:SELECT|WITH|FROM|JOIN|WHERE|GROUP\s+BY)\b", re.IGNORECASE)
+# Human-readable names are deliberately NOT emitted: arbitrary workflow/node
+# names can contain secrets that no heuristic regex can reliably recognize.
+_ALLOWED_NODE_TYPE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
 
 
 class WorkflowAuditError(ValueError):
@@ -47,12 +42,8 @@ def _canonical(value: Any) -> bytes:
 
 
 def _safe_name(value: Any, *, index: int) -> str:
-    if not isinstance(value, str) or not _SAFE_NODE_NAME.fullmatch(value):
-        return f"node-{index + 1:03d}"
-    if _SENSITIVE_NAME.search(value):
-        return f"node-{index + 1:03d}"
-    return value
-
+    """Never emit workflow-owned text; stable identity comes from ID hashes."""
+    return f"node-{index + 1:03d}"
 
 def load_workflow(path: Path) -> tuple[Mapping[str, Any], str]:
     """Read one explicit local export with strict size and shape controls."""
@@ -70,6 +61,12 @@ def load_workflow(path: Path) -> tuple[Mapping[str, Any], str]:
         raise
     except (OSError, ValueError, UnicodeError) as exc:
         raise WorkflowAuditError("WORKFLOW_READ_OR_JSON_INVALID") from exc
+    # CLI can serialize one selected workflow as a singleton list.
+    # Refuse multi-workflow bundles: the call must attest exactly one ID.
+    if isinstance(workflow, list):
+        if len(workflow) != 1 or not isinstance(workflow[0], dict):
+            raise WorkflowAuditError("WORKFLOW_SINGLE_RECORD_REQUIRED")
+        workflow = workflow[0]
     if not isinstance(workflow, dict):
         raise WorkflowAuditError("WORKFLOW_OBJECT_REQUIRED")
     nodes = workflow.get("nodes")
@@ -92,7 +89,11 @@ def _node_identity(node: Mapping[str, Any]) -> str:
 
 def _node_record(node: Mapping[str, Any], *, index: int) -> dict[str, Any]:
     kind = node.get("type")
-    if not isinstance(kind, str) or not kind.strip():
+    if (
+        not isinstance(kind, str)
+        or not 1 <= len(kind) <= 180
+        or any(char not in _ALLOWED_NODE_TYPE for char in kind)
+    ):
         raise WorkflowAuditError("WORKFLOW_NODE_TYPE_INVALID")
     params = node.get("parameters", {})
     if not isinstance(params, Mapping):
