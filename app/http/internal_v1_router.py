@@ -12,6 +12,7 @@ from app.http.internal_shadow_read_v1_handler import (
 _SQL_AGENT_ROUTES = {
     "/v1/internal/sql-agent/generate",
     "/v1/internal/sql-agent/execute-approved-shadow",
+    "/v1/internal/sql-agent/compare-shadow-sql",
 }
 
 

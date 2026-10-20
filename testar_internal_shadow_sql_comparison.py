@@ -75,10 +75,47 @@ def test_structures_and_no_raw_data():
     modified = service.execute(request("SELECT SUM(amount) AS total FROM orders WHERE period_id = 202611", tenant="company-A"))
     assert modified["status"] == "success", modified
     assert modified["metadata"]["comparison"]["verdict"] == "structural_differences"
+    assert modified["response_id"] != matched["response_id"]
+    assert modified["response_fingerprint"] != matched["response_fingerprint"]
     assert "predicates" in modified["metadata"]["comparison"]["different_facets"]
     tables = service.execute(request("SELECT SUM(amount) FROM subscriptions", tenant="company-A"))
     assert "physical_tables" in tables["metadata"]["comparison"]["different_facets"]
     assert repo.writes == 0 and repo.reads == 3
+
+
+def test_case_sensitive_sql_values_and_quoted_identifiers():
+    # PostgreSQL text literals and quoted identifier names can be case-sensitive.
+    # A casefolded normalized token stream must not be called equivalent.
+    lower = "SELECT amount FROM financial_records WHERE entity_code = 'regionA'"
+    upper = "SELECT amount FROM financial_records WHERE entity_code = 'RegionA'"
+    service = CompareShadowSqlUseCase(repository=FakeRepository(record(upper, tenant="tenant-one")))
+    result = service.execute(request(lower, tenant="tenant-one"))
+    assert result["status"] == "success", result
+    diff = result["metadata"]["comparison"]
+    assert diff["normalized_sql_match"] is False, diff
+    assert diff["verdict"] != "normalized_sql_match", diff
+    assert "predicates" in diff["different_facets"], diff
+
+    quoted_lower = 'SELECT "Amount" FROM financial_records'
+    quoted_upper = 'SELECT "amount" FROM financial_records'
+    service = CompareShadowSqlUseCase(
+        repository=FakeRepository(record(quoted_upper, tenant="tenant-one"))
+    )
+    result = service.execute(request(quoted_lower, tenant="tenant-one"))
+    assert result["status"] == "success", result
+    diff = result["metadata"]["comparison"]
+    assert diff["normalized_sql_match"] is False
+    assert diff["verdict"] != "normalized_sql_match"
+
+    # Unquoted SQL keywords remain case-insensitive and cosmetic whitespace
+    # is intentionally ignored (but no literals are case-folded).
+    same = "SELECT id FROM financial_records WHERE entity_code = 'RegionA'"
+    service = CompareShadowSqlUseCase(
+        repository=FakeRepository(record(same.lower().replace("'regiona'", "'RegionA'"), tenant="tenant-one"))
+    )
+    result = service.execute(request(same, tenant="tenant-one"))
+    assert result["status"] == "success", result
+    assert result["metadata"]["comparison"]["verdict"] == "normalized_sql_match"
 
 
 def test_isolation_rejection():
@@ -166,6 +203,7 @@ def test_authenticated_http_and_response_fingerprint():
 
 if __name__ == "__main__":
     test_structures_and_no_raw_data()
+    test_case_sensitive_sql_values_and_quoted_identifiers()
     test_isolation_rejection()
     test_missing_corrupted_or_goldens()
     test_distinct_contexts()
