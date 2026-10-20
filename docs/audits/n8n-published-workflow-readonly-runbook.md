@@ -4,7 +4,7 @@
 
 ## Situação comprovada versus desconhecida
 
-O repositório `leandrosilveiradepaula/Agente-Financeiro` contém uma exportação congelada em julho de 2026, com 75 nós, incluindo seis áreas de hardcode de negócio verificadas. Consulte `docs/audits/n8n-legacy-workflow-v2.2.31-inventory.md`.
+O repositório `leandrosilveiradepaula/Agente-Financeiro` contém uma exportação congelada em julho de 2026, com 75 nós, incluindo 13 nós com hardcodes de negócio comprovados na exportação histórica. Consulte `docs/audits/n8n-legacy-workflow-v2.2.31-inventory.md`.
 
 O produto `Agente-Financeiro` possui código que chama n8n e despacha eventos LangGraph Shadow **por `after()` quando `LANGGRAPH_SHADOW_ENABLED=true`**. No repositório, o valor padrão da variável é `false`; isso **não informa o valor implantado**. O n8n ativo, a versão publicada, o despacho real, Gemini no Shadow e as respostas numéricas equivalentes **não foram comprovados por esses arquivos**.
 
@@ -50,7 +50,9 @@ O script falha fechado quando a CLI não suporta `--published`, quando o ID expo
 
 - `published_export_selected=true` significa que o script invocou **`--published`**, mas ainda é necessário provar que o webhook do produto usa exatamente esse workflow.
 - `official_webhook_route_verified=false` não muda até comprovar configuração/roteamento real.
-- `node_identity_sha256` e `parameters_sha256` permitem identificar mudanças por nó, **não** classificar o significado da regra.
+- `node_identity_sha256` e `parameters_sha256` identificam o nó e seus parâmetros sem expor valores.
+- `runtime_configuration_sha256` detecta mudanças também de tipo/versão, credenciais referenciadas e demais configurações operacionais. `topology_changed` alerta para conexões diferentes mesmo quando nenhum nó mudou; `workflow_id_matches_baseline` distingue identidades de workflow. Esses sinais são conservadores e **não** classificam regras de negócio por si.
+- Não afirmar que as regras são iguais só porque `changed=0`: consultar também `topology_changed`, IDs e demais diferenças de export.
 - `workflow_export_sha256` divergente pode refletir metadados, configurações e alterações reais. Não tratar hash diferente como regressão sem revisar diferenças de nós.
 - Números de casos semânticos v16/v17/v18 são apenas diagnóstico; não comprovam equivalência SQL nem resultado financeiro.
 
@@ -59,6 +61,8 @@ O script falha fechado quando a CLI não suporta `--published`, quando o ID expo
 A) Confirmar exatamente qual fluxo n8n a rota oficial `/api/generate-sql` alcança (por configuração do deployment e execução correlacionada; não usar URLs hardcoded como prova).
 
 B) Com o inventário da versão publicada em mãos, revisar regras `MIXED_TO_VERIFY`, identificar `FORBIDDEN`, fonte contábil e seu destino em contexto versionado. Nenhum literal de esquema/cliente no motor LangGraph.
+
+**Lacuna de integração encontrada em código:** em `Agente-Financeiro/app/api/generate-sql/route.ts` o disparo Shadow via `after()` só ocorre no caminho que alcança o retorno final normal; respostas antecipadas de erro, bloqueio por política e webhook não-2xx não programam esse dispatch. Além disso, o disparo parte do BFF, não do workflow n8n. Isso **não** demonstra integração orquestrada n8n → LangGraph; G1 precisa cobrir também divergências/falhas antes de qualquer cutover.
 
 C) Capturar pares de evidências `agent_run_id` do mesmo pedido, um do n8n+Gemini oficial e outro do n8n+LangGraph+Gemini Shadow. O produto já grava SQL e status oficiais, e o serviço LangGraph grava Shadow separadamente; ainda falta um comparador de evidência consolidado e comprovação de ativação/execução real.
 

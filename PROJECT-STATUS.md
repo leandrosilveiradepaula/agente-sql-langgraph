@@ -49,11 +49,15 @@ Uma exportação **histórica** do workflow n8n está versionada no produto
 `d8897b347ca4fe8a79aa8ffc14e80b4ecd28143a` em 2026-07-20).
 
 O inventário preliminar `docs/audits/n8n-legacy-workflow-v2.2.31-inventory.md`
-indexa 75 nós e documenta **seis** nós com hardcodes FORBIDDEN
+indexa 75 nós e documenta **13** nós com hardcodes FORBIDDEN
 comprovados no legado: classificação/aliases, prompt SQL, planner, gates
 semânticos de DRE, schema e filtros fixos, e relatórios financeiros. O
 script `scripts/audit_n8n_workflow_export_readonly.py` permite comparar
-exportações locais sem reproduzir SQL, prompts ou credenciais. Nenhum dado
+exportações locais sem reproduzir SQL, prompts ou credenciais. A revisão
+estendida confirmou sete outros nós hardcoded no mesmo snapshot histórico,
+incluindo reescrita automática de SQL no cleaner, tabelas fixas em gate e
+inferência duplicada de métricas/dimensões. O comparador agora acompanha
+deriva de topologia e configuração runtime além dos parâmetros. Nenhum dado
 desse legado deve ser transplantado para código LangGraph.
 
 **Importante:** não foi acessado/alterado o workflow ativo na VPS, e a
@@ -112,7 +116,7 @@ Vercel, n8n, SQL, LLM ou variáveis de ambiente.
 | Gate | Situação verificável nesta atualização |
 |---|---|
 | G1 — dispatch e evidence oficial/Shadow end-to-end | Prova isolada documentada, paridade operacional completa **não comprovada** |
-| G2 — inventário n8n + eliminação FORBIDDEN + 2 contextos | **Parcial:** 75 nós de exportação histórica indexados; 6 FORBIDDEN comprovados no arquivo; VPS ativa e 2 contextos pendentes |
+| G2 — inventário n8n + eliminação FORBIDDEN + 2 contextos | **Parcial:** 75 nós de exportação histórica indexados; 13 FORBIDDEN comprovados no arquivo; VPS ativa e 2 contextos pendentes |
 | G3 — Gemini equivalência semântica/SQL/números | **Pendente:** avaliações semânticas não validam respostas financeiras |
 | G4 — segurança, execução autorizada, approvals/rollback | **Não homologado para cutover** |
 | G5 — substituição controlada do caminho inteligente n8n | **Não autorizada / não realizada** |

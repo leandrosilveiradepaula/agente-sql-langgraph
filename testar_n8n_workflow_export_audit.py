@@ -138,6 +138,54 @@ def test_drift_detects_changed_added_and_removed_nodes() -> None:
         assert _PRIVATE not in output.getvalue()
 
 
+def test_topology_runtime_configuration_and_workflow_identity_drift() -> None:
+    original = _fake_export()
+    before = summarize_workflow(original, "a" * 64)
+    assert len(before["nodes"][0]["runtime_configuration_sha256"]) == 64
+
+    rewired = deepcopy(original)
+    rewired["connections"] = {
+        "Classifier synthetic": {
+            "main": [[{"node": "Send request", "type": "main", "index": 0}]]
+        }
+    }
+    comparison = compare_exports(
+        before, summarize_workflow(rewired, "b" * 64),
+    )
+    assert comparison["changed"] == 0
+    assert comparison["topology_changed"] is True
+    assert comparison["workflow_id_matches_baseline"] is True
+
+    # These fields affect execution even with identical parameters and edges.
+    for key, value in (
+        ("typeVersion", 2.5),
+        ("credentials", {"private": {"id": _PRIVATE}}),
+    ):
+        modified = deepcopy(original)
+        modified["nodes"][0][key] = value
+        current = summarize_workflow(modified, "b" * 64)
+        delta = compare_exports(before, current)
+        assert delta["changed"] == 1, key
+        assert delta["topology_changed"] is False
+        assert _PRIVATE not in json.dumps(current)
+        assert _PRIVATE not in json.dumps(delta)
+
+    visual_only = deepcopy(original)
+    visual_only["nodes"][0]["position"] = [100, 200]
+    delta = compare_exports(
+        before, summarize_workflow(visual_only, "b" * 64),
+    )
+    assert delta["changed"] == 0
+    assert delta["topology_changed"] is False
+
+    other_flow = deepcopy(original)
+    other_flow["id"] = "different-flow-id"
+    delta = compare_exports(
+        before, summarize_workflow(other_flow, "b" * 64),
+    )
+    assert delta["workflow_id_matches_baseline"] is False
+
+
 def test_malformed_and_duplicate_exports_fail_closed() -> None:
     samples = [
         {},
@@ -275,6 +323,7 @@ if __name__ == "__main__":
     test_singleton_cli_export_envelope_and_multibundle_rejection()
     test_published_cli_runner_is_manual_and_fails_closed()
     test_drift_detects_changed_added_and_removed_nodes()
+    test_topology_runtime_configuration_and_workflow_identity_drift()
     test_malformed_and_duplicate_exports_fail_closed()
     test_error_outputs_do_not_leak_private_paths_or_bad_payloads()
     print("N8N_EXPORT_HARDCODE_AUDIT_READONLY=PASS")

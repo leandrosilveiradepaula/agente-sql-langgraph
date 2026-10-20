@@ -151,6 +151,13 @@ def _node_record(node: Mapping[str, Any], *, index: int) -> dict[str, Any]:
         "disabled_in_export": node.get("disabled") is True,
         "node_identity_sha256": _digest(_node_identity(node).encode("utf-8")),
         "parameters_sha256": _digest(canonical),
+        # Fingerprint execution-significant fields (typeVersion, credentials,
+        # webhookId and runtime settings) without exposing their values.
+        # Ignore editor-only position and node identity fields.
+        "runtime_configuration_sha256": _digest(_canonical({
+            key: value for key, value in node.items()
+            if key not in ("id", "name", "position")
+        })),
         "code_characters": len(code),
         "review_flags": review_flags,
     }
@@ -182,6 +189,13 @@ def summarize_workflow(
         "read_only": True,
         "live_instance_verified": False,
         "workflow_export_sha256": source_sha256,
+        "workflow_id_sha256": (
+            _digest(workflow["id"].encode("utf-8"))
+            if isinstance(workflow.get("id"), str) and workflow["id"]
+            else None
+        ),
+        # Rewiring can change workflow behavior without changing any node.
+        "topology_sha256": _digest(_canonical(workflow.get("connections", {}))),
         "export_active_flag": workflow.get("active") is True,
         "node_count": len(records),
         "node_types": dict(sorted(counts.items())),
@@ -209,9 +223,8 @@ def compare_exports(
         changed = (
             previous is not None
             and (
-                previous["parameters_sha256"] != node["parameters_sha256"]
-                or previous["type_fingerprint"] != node["type_fingerprint"]
-                or previous["disabled_in_export"] != node["disabled_in_export"]
+                previous["runtime_configuration_sha256"]
+                != node["runtime_configuration_sha256"]
             )
         )
         status.append({
@@ -230,6 +243,15 @@ def compare_exports(
     return {
         "baseline_export_sha256": earlier["workflow_export_sha256"],
         "candidate_export_sha256": later["workflow_export_sha256"],
+        "topology_changed": (
+            earlier["topology_sha256"] != later["topology_sha256"]
+        ),
+        "workflow_id_matches_baseline": (
+            earlier["workflow_id_sha256"] == later["workflow_id_sha256"]
+            if earlier["workflow_id_sha256"] is not None
+            and later["workflow_id_sha256"] is not None
+            else None
+        ),
         "unchanged": sum(x["status"] == "unchanged" for x in all_changes),
         "changed": sum(x["status"] == "changed" for x in all_changes),
         "added": sum(x["status"] == "added" for x in all_changes),
