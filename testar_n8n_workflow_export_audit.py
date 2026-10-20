@@ -81,6 +81,9 @@ def test_secret_safe_inventory_and_metadata_only() -> None:
         assert summary["nodes"][0]["name"] == "node-001"
         assert summary["nodes"][1]["name"] == "node-002"
         assert summary["nodes"][2]["name"] == "node-003"
+        assert summary["nodes"][0]["type"] == "code"
+        assert summary["nodes"][1]["type"] == "httpRequest"
+        assert summary["nodes"][2]["type"] == "postgres"
         assert summary["nodes"][0]["code_characters"] > 20
         assert "INLINE_CODE_REVIEW" in summary["nodes"][0]["review_flags"]
         assert "EXTERNAL_REQUEST_REVIEW" in summary["nodes"][1]["review_flags"]
@@ -195,7 +198,13 @@ def test_no_arbitrary_node_names_can_reach_report() -> None:
         len(node["node_identity_sha256"]) == 64 for node in report["nodes"]
     )
 
-    fixture["nodes"][0]["type"] = "n8n-nodes-base.code-" + _PRIVATE
+    fixture["nodes"][0]["type"] = "n8n-nodes-base." + _PRIVATE
+    hidden = summarize_workflow(fixture, "e" * 64)
+    assert hidden["nodes"][0]["type"] == "other_builtin"
+    assert _PRIVATE not in json.dumps(hidden)
+    assert len(hidden["nodes"][0]["type_fingerprint"]) == 64
+
+    fixture["nodes"][0]["type"] = "n8n-nodes-base.invalid:" + _PRIVATE
     try:
         summarize_workflow(fixture, "e" * 64)
     except WorkflowAuditError as exc:
