@@ -250,6 +250,9 @@ def _response(
         "response_id": stable_fingerprint({
             "operation": "compare_shadow_sql", "agent_run_id": agent_run_id,
             "run_id": run_id, "code": code,
+            # Different official SQL stages share the same run ID.
+            # Their responses must have distinct audit identities.
+            "comparison_payload_fingerprint": stable_fingerprint(details or {}),
         }),
         "agent_run_id": agent_run_id,
         "run_id": run_id,

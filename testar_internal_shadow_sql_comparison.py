@@ -75,6 +75,8 @@ def test_structures_and_no_raw_data():
     modified = service.execute(request("SELECT SUM(amount) AS total FROM orders WHERE period_id = 202611", tenant="company-A"))
     assert modified["status"] == "success", modified
     assert modified["metadata"]["comparison"]["verdict"] == "structural_differences"
+    assert modified["response_id"] != matched["response_id"]
+    assert modified["response_fingerprint"] != matched["response_fingerprint"]
     assert "predicates" in modified["metadata"]["comparison"]["different_facets"]
     tables = service.execute(request("SELECT SUM(amount) FROM subscriptions", tenant="company-A"))
     assert "physical_tables" in tables["metadata"]["comparison"]["different_facets"]
