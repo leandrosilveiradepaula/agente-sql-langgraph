@@ -1262,9 +1262,10 @@ def _validate_versioned_concept_negation(
             details={},
         )
 
-    if not isinstance(policy, Mapping) or set(policy) != {
-        "cue_phrases", "concept_names", "max_gap_tokens",
-    }:
+    required = {"cue_phrases", "concept_names", "max_gap_tokens"}
+    if not isinstance(policy, Mapping) or not required <= set(policy) or (
+        set(policy) - required - {"intent_gates"}
+    ):
         issue("NEGATION_SCOPE_INVALID", "")
         return
     for field, limit in (("cue_phrases", 64), ("concept_names", 32)):
@@ -1291,6 +1292,63 @@ def _validate_versioned_concept_negation(
     gap = policy.get("max_gap_tokens")
     if type(gap) is not int or not 0 <= gap <= 3:
         issue("NEGATION_SCOPE_GAP_INVALID", ".max_gap_tokens")
+
+    gates = policy.get("intent_gates", [])
+    if not isinstance(gates, list) or len(gates) > 32:
+        issue("NEGATION_INTENT_GATES_INVALID", ".intent_gates")
+        return
+
+    authorized_concepts = {
+        str(name).strip().casefold()
+        for name in policy.get("concept_names", [])
+        if _is_non_empty_text(name)
+    } if isinstance(policy.get("concept_names"), list) else set()
+    raw_resolution = snapshot.get("intent_resolution")
+    catalog = (
+        raw_resolution.get("intent_catalog", [])
+        if isinstance(raw_resolution, Mapping) else []
+    )
+    available_gates: set[tuple[str, str]] = set()
+    if isinstance(catalog, list):
+        for entry in catalog:
+            if not isinstance(entry, Mapping):
+                continue
+            name = entry.get("intent_name")
+            if not _is_non_empty_text(name):
+                continue
+            rules = entry.get("rules")
+            for rule in rules if isinstance(rules, list) else []:
+                if (
+                    not isinstance(rule, Mapping)
+                    or rule.get("effect") not in {"positive_score", "require"}
+                ):
+                    continue
+                concepts = rule.get("concepts")
+                for concept in concepts if isinstance(concepts, list) else []:
+                    if isinstance(concept, Mapping) and _is_non_empty_text(
+                        concept.get("concept_name")
+                    ):
+                        available_gates.add((
+                            str(name).strip().casefold(),
+                            str(concept["concept_name"]).strip().casefold(),
+                        ))
+    seen: set[tuple[str, str]] = set()
+    for index, gate in enumerate(gates):
+        field = f".intent_gates[{index}]"
+        if not isinstance(gate, Mapping) or set(gate) != {
+            "intent_name", "concept_name",
+        } or any(not _is_non_empty_text(v) for v in gate.values()):
+            issue("NEGATION_INTENT_GATE_INVALID", field)
+            continue
+        key = (
+            str(gate["intent_name"]).strip().casefold(),
+            str(gate["concept_name"]).strip().casefold(),
+        )
+        if key in seen:
+            issue("NEGATION_INTENT_GATE_DUPLICATE", field)
+        seen.add(key)
+        if key not in available_gates or key[1] not in authorized_concepts:
+            issue("NEGATION_INTENT_GATE_UNKNOWN", field)
 
 
 def _validate_temporal_planning_config(
