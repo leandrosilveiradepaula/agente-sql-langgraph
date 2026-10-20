@@ -25,6 +25,12 @@ MAX_PARAM_BYTES = 4 * 1024 * 1024
 # Human-readable names are deliberately NOT emitted: arbitrary workflow/node
 # names can contain secrets that no heuristic regex can reliably recognize.
 _ALLOWED_NODE_TYPE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+# Platform-only allowlist for output labels. Unknown plugin types are hashed,
+# never echoed: arbitrary type strings may also contain sensitive information.
+_SAFE_BUILTIN_CATEGORIES = frozenset({
+    "webhook", "code", "respondToWebhook", "postgres", "httpRequest",
+    "if", "wait", "manualTrigger", "splitInBatches",
+})
 _JS_STRING = re.compile(r"""(?<!\\)(?:'[^'\n]{1,240}'|"[^"\n]{1,240}")""")
 _SQL_SHAPE = re.compile(r"\b(?:SELECT|WITH|FROM|JOIN|WHERE|GROUP\s+BY)\b", re.IGNORECASE)
 
@@ -130,10 +136,18 @@ def _node_record(node: Mapping[str, Any], *, index: int) -> dict[str, Any]:
         review_flags.append("EXTERNAL_REQUEST_REVIEW")
 
     name = _safe_name(node.get("name"), index=index)
+    category = (
+        kind[len("n8n-nodes-base."):]
+        if kind.startswith("n8n-nodes-base.")
+        else ""
+    )
+    if category not in _SAFE_BUILTIN_CATEGORIES:
+        category = "other_builtin" if kind.startswith("n8n-nodes-base.") else "third_party"
     return {
         "index": index + 1,
         "name": name,
-        "type": kind,
+        "type": category,
+        "type_fingerprint": _digest(kind.encode("utf-8")),
         "disabled_in_export": node.get("disabled") is True,
         "node_identity_sha256": _digest(_node_identity(node).encode("utf-8")),
         "parameters_sha256": _digest(canonical),
@@ -196,7 +210,7 @@ def compare_exports(
             previous is not None
             and (
                 previous["parameters_sha256"] != node["parameters_sha256"]
-                or previous["type"] != node["type"]
+                or previous["type_fingerprint"] != node["type_fingerprint"]
                 or previous["disabled_in_export"] != node["disabled_in_export"]
             )
         )
