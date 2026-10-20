@@ -42,10 +42,29 @@ cleanup_on_error() {
   if [[ $status -ne 0 ]]; then
     cp -a "${ENV_BACKUP}" "${ENV_FILE}" || true
     cp -a "${COMPOSE_BACKUP}" "${DEPLOY_DIR}/compose.yaml" || true
-    (
-      cd "${DEPLOY_DIR}"
-      docker compose -f compose.yaml up -d --force-recreate "${SERVICE}"
-    ) >/dev/null 2>&1 || true
+    if (cd "${DEPLOY_DIR}" && docker compose -f compose.yaml up -d --force-recreate "${SERVICE}") >/dev/null 2>&1; then
+      restored=false
+      for _ in $(seq 1 30); do
+        restored_health="$(docker inspect "${CONTAINER}" --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || true)"
+        if [[ "${restored_health}" == "healthy" ]]; then
+          restored=true
+          break
+        fi
+        sleep 2
+      done
+      restored_image="$(docker inspect "${CONTAINER}" --format '{{.Config.Image}}' 2>/dev/null || true)"
+      expected_image="$(sed -nE 's/^[[:space:]]*image:[[:space:]]*(agente-sql-langgraph-shadow-test:[^[:space:]]+).*/\\1/p' "${DEPLOY_DIR}/compose.yaml" | head -n 1)"
+      restored_commit="$(docker inspect "${CONTAINER}" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n 's/^LANGGRAPH_COMMIT=//p' | tail -n 1)"
+      expected_commit="$(sed -n 's/^LANGGRAPH_COMMIT=//p' "${ENV_FILE}" | tail -n 1)"
+      restored_sql="$(docker inspect "${CONTAINER}" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n 's/^LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=//p' | tail -n 1)"
+      if [[ "${restored}" == true && -n "${expected_image}" && "${restored_image}" == "${expected_image}" && -n "${expected_commit}" && "${restored_commit}" == "${expected_commit}" && "${restored_sql}" == false ]]; then
+        echo "ROLLBACK_VERIFIED=PASS health=healthy image_and_commit=restored real_sql=false"
+      else
+        echo "ROLLBACK_VERIFIED=FAIL check_service_before_any_new_deploy"
+      fi
+    else
+      echo "ROLLBACK_VERIFIED=FAIL compose_recreate_failed"
+    fi
   fi
   exit $status
 }
