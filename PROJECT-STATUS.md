@@ -61,6 +61,30 @@ exportação arquivada não prova paridade nem que este é o fluxo oficial atual
 G2 continua aberto até reconciliar com exportação ativa e externalizar as
 regras; G1 e G3–G6 permanecem abertos.
 
+### Próxima evidência operacional preparada — published n8n
+
+Script de coleta manual: `scripts/audit_n8n_published_workflow_readonly.sh`.
+Seleciona **somente a versão publicada** usando `n8n export:workflow --published`
+via Docker local, exige ID e contêiner autorizado, guarda o JSON bruto em
+arquivos temporários privados, valida unicidade/identidade, entrega somente
+fingerprints e contagens, e remove o bruto antes de imprimir resultados.
+`scripts/audit_n8n_workflow_export_readonly.py` foi ajustado para aceitar
+exportação singleton e mascarar **todos** os nomes de nós, inclusive segredos
+não óbvios. Os testes sintéticos permanecem no CI offline.
+
+Procedimento e cautelas: `docs/audits/n8n-published-workflow-readonly-runbook.md`.
+**Este PR não executa o script na VPS, não verifica workflow vivo e não
+habilita SQL real.** G1 e G2 continuam com evidência pendente.
+
+Verificação cross-repo no produto `leandrosilveiradepaula/Agente-Financeiro`
+atual na investigação: `app/api/generate-sql/route.ts` usa n8n como
+caminho oficial e dispara LangGraph após a resposta via `after()` somente
+quando `LANGGRAPH_SHADOW_ENABLED=true`. `lib/langgraph-shadow-read-client.ts`
+e a UI mostram metadados Shadow, mas **não demonstram equivalência de
+SQL/resultados**; `lib/n8n-endpoint.ts` ainda possui URL fallback fixa
+para uma instância, um risco de configuração/portabilidade que deve ser
+tratado **após confirmação de ambiente**, sem quebrar produção por inferência.
+
 ### Estado dos gates finais
 
 | Gate | Situação verificável nesta atualização |
