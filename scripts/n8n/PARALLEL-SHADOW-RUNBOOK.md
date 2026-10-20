@@ -2,7 +2,9 @@
 
 This is the **new parallel orchestration candidate** for the real finance
 workflow confirmed by the operator on 2026-10-20 (separate 68-node production
-workflow). It is NOT the old 6-node manually triggered correlation fixture.
+workflow). See `docs/audits/n8n-operator-confirmed-official-2026-10-20.md`
+for its exact SHA-256, scope, audit findings and open gates.
+It is NOT the old 6-node manually triggered correlation fixture.
 The real n8n + Gemini workflow remains **OFFICIAL**, unchanged.
 
 ## What is built
