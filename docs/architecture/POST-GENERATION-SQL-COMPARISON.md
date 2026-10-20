@@ -64,3 +64,29 @@ os gates existentes; merge não equivale a deploy ou paridade.
 A validação de revisão de SQL diferencia, por exemplo, filtros textuais 'A'
 versus 'a' e identificadores citados "Amount" versus "amount".
 A normalização de palavras-chave não pode apagar essas diferenças.
+
+
+## Identidade do provedor/modelo (etapa de paridade Gemini)
+
+O comparador recupera os identificadores do **provedor e modelo realmente
+registrados** na evidência de geração, e opcionalmente do reparo. Resposta
+sanitizada: `shadow_generator_provider`, `shadow_generator_model`,
+`shadow_repair_provider`, `shadow_repair_model`,
+`generator_identity_attested` e `repair_identity_attested`.
+
+É uma verificação de proveniência, não seleção de LLM. O motor não
+recebe o provedor/modelo oficial como input para o gerador, não inventa
+aliases e não utiliza benchmark. A interface do Produto compara a
+identidade persistida no run oficial com os identificadores retornados
+aqui, **somente depois da geração**. Se qualquer parte faltar, informa
+`unattested`; se os identificadores não coincidirem literalmente,
+informa `identifier_mismatch`, não presume Gemini pelo padrão configurado.
+
+Quando há proposta de reparo, a identidade do reparador precisa estar
+registrada para atestar ambos; SQL reparada exige nova aprovação de
+qualquer modo. Os campos da resposta têm tamanho e alfabeto restritos;
+nunca são incluídos tokens, chaves ou respostas brutas do provedor.
+
+**Limite:** nomes exatos de modelos/provedores podem diferir como alias
+operacional. Sem mapeamento de provedor versionado e autorizado, não
+transformar divergência de identificador em equivalência afirmada.

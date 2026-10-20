@@ -1,3 +1,16 @@
+## Rastreabilidade de provedor/modelo na comparação Shadow — candidato
+
+A nova comparação expõe apenas identificadores sanitizados de
+`sql_generation_result` (e reparo quando presente), retirados da
+evidência persistida/fingerprint-validada. O Produto pode confrontar
+esses identificadores com `llm_provider` e `llm_model` do run
+oficial, sem passar resultado oficial ao gerador, criar aliases
+hardcoded ou gastar LLM. Isso **não** prova Gemini paritário quando
+a configuração do runtime não foi verificada. Integração real G1/G3
+permanece pendente; `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`.
+
+---
+
 ## Comparador pós-geração proposto — 2026-10-20
 
 Implementação candidada: `POST /v1/internal/sql-agent/compare-shadow-sql`,

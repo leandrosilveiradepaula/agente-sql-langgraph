@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+import re
 from typing import Any
 
 from app.domain.result_normalization import stable_fingerprint
@@ -118,6 +119,7 @@ class CompareShadowSqlUseCase:
             verdict = "inconclusive"
         lineage = record.get("lineage", {})
         lineage = lineage if isinstance(lineage, Mapping) else {}
+        provider_identity = _recorded_provider_identity(record)
         return _response(
             "success", "SHADOW_COMPARE_COMPLETED", agent_id,
             run_id=str(record.get("run_id", "")),
@@ -132,6 +134,7 @@ class CompareShadowSqlUseCase:
                 "shadow_sql_fingerprint": stable_fingerprint(shadow_sql),
                 "shadow_context_fingerprint": str(lineage.get("context_fingerprint") or ""),
                 "shadow_context_version": str(lineage.get("context_version") or ""),
+                **provider_identity,
                 "tenant_identity_attested": tenant_attested,
                 "same_data_snapshot_attested": False,
                 "financial_parity_proven": False,
@@ -140,6 +143,54 @@ class CompareShadowSqlUseCase:
                 or bool(record.get("requires_reapproval")),
             },
         )
+
+
+_PROVIDER_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+/\\-]{0,127}\\Z")
+
+
+def _public_provider_id(value: object) -> str | None:
+    """Allowlisted non-secret provider/model label, not transport or keys."""
+    if not isinstance(value, str):
+        return None
+    label = value.strip()
+    if not label or len(label) > 128 or _PROVIDER_ID_PATTERN.fullmatch(label) is None:
+        return None
+    lowered = label.casefold()
+    if any(marker in lowered for marker in ("token", "secret", "apikey", "api_key", "bearer")):
+        return None
+    return label
+
+
+def _recorded_provider_identity(record: Mapping[str, Any]) -> dict[str, str | None | bool]:
+    """Derive identity strictly from the signed, persisted generation evidence.
+
+    If model or provider was not emitted by an adapter, keep the proof absent;
+    never infer from a configured default, provider alias or repair output.
+    """
+    evidence = record.get("langgraph_evidence")
+    raw = evidence.get("provider_metadata") if isinstance(evidence, Mapping) else None
+    metadata = raw if isinstance(raw, Mapping) else {}
+    generation_provider = _public_provider_id(
+        metadata.get("sql_generation_result_provider_name")
+    )
+    generation_model = _public_provider_id(
+        metadata.get("sql_generation_result_provider_model")
+    )
+    repair_provider = _public_provider_id(
+        metadata.get("sql_repair_result_provider_name")
+    )
+    repair_model = _public_provider_id(
+        metadata.get("sql_repair_result_provider_model")
+    )
+    repair_present = bool(record.get("repaired_sql_proposal"))
+    return {
+        "shadow_generator_provider": generation_provider,
+        "shadow_generator_model": generation_model,
+        "shadow_repair_provider": repair_provider,
+        "shadow_repair_model": repair_model,
+        "generator_identity_attested": bool(generation_provider and generation_model),
+        "repair_identity_attested": not repair_present or bool(repair_provider and repair_model),
+    }
 
 
 def _valid_request(value: Mapping[str, Any]) -> bool:

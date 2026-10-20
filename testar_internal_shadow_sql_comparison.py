@@ -32,17 +32,30 @@ class FakeRepository:
     finalize = create
 
 
-def record(sql, *, tenant=None, status="success"):
+def record(sql, *, tenant=None, status="success", generation_provider=None,
+           generation_model=None, repair_provider=None, repair_model=None):
     principal = {"id": "operator-one", "profile": "admin"}
     if tenant:
         principal["organization_id"] = tenant
+    provider_result = {}
+    if generation_provider is not None:
+        provider_result["sql_generation_result"] = {
+            "provider_name": generation_provider,
+            "provider_model": generation_model,
+        }
+    if repair_provider is not None:
+        provider_result["sql_repair_result"] = {
+            "provider_name": repair_provider,
+            "provider_model": repair_model,
+        }
     return build_generate_shadow_record(
         shadow_record_id="shadow-1", agent_run_id="product-run-1", run_id="lg-run-1",
         created_at="2026-01-01T00:00:00Z", completed_at="2026-01-01T00:00:01Z",
         status=status,
         request={"question": "Show total orders for last month", "principal": principal},
         state={"generated_sql": sql, "current_sql": sql,
-               "context_fingerprint": "context-one", "context_version": "tenant-config-v1"},
+               "context_fingerprint": "context-one", "context_version": "tenant-config-v1",
+               **provider_result},
         response={"status": status, "gates": {}},
     )
 
@@ -82,6 +95,55 @@ def test_structures_and_no_raw_data():
     assert "physical_tables" in tables["metadata"]["comparison"]["different_facets"]
     assert repo.writes == 0 and repo.reads == 3
 
+
+
+def test_signed_provider_model_attestation():
+    sql = "SELECT COUNT(*) FROM records"
+    repo = FakeRepository(record(
+        sql, tenant="tenant-X",
+        generation_provider="provider-neutral", generation_model="model-v3"
+    ))
+    output = CompareShadowSqlUseCase(repository=repo).execute(
+        request(sql, tenant="tenant-X")
+    )
+    assert output["status"] == "success", output
+    details = output["metadata"]["comparison"]
+    assert details["shadow_generator_provider"] == "provider-neutral"
+    assert details["shadow_generator_model"] == "model-v3"
+    assert details["shadow_repair_provider"] is None
+    assert details["shadow_repair_model"] is None
+    assert details["generator_identity_attested"] is True
+    assert details["repair_identity_attested"] is True
+    assert "token_usage" not in json.dumps(output)
+    assert "api_key" not in json.dumps(output)
+
+    # An unrecorded model must remain unattested, never filled from defaults.
+    no_model = CompareShadowSqlUseCase(repository=FakeRepository(
+        record(sql, generation_provider="provider-neutral")
+    )).execute(request(sql))
+    partial = no_model["metadata"]["comparison"]
+    assert partial["shadow_generator_model"] is None
+    assert partial["generator_identity_attested"] is False
+
+    # Tampering with signed provider/model evidence must invalidate the record.
+    repo.record["langgraph_evidence"]["provider_metadata"][
+        "sql_generation_result_provider_model"
+    ] = "model-tampered"
+    tampered = CompareShadowSqlUseCase(repository=repo).execute(
+        request(sql, tenant="tenant-X")
+    )
+    assert tampered["status"] == "rejected"
+    assert tampered["errors"][0]["code"] == "SHADOW_COMPARE_EVIDENCE_INVALID"
+
+    # A malicious free-form model value is neither reflected nor considered proof.
+    unsafe = CompareShadowSqlUseCase(repository=FakeRepository(
+        record(sql, generation_provider="provider-neutral", generation_model="Bearer secret")
+    )).execute(request(sql))
+    assert unsafe["status"] == "success"
+    unsafe_info = unsafe["metadata"]["comparison"]
+    assert unsafe_info["shadow_generator_model"] is None
+    assert unsafe_info["generator_identity_attested"] is False
+    assert "Bearer secret" not in json.dumps(unsafe)
 
 def test_case_sensitive_sql_values_and_quoted_identifiers():
     # PostgreSQL text literals and quoted identifier names can be case-sensitive.
@@ -203,6 +265,7 @@ def test_authenticated_http_and_response_fingerprint():
 
 if __name__ == "__main__":
     test_structures_and_no_raw_data()
+    test_signed_provider_model_attestation()
     test_case_sensitive_sql_values_and_quoted_identifiers()
     test_isolation_rejection()
     test_missing_corrupted_or_goldens()
