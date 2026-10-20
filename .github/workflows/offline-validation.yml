@@ -94,3 +94,33 @@ jobs:
           docker run --rm --network none \
             --entrypoint python shadow-import-check \
             -c 'import os; assert os.geteuid() != 0; from app.test_runtime.sql_agent_test_app import create_app; print("SHADOW_IMPORT_OK")'
+      - name: Assert full Uvicorn health and S2S boundary offline in both provider configurations
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST_ENV="$(mktemp)"
+          trap 'rm -f "$TEST_ENV"' EXIT
+          chmod 600 "$TEST_ENV"
+          cat > "$TEST_ENV" <<'EOF'
+          LANGGRAPH_RUNTIME_MODE=shadow_test
+          LANGGRAPH_HTTP_HOST=0.0.0.0
+          LANGGRAPH_HTTP_PORT=8000
+          LANGGRAPH_SHADOW_PERSISTENCE=postgres
+          LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false
+          LANGGRAPH_SHADOW_DATABASE_DSN=postgresql://shadow.invalid/ci
+          CONTEXT_POSTGRES_DSN=postgresql://context.invalid/ci
+          SEMANTIC_AGENT_VERSION=ci-fixture-v1
+          LANGGRAPH_S2S_TOKEN=ci-not-a-real-secret
+          GEMINI_SQL_GENERATOR_MODEL=gemini-2.5-flash
+          OPENAI_COMPATIBLE_SQL_ENABLED=false
+          EOF
+          bash scripts/preflight_shadow_image_offline.sh shadow-import-check "$TEST_ENV"
+          sed -i 's/^OPENAI_COMPATIBLE_SQL_ENABLED=false$/OPENAI_COMPATIBLE_SQL_ENABLED=true/' "$TEST_ENV"
+          cat >> "$TEST_ENV" <<'EOF'
+          OPENAI_COMPATIBLE_SQL_PROVIDER_KEY=provider-fixture
+          OPENAI_COMPATIBLE_SQL_CONFIG_VERSION=ci-config-v1
+          OPENAI_COMPATIBLE_SQL_BASE_URL=http://10.0.0.4:8080
+          OPENAI_COMPATIBLE_SQL_ALLOW_PRIVATE_HTTP=true
+          OPENAI_COMPATIBLE_SQL_MODEL=fixture-model
+          EOF
+          bash scripts/preflight_shadow_image_offline.sh shadow-import-check "$TEST_ENV"

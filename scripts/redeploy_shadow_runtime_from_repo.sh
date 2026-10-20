@@ -37,11 +37,18 @@ COMPOSE_BACKUP="${DEPLOY_DIR}/compose.yaml.pre-runtime-${STAMP}"
 cp -a "${ENV_FILE}" "${ENV_BACKUP}"
 cp -a "${DEPLOY_DIR}/compose.yaml" "${COMPOSE_BACKUP}"
 
+# Do not recreate the healthy original service when build or offline canary fails.
+SERVICE_REPLACEMENT_STARTED=false
+
 cleanup_on_error() {
   status=$?
   if [[ $status -ne 0 ]]; then
     cp -a "${ENV_BACKUP}" "${ENV_FILE}" || true
     cp -a "${COMPOSE_BACKUP}" "${DEPLOY_DIR}/compose.yaml" || true
+    if [[ "${SERVICE_REPLACEMENT_STARTED}" != "true" ]]; then
+      echo "CANDIDATE_ABORTED=PASS original_service_not_recreated"
+      exit "$status"
+    fi
     if (cd "${DEPLOY_DIR}" && docker compose -f compose.yaml up -d --force-recreate "${SERVICE}") >/dev/null 2>&1; then
       restored=false
       for _ in $(seq 1 30); do
@@ -98,6 +105,11 @@ fi
 echo "BUILD: ${IMAGE_TAG}"
 docker build   -f "${ROOT_DIR}/deploy/docker/Dockerfile.shadow-test"   -t "${IMAGE_TAG}"   "${ROOT_DIR}"
 
+# Fail before touching the live container unless Uvicorn boots and S2S
+# rejects unauthenticated requests in an isolated, no-egress Docker namespace.
+bash "${ROOT_DIR}/scripts/preflight_shadow_image_offline.sh" "${IMAGE_TAG}" "${ENV_FILE}"
+
+SERVICE_REPLACEMENT_STARTED=true
 docker compose -f compose.yaml up -d --force-recreate "${SERVICE}"
 
 for _ in $(seq 1 90); do
