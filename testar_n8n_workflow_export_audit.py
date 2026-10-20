@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
+import subprocess
+import sys
 from contextlib import redirect_stdout
 from copy import deepcopy
 from pathlib import Path
@@ -75,6 +78,8 @@ def test_secret_safe_inventory_and_metadata_only() -> None:
         assert summary["node_count"] == 3
         assert summary["live_instance_verified"] is False
         assert summary["export_active_flag"] is True
+        assert summary["nodes"][0]["name"] == "node-001"
+        assert summary["nodes"][1]["name"] == "node-002"
         assert summary["nodes"][2]["name"] == "node-003"
         assert summary["nodes"][0]["code_characters"] > 20
         assert "INLINE_CODE_REVIEW" in summary["nodes"][0]["review_flags"]
@@ -173,8 +178,93 @@ def test_error_outputs_do_not_leak_private_paths_or_bad_payloads() -> None:
         assert "WORKFLOW_READ_OR_JSON_INVALID" in safe
 
 
+def test_no_arbitrary_node_names_can_reach_report() -> None:
+    fixture = _fake_export()
+    fixture["nodes"][0]["name"] = "nonobvious-" + _PRIVATE
+    fixture["nodes"][1]["name"] = "customer db host-and-user"
+    report = summarize_workflow(fixture, "d" * 64)
+    data = json.dumps(report, ensure_ascii=False)
+    assert "nonobvious-" not in data
+    assert "customer db host" not in data
+    assert _PRIVATE not in data
+    assert all(
+        node["name"] == f"node-{index + 1:03d}"
+        for index, node in enumerate(report["nodes"])
+    )
+    assert all(
+        len(node["node_identity_sha256"]) == 64 for node in report["nodes"]
+    )
+
+    fixture["nodes"][0]["type"] = "n8n-nodes-base.code-" + _PRIVATE
+    try:
+        summarize_workflow(fixture, "e" * 64)
+    except WorkflowAuditError as exc:
+        assert str(exc) == "WORKFLOW_NODE_TYPE_INVALID"
+    else:
+        raise AssertionError("untrusted type string accepted")
+
+
+def test_singleton_cli_export_envelope_and_multibundle_rejection() -> None:
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "published-export.json"
+        source = _fake_export()
+        path.write_text(json.dumps([source]), encoding="utf-8")
+        workflow, hash_value = load_workflow(path)
+        assert workflow == source
+        assert len(hash_value) == 64
+        assert summarize_workflow(workflow, hash_value)["node_count"] == 3
+
+        path.write_text(json.dumps([source, deepcopy(source)]), encoding="utf-8")
+        try:
+            load_workflow(path)
+        except WorkflowAuditError as exc:
+            assert str(exc) == "WORKFLOW_SINGLE_RECORD_REQUIRED"
+        else:
+            raise AssertionError("multi-workflow export accepted")
+
+
+def test_published_cli_runner_is_manual_and_fails_closed() -> None:
+    path = Path(__file__).resolve().parent / "scripts" / "audit_n8n_published_workflow_readonly.sh"
+    script = path.read_text(encoding="utf-8")
+    assert "set -Eeuo pipefail" in script
+    assert "umask 077" in script
+    assert "export:workflow" in script
+    assert "--published" in script
+    assert 'docker exec -u node "$CONTAINER"' in script
+    assert "CONTAINER_EXPORT_CLEANUP_UNCONFIRMED" in script
+    assert "official_webhook_route_verified" in script
+    assert "--id=$WORKFLOW_ID" in script
+    assert "--all" not in script
+    assert "import:workflow" not in script
+    assert "export:credentials" not in script
+    assert "n8n execute" not in script
+
+    # On POSIX, exercise parsing and early rejection without Docker calls.
+    executable = shutil.which("bash")
+    if executable and sys.platform != "win32":
+        syntax = subprocess.run(
+            [executable, "-n", str(path)],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        assert syntax.returncode == 0
+        help_result = subprocess.run(
+            [executable, str(path), "--help"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        assert help_result.returncode == 0
+        denied = subprocess.run(
+            [executable, str(path), "--workflow-id", "invalid/id"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        assert denied.returncode == 2
+        assert "WORKFLOW_ID_INVALID" in denied.stderr
+
+
 if __name__ == "__main__":
     test_secret_safe_inventory_and_metadata_only()
+    test_no_arbitrary_node_names_can_reach_report()
+    test_singleton_cli_export_envelope_and_multibundle_rejection()
+    test_published_cli_runner_is_manual_and_fails_closed()
     test_drift_detects_changed_added_and_removed_nodes()
     test_malformed_and_duplicate_exports_fail_closed()
     test_error_outputs_do_not_leak_private_paths_or_bad_payloads()
