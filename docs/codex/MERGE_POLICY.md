@@ -1,3 +1,14 @@
+> **Decisão operativa de 2026-10-19 — gate humano neste projeto:**
+> a política de delegação antiga abaixo permanece como histórico de microetapas.
+> Para Agente Financeiro, **não fazer auto-merge** de PRs sem autorização
+> explícita do operador. CI verde não permite cutover, deploy, migrations,
+> atualização de n8n, acesso adicional ou execução SQL real. Preparar PR,
+> revisar diff/CI e solicitar merge humano. Regras gerais do Factory não
+> sobrepõem este gate. Consulte `AGENTS.md` e
+> `docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md`.
+
+---
+
 # MERGE_POLICY
 
 ## Autoridade de merge
