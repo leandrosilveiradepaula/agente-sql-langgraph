@@ -107,3 +107,21 @@ reparada permanece sujeita a nova aprovação e jamais é executada por
 este comparador. Sem reparo requerido, essa condição é satisfeita de
 forma vacuamente verdadeira; não significa que um reparador tenha sido
 executado.
+
+### Comparação literal de intenção detectada
+
+O endpoint aceita **opcionalmente** `official_detected_intent`, obtido
+pelo backend Produto da execução oficial depois de sua conclusão. A
+intenção da geração LangGraph vem exclusivamente de sua evidência
+persistida e fingerprint-validada. O resultado `intent_label_status`
+pode ser `identifiers_matched`, `identifier_mismatch` ou `unattested`.
+Não devolve nenhum nome/alias de intenção ao navegador, não altera a
+consulta SQL, não chama LLM, não usa benchmark e não interpreta diferenças
+de rótulos como prova de semânticas contábeis distintas. Equivalências
+de nomenclatura requerem catálogo versionado, não if/hardcode de motor.
+
+A exportação de 68 nós do fluxo oficial atualmente retorna a intenção,
+mas **não** seu plano completo por webhook; esta etapa atesta somente
+rótulo de intenção, não paridade de métricas/dimensões/plano. A validação
+de planejamento completo precisará de evidência adicional, liberada de
+forma operacional separada.

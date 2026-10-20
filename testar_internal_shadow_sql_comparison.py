@@ -34,7 +34,7 @@ class FakeRepository:
 
 def record(sql, *, tenant=None, status="success", generation_provider=None,
            generation_model=None, repair_provider=None, repair_model=None,
-           repaired_sql=None):
+           repaired_sql=None, shadow_intent=None):
     principal = {"id": "operator-one", "profile": "admin"}
     if tenant:
         principal["organization_id"] = tenant
@@ -56,6 +56,7 @@ def record(sql, *, tenant=None, status="success", generation_provider=None,
         request={"question": "Show total orders for last month", "principal": principal},
         state={"generated_sql": sql, "current_sql": repaired_sql or sql,
                "context_fingerprint": "context-one", "context_version": "tenant-config-v1",
+               **({"intent": shadow_intent} if shadow_intent is not None else {}),
                **provider_result},
         response={"status": status, "gates": {}},
     )
@@ -258,6 +259,42 @@ def test_missing_corrupted_or_goldens():
     assert service.execute({**request(sql), "golden_answer": "no"})["errors"][0]["code"] == "SHADOW_COMPARE_REQUEST_INVALID"
 
 
+def test_recorded_intent_label_pair_is_post_generation_only():
+    sql = "SELECT COUNT(*) FROM events"
+    service = CompareShadowSqlUseCase(
+        repository=FakeRepository(record(sql, shadow_intent="intent-example"))
+    )
+    exact = service.execute({
+        **request(sql), "official_detected_intent": "intent-example"
+    })
+    assert exact["status"] == "success", exact
+    assert exact["metadata"]["comparison"]["intent_label_status"] == "identifiers_matched"
+
+    different = service.execute({
+        **request(sql), "official_detected_intent": "different-intent"
+    })
+    assert different["status"] == "success", different
+    assert different["metadata"]["comparison"]["intent_label_status"] == "identifier_mismatch"
+    assert "intent-example" not in json.dumps(different)
+    assert "different-intent" not in json.dumps(different)
+    assert different["metadata"]["comparison"]["financial_parity_proven"] is False
+
+    missing_official = service.execute(request(sql))
+    assert missing_official["metadata"]["comparison"]["intent_label_status"] == "unattested"
+    missing_shadow = CompareShadowSqlUseCase(
+        repository=FakeRepository(record(sql))
+    ).execute({**request(sql), "official_detected_intent": "intent-example"})
+    assert missing_shadow["metadata"]["comparison"]["intent_label_status"] == "unattested"
+
+    # Extra benchmark/expected labels still cannot reach the generator.
+    for wrong in ("", "  ", "x" * 129):
+        rejected = service.execute({
+            **request(sql), "official_detected_intent": wrong
+        })
+        assert rejected["status"] == "rejected", rejected
+        assert rejected["errors"][0]["code"] == "SHADOW_COMPARE_REQUEST_INVALID"
+
+
 def test_distinct_contexts():
     for tenant, sql in (
         ("tenant-alpha", "SELECT AVG(score) FROM quality_events WHERE segment = 'regional'"),
@@ -307,6 +344,7 @@ if __name__ == "__main__":
     test_structures_and_no_raw_data()
     test_signed_provider_model_attestation()
     test_repair_provider_identity_for_changed_sql()
+    test_recorded_intent_label_pair_is_post_generation_only()
     test_case_sensitive_sql_values_and_quoted_identifiers()
     test_isolation_rejection()
     test_missing_corrupted_or_goldens()

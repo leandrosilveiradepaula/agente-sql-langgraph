@@ -120,6 +120,9 @@ class CompareShadowSqlUseCase:
         lineage = record.get("lineage", {})
         lineage = lineage if isinstance(lineage, Mapping) else {}
         provider_identity = _recorded_provider_identity(record)
+        intent_identity = _recorded_intent_identity(
+            record, request.get("official_detected_intent")
+        )
         return _response(
             "success", "SHADOW_COMPARE_COMPLETED", agent_id,
             run_id=str(record.get("run_id", "")),
@@ -135,6 +138,7 @@ class CompareShadowSqlUseCase:
                 "shadow_context_fingerprint": str(lineage.get("context_fingerprint") or ""),
                 "shadow_context_version": str(lineage.get("context_version") or ""),
                 **provider_identity,
+                **intent_identity,
                 "tenant_identity_attested": tenant_attested,
                 "same_data_snapshot_attested": False,
                 "financial_parity_proven": False,
@@ -195,9 +199,35 @@ def _recorded_provider_identity(record: Mapping[str, Any]) -> dict[str, str | No
     }
 
 
+def _recorded_intent_identity(
+    record: Mapping[str, Any], official_intent: object
+) -> dict[str, str]:
+    """Literal post-generation intent-label check; no business alias mapping.
+
+    A label match is only identity of recorded strings, not semantic or
+    financial equivalence. Comparisons never read the benchmark.
+    """
+    evidence = record.get("langgraph_evidence")
+    shadow_intent = evidence.get("intent") if isinstance(evidence, Mapping) else None
+    if not isinstance(shadow_intent, str) or not shadow_intent.strip():
+        return {"intent_label_status": "unattested"}
+    if not isinstance(official_intent, str) or not official_intent.strip():
+        return {"intent_label_status": "unattested"}
+    return {"intent_label_status": (
+        "identifiers_matched"
+        if official_intent.strip() == shadow_intent.strip()
+        else "identifier_mismatch"
+    )}
+
+
 def _valid_request(value: Mapping[str, Any]) -> bool:
-    if set(value) != {"contract_version", "agent_run_id", "shadow_record_id", "question", "official_sql", "principal"}:
+    required = {"contract_version", "agent_run_id", "shadow_record_id", "question", "official_sql", "principal"}
+    if not required <= set(value) or not set(value) <= (required | {"official_detected_intent"}):
         return False
+    if "official_detected_intent" in value:
+        intent_label = value["official_detected_intent"]
+        if not isinstance(intent_label, str) or not intent_label.strip() or len(intent_label) > 128:
+            return False
     if value.get("contract_version") != CONTRACT_VERSION:
         return False
     for key, cap in (
