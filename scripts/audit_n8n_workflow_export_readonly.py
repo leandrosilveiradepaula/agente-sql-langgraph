@@ -22,11 +22,15 @@ from typing import Any, Mapping
 MAX_EXPORT_BYTES = 16 * 1024 * 1024
 MAX_NODES = 2500
 MAX_PARAM_BYTES = 4 * 1024 * 1024
-_SAFE_NODE_NAME = re.compile(r"^[\w \-()?!.,áàâãçéêíóôõúüÁÀÂÃÇÉÊÍÓÔÕÚÜ/+]{1,120}$")
-_SENSITIVE_NAME = re.compile(
-    r"(?i)(?:https?://|bearer\s+\S+|password\s*[:=]|secret\s*[:=]|"
-    r"token\s*[:=]|api[_ -]?key\s*[:=]|\bsk-[a-z0-9-]{8,})"
-)
+# Human-readable names are deliberately NOT emitted: arbitrary workflow/node
+# names can contain secrets that no heuristic regex can reliably recognize.
+_ALLOWED_NODE_TYPE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-@/+")
+# Platform-only allowlist for output labels. Unknown plugin types are hashed,
+# never echoed: arbitrary type strings may also contain sensitive information.
+_SAFE_BUILTIN_CATEGORIES = frozenset({
+    "webhook", "code", "respondToWebhook", "postgres", "httpRequest",
+    "if", "wait", "manualTrigger", "splitInBatches",
+})
 _JS_STRING = re.compile(r"""(?<!\\)(?:'[^'\n]{1,240}'|"[^"\n]{1,240}")""")
 _SQL_SHAPE = re.compile(r"\b(?:SELECT|WITH|FROM|JOIN|WHERE|GROUP\s+BY)\b", re.IGNORECASE)
 
@@ -47,11 +51,8 @@ def _canonical(value: Any) -> bytes:
 
 
 def _safe_name(value: Any, *, index: int) -> str:
-    if not isinstance(value, str) or not _SAFE_NODE_NAME.fullmatch(value):
-        return f"node-{index + 1:03d}"
-    if _SENSITIVE_NAME.search(value):
-        return f"node-{index + 1:03d}"
-    return value
+    """Never emit workflow-owned text; stable identity comes from ID hashes."""
+    return f"node-{index + 1:03d}"
 
 
 def load_workflow(path: Path) -> tuple[Mapping[str, Any], str]:
@@ -70,6 +71,12 @@ def load_workflow(path: Path) -> tuple[Mapping[str, Any], str]:
         raise
     except (OSError, ValueError, UnicodeError) as exc:
         raise WorkflowAuditError("WORKFLOW_READ_OR_JSON_INVALID") from exc
+    # CLI can serialize one selected workflow as a singleton list.
+    # Refuse multi-workflow bundles: the call must attest exactly one ID.
+    if isinstance(workflow, list):
+        if len(workflow) != 1 or not isinstance(workflow[0], dict):
+            raise WorkflowAuditError("WORKFLOW_SINGLE_RECORD_REQUIRED")
+        workflow = workflow[0]
     if not isinstance(workflow, dict):
         raise WorkflowAuditError("WORKFLOW_OBJECT_REQUIRED")
     nodes = workflow.get("nodes")
@@ -92,7 +99,11 @@ def _node_identity(node: Mapping[str, Any]) -> str:
 
 def _node_record(node: Mapping[str, Any], *, index: int) -> dict[str, Any]:
     kind = node.get("type")
-    if not isinstance(kind, str) or not kind.strip():
+    if (
+        not isinstance(kind, str)
+        or not 1 <= len(kind) <= 180
+        or any(char not in _ALLOWED_NODE_TYPE for char in kind)
+    ):
         raise WorkflowAuditError("WORKFLOW_NODE_TYPE_INVALID")
     params = node.get("parameters", {})
     if not isinstance(params, Mapping):
@@ -125,13 +136,28 @@ def _node_record(node: Mapping[str, Any], *, index: int) -> dict[str, Any]:
         review_flags.append("EXTERNAL_REQUEST_REVIEW")
 
     name = _safe_name(node.get("name"), index=index)
+    category = (
+        kind[len("n8n-nodes-base."):]
+        if kind.startswith("n8n-nodes-base.")
+        else ""
+    )
+    if category not in _SAFE_BUILTIN_CATEGORIES:
+        category = "other_builtin" if kind.startswith("n8n-nodes-base.") else "third_party"
     return {
         "index": index + 1,
         "name": name,
-        "type": kind,
+        "type": category,
+        "type_fingerprint": _digest(kind.encode("utf-8")),
         "disabled_in_export": node.get("disabled") is True,
         "node_identity_sha256": _digest(_node_identity(node).encode("utf-8")),
         "parameters_sha256": _digest(canonical),
+        # Fingerprint execution-significant fields (typeVersion, credentials,
+        # webhookId and runtime settings) without exposing their values.
+        # Ignore editor-only position and node identity fields.
+        "runtime_configuration_sha256": _digest(_canonical({
+            key: value for key, value in node.items()
+            if key not in ("id", "name", "position")
+        })),
         "code_characters": len(code),
         "review_flags": review_flags,
     }
@@ -163,6 +189,13 @@ def summarize_workflow(
         "read_only": True,
         "live_instance_verified": False,
         "workflow_export_sha256": source_sha256,
+        "workflow_id_sha256": (
+            _digest(workflow["id"].encode("utf-8"))
+            if isinstance(workflow.get("id"), str) and workflow["id"]
+            else None
+        ),
+        # Rewiring can change workflow behavior without changing any node.
+        "topology_sha256": _digest(_canonical(workflow.get("connections", {}))),
         "export_active_flag": workflow.get("active") is True,
         "node_count": len(records),
         "node_types": dict(sorted(counts.items())),
@@ -190,9 +223,8 @@ def compare_exports(
         changed = (
             previous is not None
             and (
-                previous["parameters_sha256"] != node["parameters_sha256"]
-                or previous["type"] != node["type"]
-                or previous["disabled_in_export"] != node["disabled_in_export"]
+                previous["runtime_configuration_sha256"]
+                != node["runtime_configuration_sha256"]
             )
         )
         status.append({
@@ -211,6 +243,15 @@ def compare_exports(
     return {
         "baseline_export_sha256": earlier["workflow_export_sha256"],
         "candidate_export_sha256": later["workflow_export_sha256"],
+        "topology_changed": (
+            earlier["topology_sha256"] != later["topology_sha256"]
+        ),
+        "workflow_id_matches_baseline": (
+            earlier["workflow_id_sha256"] == later["workflow_id_sha256"]
+            if earlier["workflow_id_sha256"] is not None
+            and later["workflow_id_sha256"] is not None
+            else None
+        ),
         "unchanged": sum(x["status"] == "unchanged" for x in all_changes),
         "changed": sum(x["status"] == "changed" for x in all_changes),
         "added": sum(x["status"] == "added" for x in all_changes),

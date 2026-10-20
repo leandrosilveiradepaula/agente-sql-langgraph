@@ -8,7 +8,7 @@
 - Commit que alterou o export: `d8897b347ca4fe8a79aa8ffc14e80b4ecd28143a`, em **2026-07-20** (mensagem: `chore: freeze stable n8n workflow v2.2.31`).
 - Blob SHA do arquivo observado no produto `main`: `5c385ee2718f73e74d24c59fa6afbeed3c3570fd`.
 - Nome exportado: `Agente SQL Financeiro DuckLake - v2.2.31 Sem LIMIT SQL - IMPORT SAFE + Retry Preflight`. O campo JSON `active=true` indica **apenas o flag registrado na exportação**, não confirma estado/versão da VPS em 2026-10-19/20.
-- **75 nós**: 45 Code/JS, 8 Postgres, 6 HTTP Request, 11 IF, 3 Respond to Webhook, 1 Webhook, 1 Wait. Foram inventariados todos os 75 nós por nome/tipo. A classificação substantiva ainda é parcial: **6 nós possuem FORBIDDEN comprovado**; os demais exigem validação individual contra a versão ativa antes de concluir G2.
+- **75 nós**: 45 Code/JS, 8 Postgres, 6 HTTP Request, 11 IF, 3 Respond to Webhook, 1 Webhook, 1 Wait. Foram inventariados todos os 75 nós por nome/tipo. A classificação substantiva ainda é parcial: **13 nós possuem FORBIDDEN comprovado**; os demais exigem validação individual contra a versão ativa antes de concluir G2.
 - O grafo exportado possui um nó `Postgres - Criar Tabela Cache SQL (manual)` (#55) **sem conexões de entrada/saída**; o fato de não estar conectado nessa exportação não garante que outra versão ativa não o execute.
 - O produto Next.js em `leandrosilveiradepaula/Agente-Financeiro` contém dispatch Shadow assíncrono configurável via `LANGGRAPH_SHADOW_ENABLED` em `app/api/generate-sql/route.ts` e cliente `lib/langgraph-shadow-client.ts`, mas não há nesta auditoria confirmação de que o sinal está habilitado no deployment ou que há correspondência numérica. O endpoint n8n ainda é parametrizado via environment, com fallback de URL literal em `lib/n8n-endpoint.ts` (dívida de configuração, não regra contábil).
 
@@ -22,6 +22,19 @@
 | Code - Validar Plano Query Semantico | 263–323, 503–573 | Colunas grupo_dre/conta_contabil fixas; inferência de receita/custo por códigos DRE 01, 02, 03 etc. e strings | Contexto sign_convention/DRE por cliente; contrato de plano genérico; fail-closed |
 | Code - Schema Real Watson | 19–280, 331–346 | Catálogo/schema/aliases, IMD, exclusões 97/98/99, orçamento Versão 2 e grupos DRE/CMV/OPEX explícitos | Catalogo de tabelas/joins, aliases, filtros, versões e métricas por tenant; não migrar estrutura literal |
 | Code - Montar Relatório Executivo | 305–323, 426–568 | Inferência de intenção por palavras, resumo para cenários fixos e alerta de concentração acima de 50% | Configuração versionada de indicadores/alertas + apresentação genérica no Produto; evitar novos limiares fixos |
+| Code - Validar Pergunta | 51–124 | Vocabulário financeiro e aliases de marcas codificados na validação; a segurança genérica fica misturada ao reconhecimento específico do cliente | Intenções e aliases no contexto do tenant; preservar somente controles estruturais de entrada |
+| Code - Limpar SQL DuckLake | 180–395 | Reescrita de SQL por intenção de estouro, incluindo inserção automática de filtro por DRE e modificações em CASE/ranking | Regra contábil no contexto e Contract Gate sobre SQL proposta; não modificar SQL silenciosamente |
+| Code - Validar SQL DuckLake Offline | 109–159 | Schema físico fixo e allowlist de tabelas Gold dentro do JavaScript | Table catalog e política de tabelas versionados por tenant; manter Security Gate estrutural |
+| Code - Montar Entrega Query DuckLake | 65–173 | Rótulos de filtros inferidos de strings SQL fixas: DRE, IMD, exclusões de unidades, versão de orçamento e período padrão | Evidência estruturada derivada do plano/contexto; apresentação genérica no Produto |
+| Code - Montar Entrega Watson | 194–274, 347–361 | Cinco modelos de relatórios canônicos, origem física, pressupostos financeiros e checklist de rateios codificados | Semântica versionada; formato de entrega neutro e verificação baseada no plano autorizado |
+| Code - Validar SQL Recebida | 268–282 | Lista fixa de padrões bloqueados inclui nomes de objetos e prefixos cliente-específicos, misturada à segurança estrutural | Política de objetos autorizados por tenant/catálogo; validar por parser e autorização, não substring |
+| Code - Montar Semantic Request Observado | 91–239 | Extração de métricas e dimensões por palavras e aliases de marcas fixos, duplicando regras semânticas fora do catálogo | Resolver semântico do LangGraph apoiado em contexto versionado, sem segunda classificação hardcoded |
+
+**Escopo da ampliação:** os sete achados adicionais acima também foram
+lidos diretamente do `jsCode` da exportação histórica, com intervalos
+identificados. A presença desses padrões na versão publicada atual **ainda
+não foi verificada**. O inventário continua parcial para os demais nós;
+scripts e prompts reais da VPS precisam ser confrontados separadamente.
 
 **Exceção particularmente grave:** na classificação legada, um comentário documenta que a prioridade de regra visa preservar `intent_esperada` do benchmark. **Tratar esse raciocínio como evidência histórica contaminada e nunca reproduzir no novo classificador.** O correto é modelar operação, métricas, dimensões e regras genericamente, e usar benchmark somente *após* a geração.
 
@@ -39,7 +52,7 @@
 | # | Nó | Tipo n8n | JS chars | Status da triagem | Próxima ação |
 |---:|---|---|---:|---|---|
 | 1 | Webhook - Pergunta | webhook | 0 | `RETAIN_TO_VERIFY` | Retain or migrate orchestration only after review |
-| 2 | Code - Validar Pergunta | code | 7152 | `MIXED_TO_VERIFY` | Keep validation structural; externalize business hints |
+| 2 | Code - Validar Pergunta | code | 7152 | `FORBIDDEN_CONFIRMED` | Externalize vocabulary/aliases; keep structural input checks |
 | 3 | Code - Resposta Erro Pergunta | code | 186 | `MIXED_TO_VERIFY` | Review code before retaining |
 | 4 | Respond to Webhook Erro Pergunta | respondToWebhook | 0 | `RETAIN_TO_VERIFY` | Retain or migrate orchestration only after review |
 | 5 | Postgres - Buscar Contexto DuckLake | postgres | 0 | `STRUCTURAL_TO_VERIFY` | Read context with authorization; confirm policies |
@@ -48,15 +61,15 @@
 | 8 | Code - Montar Prompt SQL DuckLake Offline | code | 56892 | `FORBIDDEN_CONFIRMED` | Remove business/prompt templates from n8n; LangGraph + versioned context |
 | 9 | Code - Montar Body Gemini | code | 3032 | `TRANSITIONAL_PROVIDER` | Preserve baseline; replace generation with LangGraph at cutover |
 | 10 | Gemini - Gerar SQL | httpRequest | 0 | `TRANSITIONAL_PROVIDER` | Disable direct n8n Gemini SQL generation only after parity |
-| 11 | Code - Limpar SQL DuckLake | code | 19300 | `MIXED_TO_VERIFY` | SQL cleaner structural; no business-specific rewrites |
-| 12 | Code - Validar SQL DuckLake Offline | code | 16084 | `MIXED_TO_VERIFY` | SQL safety gates in LangGraph; review legacy exceptions |
+| 11 | Code - Limpar SQL DuckLake | code | 19300 | `FORBIDDEN_CONFIRMED` | Remove semantic SQL rewrites from future path; validate plan/context |
+| 12 | Code - Validar SQL DuckLake Offline | code | 16084 | `FORBIDDEN_CONFIRMED` | Allow tables from authorized tenant catalog, not literals |
 | 13 | Code - Resposta Erro SQL DuckLake | code | 15143 | `MIXED_TO_VERIFY` | Review code before retaining |
 | 14 | Respond to Webhook Erro SQL | respondToWebhook | 0 | `RETAIN_TO_VERIFY` | Retain or migrate orchestration only after review |
-| 15 | Code - Montar Entrega Query DuckLake | code | 11855 | `MIXED_TO_VERIFY` | Report contract/labels; separate business mapping from formatting |
+| 15 | Code - Montar Entrega Query DuckLake | code | 11855 | `FORBIDDEN_CONFIRMED` | Derive filters/labels from QueryPlan and context |
 | 16 | Respond to Webhook | respondToWebhook | 0 | `RETAIN_TO_VERIFY` | Retain or migrate orchestration only after review |
 | 17 | Code - Montar SQL Log DuckLake | code | 1396 | `MIXED_TO_VERIFY` | Review code before retaining |
 | 18 | Postgres - Gravar Log DuckLake | postgres | 0 | `RETAIN_TO_VERIFY` | Retain or migrate orchestration only after review |
-| 19 | Code - Montar Entrega Watson | code | 13694 | `MIXED_TO_VERIFY` | Retain deterministic delivery; inspect fixed contracts |
+| 19 | Code - Montar Entrega Watson | code | 13694 | `FORBIDDEN_CONFIRMED` | Move assumptions and checklist semantics into versioned context |
 | 20 | Code - Montar SQL Question Queue | code | 2313 | `MIXED_TO_VERIFY` | Review code before retaining |
 | 21 | Postgres - Gravar Question Queue | postgres | 0 | `RETAIN_TO_VERIFY` | Retain or migrate orchestration only after review |
 | 22 | Code - Montar Plano Query DuckLake | code | 60830 | `FORBIDDEN_CONFIRMED` | Move dynamic planning to LangGraph, catalog-driven |
@@ -65,7 +78,7 @@
 | 25 | IF - SQL Aprovada? | if | 0 | `RETAIN_TO_VERIFY` | Retain or migrate orchestration only after review |
 | 26 | Code - Router de Modo | code | 876 | `MIXED_TO_VERIFY` | Review code before retaining |
 | 27 | IF - Modo Execução SQL? | if | 0 | `RETAIN_TO_VERIFY` | Retain or migrate orchestration only after review |
-| 28 | Code - Validar SQL Recebida | code | 10401 | `MIXED_TO_VERIFY` | Check approval and SQL gate logic against product policies |
+| 28 | Code - Validar SQL Recebida | code | 10401 | `FORBIDDEN_CONFIRMED` | Replace customer-specific denylist with authorized catalog policy |
 | 29 | IF - SQL Recebida Aprovada? | if | 0 | `RETAIN_TO_VERIFY` | Retain or migrate orchestration only after review |
 | 30 | Code - Config Watson Flow | code | 862 | `TRANSITIONAL_EXECUTION` | Review provider integration; do not disable execution implicitly |
 | 31 | HTTP - Gerar Token IBM IAM | httpRequest | 0 | `TRANSITIONAL_EXECUTION` | Credential exchange is operational; preserve until execution adapter approved |
@@ -95,7 +108,7 @@
 | 55 | Postgres - Criar Tabela Cache SQL (manual) | postgres | 0 | `DISCONNECTED_MANUAL` | DDL node unconnected in snapshot; confirm safe/disabled in live |
 | 56 | Code - Criar Run Context | code | 4145 | `MIXED_TO_VERIFY` | Review code before retaining |
 | 57 | Code - Anexar Uso LLM | code | 3304 | `MIXED_TO_VERIFY` | Review code before retaining |
-| 58 | Code - Montar Semantic Request Observado | code | 14873 | `MIXED_TO_VERIFY` | Audit duplicated semantic rules and evidence fields |
+| 58 | Code - Montar Semantic Request Observado | code | 14873 | `FORBIDDEN_CONFIRMED` | Remove duplicate hardcoded metric/dimension classifier |
 | 59 | Code - Avaliar Reparo SQL | code | 12510 | `MIXED_TO_VERIFY` | Preserve repair approval contract; identify special cases |
 | 60 | IF - Deve Reparar SQL? | if | 0 | `RETAIN_TO_VERIFY` | Retain or migrate orchestration only after review |
 | 61 | Code - Montar Body Reparo SQL | code | 6868 | `TRANSITIONAL_PROVIDER` | Move repair request logic behind LangGraph |

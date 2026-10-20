@@ -49,11 +49,15 @@ Uma exportação **histórica** do workflow n8n está versionada no produto
 `d8897b347ca4fe8a79aa8ffc14e80b4ecd28143a` em 2026-07-20).
 
 O inventário preliminar `docs/audits/n8n-legacy-workflow-v2.2.31-inventory.md`
-indexa 75 nós e documenta **seis** nós com hardcodes FORBIDDEN
+indexa 75 nós e documenta **13** nós com hardcodes FORBIDDEN
 comprovados no legado: classificação/aliases, prompt SQL, planner, gates
 semânticos de DRE, schema e filtros fixos, e relatórios financeiros. O
 script `scripts/audit_n8n_workflow_export_readonly.py` permite comparar
-exportações locais sem reproduzir SQL, prompts ou credenciais. Nenhum dado
+exportações locais sem reproduzir SQL, prompts ou credenciais. A revisão
+estendida confirmou sete outros nós hardcoded no mesmo snapshot histórico,
+incluindo reescrita automática de SQL no cleaner, tabelas fixas em gate e
+inferência duplicada de métricas/dimensões. O comparador agora acompanha
+deriva de topologia e configuração runtime além dos parâmetros. Nenhum dado
 desse legado deve ser transplantado para código LangGraph.
 
 **Importante:** não foi acessado/alterado o workflow ativo na VPS, e a
@@ -61,12 +65,58 @@ exportação arquivada não prova paridade nem que este é o fluxo oficial atual
 G2 continua aberto até reconciliar com exportação ativa e externalizar as
 regras; G1 e G3–G6 permanecem abertos.
 
+### Próxima evidência operacional preparada — published n8n
+
+Script de coleta manual: `scripts/audit_n8n_published_workflow_readonly.sh`.
+Seleciona **somente a versão publicada** usando `n8n export:workflow --published`
+via Docker local, exige ID e contêiner autorizado, guarda o JSON bruto em
+arquivos temporários privados, valida unicidade/identidade, entrega somente
+fingerprints e contagens, e remove o bruto antes de imprimir resultados.
+`scripts/audit_n8n_workflow_export_readonly.py` foi ajustado para aceitar
+exportação singleton e mascarar **todos** os nomes de nós, inclusive segredos
+não óbvios. Os testes sintéticos permanecem no CI offline.
+
+Procedimento e cautelas: `docs/audits/n8n-published-workflow-readonly-runbook.md`.
+**Este PR não executa o script na VPS, não verifica workflow vivo e não
+habilita SQL real.** G1 e G2 continuam com evidência pendente.
+
+Verificação cross-repo no produto `leandrosilveiradepaula/Agente-Financeiro`
+atual na investigação: `app/api/generate-sql/route.ts` usa n8n como
+caminho oficial e dispara LangGraph após a resposta via `after()` somente
+quando `LANGGRAPH_SHADOW_ENABLED=true`. `lib/langgraph-shadow-read-client.ts`
+e a UI mostram metadados Shadow, mas **não demonstram equivalência de
+SQL/resultados**; `lib/n8n-endpoint.ts` ainda possui URL fallback fixa
+para uma instância, um risco de configuração/portabilidade que deve ser
+tratado **após confirmação de ambiente**, sem quebrar produção por inferência.
+
+### Observação de deployment do Produto (Vercel, apenas leitura)
+
+Inspeção da Vercel no escopo de equipe autorizado retornou dois projetos
+distintos, não confundíveis: `agente-financeiro` e
+`agente-financeiro-demo`. O deployment de produção READY mais recente
+listado para o primeiro usa `leandrosilveiradepaula/Agente-Financeiro`
+commit `d2f01a836cf3c12a478011f07a8e06a0065ae086`. O segundo
+retornou deployment READY do branch `demo/grupo-horizonte`, commit
+`364a7a2d54508043cc03c6027badb8f702dcafdd`.
+
+Ambos registram a chave de configuração `LANGGRAPH_SHADOW_ENABLED`
+nos ambientes de projeto observados; a Vercel **não revelou o valor
+efetivo dessa chave em deployment** (variável sensível). Portanto,
+`LANGGRAPH_SHADOW_ENABLED` **não pode ser declarado ligado/desligado**
+a partir desses resultados, nem é possível atestar o alcance do webhook
+n8n ou a efetiva presença de `agent_run_id` correlacionado.
+
+A fase G1 exige conferir o deployment/tenant **correto** do Produto e
+um par de evidências n8n/Shadow produzido por fluxo real e autorizado.
+Esses acessos foram estritamente de leitura; não houve alteração de
+Vercel, n8n, SQL, LLM ou variáveis de ambiente.
+
 ### Estado dos gates finais
 
 | Gate | Situação verificável nesta atualização |
 |---|---|
 | G1 — dispatch e evidence oficial/Shadow end-to-end | Prova isolada documentada, paridade operacional completa **não comprovada** |
-| G2 — inventário n8n + eliminação FORBIDDEN + 2 contextos | **Parcial:** 75 nós de exportação histórica indexados; 6 FORBIDDEN comprovados no arquivo; VPS ativa e 2 contextos pendentes |
+| G2 — inventário n8n + eliminação FORBIDDEN + 2 contextos | **Parcial:** 75 nós de exportação histórica indexados; 13 FORBIDDEN comprovados no arquivo; VPS ativa e 2 contextos pendentes |
 | G3 — Gemini equivalência semântica/SQL/números | **Pendente:** avaliações semânticas não validam respostas financeiras |
 | G4 — segurança, execução autorizada, approvals/rollback | **Não homologado para cutover** |
 | G5 — substituição controlada do caminho inteligente n8n | **Não autorizada / não realizada** |
