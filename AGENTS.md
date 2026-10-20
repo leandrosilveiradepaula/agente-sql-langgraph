@@ -1,3 +1,60 @@
+# Operação permanente — objetivo final (decisão de 2026-10-19)
+
+> **Leitura obrigatória antes de qualquer tarefa neste repositório.** Este bloco
+> registra a intenção atual do operador e prevalece sobre instruções históricas
+> abaixo sobre microetapas, Watson, provedores ou manutenção indefinida do
+> caminho de geração antiga. Consulte a versão integral em
+> [`docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md`](docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md).
+> Texto pronto para as instruções do projeto no ChatGPT:
+> [`CHATGPT-PROJECT-INSTRUCTIONS.md`](CHATGPT-PROJECT-INSTRUCTIONS.md).
+
+## Missão e entrega final
+
+- **Não substituir n8n:** ele permanece a plataforma de orquestração,
+  webhooks, integrações, automação determinística e coordenação da execução.
+- **Substituir, após homologação, a inteligência SQL antiga do n8n:**
+  atual `n8n + Gemini` → futuro oficial `n8n + LangGraph + Gemini`.
+  O novo mecanismo deve assumir intenção, contexto, planejamento, geração
+  dinâmica, validação de SQL, repair proposto e governança.
+- **Ordem fixa:** (1) equivalência Shadow usando Gemini em ambos os
+  caminhos; (2) cutover humano seguro, desabilitando a geração inteligente
+  antiga e preservando n8n; (3) comparação Gemini vs **SQL-InfoDive** com
+  mesma arquitetura/contexto.
+- **Zero hardcode de negócio no motor:** migrar comportamento, não replicar
+  regras de nós n8n para Python/TypeScript. Auditar os nós reais, inventariar
+  `STRUCTURAL` / `TRANSITIONAL` / `FORBIDDEN`, externalizar regras de
+  cliente (catálogo, métricas, dimensões, joins, DRE quando existir,
+  filtros, aliases, intenções, SQL patterns estruturais) em contexto
+  versionado e auditável; nenhum `FORBIDDEN` no código novo.
+- **Portabilidade não negociável:** alterar cliente/esquema deve exigir
+  configuração, contexto, dialeto/conector autorizado e homologação,
+  **nunca** um `if cliente`, SQL por pergunta, threshold casuístico
+  ou alteração do núcleo. Não inferir regras contábeis ausentes.
+  Comprovar com pelo menos dois contextos materialmente diferentes.
+- **Shadow atual:** `OFFICIAL=n8n`, `SHADOW=LangGraph`,
+  `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. Sem cutover, real SQL,
+  mudança n8n/PROD/banco ou privilégios implícitos. Paridade numérica
+  exige autorização separada de execução read-only isolada.
+- **Benchmark é avaliação posterior:** SQL/respostas atuais do n8n são
+  referência para confronto, jamais dados de geração ou prompt; não
+  ajustar motor para perguntas de teste. Testar generalização, segurança,
+  correspondência financeira e regressões entre commits.
+- **Gates humanos:** aprovação/reaprovação de SQL, merge, permissões,
+  migrations, cutover, credenciais/custo e produção. Sem auto-merge.
+  Trabalhar autonomamente no restante, em blocos substantivos.
+- **Continuidade sem memória improvisada:** verificar HEAD, PR, CI,
+  evidências e contexto ativo reais; diferenciar confirmação de hipótese.
+  Retomar pelos arquivos `AGENTS.md`, `CHATGPT-PROJECT-INSTRUCTIONS.md`,
+  `ORCHESTRATION-STRATEGY.md`, `PROJECT-STATUS.md` e contrato acima.
+
+**Nota de precedência:** `docs/codex/CURRENT_TASK.md` descreve uma
+microetapa específica e pode ficar historicamente desatualizado. Não usar
+seu conteúdo para sobrescrever uma tarefa explicitamente determinada agora
+pelo operador nem para autorizar deploy/cutover/SQL real. Referências antigas
+a Watson são contratos históricos e não metas para o runtime novo.
+
+---
+
 # AGENTS.md
 
 ## Arquitetura

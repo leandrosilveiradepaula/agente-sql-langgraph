@@ -6,12 +6,21 @@ This map defines documentation precedence for the LangGraph repository and preve
 
 ## Canonical Precedence
 
-1. Explicit current operator decisions.
-2. `ORCHESTRATION-STRATEGY.md`.
-3. `PROJECT-STATUS.md`.
-4. Current technical contracts in `docs/migration/`.
-5. Audits and external review packages.
-6. Historical baselines and older migration notes.
+1. **Explicit latest operator decisions**, including phase order and deployment gates.
+2. **`AGENTS.md` + `CHATGPT-PROJECT-INSTRUCTIONS.md`**: permanent
+   agent working rules, hardcode policy and cross-chat continuity.
+3. **`docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md`** +
+   **`ORCHESTRATION-STRATEGY.md`**: normative multi-tenant acceptance
+   criteria and component responsibility boundaries.
+4. **`PROJECT-STATUS.md`**, always checking the dated latest update and
+   corroborating live GitHub/VPS evidence; stale snapshots are historical.
+5. Current technical contracts in `docs/migration/`.
+6. Audit packages and historical baselines.
+
+`docs/codex/CURRENT_TASK.md` controls only its **explicit, still-applicable
+task scope**. A historical or unrelated microstep cannot negate a newer
+user instruction, allow migration/cutover or supersede architectural gates.
+Any conflicting historical document remains preserved but subordinate.
 
 If documents conflict, use the highest-precedence current source.
 
@@ -29,6 +38,27 @@ Short temporal status document. It records current branch/HEAD, current official
 
 This document. It defines precedence and status labels.
 
+### `AGENTS.md`
+
+Mandatory repository instructions for coding agents and ChatGPT. Its
+2026-10-19 mission block has current precedence over older phase-specific
+sections of the same file.
+
+### `CHATGPT-PROJECT-INSTRUCTIONS.md`
+
+Copy-ready, session-independent instructions for the **Agente Financeiro**
+ChatGPT Project. Defines the operator's three phases, multiclient
+portability, hardcode elimination, evidence and gates. These instructions
+must also be placed in the ChatGPT Project settings by an operator;
+versioning them in GitHub alone **does not update ChatGPT settings**.
+
+### `docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md`
+
+Authoritative completion contract (G1–G6): retire the *legacy intelligent
+path* n8n + Gemini only after parity and a human cutover, while keeping
+n8n operational orchestration. Defines the future Gemini versus Infodive
+LLM test, hardcode inventory and multiclient proof.
+
 ## Technical Contracts
 
 The documents under `docs/migration/` remain technical contracts for specific capabilities unless a higher-precedence document narrows their operational meaning.
@@ -39,13 +69,27 @@ Important current contracts include:
 - `docs/migration/google-gemini-sql-repairer-contract.md`
 - `docs/migration/http-entry-adapter-contract.md`
 - `docs/migration/http-auth-boundary-contract.md`
-- `docs/migration/watson-flow-contracts.md`
-- `docs/migration/watson-flow-live-adapters.md`
+- `docs/migration/watson-flow-contracts.md` (historical/legacy only)
+- `docs/migration/watson-flow-live-adapters.md` (historical/legacy only)
 - `docs/migration/run-persistence-audit-observability-contract.md`
 - `docs/migration/application-service-use-case-contract.md`
 - `docs/migration/application-response-contract.md`
 
 ## Historical Or Superseded Documents
+
+### Watson/IBM IAM and earlier intent of preserving legacy generation
+
+The old Watson technical contracts and documentation describing *indefinite*
+coexistence are historical. The 2026-10-19 operator explicitly targets
+**replacement of legacy n8n-embedded SQL intelligence** after Shadow parity;
+this does **not** retire n8n. IBM Cloud hosting of a private model does not
+make Watson a supported provider dependency.
+
+### `PROJECT-STATUS.md` dated 2026-10-07 sections
+
+Preserved as dated history below the current operative update. Do not use
+the pre-v9/v10 63-case baseline or older provider deployment notes as current
+acceptance or evidence of recent parity.
 
 Historical documents are preserved. Do not delete or rewrite them as if their original claims were never true.
 

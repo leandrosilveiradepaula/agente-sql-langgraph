@@ -1,5 +1,79 @@
 # PROJECT-STATUS.md
 
+## Estado operativo reconciliado em 2026-10-19
+
+> Atualiza o **objetivo** e os **próximos gates**, sem reescrever evidências
+> históricas de 2026-10-07 abaixo. Fontes normativas:
+> `AGENTS.md`, `CHATGPT-PROJECT-INSTRUCTIONS.md`,
+> `ORCHESTRATION-STRATEGY.md` e
+> `docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md`.
+> Estado operacional precisa ser reconfirmado no GitHub/VPS em cada sessão.
+
+**Objetivo de entrega fechado pelo operador:** (1) n8n+Gemini oficial e
+n8n+LangGraph+Gemini Shadow até paridade funcional e portabilidade;
+(2) substituir o **mecanismo inteligente** antigo do n8n, mantendo n8n como
+orquestrador e Gemini como LLM, somente com gate humano/rollback;
+(3) comparar Gemini vs SQL-InfoDive na mesma arquitetura homologada.
+
+**Restrição principal:** não transportar hardcodes financeiros dos nós n8n
+para LangGraph; inventariar `STRUCTURAL/TRANSITIONAL/FORBIDDEN` nos fluxos
+reais e externalizar conhecimento cliente-específico em contexto
+versionado. Demonstrar portabilidade com pelo menos dois clientes/datasets
+materialmente diferentes sem mudança no motor.
+
+### Evidência de código e testes observada
+
+- `main` observada nesta atualização: commit
+  `b1d6800623faef7e6d62735c38a9a64ef795aeec`
+  (PR #132 mergeada; não implica Shadow v18 ativada).
+- Comparação v16 × v17 enviada pelo operador: **125/146** na v17 vs
+  **118/146** na v16, sem regressões entre contextos no motor da v17.
+  Houve **deriva entre versões do motor** em conjuntos anteriores;
+  nenhum desses números comprova geração SQL/resultado financeiro.
+- Candidata `demo-finance-v18` existe como overlay virtual e código
+  mergeado; **a comparação read-only de 182 casos com v17 não foi
+  comprovada nesta atualização**. Exigir saída real da VPS antes de
+  declarar aprovação. Não ativar contexto automaticamente.
+- A linha oficial n8n + Gemini serve de baseline posterior; a
+  equivalência real entre os dois **fluxos completos** ainda requer
+  evidência integrada e resultados SQL/read-only autorizados.
+- `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false` continua obrigatório para o
+  Shadow atual. Nenhum cutover autorizado.
+
+### Estado dos gates finais
+
+| Gate | Situação verificável nesta atualização |
+|---|---|
+| G1 — dispatch e evidence oficial/Shadow end-to-end | Prova isolada documentada, paridade operacional completa **não comprovada** |
+| G2 — inventário n8n + eliminação FORBIDDEN + 2 contextos | **Pendente:** ainda não há inventário comprovado dos nós reais |
+| G3 — Gemini equivalência semântica/SQL/números | **Pendente:** avaliações semânticas não validam respostas financeiras |
+| G4 — segurança, execução autorizada, approvals/rollback | **Não homologado para cutover** |
+| G5 — substituição controlada do caminho inteligente n8n | **Não autorizada / não realizada** |
+| G6 — Gemini × SQL-InfoDive | **Fase posterior, não iniciada como comparação de qualidade** |
+
+### Próximos passos por valor de conclusão
+
+1. Reconciliar o estado atual do GitHub e a comparação v17 × v18
+   read-only, sem promover versão por percentual de testes.
+2. Inspecionar **workflows e prompts do n8n realmente usados**;
+   inventariar hardcodes com classificação, fonte, destino versionado,
+   prova de comportamento e critério de aposentadoria.
+3. Validar o fluxo real de SQL Gemini do LangGraph com evidências e
+   segurança, depois comparar com o fluxo n8n+Gemini na mesma pergunta.
+4. Propor, para autorização humana, teste read-only isolado de
+   equivalência numérica e critérios formais de aceitação; preservar
+   execução real desabilitada no Shadow até decisão separada.
+5. Construir prova multicliente, canário e rollback antes do cutover.
+6. Comparar provedores apenas após homologar o fluxo final com Gemini.
+
+**Sem alterar a arquitetura por inferência:** a LLM privada pode estar
+hospedada em nuvem; isso não significa reintroduzir o adapter Watson/IBM IAM
+ou trocar modelo na Fase 1.
+
+---
+
+## Snapshot histórico — 2026-10-07
+
 Date: 2026-10-07
 
 Branch: `main`
