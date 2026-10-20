@@ -24,7 +24,8 @@ Usage: bash scripts/audit_n8n_published_workflow_readonly.sh \
 
 Requires Docker and Python 3. Requires n8n CLI --published support.
 Reports only sanitized hashes, node-type metadata and version drift.
-Does not execute the workflow or call a model, database or webhook.
+Reads the n8n internal workflow store through its CLI (SELECT-like read).
+Does not execute business SQL, a workflow, a webhook or a model.
 HELP
 }
 
