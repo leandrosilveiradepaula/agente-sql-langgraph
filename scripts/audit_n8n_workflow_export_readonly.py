@@ -12,6 +12,7 @@ Input is an explicit local JSON export, not a live n8n API request.
 import argparse
 import hashlib
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
