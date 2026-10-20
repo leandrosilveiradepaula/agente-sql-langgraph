@@ -40,12 +40,33 @@ materialmente diferentes sem mudança no motor.
 - `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false` continua obrigatório para o
   Shadow atual. Nenhum cutover autorizado.
 
+### Evidência adicional para G2 — inventário n8n exportado (2026-10-19/20)
+
+Uma exportação **histórica** do workflow n8n está versionada no produto
+`leandrosilveiradepaula/Agente-Financeiro`, arquivo
+`workflows/n8n/agente-sql-financeiro-ducklake/Agente SQL Financeiro DuckLake - v2.2.31-stable-preflight-retry.json`
+(blob `5c385ee2718f73e74d24c59fa6afbeed3c3570fd`, último commit
+`d8897b347ca4fe8a79aa8ffc14e80b4ecd28143a` em 2026-07-20).
+
+O inventário preliminar `docs/audits/n8n-legacy-workflow-v2.2.31-inventory.md`
+indexa 75 nós e documenta **seis** nós com hardcodes FORBIDDEN
+comprovados no legado: classificação/aliases, prompt SQL, planner, gates
+semânticos de DRE, schema e filtros fixos, e relatórios financeiros. O
+script `scripts/audit_n8n_workflow_export_readonly.py` permite comparar
+exportações locais sem reproduzir SQL, prompts ou credenciais. Nenhum dado
+desse legado deve ser transplantado para código LangGraph.
+
+**Importante:** não foi acessado/alterado o workflow ativo na VPS, e a
+exportação arquivada não prova paridade nem que este é o fluxo oficial atual.
+G2 continua aberto até reconciliar com exportação ativa e externalizar as
+regras; G1 e G3–G6 permanecem abertos.
+
 ### Estado dos gates finais
 
 | Gate | Situação verificável nesta atualização |
 |---|---|
 | G1 — dispatch e evidence oficial/Shadow end-to-end | Prova isolada documentada, paridade operacional completa **não comprovada** |
-| G2 — inventário n8n + eliminação FORBIDDEN + 2 contextos | **Pendente:** ainda não há inventário comprovado dos nós reais |
+| G2 — inventário n8n + eliminação FORBIDDEN + 2 contextos | **Parcial:** 75 nós de exportação histórica indexados; 6 FORBIDDEN comprovados no arquivo; VPS ativa e 2 contextos pendentes |
 | G3 — Gemini equivalência semântica/SQL/números | **Pendente:** avaliações semânticas não validam respostas financeiras |
 | G4 — segurança, execução autorizada, approvals/rollback | **Não homologado para cutover** |
 | G5 — substituição controlada do caminho inteligente n8n | **Não autorizada / não realizada** |
