@@ -30,8 +30,9 @@ aliases, valores de filtros, linhas financeiras ou respostas de provider.
 Nenhum benchmark alimenta gerador/planner/reparo.
 
 Os verdicts são:
-- normalized_sql_match: os tokens normalizados coincidem, incluindo literais;
-  ainda assim NÃO prova resultados financeiros iguais.
+- normalized_sql_match: os tokens estruturais coincidem, mas os valores de
+  strings e identificadores entre aspas preservam maiúsculas/minúsculas.
+  Mesmo assim NÃO prova resultados financeiros iguais.
 - structural_differences: há diferença identificada em pelo menos uma
   faceta entre tabelas, joins, predicates, projections, groupings,
   orderings, functions ou query_shape.
@@ -59,3 +60,7 @@ visualizar a SQL da execução oficial antes de enviar dados ao serviço interno
 Não expor o endpoint diretamente ao navegador. Não usar o banco de benchmark
 como fonte semântica. Ativação, SQL read-only, rede, n8n e produção mantêm
 os gates existentes; merge não equivale a deploy ou paridade.
+
+A validação de revisão de SQL diferencia, por exemplo, filtros textuais 'A'
+versus 'a' e identificadores citados "Amount" versus "amount".
+A normalização de palavras-chave não pode apagar essas diferenças.

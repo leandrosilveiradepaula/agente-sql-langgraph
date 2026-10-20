@@ -11,7 +11,7 @@ from typing import Any
 
 from app.domain.result_normalization import stable_fingerprint
 from app.domain.shadow_evidence_types import validate_shadow_run_record
-from app.domain.sql_analysis import SqlAnalysisError, analyze_sql, normalized_sql_tokens
+from app.domain.sql_analysis import SqlAnalysisError, analyze_sql
 from app.ports.shadow_evidence_repository import ShadowEvidenceRepository
 
 CONTRACT_VERSION = "1"
@@ -92,8 +92,8 @@ class CompareShadowSqlUseCase:
             lhs, rhs = _structure(official), _structure(shadow)
             differences = [facet for facet in _COMPARISON_FIELDS if lhs[facet] != rhs[facet]]
             normalized_match = (
-                normalized_sql_tokens(str(request["official_sql"]), include_string_values=True)
-                == normalized_sql_tokens(shadow_sql, include_string_values=True)
+                _identity_preserving_tokens(official)
+                == _identity_preserving_tokens(shadow)
             )
         except SqlAnalysisError:
             return _response("rejected", "SHADOW_COMPARE_SQL_UNSUPPORTED", agent_id)
@@ -105,7 +105,7 @@ class CompareShadowSqlUseCase:
             for analysis in (official, shadow)
             for predicate in analysis.get("predicates", [])
         )
-        if normalized_match and not has_unsupported_predicates:
+        if normalized_match and not has_unsupported_predicates and not differences:
             verdict = "normalized_sql_match"
             differences = []
         elif differences:
@@ -176,6 +176,24 @@ def _read_only_select(analysis: Mapping[str, Any]) -> bool:
             )
         )
         and analysis.get("has_select_into") is False
+    )
+
+
+def _identity_preserving_tokens(analysis: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+    """Normalize SQL keywords, never string contents or quoted identifier case.
+
+    The generic tokenizer's normalized values case-fold strings and quoted
+    identifiers, which is unsafe for exact comparison of financial filters.
+    Also include token kinds to avoid collapsing different representations.
+    """
+    tokens = analysis.get("tokens") or []
+    return tuple(
+        (str(token.get("kind")), (
+            str(token.get("value"))
+            if token.get("kind") in {"string", "quoted_identifier"}
+            else str(token.get("normalized"))
+        ))
+        for token in tokens
     )
 
 
