@@ -6,6 +6,44 @@ This document defines the canonical orchestration strategy for coexistence betwe
 
 The goal is not to replace n8n in this phase. The goal is to introduce LangGraph as a reasoning core that works alongside the existing operational product and n8n path.
 
+## Current target decision — 2026-10-19 (supersedes ambiguous historical wording)
+
+**Strategic target:** preserve **n8n** for operational orchestration, but
+**retire the old intelligence implementation inside n8n** after parity and
+controlled cutover. n8n is never retired by this decision.
+
+The operator-defined delivery sequence is:
+
+1. **Fase 1 / Shadow:** official n8n + Gemini generation versus parallel
+   n8n + LangGraph + Gemini generation, correlated on the same question,
+   authorized data/context and provider where possible. Keep response
+   authority with n8n and `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`.
+   Compare semantics, planned metrics, SQL/gates and evidence; numeric
+   equivalence requires separately authorized read-only execution.
+2. **Fase 2 / Cutover:** after functional parity, legacy n8n hardcode
+   migration, two-context portability proof, security and rollback gates
+   pass, **explicitly authorize** routing to n8n + LangGraph + Gemini.
+   Disable **only the legacy intelligent n8n + Gemini path**, keeping
+   n8n webhooks, connectors, integrations and deterministic execution.
+3. **Fase 3 / Provider evaluation:** compare Gemini and the Infodive
+   private model SQL-InfoDive inside the **same** validated architecture,
+   without conflating LLM quality with LangGraph changes.
+
+**Hardcode removal is a blocking acceptance criterion.** The legacy n8n
+nodes and prompts must be inspected and inventoried as STRUCTURAL,
+TRANSITIONAL or FORBIDDEN. Never copy business-specific logic into Python,
+TypeScript or new n8n nodes. Business knowledge is versioned per tenant,
+including table catalogs, metrics, allowed joins, aliases, financial
+mappings, filters and policy; a new tenant must not require a code change.
+Fail closed if business semantics are unknown. The baseline n8n results
+are comparison evidence **after** generation, not generation input.
+
+See `docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md` for the
+explicit G1–G6 acceptance gates and migration plan and
+`CHATGPT-PROJECT-INSTRUCTIONS.md` for session-independent instructions.
+Do not infer activation, benchmark approval or production access from
+CI success, a merged overlay, or an old readiness note.
+
 ## Current Product Architecture
 
 The original product is the operational system. It is a Next.js UI/BFF with existing user workflows and backend routes.
@@ -213,6 +251,11 @@ Correlation may be 1:N because one product run can produce multiple LangGraph sh
 
 ## Promotion Stages
 
+The stages below describe *technical capability introduction*. The active
+three-phase operator target and the mandatory G1–G6 completion criteria above
+control **when** the original intelligent n8n path is actually retired.
+
+
 ### Stage 0: offline implementation
 
 LangGraph capabilities are built and tested offline with fakes and no real external calls.
@@ -244,3 +287,8 @@ Evidence capture must begin in Stage 1 so a future benchmark can compare SQL, in
 ## Provider Boundary Update — 2026-10-07
 
 Watson and IBM Cloud are no longer part of the target architecture. n8n remains the operational integration/orchestration layer, LangGraph remains the semantic/reasoning core, and LLM providers are selected through versioned product/runtime configuration. SQL execution integrations must stay provider-neutral and preserve the human approval boundary.
+
+Clarification (2026-10-19): IBM Cloud as an optional **hosting location** of
+a private Infodive LLM does not reinstate Watson/IBM IAM as a LangGraph
+provider dependency. Model selection remains configured and audited. The
+SQL-InfoDive comparison is Phase 3, after Gemini-based cutover.
