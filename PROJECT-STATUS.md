@@ -85,6 +85,28 @@ SQL/resultados**; `lib/n8n-endpoint.ts` ainda possui URL fallback fixa
 para uma instância, um risco de configuração/portabilidade que deve ser
 tratado **após confirmação de ambiente**, sem quebrar produção por inferência.
 
+### Observação de deployment do Produto (Vercel, apenas leitura)
+
+Inspeção da Vercel no escopo de equipe autorizado retornou dois projetos
+distintos, não confundíveis: `agente-financeiro` e
+`agente-financeiro-demo`. O deployment de produção READY mais recente
+listado para o primeiro usa `leandrosilveiradepaula/Agente-Financeiro`
+commit `d2f01a836cf3c12a478011f07a8e06a0065ae086`. O segundo
+retornou deployment READY do branch `demo/grupo-horizonte`, commit
+`364a7a2d54508043cc03c6027badb8f702dcafdd`.
+
+Ambos registram a chave de configuração `LANGGRAPH_SHADOW_ENABLED`
+nos ambientes de projeto observados; a Vercel **não revelou o valor
+efetivo dessa chave em deployment** (variável sensível). Portanto,
+`LANGGRAPH_SHADOW_ENABLED` **não pode ser declarado ligado/desligado**
+a partir desses resultados, nem é possível atestar o alcance do webhook
+n8n ou a efetiva presença de `agent_run_id` correlacionado.
+
+A fase G1 exige conferir o deployment/tenant **correto** do Produto e
+um par de evidências n8n/Shadow produzido por fluxo real e autorizado.
+Esses acessos foram estritamente de leitura; não houve alteração de
+Vercel, n8n, SQL, LLM ou variáveis de ambiente.
+
 ### Estado dos gates finais
 
 | Gate | Situação verificável nesta atualização |
