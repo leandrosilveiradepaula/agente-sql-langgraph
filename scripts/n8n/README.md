@@ -12,3 +12,4 @@
   the candidate offline without Gemini/SQL/cost.
 
 Read \`PARALLEL-SHADOW-RUNBOOK.md\` before import or activation.
+- `audit_parallel_shadow_bindings_readonly.sh` + `verify_parallel_shadow_bindings_export.py`: read-only inspection of the **imported inactive** seven-node candidate's credential references and structural integrity; prints only sanitized statuses, no credential values, no SQL/LLM.
