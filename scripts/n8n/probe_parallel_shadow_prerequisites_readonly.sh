@@ -19,7 +19,7 @@ fi
 echo "=== SHADOW RUNTIME ==="
 docker inspect "$CONTAINER" --format \
   'SHADOW_STATE={{.State.Status}} SHADOW_HEALTH={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
-docker exec "$CONTAINER" python - <<'PY'
+docker exec -i "$CONTAINER" python - <<'PY'
 import os
 print("SHADOW_SQL_REAL_DISABLED=" + str(
     os.environ.get("LANGGRAPH_ALLOW_REAL_SQL_EXECUTION") == "false"
@@ -49,7 +49,7 @@ fi
 
 echo "=== N8N CONFIGURATION (METADATA ONLY) ==="
 echo "N8N_VERSION=$(docker exec -u node "$N8N_CONTAINER" n8n --version | head -n 1)"
-docker exec "$N8N_CONTAINER" node - <<'JS'
+docker exec -i "$N8N_CONTAINER" node - <<'JS'
 const env = process.env;
 const safeBool = value => String(Boolean(value)).toLowerCase();
 console.log("N8N_SHADOW_INTERNAL_BASE_URL_PRESENT=" +
