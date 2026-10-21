@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""Validate one inactive imported n8n Shadow workflow from a private export.
+
+Reads only workflow metadata and credential references, never credential
+values. Emits only fixed sanitized status codes. No network or SQL access.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import re
+import sys
+from collections.abc import Mapping
+
+# Support direct CLI execution without an installed Python package.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+from scripts.n8n.render_parallel_shadow_workflow import (
+    ShadowPreparationError,
+    render_private_candidate,
+    validate_internal_base_url,
+)
+
+MAX_BYTES = 2 * 1024 * 1024
+EXPECTED_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+CALL = "Call LangGraph Shadow"
+READ = "Read Correlated Evidence"
+WEBHOOK = "Webhook - Parallel Shadow"
+AUTH_NODES = {WEBHOOK, CALL, READ}
+# Only a JSON-quoted literal followed by the approved dynamic route is accepted.
+CALL_EXPRESSION = re.compile(
+    r'^=\{\{\s*("(?:\\.|[^"\\])*")\s*\+\s*\$json\.target_path\s*\}\}$'
+)
+
+
+class BindingAuditError(ValueError):
+    """Known, non-sensitive rejection code."""
+
+
+def _reject(code: str) -> None:
+    raise BindingAuditError(code)
+
+
+def _credential_id(node: Mapping) -> str:
+    creds = node.get("credentials")
+    if not isinstance(creds, Mapping) or set(creds) != {"httpHeaderAuth"}:
+        _reject("SHADOW_CREDENTIAL_REFERENCE_MISSING")
+    credential = creds["httpHeaderAuth"]
+    if not isinstance(credential, Mapping):
+        _reject("SHADOW_CREDENTIAL_REFERENCE_MISSING")
+    identity = credential.get("id")
+    if not isinstance(identity, str) or not 1 <= len(identity) <= 128:
+        _reject("SHADOW_CREDENTIAL_REFERENCE_MISSING")
+    # Credential names are untrusted and never printed.
+    if any(key not in {"id", "name"} for key in credential):
+        _reject("SHADOW_CREDENTIAL_REFERENCE_UNEXPECTED_FIELD")
+    return identity
+
+
+def validate_export(raw: object, workflow_id: str) -> dict[str, object]:
+    if not isinstance(workflow_id, str) or not EXPECTED_ID_RE.fullmatch(workflow_id):
+        _reject("SHADOW_WORKFLOW_ID_INVALID")
+    if isinstance(raw, list):
+        if len(raw) != 1:
+            _reject("SHADOW_EXPORT_NOT_SINGLE_WORKFLOW")
+        raw = raw[0]
+    if not isinstance(raw, Mapping) or raw.get("id") != workflow_id:
+        _reject("SHADOW_WORKFLOW_ID_MISMATCH")
+    if raw.get("active") is not False or raw.get("isArchived") is True:
+        _reject("SHADOW_WORKFLOW_NOT_INACTIVE")
+    nodes = raw.get("nodes")
+    if not isinstance(nodes, list) or len(nodes) != 7 or any(not isinstance(n, Mapping) for n in nodes):
+        _reject("SHADOW_NODE_SET_MISMATCH")
+    by_name = {n.get("name"): n for n in nodes}
+    if len(by_name) != 7 or CALL not in by_name:
+        _reject("SHADOW_NODE_SET_MISMATCH")
+    expression = by_name[CALL].get("parameters", {}).get("url")
+    if not isinstance(expression, str):
+        _reject("SHADOW_INTERNAL_URL_EXPRESSION_MISMATCH")
+    match = CALL_EXPRESSION.fullmatch(expression)
+    if not match:
+        _reject("SHADOW_INTERNAL_URL_EXPRESSION_MISMATCH")
+    try:
+        base = json.loads(match.group(1))
+        if validate_internal_base_url(base) != base:
+            _reject("SHADOW_INTERNAL_URL_INVALID")
+        expected = render_private_candidate(base)
+    except (ValueError, ShadowPreparationError, TypeError):
+        _reject("SHADOW_INTERNAL_URL_INVALID")
+    expected_by_name = {n["name"]: n for n in expected["nodes"]}
+    if set(by_name) != set(expected_by_name):
+        _reject("SHADOW_NODE_SET_MISMATCH")
+    if raw.get("connections") != expected["connections"]:
+        _reject("SHADOW_TOPOLOGY_MISMATCH")
+    if raw.get("pinData") not in ({}, None):
+        _reject("SHADOW_PINNED_DATA_PRESENT")
+    settings = raw.get("settings")
+    if not isinstance(settings, Mapping) or any(
+        settings.get(key) != value for key, value in expected["settings"].items()
+    ):
+        _reject("SHADOW_EXECUTION_PERSISTENCE_UNSAFE")
+    for name, node in by_name.items():
+        baseline = expected_by_name[name]
+        if any(node.get(key) != baseline.get(key) for key in ("id", "type", "typeVersion", "parameters")):
+            _reject("SHADOW_NODE_CONFIGURATION_DRIFT")
+        if any(node.get(flag) is True for flag in ("disabled", "continueOnFail", "alwaysOutputData", "executeOnce")):
+            _reject("SHADOW_NODE_RUNTIME_FLAGS_UNSAFE")
+        if name not in AUTH_NODES and "credentials" in node:
+            _reject("SHADOW_UNEXPECTED_CREDENTIAL_REFERENCE")
+    webhook_id = _credential_id(by_name[WEBHOOK])
+    call_id = _credential_id(by_name[CALL])
+    read_id = _credential_id(by_name[READ])
+    if call_id != read_id or call_id == webhook_id:
+        _reject("SHADOW_CREDENTIAL_BOUNDARY_MISMATCH")
+    return {
+        "contract": "n8n-parallel-shadow-g1-binding-audit-v1",
+        "status": "pass",
+        "read_only": True,
+        "workflow_active": False,
+        "node_count": 7,
+        "webhook_header_auth_bound": True,
+        "langgraph_header_auth_bound": True,
+        "langgraph_http_nodes_share_credential": True,
+        "webhook_credential_separate": True,
+        "internal_url_private": True,
+        "n8n_env_expression_required": False,
+        "credentials_values_verified": False,
+        "authenticated_http_verified": False,
+        "shadow_execution_verified": False,
+        "financial_parity_verified": False,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--workflow", type=pathlib.Path, required=True)
+    parser.add_argument("--workflow-id", required=True)
+    args = parser.parse_args(argv)
+    try:
+        path = args.workflow
+        if not path.is_file() or not 0 < path.stat().st_size <= MAX_BYTES:
+            _reject("SHADOW_EXPORT_SIZE_INVALID")
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        result = validate_export(raw, args.workflow_id)
+    except BindingAuditError as exc:
+        print(json.dumps({"status": "rejected", "reason": str(exc)}))
+        return 2
+    except (OSError, ValueError, UnicodeError, TypeError):
+        print(json.dumps({"status": "rejected", "reason": "SHADOW_EXPORT_INVALID"}))
+        return 2
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -426,3 +426,19 @@ No cutover is claimed.
 ## Architecture Decision — Watson / IBM Cloud Removal
 
 As of 2026-10-07, Watson and IBM Cloud are removed from the target architecture. The supported direction is Product + n8n + LangGraph with configurable LLM providers. Generic Generate, Repair, Preflight and Execute-Approved contracts remain, but no Watson-specific adapter, IBM IAM dependency, probe, test or runbook is part of the runtime target.
+
+## Gate G1 — prepared read-only binding verification (2026-10-21)
+
+- Operator reported the three n8n credentials configured on the newly imported
+  seven-node candidate `LwUsMRWi34D2ARWu1YzgV`. Browser read confirms
+  seven node labels and a **Publish** button, not credential attachment or
+  successful authentication. The 68-node official workflow was not changed.
+- Added a fail-closed draft-export binding audit for the exact candidate ID.
+  It checks inactive state, node/code/topology drift, two distinct credential
+  boundaries and private Docker endpoint without printing credential IDs,
+  names, secrets or node code. Synthetic offline negative tests cover
+  missing/misbound credentials and unsafe changes.
+- **Operational evidence pending:** the audit has not run on the VPS;
+  n8n credential *values* and S2S authorization are not validated. No
+  workflow publication, HTTP 202, persisted correlation, real SQL, LLM call,
+  numeric parity or cutover is implied by this code change.
