@@ -43,9 +43,13 @@ expected answers/SQL or benchmarks to the LangGraph request.
    malformed request, mismatched-ID and duplicate-evidence scenarios with
    n8n expressions evaluated in a Node.js sandbox (no HTTP, LLM or SQL).
    The test is also wired into the repository-wide offline CI.
-2. In a separate authorized n8n deployment, import the candidate as a
-   **NEW** workflow. Never replace, publish over, or edit the 68-node
-   OFFICIAL financial workflow.
+2. In a separate authorized n8n deployment, import the **rendered**
+   candidate as a NEW, **inactive** workflow using n8n's
+   `import:workflow --input=<private-file>` command and verified
+   workflow ownership/project. Never replace, publish over, or edit
+   the 68-node official financial workflow. Verify the imported workflow
+   has a distinct ID, no credentials bound by the JSON and inactive status.
+   Import permission does not authorize activation.
 3. Attach a distinct **Webhook Header Auth** credential to
    \`Webhook - Parallel Shadow\` with header \`X-Agent-Shadow-Token\`.
    Create the corresponding secret in the Product backend as
@@ -53,11 +57,35 @@ expected answers/SQL or benchmarks to the LangGraph request.
 4. Attach a separate **HTTP Header Auth** credential to **both**
    \`Call LangGraph Shadow\` and \`Read Correlated Evidence\` with
    \`Authorization: Bearer <LANGGRAPH_S2S_TOKEN>\`.
-5. Set \`LANGGRAPH_SHADOW_INTERNAL_BASE_URL\` in the authorized n8n
-   environment to the LangGraph Shadow service base address reachable
-   from the n8n container, without a trailing path. Ensure n8n permits
-   access to this specific environment variable in node expressions;
-   failure to resolve is a stop, not a reason to hardcode a host/token.
+5. **Preferred for n8n 2.x:** prepare a private, inactive workflow
+   JSON with the trusted internal URL substituted at import time. This
+   avoids `$env` expressions and **does not require** configuring
+   `LANGGRAPH_SHADOW_INTERNAL_BASE_URL` inside n8n or weakening
+   `N8N_BLOCK_ENV_ACCESS_IN_NODE`. From the up-to-date LangGraph repo,
+   after an explicitly authorized preparation:
+   ```bash
+   python3 scripts/n8n/render_parallel_shadow_workflow.py --check-template
+   python3 scripts/n8n/render_parallel_shadow_workflow.py \\
+     --internal-base-url 'http://<private-docker-service-name>:8000' \\
+     --output /tmp/parallel-shadow-inactive-private.json
+   ```
+   Supply the actual private service DNS verified from the n8n container.
+   The renderer rejects public destinations, embedded credentials, URL
+   paths/query/fragment and unexpected template changes. Only the two
+   HTTP Request URL expressions are rendered; the workflow stays inactive,
+   without an ID or attached credentials. The generated file is 0600,
+   must remain private and is never committed to Git. Import or activation
+   requires **separate operator authorization**. The trusted internal URL
+   is structural deployment configuration, not a business hardcode.
+
+   Read-only prerequisite audit:
+   ```bash
+   bash scripts/n8n/probe_parallel_shadow_prerequisites_readonly.sh
+   ```
+   **Never turn off n8n's global environment isolation just to enable
+   this Shadow workflow.** The renderer does not authorize the new
+   workflow's import, credential assignment, webhook publication or
+   SQL/LLM calls.
 6. Confirm **SHADOW model is Gemini** for apples-to-apples comparison
    with the official n8n Gemini path. The workflow does NOT select an
    LLM; LangGraph's authorized provider config does.

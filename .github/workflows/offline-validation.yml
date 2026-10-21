@@ -82,6 +82,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Validate private n8n workflow renderer (no n8n, SQL or LLM)
+        run: |
+          python3 testar_n8n_private_shadow_renderer.py
+          bash -n scripts/n8n/probe_parallel_shadow_prerequisites_readonly.sh
       - name: Reproduce restrictive checkout permissions
         run: |
           chmod 700 app/test_runtime
