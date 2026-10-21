@@ -38,6 +38,16 @@ class ParallelShadowBindingAuditTests(unittest.TestCase):
         self.assertFalse(result["shadow_execution_verified"])
         self.assertNotIn("do-not-echo", json.dumps(result))
 
+    def test_accepts_imported_node_ids_and_implicit_reader_get(self):
+        d = fixture()
+        for index, node in enumerate(d["nodes"]):
+            node["id"] = f"imported-node-{index + 1}"
+        read = next(n for n in d["nodes"] if n["name"] == "Read Correlated Evidence")
+        del read["parameters"]["method"]
+        result = validate_export(d, WORKFLOW_ID)
+        self.assertEqual(result["status"], "pass")
+        self.assertFalse(result["credentials_values_verified"])
+
     def test_rejects_drift_and_unbound_or_misbound_credentials(self):
         for mutation in (
             "wrong_id", "active", "archived", "no_webhook_cred", "no_http_cred",
@@ -45,6 +55,9 @@ class ParallelShadowBindingAuditTests(unittest.TestCase):
             "extra_node", "disabled", "code_drift", "http_url_drift",
             "env_expression", "public_endpoint", "topology", "save_execution",
             "pinned_data", "unwanted_credential", "bad_credential_shape",
+            "duplicate_node_id", "missing_node_id", "malformed_node_id",
+            "read_post_method", "read_head_method", "read_null_method",
+            "call_method_missing",
         ):
             d = fixture()
             webhook = next(n for n in d["nodes"] if n["name"] == "Webhook - Parallel Shadow")
@@ -69,6 +82,13 @@ class ParallelShadowBindingAuditTests(unittest.TestCase):
             elif mutation == "pinned_data": d["pinData"] = {"a": [{"json": {"secret": "private"}}]}
             elif mutation == "unwanted_credential": d["nodes"][1]["credentials"] = webhook["credentials"]
             elif mutation == "bad_credential_shape": webhook["credentials"] = {"httpBasicAuth": {"id": "secret"}}
+            elif mutation == "duplicate_node_id": read["id"] = call["id"]
+            elif mutation == "missing_node_id": del read["id"]
+            elif mutation == "malformed_node_id": read["id"] = "invalid id"
+            elif mutation == "read_post_method": read["parameters"]["method"] = "POST"
+            elif mutation == "read_head_method": read["parameters"]["method"] = "HEAD"
+            elif mutation == "read_null_method": read["parameters"]["method"] = None
+            elif mutation == "call_method_missing": del call["parameters"]["method"]
             with self.subTest(mutation=mutation):
                 with self.assertRaises(BindingAuditError):
                     validate_export(d, WORKFLOW_ID)
