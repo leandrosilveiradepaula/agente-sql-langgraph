@@ -83,6 +83,10 @@ def validate_internal_base_url(value: str) -> str:
         name = hostname.casefold()
         if name in {"localhost", "host", "metadata", "host.docker.internal"}:
             raise ShadowPreparationError("SHADOW_INTERNAL_HOST_NOT_PRIVATE")
+        # Reject numeric/hex IPv4 spellings that URL clients may coerce
+        # into loopback or metadata addresses (for example 2130706433).
+        if (name.isdecimal() or name.startswith("0x")):
+            raise ShadowPreparationError("SHADOW_INTERNAL_HOST_NOT_PRIVATE")
         if not (HOST_LABEL.fullmatch(name) or CLUSTER_DNS.fullmatch(name)):
             raise ShadowPreparationError("SHADOW_INTERNAL_HOST_NOT_PRIVATE")
     else:
