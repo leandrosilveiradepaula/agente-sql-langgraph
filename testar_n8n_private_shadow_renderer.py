@@ -114,6 +114,8 @@ console.log("PRIVATE_N8N_ENDPOINT_EXPRESSIONS=PASS");
             "",
             "http://localhost:8000",
             "http://127.0.0.1:8000",
+            "http://2130706433:8000",  # numeric loopback spelling
+            "http://0x7f000001:8000",  # hex loopback spelling
             "http://169.254.169.254:80",
             "http://0.0.0.0:8000",
             "http://8.8.8.8:443",
