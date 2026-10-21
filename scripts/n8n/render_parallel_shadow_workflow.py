@@ -44,7 +44,7 @@ IPV6_ALLOWED = ipaddress.ip_network("fc00::/7")
 HOST_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,252}$")
 # Explicitly internal cluster service domains, not public destinations.
 CLUSTER_DNS = re.compile(
-    r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,244}\\.svc\\.cluster\\.local$"
+    r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,244}[.]svc[.]cluster[.]local$"
 )
 
 
