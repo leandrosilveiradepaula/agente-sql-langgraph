@@ -18,6 +18,12 @@ The real n8n + Gemini workflow remains **OFFICIAL**, unchanged.
   \`generate\` or \`execute_approved\`. All SQL intelligence, prompt selection,
   metrics, filters, joins, dialect interpretation and repair stay in LangGraph
   and its versioned tenant context, never in n8n.
+- For `generate` only, preserve optional versioned
+  `llm_selection` (`provider_key`, `model_key`, `config_version`) as an
+  opaque field. Malformed or extra fields fail closed; the workflow never
+  chooses a model or silently changes the selection. The LangGraph registry
+  must authorize the selection and attest the actual generator identity.
+  Phase 1 parity requires Gemini on both paths, not merely HTTP 202.
 - Check the LangGraph response, fetch persisted Shadow evidence, and verify
   exact \`agent_run_id\`, \`run_id\`, status, event type and a unique
   \`shadow_record_id\` without returning SQL, tokens or provider raw output.
