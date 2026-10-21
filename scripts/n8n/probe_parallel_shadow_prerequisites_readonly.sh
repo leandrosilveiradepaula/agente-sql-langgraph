@@ -21,9 +21,9 @@ docker inspect "$CONTAINER" --format \
   'SHADOW_STATE={{.State.Status}} SHADOW_HEALTH={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
 docker exec -i "$CONTAINER" python - <<'PY'
 import os
-print("SHADOW_SQL_REAL_DISABLED=" + str(
-    os.environ.get("LANGGRAPH_ALLOW_REAL_SQL_EXECUTION") == "false"
-).lower())
+if os.environ.get("LANGGRAPH_ALLOW_REAL_SQL_EXECUTION") != "false":
+    raise SystemExit("SHADOW_SAFETY=FAIL real_sql_enabled")
+print("SHADOW_SQL_REAL_DISABLED=true")
 print("SHADOW_CONTEXT_PRESENT=" + str(
     bool(os.environ.get("SEMANTIC_AGENT_VERSION"))
 ).lower())
@@ -70,6 +70,7 @@ echo "=== NETWORK / S2S DENIAL ==="
 bash "$ROOT_DIR/scripts/probe_n8n_shadow_network_readonly.sh"
 
 echo "G1_READONLY_CHECK=PASS"
+echo "G1_INTEGRATION_PROVEN=false"
 echo "N8N_WORKFLOW_MODIFIED=false"
 echo "N8N_IMPORT_PERFORMED=false"
 echo "SHADOW_LLM_CALLS=0"
