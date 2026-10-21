@@ -74,6 +74,15 @@ def validate_export(raw: object, workflow_id: str) -> dict[str, object]:
     by_name = {n.get("name"): n for n in nodes}
     if len(by_name) != 7 or CALL not in by_name:
         _reject("SHADOW_NODE_SET_MISMATCH")
+    # n8n assigns new node IDs during import; require valid unique IDs, not
+    # byte-for-byte equality with portable template IDs.
+    node_ids = [n.get("id") for n in nodes]
+    if (
+        any(not isinstance(node_id, str) or not EXPECTED_ID_RE.fullmatch(node_id)
+            for node_id in node_ids)
+        or len(set(node_ids)) != len(node_ids)
+    ):
+        _reject("SHADOW_NODE_ID_INVALID")
     expression = by_name[CALL].get("parameters", {}).get("url")
     if not isinstance(expression, str):
         _reject("SHADOW_INTERNAL_URL_EXPRESSION_MISMATCH")
@@ -101,7 +110,19 @@ def validate_export(raw: object, workflow_id: str) -> dict[str, object]:
         _reject("SHADOW_EXECUTION_PERSISTENCE_UNSAFE")
     for name, node in by_name.items():
         baseline = expected_by_name[name]
-        if any(node.get(key) != baseline.get(key) for key in ("id", "type", "typeVersion", "parameters")):
+        if any(node.get(key) != baseline.get(key) for key in ("type", "typeVersion")):
+            _reject("SHADOW_NODE_CONFIGURATION_DRIFT")
+        parameters = node.get("parameters")
+        if not isinstance(parameters, Mapping):
+            _reject("SHADOW_NODE_CONFIGURATION_DRIFT")
+        if name == READ:
+            # n8n 2.x may omit its default GET method when serializing this
+            # read-only HTTP node. Explicit non-GET methods are never allowed.
+            if "method" not in parameters:
+                parameters = {**parameters, "method": "GET"}
+            elif parameters["method"] != "GET":
+                _reject("SHADOW_READ_METHOD_NOT_GET")
+        if parameters != baseline["parameters"]:
             _reject("SHADOW_NODE_CONFIGURATION_DRIFT")
         if any(node.get(flag) is True for flag in ("disabled", "continueOnFail", "alwaysOutputData", "executeOnce")):
             _reject("SHADOW_NODE_RUNTIME_FLAGS_UNSAFE")

@@ -140,8 +140,12 @@ before reporting success, and must **never** be shared or committed.
 A `G1_BINDINGS=PASS` confirms: seven expected nodes and topology, private
 rendered LangGraph URL without n8n `$env` access, inactive state, disabled
 execution-data storage, Webhook Header Auth binding, separate LangGraph
-Header Auth binding shared by both HTTP nodes, and no drift from the reviewed
-workflow. Only fixed status labels are printed. A rejection is **not**
+Header Auth binding shared by both HTTP nodes, and no functional drift from the reviewed
+workflow. n8n-generated node IDs must be unique and well formed but need
+not equal the portable template IDs. n8n 2.x may omit the default `GET`
+method on **Read Correlated Evidence**: only that one missing field is
+interpreted as `GET`; an explicit non-GET method or any other parameter
+change is rejected. Only fixed status labels are printed. A rejection is **not**
 authorization to reimport, activate, weaken security or overwrite credentials.
 
 **This audit does not read/decrypt secrets, validate credential values, make
