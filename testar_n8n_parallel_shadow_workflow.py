@@ -148,6 +148,33 @@ const generateUrl = expression("Call LangGraph Shadow", "url", normalized);
 assert.equal(generateUrl, "http://shadow-internal:8000/v1/internal/sql-agent/generate");
 const outbound = JSON.parse(expression("Call LangGraph Shadow", "jsonBody", normalized));
 assert.deepEqual(outbound, normalized.shadow_request);
+assert.equal(outbound.llm_selection, undefined);
+// Provider/model identities remain opaque transport data; LangGraph validates
+// their registration. n8n must neither discard nor reinterpret them.
+const selected = {
+  provider_key: "provider-fixture",
+  model_key: "model-fixture",
+  config_version: "config-fixture"
+};
+const withSelection = runCode("Validate Shadow Envelope", {
+  body: {...payload, llm_selection: selected}
+});
+assert.deepEqual(withSelection.shadow_request.llm_selection, selected);
+assert.deepEqual(JSON.parse(
+  expression("Call LangGraph Shadow", "jsonBody", withSelection)
+).llm_selection, selected);
+for (const invalid of [
+  {},
+  {provider_key:"provider-fixture", model_key:"model-fixture"},
+  {...selected, extra_field: "not-permitted"},
+  {...selected, provider_key:""},
+  "provider-fixture",
+  null
+]) {
+  assert.throws(() => runCode("Validate Shadow Envelope", {
+    body: {...payload, llm_selection: invalid}
+  }), /SHADOW_ENVELOPE_LLM_SELECTION_REJECTED/);
+}
 const response = runCode("Validate LangGraph Response", {
   statusCode: 200,
   body: {contract_version: "1", status: "success", agent_run_id: agentRunId, run_id: "run-one"}
@@ -193,6 +220,9 @@ const executionPayload = {
   }
 };
 const normalizedExecution = runCode("Validate Shadow Envelope", {body: executionPayload});
+assert.throws(() => runCode("Validate Shadow Envelope", {
+  body: {...executionPayload, llm_selection: selected}
+}), /SHADOW_ENVELOPE_LLM_SELECTION_REJECTED/);
 assert.equal(normalizedExecution.shadow_request.approved_sql, sqlOpaque);
 assert.equal(normalizedExecution.shadow_request.question, undefined);
 assert.equal(expression("Call LangGraph Shadow", "url", normalizedExecution),
