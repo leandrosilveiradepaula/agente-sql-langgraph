@@ -118,3 +118,42 @@ continues to serve solely as a pre-LLM correlation test.
 The current contract lacks a trusted tenant identifier in the BFF
 payload; do not claim multiclient isolation until tenant identity,
 context authorization and tests are implemented and verified.
+
+## Imported-workflow credential audit (read-only; no publication)
+
+After the operator has **saved** credential assignments on the seven-node
+workflow, run this on the authorized n8n Docker host, with the real imported
+workflow ID (never the 68-node official ID):
+
+```bash
+cd /docker/agente-sql-langgraph-repo
+bash scripts/n8n/audit_parallel_shadow_bindings_readonly.sh \
+  --workflow-id LwUsMRWi34D2ARWu1YzgV
+```
+
+The audit uses n8n's **draft** `export:workflow --id` only to inspect the
+*inactive candidate*; it does **not** use `--published` and is **not** the
+official-workflow audit. The raw export, which may contain node parameters
+and credential reference names, stays in private ephemeral files, is deleted
+before reporting success, and must **never** be shared or committed.
+
+A `G1_BINDINGS=PASS` confirms: seven expected nodes and topology, private
+rendered LangGraph URL without n8n `$env` access, inactive state, disabled
+execution-data storage, Webhook Header Auth binding, separate LangGraph
+Header Auth binding shared by both HTTP nodes, and no drift from the reviewed
+workflow. Only fixed status labels are printed. A rejection is **not**
+authorization to reimport, activate, weaken security or overwrite credentials.
+
+**This audit does not read/decrypt secrets, validate credential values, make
+authenticated calls, execute SQL/LLM, publish the workflow, or prove
+correlation/parity.** Credential references can be attached but invalid.
+After `PASS`, separately run the existing GET-only network/auth-denial probe:
+
+```bash
+bash scripts/probe_n8n_shadow_network_readonly.sh
+```
+
+Keep `LANGGRAPH_SHADOW_ENABLED=false` and the workflow unpublished.
+A real authenticated request and persisted evidence correlation require a
+separately authorized, controlled activation/test window. Never infer G1
+completion from credential bindings, network health or HTTP 202 alone.
