@@ -1,3 +1,40 @@
+## Gate G1 — evidência operacional observada em 2026-10-21 (UTC)
+
+- Na VPS, o operador confirmou n8n **2.4.8**, um contêiner detectado,
+  CLI `n8n import:workflow` disponível e
+  `LANGGRAPH_SHADOW_INTERNAL_BASE_URL` **ausente** no ambiente do n8n.
+  O teste foi read-only; não identifica importação ou ativação do candidato.
+- Último Shadow TEST operacionalmente validado pelo operador: imagem e
+  runtime `136da3419a18ec79bf67b5d42fcb7b3acdce16ba`,
+  `SEMANTIC_AGENT_VERSION=demo-finance-v9`, Gemini configurado,
+  execução SQL real desativada e conectividade n8n→Shadow confirmada.
+  A inspeção local posterior mostrou checkout VPS também nesse commit.
+- O GitHub `main` avançou para `d4f6718e0cb333fdadc0dfa94060cb629cc4fbe8`
+  pela PR #143 (transporte opcional de `llm_selection`). **Esse commit
+  não foi confirmado como implantado na VPS**; apenas o candidato n8n
+  versionado mudou. Não há motivo para trocar o runtime sem evidência.
+- A Demo `demo/grupo-horizonte` recebeu a PR #17 no commit
+  `687447c8314d6706d9853fc595a262316afeb3ca`, com deploy Vercel
+  READY. As variáveis `LANGGRAPH_SHADOW_TRANSPORT`,
+  `LANGGRAPH_SHADOW_N8N_WEBHOOK_URL` e
+  `N8N_SHADOW_WEBHOOK_TOKEN` ainda não constavam no inventário de
+  configuração da Demo; nenhuma ativação foi comprovada.
+- Gate G1 continua **pendente**: workflow paralelo de sete nós não
+  comprovadamente importado/ativo, sem correlação real Produto→n8n→
+  LangGraph e sem prova de paridade financeira. n8n + Gemini **oficial**
+  permanece intocado.
+- Para n8n 2.x, o template candidato usa `$env` nas URLs internas, cuja
+  disponibilidade pode estar bloqueada por padrão. O renderizador
+  `scripts/n8n/render_parallel_shadow_workflow.py` prepara um arquivo
+  privado/inativo com destino interno autorizado **sem alterar a proteção
+  global de ambiente n8n**. A preparação é offline e não autoriza a
+  importação, credenciais, ativação ou qualquer chamada paga.
+- Importação/publicação do workflow, credenciais, configuração Vercel,
+  uso real de LLM e execução SQL read-only continuam exigindo suas
+  autorizações separadas. Não considerar G1/G2/G3 concluídos pelo CI.
+
+---
+
 ## Rastreabilidade de provedor/modelo na comparação Shadow — candidato
 
 A nova comparação expõe apenas identificadores sanitizados de
