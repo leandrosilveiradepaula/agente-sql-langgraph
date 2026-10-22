@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Offline verification of n8n evidence bridge Code nodes."""
+from __future__ import annotations
+import json
+import pathlib
+import shutil
+import subprocess
+from scripts.n8n.render_shadow_evidence_read_workflow import load_template, render, ShadowPreparationError
+
+def main():
+    w=load_template()
+    assert len(w["nodes"])==5 and not w["active"]
+    assert all("credentials" not in n for n in w["nodes"])
+    rendered=render("http://internal-shadow-service:8000")
+    assert "$env" not in json.dumps(rendered)
+    for url in ("https://example.com","http://127.0.0.1:8000","http://169.254.169.254:80"):
+        try: render(url)
+        except ShadowPreparationError: pass
+        else: raise AssertionError("Rejected URL accepted")
+    if not shutil.which("node"):
+        raise AssertionError("Node required for JavaScript contract tests")
+    byname={n["name"]:n for n in w["nodes"]}
+    source=byname["Validate Evidence Read Envelope"]["parameters"]["jsCode"]
+    sanitizer=byname["Sanitize Evidence Response"]["parameters"]["jsCode"]
+    js=r'''
+const vm=require('node:vm'), assert=require('node:assert/strict');
+const validate=JSON.parse(process.argv[1]), sanitize=JSON.parse(process.argv[2]);
+const run=(code,input,source)=>vm.runInNewContext(code,{
+  $input:{first:()=>({json:input})},
+  $:()=>({first:()=>({json:source})}),Number,Object,Array,Set,encodeURIComponent
+},{timeout:1000})[0].json;
+const req={contract_version:'1',request_id:'req-1',operation:'list',agent_run_id:'agent-1',limit:10};
+const v=run(validate,{body:req});
+assert.equal(v.target_path,'/v1/internal/agent-runs/agent-1/shadow-runs?limit=10');
+for(const bad of [{...req,agent_run_id:'../secret'},{...req,target_path:'http://evil.invalid'},{...req,limit:51},{...req,operation:'wrong'}])
+ assert.throws(()=>run(validate,{body:bad}));
+const detail=run(validate,{body:{contract_version:'1',request_id:'req-2',operation:'detail',shadow_record_id:'shadow-1'}});
+assert.equal(detail.target_path,'/v1/internal/shadow-runs/shadow-1');
+const graph=run(validate,{body:{contract_version:'1',request_id:'req-3',operation:'visualization',shadow_record_id:'shadow-1'}});
+assert.equal(graph.target_path,'/v1/internal/shadow-runs/shadow-1/visualization');
+const item={agent_run_id:'agent-1',shadow_record_id:'shadow-1',run_id:'run-1',event_type:'generate',status:'rejected',created_at:'2026-10-22T00:00:00Z',completed_at:null,raw_sql:'SELECT confidential'};
+const safe=run(sanitize,{statusCode:200,body:{contract_version:'1',agent_run_id:'agent-1',items:[item]}},v);
+assert.equal(safe.safe_response.items.length,1);
+assert.equal(JSON.stringify(safe).includes('confidential'),false);
+assert.throws(()=>run(sanitize,{statusCode:401,body:{}},v));
+assert.throws(()=>run(sanitize,{statusCode:200,body:{contract_version:'1',agent_run_id:'another',items:[item]}},v));
+assert.throws(()=>run(sanitize,{statusCode:200,body:{contract_version:'1',agent_run_id:'agent-1',items:[item,item]}},v));
+const d=run(sanitize,{statusCode:200,body:{contract_version:'1',...item}},detail);
+assert.equal(d.safe_response.shadow_record_id,'shadow-1');
+const g=run(sanitize,{statusCode:200,body:{contract_version:'1',run:item,steps:[{id:'step-1',label:'security_gate',status:'success',order:1,metadata:{duration_ms:2,raw_sql:'SELECT private'}}],edges:[],flags:{has_error:false}}},graph);
+assert.equal(g.safe_response.steps[0].metadata.duration_ms,2);
+assert.equal(JSON.stringify(g).includes('private'),false);
+assert.throws(()=>run(sanitize,{statusCode:200,body:{contract_version:'1',run:item,steps:[{id:'step-1',label:'security_gate',status:'success',order:1}],edges:[{source:'step-1',target:'missing'}]}},graph));
+console.log('EVIDENCE_READ_NODE_BEHAVIOR=PASS');
+'''
+    r=subprocess.run(["node","-e",js,json.dumps(source),json.dumps(sanitizer)],capture_output=True,text=True,timeout=15)
+    if r.returncode: raise AssertionError(r.stderr[-1000:])
+    print(r.stdout.strip())
+    print("EVIDENCE_READ_RELAY_OFFLINE=PASS sql_execution=false llm_calls=0")
+if __name__=="__main__":main()
