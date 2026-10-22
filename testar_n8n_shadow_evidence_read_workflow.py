@@ -25,7 +25,7 @@ def main():
     js=r'''
 const vm=require('node:vm'), assert=require('node:assert/strict');
 const validate=JSON.parse(process.argv[1]), sanitize=JSON.parse(process.argv[2]);
-const run=(code,input,source)=>vm.runInNewContext(code,{
+const run=(code,input,source)=>vm.runInNewContext('(function(){'+code+'})()',{
   $input:{first:()=>({json:input})},
   $:()=>({first:()=>({json:source})}),Number,Object,Array,Set,encodeURIComponent
 },{timeout:1000})[0].json;
