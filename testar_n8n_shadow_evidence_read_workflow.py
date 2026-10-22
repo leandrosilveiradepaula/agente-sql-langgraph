@@ -50,6 +50,25 @@ assert.equal(d.safe_response.shadow_record_id,'shadow-1');
 const g=run(sanitize,{statusCode:200,body:{contract_version:'1',run:item,steps:[{id:'step-1',label:'security_gate',status:'success',order:1,metadata:{duration_ms:2,raw_sql:'SELECT private'}}],edges:[],flags:{has_error:false}}},graph);
 assert.equal(g.safe_response.steps[0].metadata.duration_ms,2);
 assert.equal(JSON.stringify(g).includes('private'),false);
+const canonical={...item,status:undefined,final_status:'rejected',created_at:'2026-10-22T00:00:00+00:00',requires_reapproval:true};
+const canonicalList=run(sanitize,{statusCode:200,body:{contract_version:'1',agent_run_id:'agent-1',items:[canonical]}},v);
+assert.equal(canonicalList.safe_response.items[0].status,'rejected');
+const canonicalDetail=run(sanitize,{statusCode:200,body:{contract_version:'1',...canonical}},detail);
+assert.equal(canonicalDetail.safe_response.status,'rejected');
+const canonicalGraph=run(sanitize,{statusCode:200,body:{
+ contract_version:'1',run:{...canonical,requires_reapproval:undefined},
+ steps:[{id:'step-1',label:'security_gate',status:'ok',sequence:1,step_type:'gate',metadata:{duration_ms:3,secret:'secret-hidden'}}],
+ edges:[],flags:{requires_reapproval:true,has_repair:true,has_error:false}
+}},graph);
+assert.equal(canonicalGraph.safe_response.run.status,'rejected');
+assert.equal(canonicalGraph.safe_response.run.requires_reapproval,true);
+assert.equal(canonicalGraph.safe_response.run.has_repair,true);
+assert.equal(canonicalGraph.safe_response.steps[0].order,1);
+assert.equal(canonicalGraph.safe_response.steps[0].metadata.duration_ms,3);
+assert.equal(JSON.stringify(canonicalGraph).includes('secret-hidden'),false);
+const shortList=run(validate,{body:{...req,limit:1}});
+assert.throws(()=>run(sanitize,{statusCode:200,body:{contract_version:'1',agent_run_id:'agent-1',items:[item,{...item,shadow_record_id:'shadow-2'}]}},shortList));
+
 assert.throws(()=>run(sanitize,{statusCode:200,body:{contract_version:'1',run:item,steps:[{id:'step-1',label:'security_gate',status:'success',order:1}],edges:[{source:'step-1',target:'missing'}]}},graph));
 console.log('EVIDENCE_READ_NODE_BEHAVIOR=PASS');
 '''
