@@ -319,13 +319,22 @@ def _run_case(case: dict, dsn: str) -> tuple[str, PostgresContextRepository]:
 def _assert_database_cross_boundary(dsn: str) -> None:
     for index, case in enumerate(CASES):
         other = CASES[1 - index]
-        foreign_reader = _reader(
-            case, dsn, schema_override=other["schema"],
+        # Use the other tenant's REAL physical table mapping. An unknown
+        # table would also fail, but would not prove an ACL boundary.
+        foreign_reader = PostgresContextRepository(
+            dsn=make_conninfo(
+                dsn, user=case["role"], password=case["password"],
+            ),
+            semantic_agent_version=other["raw"]()["semantic_agent_version"],
+            context_schema=other["schema"],
+            catalog_tables=other["names"],
         )
         try:
             foreign_reader.load_active_context(user_profile="synthetic_ci")
-        except ContextRepositoryError:
-            pass
+        except ContextRepositoryError as error:
+            assert isinstance(
+                error.__cause__, psycopg.errors.InsufficientPrivilege,
+            ), "foreign context must fail specifically on PostgreSQL ACL"
         else:
             raise AssertionError("reader escaped its private metadata schema")
     print("J2_CROSS_TENANT_CONTEXT_READ=DENIED")
@@ -351,10 +360,35 @@ def _assert_mutated_catalog_rejected(dsn: str, approved_pin: str) -> None:
     reader = _reader(beta, dsn, pin=approved_pin)
     try:
         reader.load_active_context(user_profile="synthetic_ci")
-    except ContextRepositoryError:
-        pass
+    except ContextRepositoryError as error:
+        assert error.__cause__ is None, (
+            "drift must fail on approved fingerprint, not connection or SQL",
+        )
     else:
         raise AssertionError("changed catalog bypassed approved fingerprint")
+    # Verify the same failure is enforced BEFORE a generator can run.
+    provider = ShadowTestSqlGenerator(beta["sql"])
+    env = _env(
+        SEMANTIC_AGENT_VERSION=beta["raw"]()["semantic_agent_version"],
+        LANGGRAPH_EXPECTED_ORGANIZATION_ID=beta["tenant"],
+        SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT=approved_pin,
+        LANGGRAPH_ALLOW_REAL_SQL_EXECUTION="false",
+    )
+    runtime = create_shadow_test_runtime(
+        env,
+        context_repository_override=reader,
+        shadow_repository_override=FakeShadowEvidenceRepository(),
+        sql_generator_override=provider,
+        sql_repairer_override=ShadowTestSqlRepairer(beta["sql"]),
+    )
+    code, result = _run_asgi(
+        runtime.app, "POST", "/v1/internal/sql-agent/generate",
+        _request(beta["question"], "j2-physical-drift", beta["tenant"]),
+    )
+    assert code != 200 or result.get("status") != "success"
+    assert provider.calls == 0
+    assert "unapproved_fixture_metric" not in json.dumps(result)
+    assert beta["sql"] not in json.dumps(result)
     print("J2_CONTEXT_FINGERPRINT_DRIFT=DENIED")
 
 
