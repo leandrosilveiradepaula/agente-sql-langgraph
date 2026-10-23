@@ -72,6 +72,7 @@ def main() -> None:
         _test_repository_unavailable_is_safe,
         lambda: _test_list_by_agent_run_id(records),
         lambda: _test_list_limits(records),
+        _test_targeted_run_correlation_precedes_limit,
         _test_shadow_read_id_validation,
         lambda: _test_visualization_endpoint_model(records),
         lambda: _test_read_only_guarantee(records),
@@ -91,6 +92,36 @@ def _repo_with_records(*records):
 
 def _get_view(repo, shadow_record_id):
     return GetShadowRunSafeViewUseCase(repository=repo).execute(shadow_record_id)
+
+
+def _test_targeted_run_correlation_precedes_limit() -> None:
+    # A worker may have >10 attempts sharing one agent_run_id. The historical
+    # unfiltered list is sorted by creation/record id and may exclude the
+    # current attempt; targeted lookup must select before the limit.
+    agent_run_id = "agent-run-busy"
+    records = [
+        generate_for_agent(agent_run_id, f"run-{i:03d}")
+        for i in range(15)
+    ]
+    target = generate_for_agent(agent_run_id, "run-999")
+    repo = _repo_with_records(*records, target)
+    use_case = ListAgentShadowRunsUseCase(repository=repo)
+
+    unfiltered = use_case.execute(agent_run_id, limit=10)
+    assert len(unfiltered["items"]) == 10
+    assert all(item["run_id"] != "run-999" for item in unfiltered["items"])
+
+    selected = use_case.execute(agent_run_id, run_id="run-999", limit=1)
+    assert [x["run_id"] for x in selected["items"]] == ["run-999"]
+    assert selected["items"][0]["shadow_record_id"] == target["shadow_record_id"]
+    assert use_case.execute(agent_run_id, run_id="run-missing", limit=1)["items"] == []
+    for invalid in ("", "run/bad", " " * 3, "X" * 161):
+        try:
+            use_case.execute(agent_run_id, run_id=invalid, limit=1)
+        except ShadowReadError as error:
+            assert error.status_code == 400
+        else:
+            raise AssertionError("invalid run_id allowed through lookup")
 
 
 def _test_shadow_run_found(records) -> None:
