@@ -622,6 +622,32 @@ def test_postgres_wiring_execute_event_type() -> None:
     assert connect.cursor.calls[0][1]["event_type"] == "execute_approved_shadow"
 
 
+def test_context_fingerprint_pin_from_shadow_runtime_config() -> None:
+    expected = "b" * 64
+    config = load_shadow_test_runtime_config(
+        _env(SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT=expected)
+    )
+    assert config.expected_context_fingerprint == expected
+    assert expected not in repr(config)
+
+    runtime = create_shadow_test_runtime(
+        _env(SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT=expected)
+    )
+    assert isinstance(runtime.context_repository, PostgresContextRepository)
+    assert runtime.context_repository._expected_context_fingerprint == expected
+    assert runtime.config.allow_real_sql_execution is False
+
+    for invalid in ("", "a" * 63, "A" * 64, "wrong", "b" * 65, "b" * 64 + "--"):
+        try:
+            load_shadow_test_runtime_config(
+                _env(SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT=invalid)
+            )
+        except RuntimeError as error:
+            assert str(error) == "SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT is invalid."
+        else:
+            raise AssertionError("Invalid pin must block Shadow bootstrap")
+
+
 def main() -> None:
     tests = [
         test_config_shadow_test_valida,
@@ -641,6 +667,7 @@ def main() -> None:
         test_shadow_runtime_propaga_schema_contexto_para_repository,
         test_catalogos_versionados_runtime_sem_dre,
         test_catalogos_versionados_runtime_rejeitam_injecao,
+        test_context_fingerprint_pin_from_shadow_runtime_config,
         test_runtime_com_scope_organizacao_rejeita_outra_organizacao_sem_efeitos,
         test_scope_organizacao_invalido_falha_no_startup,
         test_fake_repository_nao_e_usado_no_composition_root_test_real,
