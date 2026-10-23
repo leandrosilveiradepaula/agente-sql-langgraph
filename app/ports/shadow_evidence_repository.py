@@ -47,7 +47,13 @@ class ShadowEvidenceRepository(Protocol):
     def list_by_agent_run_id(
         self,
         agent_run_id: str,
+        *,
+        run_id: str | None = None,
     ) -> ShadowRepositoryListResult:
         """
-        Lists all shadow records correlated to one product run id.
+        Loads evidence for one product run, optionally one exact attempt.
+
+        The optional attempt selector is structural/read-only; adapters
+        should apply it in their datasource before returning raw records.
+        Omitting it preserves the legacy unfiltered list contract.
         """
