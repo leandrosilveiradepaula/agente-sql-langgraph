@@ -22,6 +22,8 @@ DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS = 10
 CONTEXT_CATALOG_TABLES_ENV = "CONTEXT_CATALOG_TABLES_JSON"
 _CONTEXT_CATALOG_KEYS = frozenset({"rules", "entities", "dre", "patterns", "catalog"})
 _CONTEXT_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_EXPECTED_ORGANIZATION_ID_ENV = "LANGGRAPH_EXPECTED_ORGANIZATION_ID"
+_ORGANIZATION_SCOPE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +44,7 @@ class ShadowTestRuntimeConfig:
     context_catalog_tables: Mapping[str, str | None] | None = field(
         default=None, repr=False
     )
+    expected_organization_id: str | None = field(default=None, repr=False)
 
 
 def load_shadow_test_runtime_config(
@@ -95,6 +98,7 @@ def load_shadow_test_runtime_config(
         langgraph_version=_safe_optional(env.get("LANGGRAPH_VERSION")),
         langgraph_commit=_safe_optional(env.get("LANGGRAPH_COMMIT")),
         context_catalog_tables=_context_catalog_tables(env),
+        expected_organization_id=_expected_organization_id(env),
     )
 
 
@@ -185,3 +189,18 @@ def _context_catalog_tables(
         if not isinstance(name, str) or not _CONTEXT_IDENTIFIER.fullmatch(name):
             raise RuntimeError("CONTEXT_CATALOG_TABLES_JSON is invalid.")
     return tables
+
+
+def _expected_organization_id(env: Mapping[str, str]) -> str | None:
+    """Optional exact tenant binding for a single-context Shadow deployment.
+
+    No fallback to a user claim, free-text request, model prompt or default
+    tenant. Enabling this binding requires the authenticated Product session
+    to supply the same organization_id explicitly.
+    """
+    if _EXPECTED_ORGANIZATION_ID_ENV not in env:
+        return None
+    value = env.get(_EXPECTED_ORGANIZATION_ID_ENV)
+    if not isinstance(value, str) or not _ORGANIZATION_SCOPE_ID.fullmatch(value):
+        raise RuntimeError("LANGGRAPH_EXPECTED_ORGANIZATION_ID is invalid.")
+    return value
