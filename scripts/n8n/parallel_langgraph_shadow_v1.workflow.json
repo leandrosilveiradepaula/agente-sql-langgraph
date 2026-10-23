@@ -102,7 +102,7 @@
       ],
       "parameters": {
         "method": "GET",
-        "url": "={{ ($env.LANGGRAPH_SHADOW_INTERNAL_BASE_URL || '').replace(/\\/+$/, '') + '/v1/internal/agent-runs/' + encodeURIComponent($json.agent_run_id) + '/shadow-runs?limit=10' }}",
+        "url": "={{ ($env.LANGGRAPH_SHADOW_INTERNAL_BASE_URL || '').replace(/\\/+$/, '') + '/v1/internal/agent-runs/' + encodeURIComponent($json.agent_run_id) + '/shadow-runs?run_id=' + encodeURIComponent($json.run_id) + '&limit=10' }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
