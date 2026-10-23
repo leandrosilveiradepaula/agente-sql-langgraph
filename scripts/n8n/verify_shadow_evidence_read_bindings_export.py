@@ -68,7 +68,9 @@ def validate_export(raw: object, workflow_id: str) -> dict[str, object]:
     nodes = raw.get("nodes")
     if not isinstance(nodes, list) or len(nodes) != 5 or any(not isinstance(n, Mapping) for n in nodes):
         reject("EVIDENCE_NODE_SET_MISMATCH")
-    by_name = {n.get("name"): n for n in nodes}
+    if any(not isinstance(n.get("name"), str) for n in nodes):
+        reject("EVIDENCE_NODE_SET_MISMATCH")
+    by_name = {n["name"]: n for n in nodes}
     if len(by_name) != 5:
         reject("EVIDENCE_NODE_SET_MISMATCH")
     ids = [n.get("id") for n in nodes]
@@ -78,7 +80,10 @@ def validate_export(raw: object, workflow_id: str) -> dict[str, object]:
 
     if HTTP_READ not in by_name:
         reject("EVIDENCE_NODE_SET_MISMATCH")
-    expression = by_name[HTTP_READ].get("parameters", {}).get("url")
+    read_parameters = by_name[HTTP_READ].get("parameters")
+    if not isinstance(read_parameters, Mapping):
+        reject("EVIDENCE_NODE_CONFIGURATION_DRIFT")
+    expression = read_parameters.get("url")
     if not isinstance(expression, str):
         reject("EVIDENCE_INTERNAL_URL_EXPRESSION_MISMATCH")
     match = URL_EXPR.fullmatch(expression)
@@ -164,7 +169,8 @@ def main(argv: list[str] | None = None) -> int:
     except EvidenceBindingAuditError as error:
         print(json.dumps({"status": "rejected", "reason": str(error)}))
         return 2
-    except (ValueError, OSError, TypeError, UnicodeError):
+    except Exception:
+        # Never expose a traceback or untrusted raw workflow fragments.
         print(json.dumps({"status": "rejected", "reason": "EVIDENCE_EXPORT_INVALID"}))
         return 2
     print(json.dumps(result, sort_keys=True))
