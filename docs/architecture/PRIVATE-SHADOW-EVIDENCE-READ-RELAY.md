@@ -14,7 +14,15 @@ Separate from both the 68-node official workflow and the seven-node Shadow gener
 - Inbound arbitrary target_path, URL, SQL, question or other keys are rejected.
 - Only n8n -> LangGraph uses Authorization: Bearer and the existing separate S2S token.
 - Only safe run IDs, status, dates, flags, bounded numeric graph metadata
-  and graph topology are forwarded. Canonical LangGraph `final_status`,
+  and graph topology are forwarded. The canonical LangGraph step kind
+  (`step_type`) is projected into the UI-supported `metadata.kind` field;
+  canonical edge kinds (`edge_type`: normal, conditional, repair, terminal)
+  are projected into the UI-supported `label` field. Both are restricted
+  to structural values to prevent raw SQL, prompts or arbitrary labels from
+  passing through a privileged endpoint. Date fields must be ISO-8601
+  with timezone; event/status/step fields are validated, not blindly copied.
+  Canonical `persistence_failure` and `has_unknown_evidence` flags generate
+  only bounded, predefined warning codes; no raw diagnostic text is forwarded. Canonical LangGraph `final_status`,
   `sequence`, and UTC timestamps with `+00:00` are normalized to Product
   `status`, `order`, and compatible timestamps. Repair/reapproval flags
   come from canonical visualization flags, and list responses cannot exceed
