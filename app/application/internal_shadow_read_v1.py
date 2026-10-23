@@ -102,7 +102,9 @@ class ListAgentShadowRunsUseCase:
             validate_shadow_read_id(run_id, field="run_id")
             if run_id is not None else None
         )
-        records = _list_records(self._repository, agent_run_id)
+        records = _list_records(
+            self._repository, agent_run_id, run_id=selected_run_id,
+        )
         # Never include another organization's events, even when an old or
         # compromised evidence store contains colliding agent_run_id values.
         scoped_records = [
@@ -287,9 +289,18 @@ def _fetch_record(
 def _list_records(
     repository: ShadowEvidenceRepository,
     agent_run_id: str,
+    *,
+    run_id: str | None = None,
 ) -> list[ShadowRunRecord]:
     try:
-        result = repository.list_by_agent_run_id(agent_run_id)
+        # Legacy callers still use the original no-keyword signature. The
+        # optional exact run selector is only passed for targeted lookups.
+        if run_id is None:
+            result = repository.list_by_agent_run_id(agent_run_id)
+        else:
+            result = repository.list_by_agent_run_id(
+                agent_run_id, run_id=run_id,
+            )
     except Exception as error:
         del error
         raise ShadowReadError("SHADOW_REPOSITORY_UNAVAILABLE", 503) from None
