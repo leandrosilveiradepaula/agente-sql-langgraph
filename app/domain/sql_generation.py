@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Literal, NotRequired, TypedDict
 
-from app.domain.planning import QueryPlan
+from app.domain.planning import QueryPlan, selected_pattern_for_provider
 
 
 SQL_GENERATION_CONTRACT_VERSION = (
@@ -533,7 +533,7 @@ def build_sql_generation_request(
                 "normalized_question",
             ),
             "selected_pattern": _stable_mapping_copy(
-                selected_pattern,
+                selected_pattern_for_provider(selected_pattern),
             ),
             "applicable_rules": _sorted_mappings(
                 planning_context.get("rules", []),
