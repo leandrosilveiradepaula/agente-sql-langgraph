@@ -164,3 +164,25 @@ real SQL execution or network call by this change.
 This bounded response is for correlation, not a paginated audit log.
 The underlying repository may load other evidence for the `agent_run_id`
 prior to the in-process projection; configured tenant scope remains enforced.
+
+## Targeted evidence lookup: database-level predicate (G1)
+
+The optional `run_id` read filter now passes through the evidence
+repository interface and is **bound in PostgreSQL alongside
+`agent_run_id` and the optional trusted tenant scope**. This keeps large
+unrelated evidence bodies outside the read/deserialization path. Query
+text remains fixed structural SELECT with parameter placeholders; no
+client table, business rule, SQL statement or user-provided identifier
+is interpolated into the query. The unfiltered list remains
+backward-compatible for administrative uses.
+
+The G1 offline bridge test `python testar_n8n_langgraph_offline_bridge.py`
+takes the actual seven-node *inactive* n8n workflow, runs its JavaScript
+envelope/response/evidence nodes, calls the real authenticated LangGraph
+ASGI endpoints against in-memory adapters and confirms exact-run evidence
+correlation with thirteen older attempts and both `generate` and
+`execute_approved` events. It also demonstrates tenant rejection before
+provider/evidence access. Tests require Node.js but no n8n server,
+LLM provider, database network, Vercel or SQL execution. This is
+a **synthetic wiring rehearsal**, not proof of Product deployed transport
+or financial result equivalence.
