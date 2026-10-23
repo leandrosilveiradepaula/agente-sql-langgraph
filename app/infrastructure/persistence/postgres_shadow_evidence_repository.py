@@ -404,11 +404,39 @@ class PostgresShadowEvidenceRepository:
             "diagnostic": None,
         }
 
+    def list_bounded_by_agent_run_id(
+        self,
+        agent_run_id: str,
+        *,
+        limit: int,
+        run_id: str | None = None,
+        expected_organization_id: str | None = None,
+    ) -> ShadowRepositoryListResult:
+        # The caller cannot silently narrow a different deployment's data.
+        # A mismatched runtime/repository scope is a configuration error.
+        if expected_organization_id != self._expected_organization_id:
+            raise ValueError("Shadow read organization scope mismatch.")
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("Shadow read limit invalid.")
+        return self._list_by_agent_run_id(
+            agent_run_id, run_id=run_id, limit=limit,
+        )
+
     def list_by_agent_run_id(
         self,
         agent_run_id: str,
         *,
         run_id: str | None = None,
+    ) -> ShadowRepositoryListResult:
+        # Historical callers still receive the full unbounded dataset.
+        return self._list_by_agent_run_id(agent_run_id, run_id=run_id)
+
+    def _list_by_agent_run_id(
+        self,
+        agent_run_id: str,
+        *,
+        run_id: str | None = None,
+        limit: int | None = None,
     ) -> ShadowRepositoryListResult:
         scoped = self._expected_organization_id is not None
         if run_id is not None:
@@ -421,6 +449,17 @@ class PostgresShadowEvidenceRepository:
                 LIST_SHADOW_RUNS_BY_AGENT_SCOPED_SQL
                 if scoped else LIST_SHADOW_RUNS_BY_AGENT_SQL
             )
+        if limit is not None:
+            # Match the application's stable ordering *before* the SQL LIMIT.
+            # No user values are interpolated into SQL; limit is bound data.
+            old_order = "ORDER BY created_at, shadow_record_id"
+            if statement.count(old_order) != 1:
+                raise RuntimeError("Shadow evidence ordering contract drift.")
+            statement = statement.replace(
+                old_order,
+                "ORDER BY created_at, event_type, shadow_record_id"
+                "\nLIMIT %(row_limit)s",
+            )
         parameters = {
             "agent_run_id": agent_run_id,
             **({"run_id": run_id} if run_id is not None else {}),
@@ -428,6 +467,7 @@ class PostgresShadowEvidenceRepository:
                 {"organization_id": self._expected_organization_id}
                 if scoped else {}
             ),
+            **({"row_limit": limit} if limit is not None else {}),
         }
         try:
             with self._connect(

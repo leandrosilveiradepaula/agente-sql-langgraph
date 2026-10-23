@@ -104,6 +104,8 @@ class ListAgentShadowRunsUseCase:
         )
         records = _list_records(
             self._repository, agent_run_id, run_id=selected_run_id,
+            limit=safe_limit,
+            expected_organization_id=self._expected_organization_id,
         )
         # Never include another organization's events, even when an old or
         # compromised evidence store contains colliding agent_run_id values.
@@ -291,11 +293,20 @@ def _list_records(
     agent_run_id: str,
     *,
     run_id: str | None = None,
+    limit: int | None = None,
+    expected_organization_id: str | None = None,
 ) -> list[ShadowRunRecord]:
     try:
-        # Legacy callers still use the original no-keyword signature. The
-        # optional exact run selector is only passed for targeted lookups.
-        if run_id is None:
+        # Only an explicitly bounded adapter may push down the presentation
+        # limit. It must attest the same trusted organization scope in SQL,
+        # otherwise earlier foreign attempts could hide an authorized run.
+        bounded = getattr(repository, "list_bounded_by_agent_run_id", None)
+        if limit is not None and callable(bounded):
+            result = bounded(
+                agent_run_id, run_id=run_id, limit=limit,
+                expected_organization_id=expected_organization_id,
+            )
+        elif run_id is None:
             result = repository.list_by_agent_run_id(agent_run_id)
         else:
             result = repository.list_by_agent_run_id(

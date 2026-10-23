@@ -68,9 +68,13 @@ The list uses an explicit `limit` query parameter:
 - repeated `limit` parameters return `400`;
 - unknown query parameters are ignored.
 
-The repository currently exposes `list_by_agent_run_id` without a native limit,
-so this microstep applies the limit after repository read. Native bounded
-repository reads are future debt before larger operational use.
+The read use case retains its final safe projection and presentation limit.
+When the PostgreSQL adapter attests the same deployment organization as the
+read use case, it now applies deterministic `ORDER BY created_at, event_type,
+shadow_record_id LIMIT %(row_limit)s` at the database before deserializing
+full SQL/context evidence. The limit is bound data, never SQL interpolation.
+Legacy adapters that lack this bounded capability continue using the original
+filter-then-sort-then-limit behavior in memory.
 
 ## Visualization Contract
 
@@ -186,3 +190,19 @@ provider/evidence access. Tests require Node.js but no n8n server,
 LLM provider, database network, Vercel or SQL execution. This is
 a **synthetic wiring rehearsal**, not proof of Product deployed transport
 or financial result equivalence.
+
+
+## Bounded administrative list pushdown (G1)
+
+This complements exact `run_id` pushdown: an administrative list without
+`run_id` also avoids loading every SQL/context evidence body of the same
+`agent_run_id`. The bounded repository capability requires a matching trusted
+tenant scope on both layers, rejects mismatch **before connecting**, and
+filters by organization and optional attempt **before** the bound limit.
+The SQL ordering agrees with the existing application ordering. The legacy
+unbounded repository method remains unchanged for callers needing all rows.
+
+The production observability wrapper forwards the bounded capability and
+falls back safely for synthetic/older adapters. This is an offline
+performance/correctness safeguard, **not** proof of deployed tenant isolation
+or real Shadow correlation.

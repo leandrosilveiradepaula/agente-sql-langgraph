@@ -33,6 +33,7 @@ from app.infrastructure.persistence.postgres_shadow_evidence_repository import (
     PostgresShadowEvidenceRepository,
 )
 from app.test_runtime.composition import create_shadow_test_runtime
+from app.test_runtime.observability import ObservedShadowEvidenceRepository
 from app.test_runtime.offline_adapters import (
     ShadowTestContextRepository,
     ShadowTestSqlGenerator,
@@ -329,6 +330,88 @@ def test_exact_attempt_is_filtered_by_postgres_before_deserialization() -> None:
     assert injection not in statement
 
 
+def test_postgres_bounded_admin_list_prevents_unrestricted_evidence_reads() -> None:
+    """PostgreSQL limits raw evidence before fetchall, with correct tenant order."""
+    for tenant in ("tenant-one", None):
+        conn = ReadConnect()
+        repo = PostgresShadowEvidenceRepository(
+            dsn="postgresql://fake.invalid/db",
+            connect=conn,
+            expected_organization_id=tenant,
+        )
+        # Production wiring includes the observability wrapper.
+        observed = ObservedShadowEvidenceRepository(repo)
+        reader = ListAgentShadowRunsUseCase(
+            repository=observed, expected_organization_id=tenant,
+        )
+        for selected_run in (None, "attempt-target"):
+            answer = reader.execute(
+                "agent-shared", limit=7, run_id=selected_run,
+            )
+            assert answer["items"] == []
+            assert answer["limit"] == 7
+            query, params = conn.cursor.calls[-1]
+            assert "WHERE agent_run_id = %(agent_run_id)s" in query
+            assert "ORDER BY created_at, event_type, shadow_record_id" in query
+            assert "LIMIT %(row_limit)s" in query
+            assert params["row_limit"] == 7
+            assert params["agent_run_id"] == "agent-shared"
+            assert "agent-shared" not in query
+            assert "tenant-one" not in query
+            assert "attempt-target" not in query
+            if tenant is not None:
+                assert "AND principal ->> 'organization_id' = %(organization_id)s" in query
+                assert params["organization_id"] == tenant
+            else:
+                assert "organization_id" not in params
+            if selected_run is None:
+                assert "run_id" not in params
+                assert "AND run_id =" not in query
+            else:
+                assert "AND run_id = %(run_id)s" in query
+                assert params["run_id"] == selected_run
+
+        # A direct call cannot bypass the structural limit gate.
+        for invalid in (0, -1, 101, True, "7"):
+            try:
+                repo.list_bounded_by_agent_run_id(
+                    "agent-shared", limit=invalid,
+                    expected_organization_id=tenant,
+                )
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("invalid bounded query size accepted")
+
+    # If wiring accidentally mixes tenant-bound use-case and unbound DB,
+    # deny BEFORE connecting instead of limiting the wrong tenant's rows.
+    conn = ReadConnect()
+    repo = PostgresShadowEvidenceRepository(
+        dsn="postgresql://fake.invalid/db", connect=conn,
+    )
+    wrong = ListAgentShadowRunsUseCase(
+        repository=repo, expected_organization_id="tenant-one",
+    )
+    try:
+        wrong.execute("agent-shared", limit=7)
+    except ShadowReadError as error:
+        assert error.status_code == 503
+        assert error.code == "SHADOW_REPOSITORY_UNAVAILABLE"
+    else:
+        raise AssertionError("unbound repo was accepted under tenant-bound reader")
+    assert conn.cursor.calls == []
+
+    # Older fakes lack bounded SQL and must filter *before* presentation limit.
+    fake = FakeShadowEvidenceRepository()
+    assert fake.create(_record("tenant-two", "other"))["status"] == "created"
+    assert fake.create(_record("tenant-one", "own"))["status"] == "created"
+    limited = ListAgentShadowRunsUseCase(
+        repository=ObservedShadowEvidenceRepository(fake),
+        expected_organization_id="tenant-one",
+    ).execute("agent-shared", limit=1)
+    assert [item["run_id"] for item in limited["items"]] == ["own"]
+
+
 def test_invalid_scope_refused_before_any_database_connection() -> None:
     for wrong in ("", "tenant two", "tenant-one';drop", "x" * 129):
         try:
@@ -362,6 +445,7 @@ def main() -> None:
         test_comparison_rejects_foreign_tenant_before_repository_access,
         test_postgres_limits_rows_before_application_deserialization,
         test_exact_attempt_is_filtered_by_postgres_before_deserialization,
+        test_postgres_bounded_admin_list_prevents_unrestricted_evidence_reads,
         test_invalid_scope_refused_before_any_database_connection,
     )
     for test in tests:
