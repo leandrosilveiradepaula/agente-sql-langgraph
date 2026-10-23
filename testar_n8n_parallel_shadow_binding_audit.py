@@ -63,7 +63,8 @@ class ParallelShadowBindingAuditTests(unittest.TestCase):
         for mutation in (
             "archived", "credential_missing", "credential_shared", "code_drift",
             "public_url", "pinned_data", "execution_saved", "extra_node",
-            "unsafe_flag", "read_post",
+            "unsafe_flag", "read_post", "retry", "error_workflow",
+            "continue_error_output",
         ):
             data = fixture()
             data["active"] = True
@@ -91,6 +92,12 @@ class ParallelShadowBindingAuditTests(unittest.TestCase):
                 call["continueOnFail"] = True
             elif mutation == "read_post":
                 read["parameters"]["method"] = "POST"
+            elif mutation == "retry":
+                call["retryOnFail"] = True
+            elif mutation == "error_workflow":
+                data["settings"]["errorWorkflow"] = "other-workflow"
+            elif mutation == "continue_error_output":
+                call["onError"] = "continueErrorOutput"
             with self.subTest(mutation=mutation):
                 with self.assertRaises(BindingAuditError):
                     validate_export(data, WORKFLOW_ID, expect_active=True)
@@ -153,7 +160,8 @@ class ParallelShadowBindingAuditTests(unittest.TestCase):
             "pinned_data", "unwanted_credential", "bad_credential_shape",
             "duplicate_node_id", "missing_node_id", "malformed_node_id",
             "read_post_method", "read_head_method", "read_null_method",
-            "call_method_missing",
+            "call_method_missing", "retry", "error_workflow",
+            "continue_error_output",
         ):
             d = fixture()
             webhook = next(n for n in d["nodes"] if n["name"] == "Webhook - Parallel Shadow")
@@ -185,6 +193,9 @@ class ParallelShadowBindingAuditTests(unittest.TestCase):
             elif mutation == "read_head_method": read["parameters"]["method"] = "HEAD"
             elif mutation == "read_null_method": read["parameters"]["method"] = None
             elif mutation == "call_method_missing": del call["parameters"]["method"]
+            elif mutation == "retry": call["retryOnFail"] = True
+            elif mutation == "error_workflow": d["settings"]["errorWorkflow"] = "other-workflow"
+            elif mutation == "continue_error_output": call["onError"] = "continueErrorOutput"
             with self.subTest(mutation=mutation):
                 with self.assertRaises(BindingAuditError):
                     validate_export(d, WORKFLOW_ID)

@@ -114,9 +114,15 @@ def validate_export(
     if raw.get("pinData") not in ({}, None):
         _reject("SHADOW_PINNED_DATA_PRESENT")
     settings = raw.get("settings")
-    if not isinstance(settings, Mapping) or any(
-        settings.get(key) != value for key, value in expected["settings"].items()
+    if (
+        not isinstance(settings, Mapping)
+        or any(
+            settings.get(key) != value for key, value in expected["settings"].items()
+        )
+        or settings.get("errorWorkflow") not in (None, "")
     ):
+        # A failure hook could run an unrelated workflow and bypass the
+        # explicitly isolated Shadow path, including in published mode.
         _reject("SHADOW_EXECUTION_PERSISTENCE_UNSAFE")
     for name, node in by_name.items():
         baseline = expected_by_name[name]
@@ -134,7 +140,17 @@ def validate_export(
                 _reject("SHADOW_READ_METHOD_NOT_GET")
         if parameters != baseline["parameters"]:
             _reject("SHADOW_NODE_CONFIGURATION_DRIFT")
-        if any(node.get(flag) is True for flag in ("disabled", "continueOnFail", "alwaysOutputData", "executeOnce")):
+        if (
+            any(
+                node.get(flag) is True for flag in (
+                    "disabled", "continueOnFail", "alwaysOutputData",
+                    "executeOnce", "retryOnFail",
+                )
+            )
+            or node.get("onError") not in (None, "stopWorkflow")
+        ):
+            # Retrying Generate/Execute Approved or routing errors onward
+            # may duplicate side effects. Neither is allowed in Shadow.
             _reject("SHADOW_NODE_RUNTIME_FLAGS_UNSAFE")
         if name not in AUTH_NODES and "credentials" in node:
             _reject("SHADOW_UNEXPECTED_CREDENTIAL_REFERENCE")
