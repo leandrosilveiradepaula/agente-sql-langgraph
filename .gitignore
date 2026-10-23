@@ -57,3 +57,6 @@ exports-private/
 secrets/
 !app/infrastructure/secrets/
 !app/infrastructure/secrets/*.py
+
+# Private frozen benchmark data, full SQL and evidence (NEVER commit)
+benchmark-private/
