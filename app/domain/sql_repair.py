@@ -13,7 +13,7 @@ from app.domain.engine_preflight_sanitization import (
     safe_provider_name,
     safe_warnings,
 )
-from app.domain.planning import QueryPlan
+from app.domain.planning import QueryPlan, selected_pattern_for_provider
 from app.domain.sql_generation import (
     SqlGenerationProviderResult,
     SqlGenerationValidationError,
@@ -174,7 +174,9 @@ def build_sql_repair_request(
                 "planner_version",
             ),
             "intent_name": _required_text(query_plan, "intent_name"),
-            "selected_pattern": _stable_mapping_copy(selected_pattern),
+            "selected_pattern": _stable_mapping_copy(
+                selected_pattern_for_provider(selected_pattern)
+            ),
             "allowed_schemas": _sorted_text_list(
                 planning_context.get("allowed_schemas", [])
             ),
