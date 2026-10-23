@@ -118,3 +118,22 @@ controle humano de ativação. O teste `testar_shadow_evidence_persistence.py`
 comprova as quatro operações em modo vinculado/legado e que UPDATE sem
 linha elegível devolve `not_found`. Não substitui prova de isolamento
 em banco real com policies e conexões por tenant.
+
+
+## Integridade e idempotência de tentativas Shadow (G4, validação offline)
+
+O `ON CONFLICT DO NOTHING` do PostgreSQL não comprova que a mesma
+`shadow_record_id` corresponde à mesma evidência. O repositório agora
+confirma um replay por SELECT parametrizado, exigindo correspondência
+de `agent_run_id`, `run_id`, evento, principal e fingerprint persistido.
+O escopo de organização configurado também é aplicado nesta confirmação;
+replay divergente devolve `SHADOW_RECORD_CONFLICT` sem revelar SQL,
+principal, contexto ou a existência de outra organização.
+
+Escritas posteriores usam predicados de identidade/fingerprint sobre a
+linha persistida. `finalize` exige fingerprint, status e data de conclusão
+correspondentes mesmo sem escopo opcional. Um replay exato é somente
+reconhecido, não provoca novo update/finalize. O FakeRepository espelha as
+mesmas restrições de integridade. Isso protege evidências assinadas para
+auditoria G1/G4 e impede falso "já existia" em colisões, mas não torna o
+workflow n8n ativo nem demonstra paridade financeira.

@@ -102,6 +102,11 @@ SET
   evidence_fingerprint = %(evidence_fingerprint)s,
   updated_at = now()
 WHERE shadow_record_id = %(shadow_record_id)s
+  AND agent_run_id = %(agent_run_id)s
+  AND run_id = %(run_id)s
+  AND event_type = %(event_type)s
+  AND principal = %(principal)s::jsonb
+  AND evidence_fingerprint = %(evidence_fingerprint)s
 """
 
 FINALIZE_SHADOW_RUN_SQL = """
@@ -112,6 +117,9 @@ SET
   evidence_fingerprint = %(evidence_fingerprint)s,
   updated_at = now()
 WHERE shadow_record_id = %(shadow_record_id)s
+  AND evidence_fingerprint = %(evidence_fingerprint)s
+  AND status = %(status)s
+  AND completed_at = %(completed_at)s::timestamptz
 """
 
 # Update/finalize must check the *persisted* record's existing tenant,
@@ -123,8 +131,26 @@ UPDATE_SHADOW_EVIDENCE_SCOPED_SQL = (
 )
 FINALIZE_SHADOW_RUN_SCOPED_SQL = (
     FINALIZE_SHADOW_RUN_SQL.rstrip()
-    + "\nAND principal ->> 'organization_id' = %(organization_id)s"
-    + "\nAND evidence_fingerprint = %(evidence_fingerprint)s\n"
+    + "\nAND principal ->> 'organization_id' = %(organization_id)s\n"
+)
+
+# Confirm an ON CONFLICT no-op only if the stored identity and signed content
+# are exactly the same. SELECT returns no question, SQL, principal or tenant.
+EXACT_SHADOW_DUPLICATE_SQL = """
+SELECT 1
+FROM public.langgraph_shadow_runs
+WHERE shadow_record_id = %(shadow_record_id)s
+  AND agent_run_id = %(agent_run_id)s
+  AND run_id = %(run_id)s
+  AND event_type = %(event_type)s
+  AND principal = %(principal)s::jsonb
+  AND evidence_fingerprint = %(evidence_fingerprint)s
+LIMIT 1
+"""
+EXACT_SHADOW_DUPLICATE_SCOPED_SQL = (
+    EXACT_SHADOW_DUPLICATE_SQL.replace(
+        "LIMIT 1", "AND principal ->> 'organization_id' = %(organization_id)s\nLIMIT 1",
+    )
 )
 
 FETCH_SHADOW_RUN_SQL = """
@@ -275,13 +301,59 @@ class PostgresShadowEvidenceRepository:
         # principal, even if a new caller bypasses upstream use-case checks.
         if not self._record_in_scope(captured):
             return _scope_rejected_result(captured)
-        return self._execute_write(
+        inserted = self._execute_write(
             INSERT_SHADOW_RUN_SQL,
             _record_parameters(captured),
             captured,
             status="created",
             zero_status="already_exists",
         )
+        if inserted["status"] != "already_exists":
+            return inserted
+        # DO NOTHING on conflict is NOT proof of identical evidence.
+        # A collision from another tenant/run/fingerprint must not be
+        # reported as successful idempotency or followed by an UPDATE.
+        return self._verify_exact_duplicate(captured)
+
+    def _verify_exact_duplicate(
+        self, record: ShadowRunRecord,
+    ) -> ShadowRepositoryResult:
+        parameters = {
+            **_record_parameters(record),
+            **self._scope_parameters(),
+        }
+        query = (
+            EXACT_SHADOW_DUPLICATE_SCOPED_SQL
+            if self._expected_organization_id is not None
+            else EXACT_SHADOW_DUPLICATE_SQL
+        )
+        try:
+            with self._connect(
+                self._dsn,
+                connect_timeout=self._connect_timeout_seconds,
+                row_factory=dict_row,
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(query, parameters)
+                    duplicate = cursor.fetchone() is not None
+        except psycopg.Error:
+            return _error_result(
+                record["shadow_record_id"],
+                record["agent_run_id"],
+                record["run_id"],
+                record["evidence_fingerprint"],
+            )
+        if not duplicate:
+            return _conflict_result(record)
+        return {
+            "status": "already_exists",
+            "shadow_record_id": record["shadow_record_id"],
+            "agent_run_id": record["agent_run_id"],
+            "run_id": record["run_id"],
+            "evidence_fingerprint": record["evidence_fingerprint"],
+            "diagnostic": None,
+            "duration_ms": None,
+        }
 
     def update_evidence(self, record: ShadowRunRecord) -> ShadowRepositoryResult:
         captured = validate_shadow_run_record(record)
@@ -619,6 +691,25 @@ def _commit(connection: Any) -> None:
     if callable(commit):
         commit()
 
+
+
+def _conflict_result(record: ShadowRunRecord) -> ShadowRepositoryResult:
+    # A missing row, foreign tenant and a different stored fingerprint
+    # deliberately share one non-enumerable diagnosis.
+    return {
+        "status": "rejected",
+        "shadow_record_id": record["shadow_record_id"],
+        "agent_run_id": record["agent_run_id"],
+        "run_id": record["run_id"],
+        "evidence_fingerprint": record["evidence_fingerprint"],
+        "diagnostic": {
+            "code": "SHADOW_RECORD_CONFLICT",
+            "message": "Shadow record conflict.",
+            "failure_category": "rejected",
+            "safe_details": {},
+        },
+        "duration_ms": None,
+    }
 
 
 def _scope_rejected_result(record: ShadowRunRecord) -> ShadowRepositoryResult:

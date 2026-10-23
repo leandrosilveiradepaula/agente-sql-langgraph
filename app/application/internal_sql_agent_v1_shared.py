@@ -83,9 +83,14 @@ def persist_shadow_record(
         # response. Rejections, conflicts with another scope and repository
         # failures must stop here rather than finalizing an unrelated record
         # with the same shadow_record_id.
-        if not isinstance(created, Mapping) or created.get("status") not in (
-            "created", "already_exists",
-        ):
+        if not isinstance(created, Mapping):
+            return
+        if created.get("status") == "already_exists":
+            # An exact duplicate has already been signed and persisted.
+            # Replaying it must not mutate the historical record or run the
+            # finalize stage again.
+            return
+        if created.get("status") != "created":
             return
         updated = repository.update_evidence(record)
         if not isinstance(updated, Mapping) or updated.get("status") != "updated":
