@@ -145,6 +145,7 @@ def validate_export(
             settings.get(key) != value for key, value in expected["settings"].items()
         )
         or settings.get("errorWorkflow") not in (None, "")
+        or settings.get("availableInMCP") not in (None, False)
     ):
         # A failure hook could run an unrelated workflow and bypass the
         # explicitly isolated Shadow path, including in published mode.

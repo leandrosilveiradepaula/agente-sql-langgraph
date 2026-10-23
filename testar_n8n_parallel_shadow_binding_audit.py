@@ -61,6 +61,24 @@ class ParallelShadowBindingAuditTests(unittest.TestCase):
         ):
             validate_export(fixture(), WORKFLOW_ID, expect_active=True)
 
+    def test_auditor_rejects_external_mcp_exposure(self):
+        for active in (False, True):
+            data = fixture()
+            data["active"] = active
+            data["settings"]["availableInMCP"] = True
+            if active:
+                data["versionId"] = VERSION_ONE
+                data["activeVersionId"] = VERSION_ONE
+            with self.subTest(active=active):
+                with self.assertRaisesRegex(
+                    BindingAuditError, "SHADOW_EXECUTION_PERSISTENCE_UNSAFE"
+                ):
+                    validate_export(
+                        data, WORKFLOW_ID,
+                        expect_active=active,
+                        require_active_version_match=active,
+                    )
+
     def test_active_mode_does_not_relax_credential_topology_or_safety_checks(self):
         for mutation in (
             "archived", "credential_missing", "credential_shared", "code_drift",

@@ -102,3 +102,30 @@ Windows é explicitamente recusado antes de tocar no n8n, pois bits de
 permissão Unix não são equivalentes a ACLs NTFS. A suíte de teste positiva
 de aplicação e rollback-fallback roda no runner Linux, separada da
 regressão Windows. Não usar Windows para a operação.
+
+
+## Projeção da exportação para API pública n8n 2.4.8
+
+Se `--upgrade-plan` retornar `N8N_UPDATE_SCHEMA_UNSUPPORTED`,
+a causa não é necessariamente uma alteração do fluxo: o exportador CLI
+serializa a entidade completa; o schema público PUT aceita somente campos
+editáveis e marca `nodes[*].createdAt` e `nodes[*].updatedAt` como
+**readOnly**. O reconciliador passa a descartar **somente** esses
+metadados de nós documentados antes do PUT, sem alterar o backup nem os
+dados originais. Mantém todos os campos editáveis dos nós (incluindo
+`credentials`, `id`, `parameters`, `typeVersion` e `position`),
+todas as configurações permitidas e conexões. Desconhecidos **não** são
+ignorados: as falhas foram separadas em categorias sanitizadas
+`N8N_UPDATE_SCHEMA_UNSUPPORTED_SETTINGS_FIELDS` ou
+`N8N_UPDATE_SCHEMA_UNSUPPORTED_NODE_FIELDS`, sem imprimir nomes
+nem valores desconhecidos.
+
+Além disso, `settings.availableInMCP=true` é recusado pelo auditor:
+workflow Shadow isolado não pode ser divulgado como ferramenta MCP.
+
+Fonte schema exata:
+https://github.com/n8n-io/n8n/blob/n8n%402.4.8/packages/cli/src/public-api/v1/handlers/workflows/spec/schemas/node.yml
+
+**Não executar --apply apenas porque o plano passa**: a aplicação
+continua dependendo do runtime atualizado, autorização específica,
+credencial API de menor privilégio e backup/rollback.
