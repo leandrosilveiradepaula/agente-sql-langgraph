@@ -27,9 +27,11 @@ from app.infrastructure.persistence.postgres_shadow_evidence_repository import (
     PostgresShadowEvidenceRepository,
     FETCH_SHADOW_RUN_SQL,
     FINALIZE_SHADOW_RUN_SQL,
+    FINALIZE_SHADOW_RUN_SCOPED_SQL,
     INSERT_SHADOW_RUN_SQL,
     LIST_SHADOW_RUNS_BY_AGENT_SQL,
     UPDATE_SHADOW_EVIDENCE_SQL,
+    UPDATE_SHADOW_EVIDENCE_SCOPED_SQL,
 )
 from testar_grafo_base import SuccessContextRepository
 
@@ -724,6 +726,93 @@ def test_postgres_finalize_returns_not_found_when_rowcount_zero() -> None:
     assert result["diagnostic"]["code"] == "SHADOW_RECORD_NOT_FOUND"
 
 
+def test_postgres_tenant_bound_writes_fail_closed_and_do_not_cross_rows() -> None:
+    """Second security boundary even when a future caller bypasses use cases."""
+    from app.domain.result_normalization import stable_fingerprint
+    from app.domain.shadow_evidence_types import _fingerprint_payload
+
+    allowed = _generate_record()
+    foreign = deepcopy(allowed)
+    foreign["principal"]["organization_id"] = "org-foreign"
+    # Preserve a valid, signed synthetic fixture; only the trusted runtime
+    # organization binding should cause this rejection.
+    digest = stable_fingerprint(_fingerprint_payload(foreign))
+    foreign["fingerprints"]["evidence_payload"] = digest
+    foreign["evidence_fingerprint"] = digest
+    cursor = FakePostgresCursor()
+    connect = FakePostgresConnect(cursor)
+    bound = PostgresShadowEvidenceRepository(
+        dsn="postgresql://shadow-test",
+        connect=connect,
+        expected_organization_id="org-1",
+    )
+
+    for write in (bound.create, bound.update_evidence):
+        result = write(foreign)
+        assert result["status"] == "rejected"
+        assert result["diagnostic"]["code"] == "SHADOW_ORGANIZATION_SCOPE_MISMATCH"
+        assert connect.calls == 0
+        serialized = repr(result)
+        assert "org-foreign" not in serialized
+        assert "org-1" not in serialized
+        assert "postgresql://" not in serialized
+
+    created = bound.create(allowed)
+    assert created["status"] == "created"
+    assert cursor.query == INSERT_SHADOW_RUN_SQL
+    assert connect.calls == 1
+
+    updated = bound.update_evidence(allowed)
+    assert updated["status"] == "updated"
+    assert cursor.query == UPDATE_SHADOW_EVIDENCE_SCOPED_SQL
+    assert cursor.parameters["organization_id"] == "org-1"
+    assert "AND principal ->> 'organization_id' = %(organization_id)s" in cursor.query
+    assert "org-1" not in cursor.query
+
+    finale = {
+        "shadow_record_id": allowed["shadow_record_id"],
+        "status": "success",
+        "completed_at": allowed["completed_at"],
+        "evidence_fingerprint": allowed["evidence_fingerprint"],
+    }
+    finalized = bound.finalize(finale)
+    assert finalized["status"] == "finalized"
+    assert cursor.query == FINALIZE_SHADOW_RUN_SCOPED_SQL
+    assert cursor.parameters["organization_id"] == "org-1"
+    assert "AND principal ->> 'organization_id' = %(organization_id)s" in cursor.query
+    assert "org-1" not in cursor.query
+
+    # Simulate foreign/missing persisted row (WHERE predicate matched zero
+    # rows). Neither update nor finalize can attest existence across tenants.
+    cursor.rowcount = 0
+    for result in (bound.update_evidence(allowed), bound.finalize(finale)):
+        assert result["status"] == "not_found"
+        assert result["diagnostic"]["code"] == "SHADOW_RECORD_NOT_FOUND"
+
+
+def test_postgres_unbound_legacy_writes_keep_original_queries() -> None:
+    record = _generate_record()
+    cursor = FakePostgresCursor()
+    connector = FakePostgresConnect(cursor)
+    legacy = PostgresShadowEvidenceRepository(
+        dsn="postgresql://shadow-test", connect=connector,
+    )
+    assert legacy.create(record)["status"] == "created"
+    assert cursor.query == INSERT_SHADOW_RUN_SQL
+    assert legacy.update_evidence(record)["status"] == "updated"
+    assert cursor.query == UPDATE_SHADOW_EVIDENCE_SQL
+    assert "organization_id" not in cursor.parameters
+    assert legacy.finalize({
+        "shadow_record_id": record["shadow_record_id"],
+        "status": record["status"],
+        "completed_at": record["completed_at"],
+        "evidence_fingerprint": record["evidence_fingerprint"],
+    })["status"] == "finalized"
+    assert cursor.query == FINALIZE_SHADOW_RUN_SQL
+    assert "organization_id" not in cursor.parameters
+    assert connector.calls == 3
+
+
 def test_postgres_fetch_and_list_normalize_timestamps_for_fingerprint() -> None:
     record = _generate_record()
     row = deepcopy(record)
@@ -946,6 +1035,8 @@ def main() -> None:
         test_postgres_adapter_uses_bind_parameters_only,
         test_postgres_create_returns_already_exists_when_rowcount_zero,
         test_postgres_finalize_returns_not_found_when_rowcount_zero,
+        test_postgres_tenant_bound_writes_fail_closed_and_do_not_cross_rows,
+        test_postgres_unbound_legacy_writes_keep_original_queries,
         test_postgres_fetch_and_list_normalize_timestamps_for_fingerprint,
         test_generate_shadow_postgres_round_trip_matches_fingerprint,
         test_execute_shadow_postgres_round_trip_matches_fingerprint,
