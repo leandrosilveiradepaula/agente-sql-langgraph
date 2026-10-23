@@ -65,3 +65,52 @@ de cliente ou fórmulas financeiras no LangGraph.
   real entre clientes.
 - Não modificar `SEMANTIC_AGENT_VERSION`, runtime n8n, banco, políticas,
   produção ou SQL executor ao revisar este PR.
+
+## Vincular o conteúdo aprovado do catálogo ao runtime — Jornada 2
+
+Além de `SEMANTIC_AGENT_VERSION` e do schema físico do leitor, o operador
+pode configurar o SHA-256 canônico do snapshot semântico por deployment:
+
+```text
+SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT=<sha256-minúsculo-validado>
+```
+
+A variável é **opcional/desativada por padrão** para não alterar deployments
+legados sem decisão operacional. Quando definida, o leitor PostgreSQL
+normaliza o snapshot inteiro e compara seu fingerprint com o hash
+exatamente aprovado. **Mudança de regras/aliases/métricas/tabelas/filtros
+sob a mesma versão será rejeitada antes da classificação, do planner, da
+geração de SQL e de seu repair.** Não há fallback para outra versão,
+tenant ou resposta de benchmark. Erro público genérico não revela
+hash real/esperado, regras, conexão ou SQL.
+
+Valores ausentes preservam o comportamento anterior; valores presentes
+inválidos, vazios, com maiúsculas, espaços ou tamanho incorreto bloqueiam
+o bootstrap. A mesma configuração funciona no runtime Shadow
+`CONTEXT_POSTGRES_DSN` e no runtime geral `POSTGRES_DSN`. O fingerprint
+do contexto não é um segredo, **não** substitui autenticação,
+tenant-binding, privilégios do leitor ou controle de versão. A pinagem
+correta deve ser registrada *após* conferir o conteúdo e origem do
+catálogo, não inferida de uma saída da LLM.
+
+O teste `python testar_shadow_context_portability_e2e.py` exercita
+o mesmo código HTTP/S2S → leitura do catálogo → resolução/planner →
+validação da SQL usando **provedores offline injetados** e dois contextos
+sintéticos com estruturas e nomes diferentes. Um dos contextos usa
+`CONTEXT_CATALOG_TABLES_JSON` para ler metadados de tabelas com outros
+nomes e `dre=null`. A suíte verifica:
+
+- Configuração e fingerprints diferentes para ambientes independentes.
+- Mudança de metadados **mantendo a versão** causando rejeição segura
+  antes da geração.
+- Organização divergente recusada antes até do SELECT de metadados.
+- Pergunta que faz sentido apenas no outro catálogo sem inferência
+  entre clientes ou SQL default.
+- SQL analisada/gated no fluxo real, mas produzida por stub de teste;
+  **isto NÃO comprova qualidade do gerador LLM, portabilidade financeira
+  real nem SQL executada no warehouse.**
+
+Para G4, continuam necessárias segregação física ou política de DSN
+e autenticação por organização, prova no runtime implantado e
+consulta financeira read-only separadamente autorizada. Não aplicar
+configuração, migração nem alterar n8n por esta PR.
