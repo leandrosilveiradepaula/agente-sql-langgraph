@@ -8,6 +8,7 @@ from psycopg.rows import dict_row
 
 from app.adapters.postgres.context_repository import (
     LOAD_SEMANTIC_CONTEXT_SQL,
+    LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE,
     PostgresContextRepository,
     render_versioned_context_sql,
 )
@@ -243,6 +244,9 @@ def test_carrega_snapshot_com_query_parametrizada() -> None:
         "agent_version": "semantic-test-v1",
     }
 
+    assert LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE.format(
+        context_schema="public"
+    ) == LOAD_SEMANTIC_CONTEXT_SQL
     assert "%(agent_version)s" in LOAD_SEMANTIC_CONTEXT_SQL
     assert "semantic-test-v1" not in LOAD_SEMANTIC_CONTEXT_SQL
 
