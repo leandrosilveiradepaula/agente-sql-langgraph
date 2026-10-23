@@ -3,14 +3,17 @@ set -Eeuo pipefail
 umask 077
 
 # Read-only verification of one 7-node n8n Shadow workflow.
-# DEFAULT audits the inactive draft. --active-published reads strictly
-# the n8n --published version and expects active=true. Neither mode
-# changes/publishes/activates a workflow or reads credential values.
+# DEFAULT audits inactive draft. --active-published exports strict published
+# with --published. --active-version-match is EXPLICIT for n8n 2.4.8 only:
+# export current; require active=true + matching current/active version UUIDs.
+# No fallback: divergent versions remain blocked. No mode modifies n8n,
+# executes SQL/LLM or reads credential values.
 # No HTTP POST, SQL, model call; raw exports remain private.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 N8N_CONTAINER="${N8N_CONTAINER:-}"
 WORKFLOW_ID=""
 ACTIVE_PUBLISHED=false
+ACTIVE_VERSION_MATCH=false
 PRIVATE_DIR=""
 REMOTE_DIR=""
 
@@ -32,13 +35,19 @@ while (( $# > 0 )); do
     --active-published)
       ACTIVE_PUBLISHED=true
       shift ;;
+    --active-version-match)
+      ACTIVE_VERSION_MATCH=true
+      shift ;;
     -h|--help)
-      echo 'Usage: bash scripts/n8n/audit_parallel_shadow_bindings_readonly.sh --workflow-id ID [--container NAME] [--active-published]'
-      echo 'Default: inactive draft. --active-published: audited active --published export (read-only).'
+      echo 'Usage: bash scripts/n8n/audit_parallel_shadow_bindings_readonly.sh --workflow-id ID [--container NAME] [--active-published | --active-version-match]'
+      echo 'Default: inactive draft. --active-published: CLI --published; --active-version-match: n8n 2.4.8 only, require identical current/active version IDs.'
       exit 0 ;;
     *) reject "UNKNOWN_ARGUMENT" ;;
   esac
 done
+if [[ "$ACTIVE_PUBLISHED" == true && "$ACTIVE_VERSION_MATCH" == true ]]; then
+  reject "AUDIT_MODES_MUTUALLY_EXCLUSIVE"
+fi
 [[ "$WORKFLOW_ID" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || reject "WORKFLOW_ID_INVALID"
 [[ -z "$N8N_CONTAINER" || "$N8N_CONTAINER" =~ ^[A-Za-z0-9_.-]{1,180}$ ]] || reject "CONTAINER_INVALID"
 command -v docker >/dev/null 2>&1 || reject "DOCKER_UNAVAILABLE"
@@ -71,8 +80,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# An active workflow must be audited from the published version, not a
-# potentially newer or different draft. Never silently fall back.
+# On n8n@2.4.8, export:workflow supports no --published and exports the
+# CURRENT WorkflowRepository record. Source-verified 2.4.8 only:
+# a current version is equivalent to published iff versionId == activeVersionId.
+# Any other n8n version needs its own reviewed contract.
+if [[ "$ACTIVE_VERSION_MATCH" == true ]]; then
+  VERSION="$(docker exec -u node "$N8N_CONTAINER" n8n --version 2>"$PRIVATE_DIR/version.err" | head -n 1)" ||
+    reject "N8N_VERSION_UNVERIFIED"
+  [[ "$VERSION" == "2.4.8" ]] || reject "N8N_VERSION_UNSUPPORTED_FOR_IDENTITY_CHECK"
+fi
+
+# Prefer a genuine --published export on newer supported n8n versions.
+# Never silently fall back to draft on a missing flag or failed export.
 if [[ "$ACTIVE_PUBLISHED" == true ]]; then
   if ! docker exec -u node "$N8N_CONTAINER" n8n export:workflow --help \
     >"$PRIVATE_DIR/help.out" 2>"$PRIVATE_DIR/help.err"; then
@@ -105,8 +124,11 @@ if ! docker cp "$N8N_CONTAINER:$REMOTE_DIR/workflow.json" \
   reject "N8N_DRAFT_COPY_FAILED"
 fi
 VERIFY_ARGS=(--workflow "$PRIVATE_DIR/workflow.json" --workflow-id "$WORKFLOW_ID")
-if [[ "$ACTIVE_PUBLISHED" == true ]]; then
+if [[ "$ACTIVE_PUBLISHED" == true || "$ACTIVE_VERSION_MATCH" == true ]]; then
   VERIFY_ARGS+=(--expect-active)
+fi
+if [[ "$ACTIVE_VERSION_MATCH" == true ]]; then
+  VERIFY_ARGS+=(--require-active-version-match)
 fi
 if ! python3 "$ROOT/scripts/n8n/verify_parallel_shadow_bindings_export.py" \
   "${VERIFY_ARGS[@]}" >"$PRIVATE_DIR/report.json" 2>"$PRIVATE_DIR/verify.err"; then
@@ -130,6 +152,9 @@ if [[ "$ACTIVE_PUBLISHED" == true ]]; then
   echo 'G1_PUBLISHED_EXPORT_SELECTED=true'
 else
   echo 'G1_PUBLISHED_EXPORT_SELECTED=false'
+fi
+if [[ "$ACTIVE_VERSION_MATCH" == true ]]; then
+  echo 'G1_N8N_248_PUBLISHED_IDENTITY_MATCH=true'
 fi
 echo 'G1_CORRELATED_EXECUTION=NOT_TESTED'
 echo 'N8N_WORKFLOW_MODIFIED=false'

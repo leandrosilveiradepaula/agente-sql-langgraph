@@ -267,3 +267,48 @@ não alterar `N8N_BLOCK_ENV_ACCESS_IN_NODE` para satisfazer esse teste.
 `agent_run_id` oficial, despacho HTTP 202 e evidência correlacionada
 `agent_run_id/run_id/shadow_record_id` na mesma run, sem SQL real no Shadow.
 Este comando não consome Gemini ou SQL e não fecha G1 sozinho.
+
+
+## G1 — compatibilidade exata com n8n **2.4.8** e versões publicadas
+
+O operador confirmou em VPS `N8N_VERSION=2.4.8` e
+`PUBLISHED_EXPORT_UNSUPPORTED`. Isto é comprovado no código-fonte oficial
+do tag `n8n@2.4.8`:
+`packages/cli/src/commands/export/workflow.ts` declara apenas
+`--all/--backup/--id/--output/--pretty/--separate`, e exporta a entidade
+**CURRENT** via `WorkflowRepository.find()`. A entidade nessa versão
+possui `versionId` e `activeVersionId` separados
+(`packages/@n8n/db/src/entities/workflow-entity.ts`).
+Um draft pode divergir da versão publicada, portanto não é seguro aceitar
+`active=true` sozinho.
+
+Para **somente** n8n 2.4.8, e somente quando os dois IDs UUID são
+válidos, estão presentes e **são idênticos**, o exportador de draft possui
+a mesma identidade da versão publicada. Novo modo explícito:
+
+```bash
+bash scripts/n8n/audit_parallel_shadow_bindings_readonly.sh \
+  --workflow-id LwUsMRWi34D2ARWu1YzgV --active-version-match
+```
+
+O wrapper verifica `n8n --version` EXATAMENTE `2.4.8`, sem upgrade
+automático. Passa `--require-active-version-match` ao validador e
+mantém checagens anteriores de 7 nós, código, URL interna, conexões,
+credenciais, dados fixos, retry, workflow de erros e execução sem dados
+persistidos. Falha fechado em `SHADOW_PUBLISHED_VERSION_DIFFERS_FROM_DRAFT`
+quando existe rascunho não publicado, ou em
+`SHADOW_ACTIVE_VERSION_IDENTITY_UNVERIFIED` quando os IDs faltam ou
+são inválidos. **Não desativar, republicar nem alterar workflow para
+satisfazer a auditoria.** Não há fallback silencioso.
+
+Recibo `published_version_identity_matches_draft=true` comprova
+somente igualdade dos identificadores de versão **salvos no n8n**;
+`G1_PUBLISHED_EXPORT_SELECTED=false` é deliberado porque a CLI não
+exportou a versão publicada diretamente. Não é prova de
+`webhook` alcançado, credenciais funcionais, processamento,
+persistência ou paridade. Versões n8n diferentes continuam obrigadas
+a usar modo `--active-published` suportado ou outro contrato revisado,
+nunca esta equivalência por suposição.
+
+Fonte de referência fixa (não lógica financeira):
+https://github.com/n8n-io/n8n/blob/n8n%402.4.8/packages/cli/src/commands/export/workflow.ts
