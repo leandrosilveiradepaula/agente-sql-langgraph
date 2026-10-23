@@ -181,3 +181,22 @@ Keep `LANGGRAPH_SHADOW_ENABLED=false` and the workflow unpublished.
 A real authenticated request and persisted evidence correlation require a
 separately authorized, controlled activation/test window. Never infer G1
 completion from credential bindings, network health or HTTP 202 alone.
+
+## Integrated offline contract rehearsal
+
+Before any new authorized activation of the separate seven-node workflow:
+
+```bash
+python testar_n8n_langgraph_offline_bridge.py
+```
+
+Unlike tests of isolated JSON fixtures, this executes the actual n8n
+Code-node JavaScript against a structurally valid Product-like v1 envelope,
+then sends its forwarded request into the real S2S-protected LangGraph ASGI
+routing and checks the persisted in-memory evidence through the exact
+`run_id` reader. It covers generation and approved-SQL Shadow events,
+thirteen older attempts and mismatched organization identity, without
+an LLM or a financial database. This rehearsal does **not** activate
+anything or prove the official Next.js `after()` delivery lifecycle.
+The real deployment still requires G1 correlation between the Product
+official receipt, the deployed n8n workflow and stored LangGraph evidence.
