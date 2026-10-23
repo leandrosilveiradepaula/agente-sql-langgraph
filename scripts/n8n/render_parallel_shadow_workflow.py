@@ -171,7 +171,9 @@ def render_private_candidate(internal_base_url: str) -> dict:
                 "={{ " + base_js
                 + " + '/v1/internal/agent-runs/'"
                 + " + encodeURIComponent($json.agent_run_id)"
-                + " + '/shadow-runs?limit=10' }}"
+                + " + '/shadow-runs?run_id='"
+                + " + encodeURIComponent($json.run_id)"
+                + " + '&limit=10' }}"
             )
 
     result = json.dumps(workflow, ensure_ascii=False, separators=(",", ":"))
