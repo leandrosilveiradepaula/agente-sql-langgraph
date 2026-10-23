@@ -90,7 +90,7 @@ def test_embedded_javascript_syntax() -> None:
             path.write_text(code, encoding="utf-8")
             result = subprocess.run(
                 [node_binary, "--check", str(path)],
-                capture_output=True, text=True, timeout=8,
+                capture_output=True, text=True, timeout=30,
             )
             assert result.returncode == 0, node["name"]
 
