@@ -1,0 +1,62 @@
+name: Shadow evidence integrity (disposable PostgreSQL)
+
+on:
+  pull_request:
+    paths:
+      - "app/infrastructure/persistence/postgres_shadow_evidence_repository.py"
+      - "app/application/internal_sql_agent_v1_shared.py"
+      - "app/adapters/testing/fake_shadow_evidence_repository.py"
+      - "scripts/migrations/001_create_langgraph_shadow_runs.sql"
+      - "scripts/validation/test_shadow_evidence_integrity_postgres.py"
+      - ".github/workflows/shadow-evidence-integrity-postgres.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "app/infrastructure/persistence/postgres_shadow_evidence_repository.py"
+      - "app/application/internal_sql_agent_v1_shared.py"
+      - "app/adapters/testing/fake_shadow_evidence_repository.py"
+      - "scripts/migrations/001_create_langgraph_shadow_runs.sql"
+      - "scripts/validation/test_shadow_evidence_integrity_postgres.py"
+      - ".github/workflows/shadow-evidence-integrity-postgres.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-shadow-evidence:
+    name: Real PostgreSQL 16 evidence integrity (synthetic only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: synthetic_ci
+          POSTGRES_PASSWORD: local_fixture_only
+          POSTGRES_DB: synthetic_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U synthetic_ci -d synthetic_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CI: "true"
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: synthetic_ci
+      PGPASSWORD: local_fixture_only
+      PGDATABASE: synthetic_ci
+      SHADOW_EVIDENCE_DISPOSABLE_POSTGRES_TEST: "true"
+      LANGGRAPH_ALLOW_REAL_SQL_EXECUTION: "false"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install repository dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Verify synthetic evidence persistence, isolation and collision guards
+        run: python scripts/validation/test_shadow_evidence_integrity_postgres.py

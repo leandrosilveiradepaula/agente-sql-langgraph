@@ -29,6 +29,8 @@ from app.infrastructure.persistence.postgres_shadow_evidence_repository import (
     FETCH_SHADOW_RUN_SQL,
     FINALIZE_SHADOW_RUN_SQL,
     FINALIZE_SHADOW_RUN_SCOPED_SQL,
+    EXACT_SHADOW_DUPLICATE_SQL,
+    EXACT_SHADOW_DUPLICATE_SCOPED_SQL,
     INSERT_SHADOW_RUN_SQL,
     LIST_SHADOW_RUNS_BY_AGENT_SQL,
     UPDATE_SHADOW_EVIDENCE_SQL,
@@ -689,7 +691,7 @@ def test_postgres_adapter_uses_bind_parameters_only() -> None:
 
 def test_postgres_create_returns_already_exists_when_rowcount_zero() -> None:
     record = _generate_record()
-    cursor = FakePostgresCursor(rowcount=0)
+    cursor = FakePostgresCursor(rowcount=0, rows=[{"exists": 1}])
     connect = FakePostgresConnect(cursor)
     repository = PostgresShadowEvidenceRepository(
         dsn="postgresql://shadow-test",
@@ -700,9 +702,85 @@ def test_postgres_create_returns_already_exists_when_rowcount_zero() -> None:
 
     assert result["status"] == "already_exists"
     assert result["shadow_record_id"] == record["shadow_record_id"]
-    assert cursor.query == INSERT_SHADOW_RUN_SQL
+    assert cursor.query == EXACT_SHADOW_DUPLICATE_SQL
     assert cursor.parameters is not None
     assert cursor.parameters["shadow_record_id"] == record["shadow_record_id"]
+    assert cursor.parameters["evidence_fingerprint"] == record["evidence_fingerprint"]
+    assert cursor.parameters["principal"] is not None
+    assert connect.calls == 2
+
+
+def test_postgres_rejects_conflicting_duplicate_without_exposing_evidence() -> None:
+    incoming = _generate_record()
+    cursor = FakePostgresCursor(rowcount=0)
+    connect = FakePostgresConnect(cursor)
+    repo = PostgresShadowEvidenceRepository(
+        dsn="postgresql://shadow-test", connect=connect,
+        expected_organization_id="org-1",
+    )
+    result = repo.create(incoming)
+    assert result["status"] == "rejected"
+    assert result["diagnostic"]["code"] == "SHADOW_RECORD_CONFLICT"
+    assert cursor.query == EXACT_SHADOW_DUPLICATE_SCOPED_SQL
+    assert "AND principal ->> 'organization_id' = %(organization_id)s" in cursor.query
+    assert cursor.parameters["organization_id"] == "org-1"
+    assert "org-1" not in cursor.query
+    assert incoming["generated_sql"] not in repr(result)
+    assert "postgresql://" not in repr(result)
+
+
+def test_fake_repository_refuses_modified_replay_update_and_finalize() -> None:
+    repository = FakeShadowEvidenceRepository()
+    original = _generate_record()
+    modified = _generate_record(sql="SELECT id + 1 FROM schema_test.table_test")
+    assert original["shadow_record_id"] == modified["shadow_record_id"]
+    assert original["evidence_fingerprint"] != modified["evidence_fingerprint"]
+    assert repository.create(original)["status"] == "created"
+    assert repository.create(original)["status"] == "already_exists"
+    assert repository.create(modified)["status"] == "rejected"
+    assert repository.update_evidence(modified)["status"] == "rejected"
+    wrong_finalization = {
+        "shadow_record_id": original["shadow_record_id"],
+        "status": original["status"],
+        "completed_at": original["completed_at"],
+        "evidence_fingerprint": modified["evidence_fingerprint"],
+    }
+    assert repository.finalize(wrong_finalization)["status"] == "rejected"
+    altered_time = dict(wrong_finalization)
+    altered_time["evidence_fingerprint"] = original["evidence_fingerprint"]
+    altered_time["completed_at"] = "2026-08-08T00:00:02+00:00"
+    assert repository.finalize(altered_time)["status"] == "rejected"
+    assert repository.records[original["shadow_record_id"]] == original
+
+
+def test_postgres_guarded_updates_and_finalization_require_matching_identity() -> None:
+    record = _generate_record()
+    cursor = FakePostgresCursor()
+    repo = PostgresShadowEvidenceRepository(
+        dsn="postgresql://shadow-test", connect=FakePostgresConnect(cursor)
+    )
+    assert repo.update_evidence(record)["status"] == "updated"
+    for predicate in (
+        "agent_run_id = %(agent_run_id)s",
+        "run_id = %(run_id)s",
+        "event_type = %(event_type)s",
+        "principal = %(principal)s::jsonb",
+        "evidence_fingerprint = %(evidence_fingerprint)s",
+    ):
+        assert predicate in cursor.query
+    assert record["generated_sql"] not in cursor.query
+    assert repo.finalize({
+        "shadow_record_id": record["shadow_record_id"],
+        "status": record["status"],
+        "completed_at": record["completed_at"],
+        "evidence_fingerprint": record["evidence_fingerprint"],
+    })["status"] == "finalized"
+    for predicate in (
+        "evidence_fingerprint = %(evidence_fingerprint)s",
+        "status = %(status)s",
+        "completed_at = %(completed_at)s::timestamptz",
+    ):
+        assert predicate in cursor.query
 
 
 def test_postgres_finalize_returns_not_found_when_rowcount_zero() -> None:
@@ -826,10 +904,12 @@ def test_persist_pipeline_never_finalizes_after_rejected_write() -> None:
         persist_shadow_record(repository, record)
         assert repository.calls == ["create", "update"], status
 
-    for allowed_create in ("created", "already_exists"):
-        repository = StagedRepository(allowed_create, "updated")
-        persist_shadow_record(repository, record)
-        assert repository.calls == ["create", "update", "finalize"]
+    repository = StagedRepository("already_exists", "updated")
+    persist_shadow_record(repository, record)
+    assert repository.calls == ["create"]
+    repository = StagedRepository("created", "updated")
+    persist_shadow_record(repository, record)
+    assert repository.calls == ["create", "update", "finalize"]
 
 
 def test_postgres_unbound_legacy_writes_keep_original_queries() -> None:
@@ -1076,6 +1156,9 @@ def main() -> None:
         test_migration_sql_defines_separated_shadow_table,
         test_postgres_adapter_uses_bind_parameters_only,
         test_postgres_create_returns_already_exists_when_rowcount_zero,
+        test_postgres_rejects_conflicting_duplicate_without_exposing_evidence,
+        test_fake_repository_refuses_modified_replay_update_and_finalize,
+        test_postgres_guarded_updates_and_finalization_require_matching_identity,
         test_postgres_finalize_returns_not_found_when_rowcount_zero,
         test_postgres_tenant_bound_writes_fail_closed_and_do_not_cross_rows,
         test_persist_pipeline_never_finalizes_after_rejected_write,

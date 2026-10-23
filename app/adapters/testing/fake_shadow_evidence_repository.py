@@ -36,7 +36,7 @@ class FakeShadowEvidenceRepository:
         shadow_record_id = captured["shadow_record_id"]
         previous = self.records.get(shadow_record_id)
         if previous is not None:
-            if previous["evidence_fingerprint"] == captured["evidence_fingerprint"]:
+            if _same_signed_attempt(previous, captured):
                 return _result("already_exists", captured)
             return _diagnostic_result(
                 "rejected",
@@ -52,12 +52,18 @@ class FakeShadowEvidenceRepository:
         captured = validate_shadow_run_record(record)
         self.updated_records.append(deepcopy(captured))
         shadow_record_id = captured["shadow_record_id"]
-        if shadow_record_id not in self.records:
+        previous = self.records.get(shadow_record_id)
+        if previous is None:
             return _diagnostic_result(
                 "not_found",
                 captured,
                 "SHADOW_RECORD_NOT_FOUND",
                 "Shadow record was not found.",
+            )
+        if not _same_signed_attempt(previous, captured):
+            return _diagnostic_result(
+                "rejected", captured, "SHADOW_RECORD_CONFLICT",
+                "Shadow record conflict.",
             )
         self.records[shadow_record_id] = deepcopy(captured)
         return _result("updated", captured)
@@ -82,9 +88,15 @@ class FakeShadowEvidenceRepository:
                 },
                 "duration_ms": 0,
             }
-        record["status"] = captured["status"]
-        record["completed_at"] = captured["completed_at"]
-        record["evidence_fingerprint"] = captured["evidence_fingerprint"]
+        if (
+            record["evidence_fingerprint"] != captured["evidence_fingerprint"]
+            or record["status"] != captured["status"]
+            or record["completed_at"] != captured["completed_at"]
+        ):
+            return _diagnostic_result(
+                "rejected", record, "SHADOW_RECORD_CONFLICT",
+                "Shadow record conflict.",
+            )
         self.records[captured["shadow_record_id"]] = validate_shadow_run_record(record)
         return _result("finalized", self.records[captured["shadow_record_id"]])
 
@@ -119,6 +131,18 @@ class FakeShadowEvidenceRepository:
             ],
             "diagnostic": None,
         }
+
+
+def _same_signed_attempt(
+    previous: ShadowRunRecord, incoming: ShadowRunRecord,
+) -> bool:
+    return all(
+        previous.get(key) == incoming.get(key)
+        for key in (
+            "shadow_record_id", "agent_run_id", "run_id", "event_type",
+            "principal", "evidence_fingerprint",
+        )
+    )
 
 
 def _result(status: str, record: ShadowRunRecord) -> ShadowRepositoryResult:
