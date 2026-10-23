@@ -93,6 +93,7 @@ STEPS = [
     ("testar_n8n_shadow_network_probe.py", [sys.executable, "testar_n8n_shadow_network_probe.py"]),
     ("testar_n8n_isolated_shadow_workflow.py", [sys.executable, "testar_n8n_isolated_shadow_workflow.py"]),
     ("testar_n8n_parallel_shadow_workflow.py", [sys.executable, "testar_n8n_parallel_shadow_workflow.py"]),
+    ("testar_n8n_langgraph_offline_bridge.py", [sys.executable, "testar_n8n_langgraph_offline_bridge.py"]),
     ("testar_n8n_shadow_evidence_read_workflow.py", [sys.executable, "testar_n8n_shadow_evidence_read_workflow.py"]),
     ("testar_n8n_shadow_evidence_binding_audit.py", [sys.executable, "testar_n8n_shadow_evidence_binding_audit.py"]),
     ("testar_n8n_private_shadow_renderer.py", [sys.executable, "testar_n8n_private_shadow_renderer.py"]),
