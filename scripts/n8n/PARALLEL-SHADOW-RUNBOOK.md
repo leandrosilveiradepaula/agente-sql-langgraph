@@ -29,6 +29,18 @@ The real n8n + Gemini workflow remains **OFFICIAL**, unchanged.
   \`shadow_record_id\` without returning SQL, tokens or provider raw output.
 - Disable n8n execution-data persistence on success, error and manual runs.
   LangGraph persists the correlated sanitized Shadow evidence separately.
+- Forward the **optional** authenticated Product `principal.organization_id` as
+  an opaque bounded identifier without defaulting, rewriting or inferring it
+  from question/SQL. Reject malformed supplied IDs rather than stripping them.
+  The currently deployed Demo session has no authoritative organization ID;
+  this is forward-compatible transport only. Do **not** activate the
+  LangGraph expected-organization scope until Product/BFF identity,
+  n8n credential ownership and tenant-scoped deployment have been proved.
+- Reconcile LangGraph's **HTTP 503 / `infrastructure_error`** as a terminal
+  result only when `agent_run_id`, `run_id`, contract, event type, status
+  and a single persisted evidence record correlate exactly. A generic
+  503, 500, malformed/truncated response or missing evidence still fails
+  closed. This is failure observability, **not** success or SQL parity.
 
 **202 means n8n accepted the request, NOT successful SQL generation or proven
 equivalence.** The evidence check runs afterwards. The comparison evaluator
