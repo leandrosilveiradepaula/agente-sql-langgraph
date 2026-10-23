@@ -137,6 +137,13 @@ class CandidateReconciliationTests(unittest.TestCase):
                 reconcile(api, WORKFLOW_ID, apply=True, approved=True,
                           expected_hash="0" * 64, backup_dir=p,
                           known=_historical_code())
+            if __import__("os").name != "posix":
+                with self.assertRaisesRegex(ReconcileError, "APPLY_REQUIRES_POSIX_HOST"):
+                    reconcile(api, WORKFLOW_ID, apply=True, approved=True,
+                              expected_hash=before["snapshot_sha256"],
+                              backup_dir=p, known=_historical_code())
+                self.assertEqual(api.calls.count("PUT"), 0)
+                return
             report = reconcile(api, WORKFLOW_ID, apply=True, approved=True,
                                expected_hash=before["snapshot_sha256"],
                                backup_dir=p, known=_historical_code())

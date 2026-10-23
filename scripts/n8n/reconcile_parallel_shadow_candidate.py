@@ -291,6 +291,10 @@ def reconcile(api, workflow_id: str, *, apply: bool = False,
         _fail("EXPECTED_SNAPSHOT_HASH_REQUIRED")
     if expected_hash != hash_before:
         _fail("WORKFLOW_SNAPSHOT_CHANGED")
+    if os.name != "posix":
+        # Windows does not enforce POSIX mode bits for 0700 directories.
+        # This privileged apply operation is supported only on the Linux VPS.
+        _fail("APPLY_REQUIRES_POSIX_HOST")
     if backup_dir is None or not backup_dir.is_absolute():
         _fail("PRIVATE_BACKUP_DIR_REQUIRED")
     # Avoid writing into directories controlled by a different user.

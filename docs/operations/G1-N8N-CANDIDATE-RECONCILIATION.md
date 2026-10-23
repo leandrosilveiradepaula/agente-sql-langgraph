@@ -95,3 +95,10 @@ executar apenas em janela autorizada e sem outros editores do candidato.
 versão homologada com rollback antes do PUT; o runtime da VPS ainda
 reportou LANGGRAPH_COMMIT 136da341... quando o código principal já tinha
 avançado. A revisão de alterações do n8n não substitui G1 real.
+
+
+**Permissões de backup:** `--apply` funciona somente em Linux/POSIX;
+Windows é explicitamente recusado antes de tocar no n8n, pois bits de
+permissão Unix não são equivalentes a ACLs NTFS. A suíte de teste positiva
+de aplicação e rollback-fallback roda no runner Linux, separada da
+regressão Windows. Não usar Windows para a operação.

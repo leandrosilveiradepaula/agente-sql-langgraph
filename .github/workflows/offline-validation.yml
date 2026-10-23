@@ -82,6 +82,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Verify POSIX-only candidate backup/upgrade path, offline
+        run: python3 testar_n8n_parallel_shadow_candidate_upgrade.py
       - name: Validate private n8n workflow renderer (no n8n, SQL or LLM)
         run: |
           python3 testar_n8n_private_shadow_renderer.py
