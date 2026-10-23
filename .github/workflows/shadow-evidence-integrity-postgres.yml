@@ -9,6 +9,9 @@ on:
       - "scripts/migrations/001_create_langgraph_shadow_runs.sql"
       - "scripts/validation/test_shadow_evidence_integrity_postgres.py"
       - "scripts/validation/test_n8n_langgraph_shadow_bridge_postgres.py"
+      - "scripts/validation/test_j2_real_postgres_portability.py"
+      - "testar_shadow_context_portability_e2e.py"
+      - "app/adapters/postgres/context_repository.py"
       - "testar_n8n_langgraph_offline_bridge.py"
       - "scripts/n8n/parallel_langgraph_shadow_v1.workflow.json"
       - ".github/workflows/shadow-evidence-integrity-postgres.yml"
@@ -22,6 +25,9 @@ on:
       - "scripts/migrations/001_create_langgraph_shadow_runs.sql"
       - "scripts/validation/test_shadow_evidence_integrity_postgres.py"
       - "scripts/validation/test_n8n_langgraph_shadow_bridge_postgres.py"
+      - "scripts/validation/test_j2_real_postgres_portability.py"
+      - "testar_shadow_context_portability_e2e.py"
+      - "app/adapters/postgres/context_repository.py"
       - "testar_n8n_langgraph_offline_bridge.py"
       - "scripts/n8n/parallel_langgraph_shadow_v1.workflow.json"
       - ".github/workflows/shadow-evidence-integrity-postgres.yml"
@@ -71,3 +77,5 @@ jobs:
         run: python scripts/validation/test_shadow_evidence_integrity_postgres.py
       - name: Verify n8n Code to S2S ASGI to persisted evidence and comparison
         run: python scripts/validation/test_n8n_langgraph_shadow_bridge_postgres.py
+      - name: Prove distinct physical catalogs and tenant SELECT-only context readers
+        run: python scripts/validation/test_j2_real_postgres_portability.py

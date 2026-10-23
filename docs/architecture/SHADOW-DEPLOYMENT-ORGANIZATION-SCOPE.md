@@ -155,3 +155,26 @@ A consulta SQL sintética é **apenas um valor textual de evidência** e jamais
 executada no warehouse. CI em PostgreSQL descartável não comprova paridade
 financeira, política de deploy, autorização de ativação do n8n ou isolamento de
 credenciais na instalação real. Esta verificação independe da Vercel.
+
+
+## G2/J2 — isolamento de catálogos em PostgreSQL físico (CI)
+
+O teste `scripts/validation/test_j2_real_postgres_portability.py` utiliza
+o serviço PostgreSQL 16 **descartável** do CI. Cria dois esquemas de
+metadados versionados com nomes de tabelas fisicamente diferentes,
+perguntas, aliases, métricas e tabelas analíticas distintas. O segundo
+catálogo não possui tabela DRE: o leitor usa apenas `dre=None` como
+configuração explícita, nunca pressupõe uma DRE para todos os clientes.
+
+Cada catálogo usa um login PostgreSQL **não superusuário** diferente,
+com USAGE/SELECT somente em suas próprias tabelas e sem INSERT. O teste
+exercita o repositório de contexto real, fingerprint versionado, runtime
+ASGI/S2S e gates sem provedor externo. O acesso de um leitor às tabelas
+do outro é negado pelo próprio PostgreSQL; identidades tenant divergentes
+são recusadas e mudanças físicas após o pin invalidam o contexto.
+
+Isso é uma demonstração estrutural de portabilidade **offline com banco
+real**, não homologação de dados, memberships ou credenciais dos
+clientes reais. Nenhum SQL financeiro é executado, sem alterações
+em n8n, Produto, Vercel ou banco não-descartável. O teste deve continuar
+isolado de benchmarks e golden answers.
