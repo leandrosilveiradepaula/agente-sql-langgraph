@@ -39,3 +39,39 @@ the official n8n or the existing Shadow generation workflow.
 
 An HTTP 200 safe read response confirms retrieval only; it does not prove SQL
 parity, LLM provider equivalence or financial results.
+
+## Auditoria de bindings do relay importado (read-only)
+
+**Somente após uma importação separadamente autorizada**, ainda **inativa**,
+com o Webhook Header Auth exclusivo salvo e com o HTTP Header Auth do
+LangGraph associado ao nó `Read LangGraph Evidence`, conferir o ID real
+do NOVO workflow (nunca usar o ID de produção nem do Shadow de sete nós).
+Executar no host Docker autorizado, sem informar tokens:
+
+```bash
+cd /docker/agente-sql-langgraph-repo
+bash scripts/n8n/audit_shadow_evidence_read_bindings_readonly.sh \\
+  --workflow-id ID_REAL_DO_WORKFLOW_NOVO
+```
+
+A auditoria usa `n8n export:workflow --id` na versão *draft* (não publica,
+não ativa e não usa o workflow oficial). Guarda o JSON bruto apenas em
+arquivos temporários restritos no host e no contêiner e os remove antes
+de declarar sucesso. Não expõe conteúdo de nós, URLs internas, IDs/nome de
+credenciais nem segredos.
+
+Um resultado `EVIDENCE_READ_BINDINGS=PASS` comprova apenas: cinco nós,
+configuração igual ao template revisado, caminho `GET` privado e
+estático, nenhuma expressão `$env` necessária, armazenamento de execuções
+desabilitado, dois IDs de credenciais Header Auth **distintos**, topologia
+sem deriva e workflow inativo. Os testes offline exercitam erros de
+bind, injeção de URL, métodos não-GET, alterações de código e opções de
+execução perigosas. A ferramenta aceita IDs de nós gerados pelo n8n 2.x
+e a omissão do método GET padrão na exportação.
+
+Um PASS **não comprova** valores corretos das credenciais, conexão
+n8n→LangGraph, existência dos endpoints na imagem implantada, autorização
+multi-tenant nem leitura real de evidências. Essas verificações exigem
+suas etapas operacionais e autorizações próprias. Não rodar chamadas
+reais, alterar variáveis Vercel ou publicar o workflow em resposta a uma
+falha da auditoria.
