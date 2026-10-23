@@ -6,6 +6,10 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from app.config.context_fingerprint import (
+    EXPECTED_CONTEXT_FINGERPRINT_ENV,
+    validate_expected_context_fingerprint,
+)
 from app.config.postgres_context import (
     DEFAULT_POSTGRES_CONTEXT_SCHEMA,
     POSTGRES_CONTEXT_SCHEMA_ENV,
@@ -45,6 +49,7 @@ class ShadowTestRuntimeConfig:
         default=None, repr=False
     )
     expected_organization_id: str | None = field(default=None, repr=False)
+    expected_context_fingerprint: str | None = field(default=None, repr=False)
 
 
 def load_shadow_test_runtime_config(
@@ -99,6 +104,7 @@ def load_shadow_test_runtime_config(
         langgraph_commit=_safe_optional(env.get("LANGGRAPH_COMMIT")),
         context_catalog_tables=_context_catalog_tables(env),
         expected_organization_id=_expected_organization_id(env),
+        expected_context_fingerprint=_expected_context_fingerprint(env),
     )
 
 
@@ -204,3 +210,14 @@ def _expected_organization_id(env: Mapping[str, str]) -> str | None:
     if not isinstance(value, str) or not _ORGANIZATION_SCOPE_ID.fullmatch(value):
         raise RuntimeError("LANGGRAPH_EXPECTED_ORGANIZATION_ID is invalid.")
     return value
+
+
+def _expected_context_fingerprint(environ: Mapping[str, str]) -> str | None:
+    try:
+        return validate_expected_context_fingerprint(
+            environ.get(EXPECTED_CONTEXT_FINGERPRINT_ENV)
+        )
+    except ValueError:
+        raise RuntimeError(
+            "SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT is invalid."
+        ) from None
