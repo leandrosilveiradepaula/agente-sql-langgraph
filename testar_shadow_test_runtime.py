@@ -457,7 +457,7 @@ def test_runtime_com_scope_organizacao_rejeita_outra_organizacao_sem_efeitos() -
                 else:
                     claim["principal"]["organization_id"] = claimed
                 status, body = _run_asgi(runtime.app, "POST", path, claim)
-                assert status in (200, 400, 403), (event, status)
+                assert status == 422, (event, status)
                 assert body["status"] == "rejected", (event, body.get("status"))
                 assert "INTERNAL_ORGANIZATION_SCOPE_MISMATCH" in {
                     item["code"] for item in body["errors"]
