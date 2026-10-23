@@ -20,7 +20,7 @@ _POSTGRES_IDENTIFIER_PATTERN = re.compile(
 )
 
 
-LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE = """
+LOAD_SEMANTIC_CONTEXT_RELATIONS_SQL_TEMPLATE = """
 WITH cfg AS (
   SELECT
     %(agent_version)s::text AS agent_version
@@ -225,6 +225,18 @@ SELECT
 FROM cfg
 """
 
+# Preserve the previously public `LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE`
+# contract: callers can still render the historical defaults with only
+# `context_schema` and receive the exact SQL used before this change.
+LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE = LOAD_SEMANTIC_CONTEXT_RELATIONS_SQL_TEMPLATE.format(
+    rules_relation="{context_schema}.ai_ducklake_agent_rules",
+    entities_relation="{context_schema}.ai_ducklake_entity_aliases",
+    dre_relation="{context_schema}.ai_ducklake_dre_mapping",
+    patterns_relation="{context_schema}.ai_ducklake_sql_patterns",
+    catalog_relation="{context_schema}.ai_ducklake_table_catalog",
+)
+
+
 # Adapter-owned canonical collections; business schema/aliases/metrics are
 # loaded from versioned data. Table identities are configurable per tenant and
 # are never taken from prompts, generated SQL, or benchmark expectations.
@@ -288,7 +300,7 @@ def render_versioned_context_sql(
             raise ValueError("catalog_tables contém identificador inválido.")
         relations[key] = f"{context_schema}.{table}"
 
-    return LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE.format(
+    return LOAD_SEMANTIC_CONTEXT_RELATIONS_SQL_TEMPLATE.format(
         rules_relation=relations["rules"],
         entities_relation=relations["entities"],
         dre_relation=relations["dre"],
