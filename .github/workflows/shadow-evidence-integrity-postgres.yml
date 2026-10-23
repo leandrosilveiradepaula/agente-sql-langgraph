@@ -8,6 +8,9 @@ on:
       - "app/adapters/testing/fake_shadow_evidence_repository.py"
       - "scripts/migrations/001_create_langgraph_shadow_runs.sql"
       - "scripts/validation/test_shadow_evidence_integrity_postgres.py"
+      - "scripts/validation/test_n8n_langgraph_shadow_bridge_postgres.py"
+      - "testar_n8n_langgraph_offline_bridge.py"
+      - "scripts/n8n/parallel_langgraph_shadow_v1.workflow.json"
       - ".github/workflows/shadow-evidence-integrity-postgres.yml"
   push:
     branches:
@@ -18,6 +21,9 @@ on:
       - "app/adapters/testing/fake_shadow_evidence_repository.py"
       - "scripts/migrations/001_create_langgraph_shadow_runs.sql"
       - "scripts/validation/test_shadow_evidence_integrity_postgres.py"
+      - "scripts/validation/test_n8n_langgraph_shadow_bridge_postgres.py"
+      - "testar_n8n_langgraph_offline_bridge.py"
+      - "scripts/n8n/parallel_langgraph_shadow_v1.workflow.json"
       - ".github/workflows/shadow-evidence-integrity-postgres.yml"
 
 permissions:
@@ -58,5 +64,10 @@ jobs:
           python-version: "3.11"
       - name: Install repository dependencies
         run: python -m pip install -r requirements.txt
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
       - name: Verify synthetic evidence persistence, isolation and collision guards
         run: python scripts/validation/test_shadow_evidence_integrity_postgres.py
+      - name: Verify n8n Code to S2S ASGI to persisted evidence and comparison
+        run: python scripts/validation/test_n8n_langgraph_shadow_bridge_postgres.py
