@@ -232,7 +232,11 @@ def _process_cycle(runtime, event: str) -> tuple[dict, dict, dict]:
         "/v1/internal/agent-runs/" + AGENT_RUN_ID + "/shadow-runs",
         query_string=exact_query,
     )
-    assert read_status == 200
+    # Only a fixed safe code is printed on failure, never questions/SQL.
+    assert read_status == 200, (
+        "G1_EVIDENCE_READ_NOT_OK", read_status,
+        (read_body.get("error") or {}).get("code", "NO_SAFE_ERROR_CODE"),
+    )
     assert len(read_body["items"]) == 1
     # Run the actual final n8n Code node (not a parallel mock assertion).
     confirmed = _n8n_code(
