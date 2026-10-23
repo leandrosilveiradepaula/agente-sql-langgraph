@@ -200,3 +200,24 @@ an LLM or a financial database. This rehearsal does **not** activate
 anything or prove the official Next.js `after()` delivery lifecycle.
 The real deployment still requires G1 correlation between the Product
 official receipt, the deployed n8n workflow and stored LangGraph evidence.
+
+
+## G1 real-PostgreSQL integrated rehearsal (CI only)
+
+The additional step in `.github/workflows/shadow-evidence-integrity-postgres.yml`
+now runs `scripts/validation/test_n8n_langgraph_shadow_bridge_postgres.py`
+against the workflow's **actual n8n Code-node JavaScript**, the actual
+S2S-protected LangGraph ASGI HTTP router, the existing PostgreSQL 16
+`langgraph_shadow_runs` schema and the genuine PostgreSQL evidence
+repository. It checks exact returned `run_id`, both separate event types,
+thirteen older attempts, evidence signatures, tenant-bound SQL reads,
+foreign-tenant denial and post-generation comparison. The official SQL
+is never supplied to the generator, and the comparison uses only a
+synthetic self-consistency input.
+
+The script has the same GitHub Actions + loopback-only + synthetic DB
+environment guard as the already approved G4 disposable PostgreSQL test.
+No runtime credentials, real Gemini calls, financial SQL execution,
+Vercel deployment or n8n activation. This is a stronger **offline** G1
+integration proof, **not** the missing Product official run receipt ↔
+live n8n webhook ↔ live persisted LangGraph evidence correlation.
