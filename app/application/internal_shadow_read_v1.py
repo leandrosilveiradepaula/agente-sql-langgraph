@@ -102,7 +102,11 @@ class ListAgentShadowRunsUseCase:
             validate_shadow_read_id(run_id, field="run_id")
             if run_id is not None else None
         )
-        records = _list_records(self._repository, agent_run_id)
+        records = _list_records(
+            self._repository, agent_run_id, run_id=selected_run_id,
+            limit=safe_limit,
+            expected_organization_id=self._expected_organization_id,
+        )
         # Never include another organization's events, even when an old or
         # compromised evidence store contains colliding agent_run_id values.
         scoped_records = [
@@ -287,9 +291,27 @@ def _fetch_record(
 def _list_records(
     repository: ShadowEvidenceRepository,
     agent_run_id: str,
+    *,
+    run_id: str | None = None,
+    limit: int | None = None,
+    expected_organization_id: str | None = None,
 ) -> list[ShadowRunRecord]:
     try:
-        result = repository.list_by_agent_run_id(agent_run_id)
+        # Only an explicitly bounded adapter may push down the presentation
+        # limit. It must attest the same trusted organization scope in SQL,
+        # otherwise earlier foreign attempts could hide an authorized run.
+        bounded = getattr(repository, "list_bounded_by_agent_run_id", None)
+        if limit is not None and callable(bounded):
+            result = bounded(
+                agent_run_id, run_id=run_id, limit=limit,
+                expected_organization_id=expected_organization_id,
+            )
+        elif run_id is None:
+            result = repository.list_by_agent_run_id(agent_run_id)
+        else:
+            result = repository.list_by_agent_run_id(
+                agent_run_id, run_id=run_id,
+            )
     except Exception as error:
         del error
         raise ShadowReadError("SHADOW_REPOSITORY_UNAVAILABLE", 503) from None

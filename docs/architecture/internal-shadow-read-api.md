@@ -68,9 +68,13 @@ The list uses an explicit `limit` query parameter:
 - repeated `limit` parameters return `400`;
 - unknown query parameters are ignored.
 
-The repository currently exposes `list_by_agent_run_id` without a native limit,
-so this microstep applies the limit after repository read. Native bounded
-repository reads are future debt before larger operational use.
+The read use case retains its final safe projection and presentation limit.
+When the PostgreSQL adapter attests the same deployment organization as the
+read use case, it now applies deterministic `ORDER BY created_at, event_type,
+shadow_record_id LIMIT %(row_limit)s` at the database before deserializing
+full SQL/context evidence. The limit is bound data, never SQL interpolation.
+Legacy adapters that lack this bounded capability continue using the original
+filter-then-sort-then-limit behavior in memory.
 
 ## Visualization Contract
 
@@ -164,3 +168,41 @@ real SQL execution or network call by this change.
 This bounded response is for correlation, not a paginated audit log.
 The underlying repository may load other evidence for the `agent_run_id`
 prior to the in-process projection; configured tenant scope remains enforced.
+
+## Targeted evidence lookup: database-level predicate (G1)
+
+The optional `run_id` read filter now passes through the evidence
+repository interface and is **bound in PostgreSQL alongside
+`agent_run_id` and the optional trusted tenant scope**. This keeps large
+unrelated evidence bodies outside the read/deserialization path. Query
+text remains fixed structural SELECT with parameter placeholders; no
+client table, business rule, SQL statement or user-provided identifier
+is interpolated into the query. The unfiltered list remains
+backward-compatible for administrative uses.
+
+The G1 offline bridge test `python testar_n8n_langgraph_offline_bridge.py`
+takes the actual seven-node *inactive* n8n workflow, runs its JavaScript
+envelope/response/evidence nodes, calls the real authenticated LangGraph
+ASGI endpoints against in-memory adapters and confirms exact-run evidence
+correlation with thirteen older attempts and both `generate` and
+`execute_approved` events. It also demonstrates tenant rejection before
+provider/evidence access. Tests require Node.js but no n8n server,
+LLM provider, database network, Vercel or SQL execution. This is
+a **synthetic wiring rehearsal**, not proof of Product deployed transport
+or financial result equivalence.
+
+
+## Bounded administrative list pushdown (G1)
+
+This complements exact `run_id` pushdown: an administrative list without
+`run_id` also avoids loading every SQL/context evidence body of the same
+`agent_run_id`. The bounded repository capability requires a matching trusted
+tenant scope on both layers, rejects mismatch **before connecting**, and
+filters by organization and optional attempt **before** the bound limit.
+The SQL ordering agrees with the existing application ordering. The legacy
+unbounded repository method remains unchanged for callers needing all rows.
+
+The production observability wrapper forwards the bounded capability and
+falls back safely for synthetic/older adapters. This is an offline
+performance/correctness safeguard, **not** proof of deployed tenant isolation
+or real Shadow correlation.

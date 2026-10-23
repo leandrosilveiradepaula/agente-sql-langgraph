@@ -114,6 +114,19 @@ SET
 WHERE shadow_record_id = %(shadow_record_id)s
 """
 
+# Update/finalize must check the *persisted* record's existing tenant,
+# never just the incoming principal. These are fixed structural SQL queries:
+# the deployment organization always remains a bound parameter.
+UPDATE_SHADOW_EVIDENCE_SCOPED_SQL = (
+    UPDATE_SHADOW_EVIDENCE_SQL.rstrip()
+    + "\nAND principal ->> 'organization_id' = %(organization_id)s\n"
+)
+FINALIZE_SHADOW_RUN_SCOPED_SQL = (
+    FINALIZE_SHADOW_RUN_SQL.rstrip()
+    + "\nAND principal ->> 'organization_id' = %(organization_id)s"
+    + "\nAND evidence_fingerprint = %(evidence_fingerprint)s\n"
+)
+
 FETCH_SHADOW_RUN_SQL = """
 SELECT
   shadow_record_id,
@@ -192,6 +205,22 @@ LIST_SHADOW_RUNS_BY_AGENT_SCOPED_SQL = (
     )
 )
 
+# Fixed structural SQL variants, never interpolation of a run ID, tenant or
+# question into the query string. The WHERE clauses apply before the stored
+# evidence (including large internal snapshots) is read/deserialized.
+LIST_SHADOW_RUNS_BY_AGENT_AND_RUN_SQL = (
+    LIST_SHADOW_RUNS_BY_AGENT_SQL.replace(
+        "ORDER BY created_at, shadow_record_id",
+        "AND run_id = %(run_id)s\nORDER BY created_at, shadow_record_id",
+    )
+)
+LIST_SHADOW_RUNS_BY_AGENT_AND_RUN_SCOPED_SQL = (
+    LIST_SHADOW_RUNS_BY_AGENT_SCOPED_SQL.replace(
+        "ORDER BY created_at, shadow_record_id",
+        "AND run_id = %(run_id)s\nORDER BY created_at, shadow_record_id",
+    )
+)
+
 ConnectCallable = Callable[..., Any]
 
 
@@ -242,6 +271,10 @@ class PostgresShadowEvidenceRepository:
 
     def create(self, record: ShadowRunRecord) -> ShadowRepositoryResult:
         captured = validate_shadow_run_record(record)
+        # A tenant-bound deployment must never persist an unscoped/foreign
+        # principal, even if a new caller bypasses upstream use-case checks.
+        if not self._record_in_scope(captured):
+            return _scope_rejected_result(captured)
         return self._execute_write(
             INSERT_SHADOW_RUN_SQL,
             _record_parameters(captured),
@@ -252,16 +285,33 @@ class PostgresShadowEvidenceRepository:
 
     def update_evidence(self, record: ShadowRunRecord) -> ShadowRepositoryResult:
         captured = validate_shadow_run_record(record)
+        if not self._record_in_scope(captured):
+            return _scope_rejected_result(captured)
         return self._execute_write(
-            UPDATE_SHADOW_EVIDENCE_SQL,
-            _record_parameters(captured),
+            UPDATE_SHADOW_EVIDENCE_SCOPED_SQL
+            if self._expected_organization_id is not None
+            else UPDATE_SHADOW_EVIDENCE_SQL,
+            {
+                **_record_parameters(captured),
+                **self._scope_parameters(),
+            },
             captured,
             status="updated",
             zero_status="not_found",
         )
 
     def finalize(self, request: FinalizeShadowRunRequest) -> ShadowRepositoryResult:
-        parameters = deepcopy(dict(request))
+        # Finalize does not carry a principal. The database must attest
+        # the already-persisted tenant before updating a record by ID.
+        parameters = {
+            **deepcopy(dict(request)),
+            **self._scope_parameters(),
+        }
+        statement = (
+            FINALIZE_SHADOW_RUN_SCOPED_SQL
+            if self._expected_organization_id is not None
+            else FINALIZE_SHADOW_RUN_SQL
+        )
         try:
             with self._connect(
                 self._dsn,
@@ -269,7 +319,7 @@ class PostgresShadowEvidenceRepository:
                 row_factory=dict_row,
             ) as connection:
                 with connection.cursor() as cursor:
-                    cursor.execute(FINALIZE_SHADOW_RUN_SQL, parameters)
+                    cursor.execute(statement, parameters)
                     rowcount = int(getattr(cursor, "rowcount", -1))
                 _commit(connection)
         except psycopg.Error:
@@ -295,6 +345,21 @@ class PostgresShadowEvidenceRepository:
             "diagnostic": None,
             "duration_ms": None,
         }
+
+    def _record_in_scope(self, record: ShadowRunRecord) -> bool:
+        if self._expected_organization_id is None:
+            return True
+        principal = record.get("principal")
+        return (
+            isinstance(principal, dict)
+            and principal.get("organization_id") == self._expected_organization_id
+        )
+
+    def _scope_parameters(self) -> dict[str, str]:
+        return (
+            {"organization_id": self._expected_organization_id}
+            if self._expected_organization_id is not None else {}
+        )
 
     def fetch_by_shadow_record_id(
         self,
@@ -339,7 +404,71 @@ class PostgresShadowEvidenceRepository:
             "diagnostic": None,
         }
 
-    def list_by_agent_run_id(self, agent_run_id: str) -> ShadowRepositoryListResult:
+    def list_bounded_by_agent_run_id(
+        self,
+        agent_run_id: str,
+        *,
+        limit: int,
+        run_id: str | None = None,
+        expected_organization_id: str | None = None,
+    ) -> ShadowRepositoryListResult:
+        # The caller cannot silently narrow a different deployment's data.
+        # A mismatched runtime/repository scope is a configuration error.
+        if expected_organization_id != self._expected_organization_id:
+            raise ValueError("Shadow read organization scope mismatch.")
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("Shadow read limit invalid.")
+        return self._list_by_agent_run_id(
+            agent_run_id, run_id=run_id, limit=limit,
+        )
+
+    def list_by_agent_run_id(
+        self,
+        agent_run_id: str,
+        *,
+        run_id: str | None = None,
+    ) -> ShadowRepositoryListResult:
+        # Historical callers still receive the full unbounded dataset.
+        return self._list_by_agent_run_id(agent_run_id, run_id=run_id)
+
+    def _list_by_agent_run_id(
+        self,
+        agent_run_id: str,
+        *,
+        run_id: str | None = None,
+        limit: int | None = None,
+    ) -> ShadowRepositoryListResult:
+        scoped = self._expected_organization_id is not None
+        if run_id is not None:
+            statement = (
+                LIST_SHADOW_RUNS_BY_AGENT_AND_RUN_SCOPED_SQL
+                if scoped else LIST_SHADOW_RUNS_BY_AGENT_AND_RUN_SQL
+            )
+        else:
+            statement = (
+                LIST_SHADOW_RUNS_BY_AGENT_SCOPED_SQL
+                if scoped else LIST_SHADOW_RUNS_BY_AGENT_SQL
+            )
+        if limit is not None:
+            # Match the application's stable ordering *before* the SQL LIMIT.
+            # No user values are interpolated into SQL; limit is bound data.
+            old_order = "ORDER BY created_at, shadow_record_id"
+            if statement.count(old_order) != 1:
+                raise RuntimeError("Shadow evidence ordering contract drift.")
+            statement = statement.replace(
+                old_order,
+                "ORDER BY created_at, event_type, shadow_record_id"
+                "\nLIMIT %(row_limit)s",
+            )
+        parameters = {
+            "agent_run_id": agent_run_id,
+            **({"run_id": run_id} if run_id is not None else {}),
+            **(
+                {"organization_id": self._expected_organization_id}
+                if scoped else {}
+            ),
+            **({"row_limit": limit} if limit is not None else {}),
+        }
         try:
             with self._connect(
                 self._dsn,
@@ -347,19 +476,7 @@ class PostgresShadowEvidenceRepository:
                 row_factory=dict_row,
             ) as connection:
                 with connection.cursor() as cursor:
-                    cursor.execute(
-                        LIST_SHADOW_RUNS_BY_AGENT_SCOPED_SQL
-                        if self._expected_organization_id is not None
-                        else LIST_SHADOW_RUNS_BY_AGENT_SQL,
-                        {
-                            "agent_run_id": agent_run_id,
-                            **(
-                                {"organization_id": self._expected_organization_id}
-                                if self._expected_organization_id is not None
-                                else {}
-                            ),
-                        },
-                    )
+                    cursor.execute(statement, parameters)
                     rows = cursor.fetchall()
         except psycopg.Error:
             return {
@@ -502,6 +619,24 @@ def _commit(connection: Any) -> None:
     if callable(commit):
         commit()
 
+
+
+def _scope_rejected_result(record: ShadowRunRecord) -> ShadowRepositoryResult:
+    # Do not reflect the foreign tenant ID, SQL, DSN or row state.
+    return {
+        "status": "rejected",
+        "shadow_record_id": record["shadow_record_id"],
+        "agent_run_id": record["agent_run_id"],
+        "run_id": record["run_id"],
+        "evidence_fingerprint": record["evidence_fingerprint"],
+        "diagnostic": {
+            "code": "SHADOW_ORGANIZATION_SCOPE_MISMATCH",
+            "message": "Shadow evidence organization scope mismatch.",
+            "failure_category": "rejected",
+            "safe_details": {},
+        },
+        "duration_ms": None,
+    }
 
 
 def _not_found_result(

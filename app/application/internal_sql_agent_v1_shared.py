@@ -78,8 +78,18 @@ def persist_shadow_record(
     if repository is None:
         return
     try:
-        repository.create(record)
-        repository.update_evidence(record)
+        created = repository.create(record)
+        # Persistence is best effort and must never change the official
+        # response. Rejections, conflicts with another scope and repository
+        # failures must stop here rather than finalizing an unrelated record
+        # with the same shadow_record_id.
+        if not isinstance(created, Mapping) or created.get("status") not in (
+            "created", "already_exists",
+        ):
+            return
+        updated = repository.update_evidence(record)
+        if not isinstance(updated, Mapping) or updated.get("status") != "updated":
+            return
         repository.finalize(
             FinalizeShadowRunRequest(
                 shadow_record_id=record["shadow_record_id"],

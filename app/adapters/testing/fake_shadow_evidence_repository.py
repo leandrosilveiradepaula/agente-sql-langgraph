@@ -106,13 +106,16 @@ class FakeShadowEvidenceRepository:
             }
         return {"status": "ok", "record": deepcopy(record), "diagnostic": None}
 
-    def list_by_agent_run_id(self, agent_run_id: str) -> ShadowRepositoryListResult:
+    def list_by_agent_run_id(
+        self, agent_run_id: str, *, run_id: str | None = None,
+    ) -> ShadowRepositoryListResult:
         return {
             "status": "ok",
             "records": [
                 deepcopy(record)
                 for record in self.records.values()
                 if record["agent_run_id"] == agent_run_id
+                and (run_id is None or record["run_id"] == run_id)
             ],
             "diagnostic": None,
         }
