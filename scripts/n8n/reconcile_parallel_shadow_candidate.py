@@ -70,6 +70,13 @@ API_SETTINGS_FIELDS = frozenset((
     "errorWorkflow", "timezone", "callerPolicy", "callerIds",
     "timeSavedPerExecution", "availableInMCP",
 ))
+# n8n@2.4.8 supports timeSavedMode ('fixed' | 'dynamic') internally, but
+# public workflowSettings.yml sets additionalProperties=false and omits it.
+# WorkflowService.update merges PUT settings over the persisted settings;
+# keep this one validated server-retained field outside the public PUT, then
+# attest that ALL settings stayed unchanged after the authorized update.
+# Never treat arbitrary unknown settings as safe to omit.
+API_SETTINGS_SERVER_RETAINED_FIELDS = frozenset(("timeSavedMode",))
 
 
 class ReconcileError(ValueError):
@@ -245,10 +252,21 @@ def _public_update_payload(workflow: dict) -> dict:
     settings = workflow.get("settings")
     if not isinstance(settings, dict):
         _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED_SETTINGS")
-    if set(settings) - API_SETTINGS_FIELDS:
+    if set(settings) - API_SETTINGS_FIELDS - API_SETTINGS_SERVER_RETAINED_FIELDS:
         # Unknown settings can alter workflow execution or exposure; never
         # drop or forward them merely to satisfy an API schema check.
         _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED_SETTINGS_FIELDS")
+    if "timeSavedMode" in settings and settings["timeSavedMode"] not in (
+        "fixed", "dynamic",
+    ):
+        _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED_SETTINGS_TIME_SAVED_MODE")
+    # A n8n 2.4.8 public PUT cannot accept timeSavedMode, but n8n's
+    # WorkflowService.update preserves it by merging the submitted settings.
+    # The dry-run checks compatibility without changing the original export.
+    public_settings = {
+        key: copy.deepcopy(value) for key, value in settings.items()
+        if key in API_SETTINGS_FIELDS
+    }
     nodes = workflow.get("nodes")
     if not isinstance(nodes, list) or len(nodes) != 7:
         _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED_NODES")
@@ -272,7 +290,7 @@ def _public_update_payload(workflow: dict) -> dict:
         "name": workflow["name"],
         "nodes": public_nodes,
         "connections": copy.deepcopy(workflow["connections"]),
-        "settings": copy.deepcopy(settings),
+        "settings": public_settings,
     }
     if "staticData" in workflow:
         if workflow["staticData"] is not None and not isinstance(
@@ -342,6 +360,11 @@ def reconcile(api, workflow_id: str, *, apply: bool = False,
     api.exchange(workflow_id, "PUT", payload)
     after = api.exchange(workflow_id, "GET")
     try:
+        # The PUT is ONLY a four-parameter transport upgrade, not a settings
+        # migration. In particular, timeSavedMode must remain unchanged even
+        # though the public API rejects it in the update request.
+        if after.get("settings") != before.get("settings"):
+            _fail("POST_APPLY_SETTINGS_DRIFT")
         # Only accept the exact patched parameters; n8n may rewrite the
         # version IDs, but must preserve all audited structural invariants.
         if not after.get("active") or (
