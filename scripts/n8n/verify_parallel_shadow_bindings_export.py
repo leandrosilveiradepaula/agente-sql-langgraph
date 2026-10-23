@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Validate one inactive imported n8n Shadow workflow from a private export.
+"""Validate one private n8n Shadow workflow export against an exact contract.
 
-Reads only workflow metadata and credential references, never credential
-values. Emits only fixed sanitized status codes. No network or SQL access.
+Inactive draft is the DEFAULT. The explicit --expect-active mode is only
+for the wrapper's --published export, never a request to activate the n8n
+workflow. Neither mode reads credential values or executes workflows.
 """
 from __future__ import annotations
 
@@ -57,7 +58,9 @@ def _credential_id(node: Mapping) -> str:
     return identity
 
 
-def validate_export(raw: object, workflow_id: str) -> dict[str, object]:
+def validate_export(
+    raw: object, workflow_id: str, *, expect_active: bool = False,
+) -> dict[str, object]:
     if not isinstance(workflow_id, str) or not EXPECTED_ID_RE.fullmatch(workflow_id):
         _reject("SHADOW_WORKFLOW_ID_INVALID")
     if isinstance(raw, list):
@@ -66,8 +69,15 @@ def validate_export(raw: object, workflow_id: str) -> dict[str, object]:
         raw = raw[0]
     if not isinstance(raw, Mapping) or raw.get("id") != workflow_id:
         _reject("SHADOW_WORKFLOW_ID_MISMATCH")
-    if raw.get("active") is not False or raw.get("isArchived") is True:
-        _reject("SHADOW_WORKFLOW_NOT_INACTIVE")
+    if raw.get("isArchived") is True:
+        _reject("SHADOW_WORKFLOW_ARCHIVED")
+    # Never infer the state from an inactive template or from the mode
+    # flag alone. Active and inactive audits have distinct strict contracts.
+    if raw.get("active") is not expect_active:
+        _reject(
+            "SHADOW_WORKFLOW_NOT_ACTIVE"
+            if expect_active else "SHADOW_WORKFLOW_NOT_INACTIVE"
+        )
     nodes = raw.get("nodes")
     if not isinstance(nodes, list) or len(nodes) != 7 or any(not isinstance(n, Mapping) for n in nodes):
         _reject("SHADOW_NODE_SET_MISMATCH")
@@ -104,9 +114,15 @@ def validate_export(raw: object, workflow_id: str) -> dict[str, object]:
     if raw.get("pinData") not in ({}, None):
         _reject("SHADOW_PINNED_DATA_PRESENT")
     settings = raw.get("settings")
-    if not isinstance(settings, Mapping) or any(
-        settings.get(key) != value for key, value in expected["settings"].items()
+    if (
+        not isinstance(settings, Mapping)
+        or any(
+            settings.get(key) != value for key, value in expected["settings"].items()
+        )
+        or settings.get("errorWorkflow") not in (None, "")
     ):
+        # A failure hook could run an unrelated workflow and bypass the
+        # explicitly isolated Shadow path, including in published mode.
         _reject("SHADOW_EXECUTION_PERSISTENCE_UNSAFE")
     for name, node in by_name.items():
         baseline = expected_by_name[name]
@@ -124,7 +140,17 @@ def validate_export(raw: object, workflow_id: str) -> dict[str, object]:
                 _reject("SHADOW_READ_METHOD_NOT_GET")
         if parameters != baseline["parameters"]:
             _reject("SHADOW_NODE_CONFIGURATION_DRIFT")
-        if any(node.get(flag) is True for flag in ("disabled", "continueOnFail", "alwaysOutputData", "executeOnce")):
+        if (
+            any(
+                node.get(flag) is True for flag in (
+                    "disabled", "continueOnFail", "alwaysOutputData",
+                    "executeOnce", "retryOnFail",
+                )
+            )
+            or node.get("onError") not in (None, "stopWorkflow")
+        ):
+            # Retrying Generate/Execute Approved or routing errors onward
+            # may duplicate side effects. Neither is allowed in Shadow.
             _reject("SHADOW_NODE_RUNTIME_FLAGS_UNSAFE")
         if name not in AUTH_NODES and "credentials" in node:
             _reject("SHADOW_UNEXPECTED_CREDENTIAL_REFERENCE")
@@ -137,7 +163,8 @@ def validate_export(raw: object, workflow_id: str) -> dict[str, object]:
         "contract": "n8n-parallel-shadow-g1-binding-audit-v1",
         "status": "pass",
         "read_only": True,
-        "workflow_active": False,
+        "workflow_active": expect_active,
+        "workflow_state_expectation": "active" if expect_active else "inactive",
         "node_count": 7,
         "webhook_header_auth_bound": True,
         "langgraph_header_auth_bound": True,
@@ -156,13 +183,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workflow", type=pathlib.Path, required=True)
     parser.add_argument("--workflow-id", required=True)
+    parser.add_argument(
+        "--expect-active", action="store_true",
+        help="Validate an active published export (wrapper must use --published).",
+    )
     args = parser.parse_args(argv)
     try:
         path = args.workflow
         if not path.is_file() or not 0 < path.stat().st_size <= MAX_BYTES:
             _reject("SHADOW_EXPORT_SIZE_INVALID")
         raw = json.loads(path.read_text(encoding="utf-8"))
-        result = validate_export(raw, args.workflow_id)
+        result = validate_export(
+            raw, args.workflow_id, expect_active=args.expect_active,
+        )
     except BindingAuditError as exc:
         print(json.dumps({"status": "rejected", "reason": str(exc)}))
         return 2
