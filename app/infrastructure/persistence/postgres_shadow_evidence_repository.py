@@ -192,6 +192,22 @@ LIST_SHADOW_RUNS_BY_AGENT_SCOPED_SQL = (
     )
 )
 
+# Fixed structural SQL variants, never interpolation of a run ID, tenant or
+# question into the query string. The WHERE clauses apply before the stored
+# evidence (including large internal snapshots) is read/deserialized.
+LIST_SHADOW_RUNS_BY_AGENT_AND_RUN_SQL = (
+    LIST_SHADOW_RUNS_BY_AGENT_SQL.replace(
+        "ORDER BY created_at, shadow_record_id",
+        "AND run_id = %(run_id)s\nORDER BY created_at, shadow_record_id",
+    )
+)
+LIST_SHADOW_RUNS_BY_AGENT_AND_RUN_SCOPED_SQL = (
+    LIST_SHADOW_RUNS_BY_AGENT_SCOPED_SQL.replace(
+        "ORDER BY created_at, shadow_record_id",
+        "AND run_id = %(run_id)s\nORDER BY created_at, shadow_record_id",
+    )
+)
+
 ConnectCallable = Callable[..., Any]
 
 
@@ -339,7 +355,31 @@ class PostgresShadowEvidenceRepository:
             "diagnostic": None,
         }
 
-    def list_by_agent_run_id(self, agent_run_id: str) -> ShadowRepositoryListResult:
+    def list_by_agent_run_id(
+        self,
+        agent_run_id: str,
+        *,
+        run_id: str | None = None,
+    ) -> ShadowRepositoryListResult:
+        scoped = self._expected_organization_id is not None
+        if run_id is not None:
+            statement = (
+                LIST_SHADOW_RUNS_BY_AGENT_AND_RUN_SCOPED_SQL
+                if scoped else LIST_SHADOW_RUNS_BY_AGENT_AND_RUN_SQL
+            )
+        else:
+            statement = (
+                LIST_SHADOW_RUNS_BY_AGENT_SCOPED_SQL
+                if scoped else LIST_SHADOW_RUNS_BY_AGENT_SQL
+            )
+        parameters = {
+            "agent_run_id": agent_run_id,
+            **({"run_id": run_id} if run_id is not None else {}),
+            **(
+                {"organization_id": self._expected_organization_id}
+                if scoped else {}
+            ),
+        }
         try:
             with self._connect(
                 self._dsn,
@@ -347,19 +387,7 @@ class PostgresShadowEvidenceRepository:
                 row_factory=dict_row,
             ) as connection:
                 with connection.cursor() as cursor:
-                    cursor.execute(
-                        LIST_SHADOW_RUNS_BY_AGENT_SCOPED_SQL
-                        if self._expected_organization_id is not None
-                        else LIST_SHADOW_RUNS_BY_AGENT_SQL,
-                        {
-                            "agent_run_id": agent_run_id,
-                            **(
-                                {"organization_id": self._expected_organization_id}
-                                if self._expected_organization_id is not None
-                                else {}
-                            ),
-                        },
-                    )
+                    cursor.execute(statement, parameters)
                     rows = cursor.fetchall()
         except psycopg.Error:
             return {
