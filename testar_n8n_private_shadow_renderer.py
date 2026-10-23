@@ -86,8 +86,9 @@ const source = data.map(x => {
 assert.equal(source[0]({
   target_path: "/v1/internal/sql-agent/generate"
 }), "http://shadow-internal:8000/v1/internal/sql-agent/generate");
-assert.equal(source[1]({agent_run_id: "agent:one/two"}),
-  "http://shadow-internal:8000/v1/internal/agent-runs/agent%3Aone%2Ftwo/shadow-runs?limit=10");
+assert.equal(source[1]({
+  agent_run_id: "agent:one/two", run_id: "lg-run:two/42"
+}), "http://shadow-internal:8000/v1/internal/agent-runs/agent%3Aone%2Ftwo/shadow-runs?run_id=lg-run%3Atwo%2F42&limit=10");
 console.log("PRIVATE_N8N_ENDPOINT_EXPRESSIONS=PASS");
 """
         completed = subprocess.run(

@@ -203,9 +203,10 @@ const response = runCode("Validate LangGraph Response", {
   body: {contract_version: "1", status: "success", agent_run_id: agentRunId, run_id: "run-one"}
 }, {"Validate Shadow Envelope": normalized});
 assert.equal(response.run_id, "run-one");
+assert.ok(nodes["Read Correlated Evidence"].parameters.url.includes("encodeURIComponent($json.run_id)"));
 const evidenceUrl = expression("Read Correlated Evidence", "url", response);
 assert.equal(evidenceUrl,
-  "http://shadow-internal:8000/v1/internal/agent-runs/agent-synthetic-1/shadow-runs?limit=10");
+  "http://shadow-internal:8000/v1/internal/agent-runs/agent-synthetic-1/shadow-runs?run_id=run-one&limit=10");
 const evidence = runCode("Assert Shadow Evidence", {
   statusCode: 200, body: {
     contract_version: "1", agent_run_id: agentRunId, items: [{

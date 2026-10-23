@@ -95,15 +95,27 @@ class ListAgentShadowRunsUseCase:
         agent_run_id: str,
         *,
         limit: int = DEFAULT_SHADOW_RUN_LIST_LIMIT,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         safe_limit = validate_shadow_run_list_limit(limit)
+        selected_run_id = (
+            validate_shadow_read_id(run_id, field="run_id")
+            if run_id is not None else None
+        )
         records = _list_records(self._repository, agent_run_id)
         # Never include another organization's events, even when an old or
         # compromised evidence store contains colliding agent_run_id values.
         scoped_records = [
             record for record in records
             if _read_scope_matches(record, self._expected_organization_id)
+            and (
+                selected_run_id is None
+                or record.get("run_id") == selected_run_id
+            )
         ]
+        # Select the exact attempt BEFORE applying the presentation limit.
+        # An older set of 10+ attempts for this agent_run_id must not
+        # obscure the run_id returned by LangGraph after its generation.
         ordered = sorted(
             scoped_records,
             key=lambda record: (

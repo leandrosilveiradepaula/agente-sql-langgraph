@@ -12,6 +12,7 @@ from app.adapters.testing.shadow_run_visualization_fixtures import (
     SYNTHETIC_QUESTION,
     SYNTHETIC_SQL,
     all_records,
+    generate_for_agent,
 )
 from app.application.internal_shadow_read_v1 import (
     GetShadowRunSafeViewUseCase,
@@ -94,6 +95,7 @@ def main() -> None:
     tests = [
         _test_get_shadow_run_handler,
         _test_get_list_handler,
+        _test_exact_attempt_after_many_older_records,
         _test_get_visualization_handler,
         _test_http_errors,
         _test_auth_boundary_bloqueia_read_antes_do_repository,
@@ -191,6 +193,52 @@ def _test_get_list_handler() -> None:
     assert body["limit"] == 1
     assert len(body["items"]) == 1
     assert body["items"][0]["event_type"] == "generate"
+
+
+def _test_exact_attempt_after_many_older_records() -> None:
+    agent = "synthetic-agent-with-retries"
+    records = [
+        generate_for_agent(agent, f"run-{index:03d}")
+        for index in range(15)
+    ]
+    target = generate_for_agent(agent, "run-999")
+    handler = _protected_handler(_repo_with_records(*records, target))
+    url = f"/v1/internal/agent-runs/{agent}/shadow-runs"
+    headers = {
+        "Authorization": f"Bearer {S2S_TOKEN}",
+        "Accept": "application/json",
+    }
+    unfiltered = _body(handler.handle(
+        _request("GET", url, query_string="limit=10", headers=headers)
+    ))
+    assert len(unfiltered["items"]) == 10
+    assert all(item["run_id"] != "run-999" for item in unfiltered["items"])
+
+    response = handler.handle(_request(
+        "GET", url, query_string="run_id=run-999&limit=1", headers=headers
+    ))
+    data = _body(response)
+    assert response["status_code"] == 200
+    assert len(data["items"]) == 1
+    assert data["items"][0]["run_id"] == "run-999"
+    assert data["items"][0]["shadow_record_id"] == target["shadow_record_id"]
+    assert "SELECT " not in json.dumps(data).upper()
+
+    missing = handler.handle(_request(
+        "GET", url, query_string="run_id=run-absent&limit=1", headers=headers
+    ))
+    assert missing["status_code"] == 200
+    assert _body(missing)["items"] == []
+
+    for query in ("run_id=", "run_id=../evil", "run_id=foo&run_id=bar",
+                  "run_id=with%20space", "run_id=" + "a" * 161):
+        blocked = handler.handle(
+            _request("GET", url, query_string=query, headers=headers)
+        )
+        assert blocked["status_code"] == 400
+        assert _body(blocked)["error"]["code"] in (
+            "RUN_ID_INVALID", "SHADOW_RUN_ID_INVALID"
+        )
 
 
 def _test_get_visualization_handler() -> None:
