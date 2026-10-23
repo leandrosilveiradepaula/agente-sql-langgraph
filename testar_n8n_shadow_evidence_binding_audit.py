@@ -64,6 +64,7 @@ class EvidenceBindingAuditTests(unittest.TestCase):
             "read_null", "extra_read_param", "topology_drift", "pinned_data",
             "save_execution", "save_error_execution", "manual_execution_storage",
             "disabled", "continue_on_fail", "retry", "unexpected_credentials",
+            "invalid_reader_parameters", "non_string_node_name",
         )
         for case in cases:
             data = fixture()
@@ -102,6 +103,8 @@ class EvidenceBindingAuditTests(unittest.TestCase):
             elif case == "continue_on_fail": read["continueOnFail"] = True
             elif case == "retry": read["retryOnFail"] = True
             elif case == "unexpected_credentials": by_name["Sanitize Evidence Response"]["credentials"] = copy.deepcopy(webhook["credentials"])
+            elif case == "invalid_reader_parameters": read["parameters"] = None
+            elif case == "non_string_node_name": read["name"] = ["not-a-name"]
             with self.subTest(case=case):
                 with self.assertRaises(EvidenceBindingAuditError):
                     validate_export(data, WORKFLOW_ID)
