@@ -128,22 +128,22 @@ def test_comparison_rejects_foreign_tenant_before_repository_access() -> None:
     )
     denied = compare.execute(_compare_request(two, "tenant-two"))
     assert denied["status"] == "rejected"
-    assert denied["code"] == "SHADOW_COMPARE_TENANT_MISMATCH"
+    assert denied["errors"][0]["code"] == "SHADOW_COMPARE_TENANT_MISMATCH"
     assert repo.read_count == 0
 
     # An attacker claiming the bound tenant cannot match a record actually
     # persisted for another tenant. No official SQL/raw evidence is returned.
     mismatch = compare.execute(_compare_request(two, "tenant-one"))
     assert mismatch["status"] == "rejected"
-    assert mismatch["code"] == "SHADOW_COMPARE_TENANT_MISMATCH"
+    assert mismatch["errors"][0]["code"] == "SHADOW_COMPARE_TENANT_MISMATCH"
     assert repo.read_count == 1
     assert SYNTHETIC_SQL not in repr(mismatch)
 
     permitted = compare.execute(_compare_request(one, "tenant-one"))
     assert permitted["status"] == "success"
-    assert permitted["details"]["tenant_identity_attested"] is True
-    assert permitted["details"]["financial_parity_proven"] is False
-    assert permitted["details"]["real_sql_executed"] is False
+    assert permitted["metadata"]["comparison"]["tenant_identity_attested"] is True
+    assert permitted["metadata"]["comparison"]["financial_parity_proven"] is False
+    assert permitted["metadata"]["comparison"]["real_sql_executed"] is False
 
 
 class ReadCursor:
