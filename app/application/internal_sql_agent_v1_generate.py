@@ -14,6 +14,8 @@ from app.application.internal_sql_agent_v1_shared import (
     preflight_approved,
     preflight_repairable,
     principal_to_user,
+    organization_scope_matches,
+    validated_organization_scope,
     shadow_record_id,
     state_errors,
     status_from_final_status,
@@ -62,6 +64,7 @@ class GenerateSqlUseCase:
         shadow_repository: ShadowEvidenceRepository | None = None,
         langgraph_version: str | None = None,
         langgraph_commit: str | None = None,
+        expected_organization_id: str | None = None,
     ) -> None:
         if context_repository is None:
             raise RuntimeError("context_repository deve ser injetado.")
@@ -79,6 +82,9 @@ class GenerateSqlUseCase:
         self._shadow_repository = shadow_repository
         self._langgraph_version = langgraph_version
         self._langgraph_commit = langgraph_commit
+        self._expected_organization_id = validated_organization_scope(
+            expected_organization_id
+        )
         self._receive_question = receive_question
         self._load_context = create_load_context_node(context_repository)
         self._classify_intent = classify_intent
@@ -90,6 +96,15 @@ class GenerateSqlUseCase:
 
     def execute(self, request: GenerateSqlV1Request) -> GenerateSqlV1Response:
         validation = validate_generate_request(request)
+        scope_ok = organization_scope_matches(
+            request, self._expected_organization_id
+        )
+        if not scope_ok:
+            validation.append(error(
+                "INTERNAL_ORGANIZATION_SCOPE_MISMATCH",
+                "principal",
+                "Request is not authorized for this organization scope.",
+            ))
         agent_run_id = string_field(request, "agent_run_id")
         run_id = new_run_id(self._id_generator)
         created_at = now_utc_iso()
@@ -102,12 +117,15 @@ class GenerateSqlUseCase:
                 state={},
                 errors=validation,
             )
-            self._persist_shadow(
-                request if isinstance(request, Mapping) else {},
-                {},
-                response,
-                created_at,
-            )
+            # A foreign or missing organization must never reach even the
+            # Shadow evidence store (nor context, provider, repair, preflight).
+            if scope_ok:
+                self._persist_shadow(
+                    request if isinstance(request, Mapping) else {},
+                    {},
+                    response,
+                    created_at,
+                )
             return response
 
         state: GraphState = {
