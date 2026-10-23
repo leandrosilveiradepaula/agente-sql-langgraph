@@ -200,6 +200,34 @@ def test_mapping_injetado_nao_depende_do_ambiente_real() -> None:
     assert config.connect_timeout_seconds == 3
 
 
+def test_fingerprint_pin_config_explicit_and_strict() -> None:
+    fingerprint = "a" * 64
+    env = {
+        "POSTGRES_DSN": FAKE_DSN,
+        "SEMANTIC_AGENT_VERSION": "semantic-test-v1",
+        "SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT": fingerprint,
+    }
+    config = load_postgres_context_runtime_config(env)
+    assert config.expected_context_fingerprint == fingerprint
+    assert load_postgres_context_runtime_config({
+        "POSTGRES_DSN": FAKE_DSN,
+        "SEMANTIC_AGENT_VERSION": "semantic-test-v1",
+    }).expected_context_fingerprint is None
+
+    for invalid in ("", "a" * 63, "A" * 64, " " + fingerprint,
+                    "random-tenant", "a" * 65, fingerprint + ";DROP"):
+        env["SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT"] = invalid
+        try:
+            load_postgres_context_runtime_config(env)
+        except RuntimeConfigError as error:
+            assert str(error) == (
+                "A variável SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT é inválida."
+            )
+            assert FAKE_DSN not in str(error)
+        else:
+            raise AssertionError("Invalid fingerprint pin must fail closed.")
+
+
 def main() -> None:
     tests = [
         (
@@ -234,6 +262,7 @@ def main() -> None:
             "mapping injetado independe do ambiente real",
             test_mapping_injetado_nao_depende_do_ambiente_real,
         ),
+        ("fingerprint do contexto configurado", test_fingerprint_pin_config_explicit_and_strict),
     ]
 
     for index, (name, test_function) in enumerate(

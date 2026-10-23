@@ -126,6 +126,7 @@ def create_postgres_context_repository(
         dsn=config.dsn,
         semantic_agent_version=config.semantic_agent_version,
         context_schema=config.context_schema,
+        expected_context_fingerprint=config.expected_context_fingerprint,
         connect_timeout_seconds=config.connect_timeout_seconds,
     )
 

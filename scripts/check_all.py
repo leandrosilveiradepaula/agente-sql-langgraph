@@ -100,6 +100,7 @@ STEPS = [
     ("testar_internal_shadow_sql_comparison.py", [sys.executable, "testar_internal_shadow_sql_comparison.py"]),
     ("testar_blind_shadow_benchmark.py", [sys.executable, "testar_blind_shadow_benchmark.py"]),
     ("testar_shadow_read_organization_scope.py", [sys.executable, "testar_shadow_read_organization_scope.py"]),
+    ("testar_shadow_context_portability_e2e.py", [sys.executable, "testar_shadow_context_portability_e2e.py"]),
     ("testar_n8n_workflow_export_audit.py", [sys.executable, "testar_n8n_workflow_export_audit.py"]),
     ("testar_shadow_full_flow_live_opt_in.py", [sys.executable, "testar_shadow_full_flow_live_opt_in.py"]),
     (

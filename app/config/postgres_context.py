@@ -5,6 +5,11 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from app.config.context_fingerprint import (
+    EXPECTED_CONTEXT_FINGERPRINT_ENV,
+    validate_expected_context_fingerprint,
+)
+
 
 POSTGRES_DSN_ENV = "POSTGRES_DSN"
 SEMANTIC_AGENT_VERSION_ENV = "SEMANTIC_AGENT_VERSION"
@@ -39,6 +44,7 @@ class PostgresContextRuntimeConfig:
     semantic_agent_version: str
     context_schema: str
     connect_timeout_seconds: int
+    expected_context_fingerprint: str | None = None
 
 
 def load_postgres_context_runtime_config(
@@ -72,11 +78,21 @@ def load_postgres_context_runtime_config(
         default=DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS,
     )
 
+    try:
+        expected_context_fingerprint = validate_expected_context_fingerprint(
+            source.get(EXPECTED_CONTEXT_FINGERPRINT_ENV)
+        )
+    except ValueError:
+        raise RuntimeConfigError(
+            f"A variável {EXPECTED_CONTEXT_FINGERPRINT_ENV} é inválida."
+        ) from None
+
     return PostgresContextRuntimeConfig(
         dsn=dsn,
         semantic_agent_version=semantic_agent_version,
         context_schema=context_schema,
         connect_timeout_seconds=connect_timeout_seconds,
+        expected_context_fingerprint=expected_context_fingerprint,
     )
 
 

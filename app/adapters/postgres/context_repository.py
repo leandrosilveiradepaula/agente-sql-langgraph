@@ -7,6 +7,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
+from app.config.context_fingerprint import validate_expected_context_fingerprint
 from app.domain.context import ContextSnapshot
 from app.domain.context_normalizer import (
     ContextNormalizationError,
@@ -331,6 +332,7 @@ class PostgresContextRepository:
         semantic_agent_version: str,
         context_schema: str = "public",
         catalog_tables: Mapping[str, str | None] | None = None,
+        expected_context_fingerprint: str | None = None,
         connect_timeout_seconds: int = 10,
         connect: ConnectCallable = psycopg.connect,
     ) -> None:
@@ -363,6 +365,11 @@ class PostgresContextRepository:
                 "connect_timeout_seconds deve ser um inteiro positivo."
             )
 
+        # Verify before opening any connection. No fingerprint fallback is
+        # inferred from a tenant ID, active version or prompt text.
+        self._expected_context_fingerprint = validate_expected_context_fingerprint(
+            expected_context_fingerprint
+        )
         self._dsn = normalized_dsn
         self._semantic_agent_version = normalized_version
         self._context_schema = normalized_schema
@@ -415,9 +422,20 @@ class PostgresContextRepository:
             )
 
         try:
-            return normalize_context_snapshot(raw_snapshot)
-
+            snapshot = normalize_context_snapshot(raw_snapshot)
         except ContextNormalizationError as error:
             raise ContextRepositoryError(
                 "O PostgreSQL retornou um snapshot semântico inválido."
             ) from error
+
+        if (
+            self._expected_context_fingerprint is not None
+            and snapshot["fingerprint"] != self._expected_context_fingerprint
+        ):
+            # Fail closed before resolver, planner, generator, repair and
+            # evidence persistence. Never report the observed hash, tenant
+            # catalog names, DSN or private rules in this exception.
+            raise ContextRepositoryError(
+                "O fingerprint do contexto semântico não corresponde ao aprovado."
+            )
+        return snapshot
