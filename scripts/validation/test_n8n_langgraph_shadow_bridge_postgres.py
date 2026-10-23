@@ -47,7 +47,12 @@ TABLE = "public.langgraph_shadow_runs"
 
 def _count(dsn: str) -> int:
     with psycopg.connect(dsn) as conn, conn.cursor() as cursor:
-        cursor.execute(f"SELECT count(*) FROM {TABLE}")
+        # Other independent tests also write into this disposable database.
+        # Count only this bridge's agent_run_id, never fixture-global rows.
+        cursor.execute(
+            f"SELECT count(*) FROM {TABLE} WHERE agent_run_id = %s",
+            (AGENT_RUN_ID,),
+        )
         return int(cursor.fetchone()[0])
 
 
