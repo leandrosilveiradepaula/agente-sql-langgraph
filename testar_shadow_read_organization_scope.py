@@ -271,6 +271,64 @@ def test_postgres_limits_rows_before_application_deserialization() -> None:
     )
 
 
+def test_exact_attempt_is_filtered_by_postgres_before_deserialization() -> None:
+    """Read only the selected attempt from the authorized tenant in SQL."""
+    # SQL must never contain runtime parameters or customer identifiers.
+    for tenant in ("tenant-one", None):
+        connector = ReadConnect()
+        repository = PostgresShadowEvidenceRepository(
+            dsn="postgresql://fake.invalid/db",
+            connect=connector,
+            expected_organization_id=tenant,
+        )
+        run_id = "run-attested-999"
+        answer = repository.list_by_agent_run_id(
+            "agent-run-repeated", run_id=run_id
+        )
+        assert answer["status"] == "ok"
+        assert len(connector.cursor.calls) == 1
+        statement, parameters = connector.cursor.calls[0]
+        assert "WHERE agent_run_id = %(agent_run_id)s" in statement
+        assert "AND run_id = %(run_id)s" in statement
+        assert parameters["run_id"] == run_id
+        assert parameters["agent_run_id"] == "agent-run-repeated"
+        assert run_id not in statement
+        assert "agent-run-repeated" not in statement
+        if tenant is None:
+            assert "organization_id" not in parameters
+            assert "principal ->> 'organization_id'" not in statement
+        else:
+            assert "AND principal ->> 'organization_id' = %(organization_id)s" in statement
+            assert parameters["organization_id"] == tenant
+            assert tenant not in statement
+        assert statement.count("ORDER BY created_at, shadow_record_id") == 1
+        assert not any(keyword in statement.upper() for keyword in (
+            "UPDATE ", "DELETE ", "INSERT ", "DROP "
+        ))
+
+        unfiltered = ReadConnect()
+        older = PostgresShadowEvidenceRepository(
+            dsn="postgresql://fake.invalid/db", connect=unfiltered,
+            expected_organization_id=tenant,
+        )
+        older.list_by_agent_run_id("agent-run-repeated")
+        normal_sql, normal_params = unfiltered.cursor.calls[0]
+        assert "AND run_id =" not in normal_sql
+        assert "run_id" not in normal_params
+
+    # A hostile selector is data, never executable query text. Validation
+    # of public URL IDs happens before this internal repository boundary.
+    injection = "attempt'; DROP TABLE private_evidence;--"
+    connection = ReadConnect()
+    target = PostgresShadowEvidenceRepository(
+        dsn="postgresql://fake.invalid/db", connect=connection
+    )
+    assert target.list_by_agent_run_id("agent-run-repeated", run_id=injection)["status"] == "ok"
+    statement, params = connection.cursor.calls[-1]
+    assert params["run_id"] == injection
+    assert injection not in statement
+
+
 def test_invalid_scope_refused_before_any_database_connection() -> None:
     for wrong in ("", "tenant two", "tenant-one';drop", "x" * 129):
         try:
@@ -303,6 +361,7 @@ def main() -> None:
         test_actual_s2s_asgi_routes_enforce_configured_organization,
         test_comparison_rejects_foreign_tenant_before_repository_access,
         test_postgres_limits_rows_before_application_deserialization,
+        test_exact_attempt_is_filtered_by_postgres_before_deserialization,
         test_invalid_scope_refused_before_any_database_connection,
     )
     for test in tests:
