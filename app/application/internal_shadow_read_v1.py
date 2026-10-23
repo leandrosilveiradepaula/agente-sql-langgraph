@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any, TypedDict
 
+from app.application.internal_sql_agent_v1_shared import validated_organization_scope
 from app.domain.shadow_evidence_types import ShadowRunRecord, validate_shadow_run_record
 from app.domain.shadow_run_visualization import (
     ShadowRunVisualization,
@@ -58,19 +59,36 @@ class ShadowRunListItem(TypedDict):
 
 
 class GetShadowRunSafeViewUseCase:
-    def __init__(self, *, repository: ShadowEvidenceRepository) -> None:
+    def __init__(
+        self,
+        *,
+        repository: ShadowEvidenceRepository,
+        expected_organization_id: str | None = None,
+    ) -> None:
         _require_repository(repository)
         self._repository = repository
+        self._expected_organization_id = validated_organization_scope(
+            expected_organization_id
+        )
 
     def execute(self, shadow_record_id: str) -> ShadowRunSafeView:
         record = _fetch_record(self._repository, shadow_record_id)
+        _require_read_scope(record, self._expected_organization_id)
         return safe_shadow_run_view(record)
 
 
 class ListAgentShadowRunsUseCase:
-    def __init__(self, *, repository: ShadowEvidenceRepository) -> None:
+    def __init__(
+        self,
+        *,
+        repository: ShadowEvidenceRepository,
+        expected_organization_id: str | None = None,
+    ) -> None:
         _require_repository(repository)
         self._repository = repository
+        self._expected_organization_id = validated_organization_scope(
+            expected_organization_id
+        )
 
     def execute(
         self,
@@ -80,8 +98,14 @@ class ListAgentShadowRunsUseCase:
     ) -> dict[str, Any]:
         safe_limit = validate_shadow_run_list_limit(limit)
         records = _list_records(self._repository, agent_run_id)
+        # Never include another organization's events, even when an old or
+        # compromised evidence store contains colliding agent_run_id values.
+        scoped_records = [
+            record for record in records
+            if _read_scope_matches(record, self._expected_organization_id)
+        ]
         ordered = sorted(
-            records,
+            scoped_records,
             key=lambda record: (
                 str(record.get("created_at", "")),
                 str(record.get("event_type", "")),
@@ -97,14 +121,50 @@ class ListAgentShadowRunsUseCase:
 
 
 class GetShadowRunVisualizationUseCase:
-    def __init__(self, *, repository: ShadowEvidenceRepository) -> None:
+    def __init__(
+        self,
+        *,
+        repository: ShadowEvidenceRepository,
+        expected_organization_id: str | None = None,
+    ) -> None:
         _require_repository(repository)
         self._repository = repository
+        self._expected_organization_id = validated_organization_scope(
+            expected_organization_id
+        )
 
     def execute(self, shadow_record_id: str) -> dict[str, Any]:
         record = _fetch_record(self._repository, shadow_record_id)
+        _require_read_scope(record, self._expected_organization_id)
         visualization = visualize_shadow_run(record)
         return safe_shadow_run_visualization(visualization)
+
+
+def _read_scope_matches(
+    record: Mapping[str, Any],
+    expected_organization_id: str | None,
+) -> bool:
+    """Bound deployments never return foreign or unscoped persisted evidence.
+
+    An unbound legacy runtime preserves its prior behavior; it does not
+    establish tenant isolation. The authenticated S2S layer is still required.
+    """
+    if expected_organization_id is None:
+        return True
+    principal = record.get("principal")
+    return (
+        isinstance(principal, Mapping)
+        and principal.get("organization_id") == expected_organization_id
+    )
+
+
+def _require_read_scope(
+    record: Mapping[str, Any], expected_organization_id: str | None,
+) -> None:
+    if not _read_scope_matches(record, expected_organization_id):
+        # 404 instead of 403 prevents disclosing whether another tenant's
+        # shadow_record_id exists. Never return the principal or raw evidence.
+        raise ShadowReadError("SHADOW_RECORD_NOT_FOUND", 404)
 
 
 def safe_shadow_run_view(record: ShadowRunRecord) -> ShadowRunSafeView:
