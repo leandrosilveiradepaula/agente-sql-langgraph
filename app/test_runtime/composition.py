@@ -155,6 +155,7 @@ def create_shadow_test_runtime(
             shadow_repository=observed_repository,
             langgraph_version=config.langgraph_version,
             langgraph_commit=config.langgraph_commit,
+            expected_organization_id=config.expected_organization_id,
         ),
         execute_approved_shadow_use_case=ExecuteApprovedSqlShadowUseCase(
             engine_preflight=engine_preflight,
@@ -163,6 +164,7 @@ def create_shadow_test_runtime(
             shadow_repository=observed_repository,
             langgraph_version=config.langgraph_version,
             langgraph_commit=config.langgraph_commit,
+            expected_organization_id=config.expected_organization_id,
         ),
         compare_shadow_sql_use_case=CompareShadowSqlUseCase(
             repository=observed_repository,
