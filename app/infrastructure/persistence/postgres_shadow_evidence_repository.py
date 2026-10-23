@@ -178,6 +178,20 @@ ORDER BY created_at, shadow_record_id
 """
 
 
+# Read-time predicate is fixed structural SQL; the organization value is
+# always a bound parameter and never interpolated into identifiers or queries.
+FETCH_SHADOW_RUN_SCOPED_SQL = (
+    FETCH_SHADOW_RUN_SQL.rstrip()
+    + "\nAND principal ->> 'organization_id' = %(organization_id)s\n"
+)
+LIST_SHADOW_RUNS_BY_AGENT_SCOPED_SQL = (
+    LIST_SHADOW_RUNS_BY_AGENT_SQL.replace(
+        "ORDER BY created_at, shadow_record_id",
+        "AND principal ->> 'organization_id' = %(organization_id)s"
+        "\nORDER BY created_at, shadow_record_id",
+    )
+)
+
 ConnectCallable = Callable[..., Any]
 
 
@@ -195,6 +209,7 @@ class PostgresShadowEvidenceRepository:
         dsn: str,
         connect_timeout_seconds: int = 10,
         connect: ConnectCallable = psycopg.connect,
+        expected_organization_id: str | None = None,
     ) -> None:
         normalized_dsn = dsn.strip()
         if not normalized_dsn:
@@ -205,9 +220,25 @@ class PostgresShadowEvidenceRepository:
             or connect_timeout_seconds <= 0
         ):
             raise ValueError("connect_timeout_seconds deve ser positivo.")
+        if expected_organization_id is not None:
+            # Keep a bounded plain identifier independent of tenant-specific
+            # tables, user questions or prompt text.
+            if (
+                not isinstance(expected_organization_id, str)
+                or not expected_organization_id
+                or len(expected_organization_id) > 128
+                or not expected_organization_id[0].isascii()
+                or not expected_organization_id[0].isalnum()
+                or not all(
+                    char.isascii() and (char.isalnum() or char in "._:-")
+                    for char in expected_organization_id
+                )
+            ):
+                raise ValueError("Expected organization scope is invalid.")
         self._dsn = normalized_dsn
         self._connect_timeout_seconds = connect_timeout_seconds
         self._connect = connect
+        self._expected_organization_id = expected_organization_id
 
     def create(self, record: ShadowRunRecord) -> ShadowRepositoryResult:
         captured = validate_shadow_run_record(record)
@@ -277,8 +308,17 @@ class PostgresShadowEvidenceRepository:
             ) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        FETCH_SHADOW_RUN_SQL,
-                        {"shadow_record_id": shadow_record_id},
+                        FETCH_SHADOW_RUN_SCOPED_SQL
+                        if self._expected_organization_id is not None
+                        else FETCH_SHADOW_RUN_SQL,
+                        {
+                            "shadow_record_id": shadow_record_id,
+                            **(
+                                {"organization_id": self._expected_organization_id}
+                                if self._expected_organization_id is not None
+                                else {}
+                            ),
+                        },
                     )
                     row = cursor.fetchone()
         except psycopg.Error:
@@ -308,8 +348,17 @@ class PostgresShadowEvidenceRepository:
             ) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        LIST_SHADOW_RUNS_BY_AGENT_SQL,
-                        {"agent_run_id": agent_run_id},
+                        LIST_SHADOW_RUNS_BY_AGENT_SCOPED_SQL
+                        if self._expected_organization_id is not None
+                        else LIST_SHADOW_RUNS_BY_AGENT_SQL,
+                        {
+                            "agent_run_id": agent_run_id,
+                            **(
+                                {"organization_id": self._expected_organization_id}
+                                if self._expected_organization_id is not None
+                                else {}
+                            ),
+                        },
                     )
                     rows = cursor.fetchall()
         except psycopg.Error:
