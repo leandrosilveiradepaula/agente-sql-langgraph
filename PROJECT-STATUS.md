@@ -3,7 +3,7 @@
 - Inventário sanitizado de **68 nós** do JSON fornecido pelo operador em 20/10: `docs/audits/n8n-official-68-node-externalization-ledger.md`.
 - Grafo estático do arquivo: **60 nós alcançáveis**, **8 inalcançáveis**; os oito não comprovam comportamento ativo. Triagem por responsabilidade com candidatos FORBIDDEN, TRANSITIONAL e STRUCTURAL; não é auditoria de cada expressão nem reconciliação com `--published`.
 - Principal direção: externalizar métricas, aliases, filtros, schema, prompt, planos e relatórios em contexto versionado; **não** transportar os hardcodes do cleaner para LangGraph. Cache/credenciais/tenant e pré-aprovação exigem gates próprios.
-- O adapter PostgreSQL atual consulta fontes canônicas incluindo mapeamento DRE; **portabilidade sem DRE, denominações físicas diferentes e enforcement por tenant não estão atestados**. Não ativar adaptação implícita por cliente.
+- **Candidata nesta branch:** o adapter PostgreSQL agora aceita mapeamento configurável de nomes das tabelas semânticas e DRE opcional via `CONTEXT_CATALOG_TABLES_JSON`, preservando o default antigo. Testes offline exercitam dois contextos físicos distintos e validação contra injeções. **Ainda não há implantação nem comprovação de paridade multicliente em bancos reais.** Enforcements de RBAC/tenant não foram implementados neste loader; continuam pendentes.
 - Workflow oficial e versões/credenciais runtime não foram alterados por este inventário. G1/G2 e paridade financeira continuam pendentes.
 
 ---
