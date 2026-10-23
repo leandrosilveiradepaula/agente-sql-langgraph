@@ -3211,6 +3211,7 @@ def test_planned_filters_vazio_preserva_compatibilidade() -> None:
 
 def main() -> None:
     tests = [
+        ("exemplos apenas sinais semanticos", test_exemplos_permanecem_sinais_semanticos_sem_integrar_query_plan),
         (
             "join target nao selecionado removido",
             test_join_rule_com_target_nao_selecionado_e_removida,
@@ -3823,5 +3824,3 @@ def test_exemplos_permanecem_sinais_semanticos_sem_integrar_query_plan() -> None
 
 if __name__ == "__main__":
     main()
-test_exemplos_permanecem_sinais_semanticos_sem_integrar_query_plan()
-
