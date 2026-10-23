@@ -126,6 +126,33 @@ def test_constroi_requisicao_do_query_plan() -> None:
     assert context["grouping_dimensions"] == []
 
 
+def test_exemplos_historicos_nao_cruzam_limite_do_gerador() -> None:
+    from json import dumps
+
+    original = _query_plan()
+    assert "business_question_examples" not in original["selected_pattern"]
+    baseline = build_sql_generation_request(original)
+    altered = deepcopy(original)
+    marker = "ARCHIVED_QUESTION_NOT_FOR_PROVIDER_01937"
+    altered["selected_pattern"]["business_question_examples"] = [marker]
+    altered["selected_pattern"]["matched_example"] = marker
+    altered["selected_pattern"]["golden_answer"] = marker
+    altered["selected_pattern"]["untrusted_extra"] = {"sql": marker}
+    altered["selection_diagnostic"]["candidates"] = [
+        {"criteria": {"matched_example": marker}}
+    ]
+    snapshot = deepcopy(altered)
+
+    candidate = build_sql_generation_request(altered)
+    assert marker not in dumps(candidate, ensure_ascii=False)
+    assert candidate == baseline
+    assert request_fingerprint(candidate) == request_fingerprint(baseline)
+    assert candidate["generation_context"]["selected_pattern"]["pattern_name"] == (
+        original["selected_pattern"]["pattern_name"]
+    )
+    assert altered == snapshot  # no mutation of QueryPlan or audit evidence
+
+
 def test_requisicao_propaga_dimensao_de_agrupamento_planejada() -> None:
     query_plan = _query_plan()
     query_plan["planning_context"]["detected_dimensions"] = [
@@ -851,6 +878,7 @@ def test_comportamento_deterministico_repetido() -> None:
 def main() -> None:
     tests = [
         ("constroi requisicao", test_constroi_requisicao_do_query_plan),
+        ("sem exemplos historicos no gerador", test_exemplos_historicos_nao_cruzam_limite_do_gerador),
         (
             "propaga dimensao de agrupamento",
             test_requisicao_propaga_dimensao_de_agrupamento_planejada,

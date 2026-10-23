@@ -70,6 +70,40 @@ def test_constroi_requisicao_minima() -> None:
     assert "token" not in serialized
 
 
+def test_exemplos_e_golden_answers_nao_cruzam_limite_do_reparo() -> None:
+    from json import dumps
+
+    base = _query_plan()
+    original = build_sql_repair_request(
+        current_sql=CURRENT_SQL,
+        query_plan=base,
+        engine_preflight_result=_preflight_result(),
+        repair_attempts=0,
+        max_repair_attempts=2,
+        repair_history=[],
+    )
+    adversarial = deepcopy(base)
+    sentinel = "HISTORICAL_EXAMPLE_NOT_FOR_REPAIR_78002"
+    adversarial["selected_pattern"]["business_question_examples"] = [sentinel]
+    adversarial["selected_pattern"]["matched_example"] = sentinel
+    adversarial["selected_pattern"]["expected_sql"] = sentinel
+    adversarial["selected_pattern"]["hidden_benchmark"] = {"answer": sentinel}
+    original_plan = deepcopy(adversarial)
+    safe = build_sql_repair_request(
+        current_sql=CURRENT_SQL,
+        query_plan=adversarial,
+        engine_preflight_result=_preflight_result(),
+        repair_attempts=0,
+        max_repair_attempts=2,
+        repair_history=[],
+    )
+
+    assert safe == original
+    assert request_fingerprint(safe) == request_fingerprint(original)
+    assert sentinel not in dumps(safe, ensure_ascii=False)
+    assert adversarial == original_plan
+
+
 def test_fingerprint_e_imutabilidade() -> None:
     plan = _query_plan()
     preflight = _preflight_result()
@@ -260,6 +294,7 @@ def test_comportamento_deterministico() -> None:
 def main() -> None:
     tests = [
         ("constroi requisicao", test_constroi_requisicao_minima),
+        ("sem golden answers no reparo", test_exemplos_e_golden_answers_nao_cruzam_limite_do_reparo),
         ("fingerprint imutabilidade", test_fingerprint_e_imutabilidade),
         (
             "limites e reparabilidade",

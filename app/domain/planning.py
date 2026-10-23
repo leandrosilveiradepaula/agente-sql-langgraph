@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any, Literal, TypedDict
 
 from app.domain.context import (
@@ -52,7 +54,6 @@ class SelectedPattern(TypedDict, total=False):
     priority: float | None
     required_tables: list[str]
     required_rules: list[str]
-    business_question_examples: list[str]
     sql_pattern: str
     notes: str | None
 
@@ -309,9 +310,34 @@ def selected_pattern_from_query_pattern(
         ),
         "required_tables": list(pattern.get("required_tables", [])),
         "required_rules": list(pattern.get("required_rules", [])),
-        "business_question_examples": list(
-            pattern.get("business_question_examples", [])
-        ),
         "sql_pattern": pattern.get("sql_pattern", ""),
         "notes": pattern.get("notes"),
     }
+
+# Pattern examples are used solely while choosing semantic candidates.
+# No literal examples, diagnostic match strings or unreviewed payload
+# attributes may cross the QueryPlan -> LLM generation/repair boundary.
+_PROVIDER_VISIBLE_SELECTED_PATTERN_FIELDS = (
+    "intent_name",
+    "pattern_name",
+    "priority",
+    "required_tables",
+    "required_rules",
+    "sql_pattern",
+    "notes",
+)
+
+
+def selected_pattern_for_provider(pattern: Mapping[str, Any]) -> dict[str, Any]:
+    """Project only versioned planning metadata authorized for an LLM.
+
+    Defensive allowlist: legacy or injected QueryPlans may still carry
+    `business_question_examples` or `matched_example`. Ignore both
+    instead of copying all fields. Neither the selected semantics nor the
+    original plan are mutated.
+    """
+    return deepcopy({
+        key: pattern[key]
+        for key in _PROVIDER_VISIBLE_SELECTED_PATTERN_FIELDS
+        if key in pattern
+    })

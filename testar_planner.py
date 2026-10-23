@@ -3211,6 +3211,7 @@ def test_planned_filters_vazio_preserva_compatibilidade() -> None:
 
 def main() -> None:
     tests = [
+        ("exemplos apenas sinais semanticos", test_exemplos_permanecem_sinais_semanticos_sem_integrar_query_plan),
         (
             "join target nao selecionado removido",
             test_join_rule_com_target_nao_selecionado_e_removida,
@@ -3798,6 +3799,28 @@ def test_temporal_plan_end_to_end_planner_projection() -> None:
     assert "event_date" in {
         column["name"] for column in projection["relevant_columns"]["schema_test.fact_metrics"]
     }
+
+def test_exemplos_permanecem_sinais_semanticos_sem_integrar_query_plan() -> None:
+    context = _context()
+    marker = "historical example marker intended only for semantic selection"
+    context["query_patterns"] = [
+        _pattern(pattern_name="selected_from_example", examples=[marker])
+    ]
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.91,
+        normalized_question=marker,
+    )
+    assert result["status"] == "planned"
+    assert result["selection_result"]["diagnostic"]["candidates"][0]["criteria"][
+        "matched_example"
+    ] == marker
+    assert "business_question_examples" not in result["query_plan"]["selected_pattern"]
+    assert "business_question_examples" not in result["selection_result"][
+        "selected_pattern"
+    ]
+
 
 if __name__ == "__main__":
     main()
