@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import psycopg
@@ -35,7 +35,7 @@ regras AS (
     r.validation_hint,
     r.severity,
     r.priority
-  FROM {context_schema}.ai_ducklake_agent_rules r
+  FROM {rules_relation} r
   JOIN cfg
     ON cfg.agent_version = r.agent_version
   WHERE r.is_active = TRUE
@@ -55,7 +55,7 @@ entidades AS (
     e.sql_filter_hint,
     e.business_rule,
     e.priority
-  FROM {context_schema}.ai_ducklake_entity_aliases e
+  FROM {entities_relation} e
   JOIN cfg
     ON cfg.agent_version = e.agent_version
   WHERE e.is_active = TRUE
@@ -79,7 +79,7 @@ dre AS (
     d.is_financial_result,
     d.sql_filter_hint,
     d.sort_order
-  FROM {context_schema}.ai_ducklake_dre_mapping d
+  FROM {dre_relation} d
   JOIN cfg
     ON cfg.agent_version = d.agent_version
   WHERE d.is_active = TRUE
@@ -98,7 +98,7 @@ padroes AS (
     p.sql_pattern,
     p.notes,
     p.priority
-  FROM {context_schema}.ai_ducklake_sql_patterns p
+  FROM {patterns_relation} p
   JOIN cfg
     ON cfg.agent_version = p.agent_version
   WHERE p.is_active = TRUE
@@ -122,7 +122,7 @@ catalogo AS (
     t.join_rules,
     t.ai_hint,
     t.priority
-  FROM {context_schema}.ai_ducklake_table_catalog t
+  FROM {catalog_relation} t
   JOIN cfg
     ON cfg.agent_version = t.agent_version
   WHERE t.is_allowed = TRUE
@@ -225,9 +225,79 @@ SELECT
 FROM cfg
 """
 
-LOAD_SEMANTIC_CONTEXT_SQL = LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE.format(
-    context_schema="public",
-)
+# Adapter-owned canonical collections; business schema/aliases/metrics are
+# loaded from versioned data. Table identities are configurable per tenant and
+# are never taken from prompts, generated SQL, or benchmark expectations.
+DEFAULT_CONTEXT_TABLES: dict[str, str] = {
+    "rules": "ai_ducklake_agent_rules",
+    "entities": "ai_ducklake_entity_aliases",
+    "dre": "ai_ducklake_dre_mapping",
+    "patterns": "ai_ducklake_sql_patterns",
+    "catalog": "ai_ducklake_table_catalog",
+}
+
+# Disabled optional mapping yields an empty typed relation. The DRE concept
+# is *optional*, never guessed for tenants whose accounting model lacks it.
+_EMPTY_DRE_RELATION = """(
+  SELECT
+    NULL::text AS agent_version,
+    FALSE::boolean AS is_active,
+    NULL::text AS dre_code,
+    NULL::text AS nivel_1_bi,
+    NULL::text AS business_description,
+    NULL::text AS sign_convention,
+    NULL::text AS category,
+    NULL::boolean AS is_revenue,
+    NULL::boolean AS is_deduction,
+    NULL::boolean AS is_cost,
+    NULL::boolean AS is_opex,
+    NULL::boolean AS is_financial_result,
+    NULL::jsonb AS sql_filter_hint,
+    NULL::integer AS sort_order
+  WHERE FALSE
+)"""
+
+
+def render_versioned_context_sql(
+    *,
+    context_schema: str,
+    catalog_tables: Mapping[str, str | None] | None = None,
+) -> str:
+    """Compile only allowlisted, externally configured catalog identifiers.
+
+    `dre=None` is the only supported omission: all remaining collections
+    are required structural metadata, not financial-business fallbacks.
+    Unrecognized keys, SQL expressions and cross-schema identifiers fail closed.
+    """
+    if not isinstance(context_schema, str) or not _POSTGRES_IDENTIFIER_PATTERN.fullmatch(context_schema):
+        raise ValueError("context_schema deve ser um identificador PostgreSQL simples.")
+    configured: dict[str, str | None] = dict(DEFAULT_CONTEXT_TABLES)
+    if catalog_tables is not None:
+        if not isinstance(catalog_tables, Mapping):
+            raise ValueError("catalog_tables deve ser um mapeamento.")
+        if set(catalog_tables) - set(DEFAULT_CONTEXT_TABLES):
+            raise ValueError("catalog_tables contém fonte desconhecida.")
+        configured.update(catalog_tables)
+
+    relations: dict[str, str] = {}
+    for key, table in configured.items():
+        if key == "dre" and table is None:
+            relations[key] = _EMPTY_DRE_RELATION
+            continue
+        if not isinstance(table, str) or not _POSTGRES_IDENTIFIER_PATTERN.fullmatch(table):
+            raise ValueError("catalog_tables contém identificador inválido.")
+        relations[key] = f"{context_schema}.{table}"
+
+    return LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE.format(
+        rules_relation=relations["rules"],
+        entities_relation=relations["entities"],
+        dre_relation=relations["dre"],
+        patterns_relation=relations["patterns"],
+        catalog_relation=relations["catalog"],
+    )
+
+
+LOAD_SEMANTIC_CONTEXT_SQL = render_versioned_context_sql(context_schema="public")
 
 
 ConnectCallable = Callable[..., Any]
@@ -248,6 +318,7 @@ class PostgresContextRepository:
         dsn: str,
         semantic_agent_version: str,
         context_schema: str = "public",
+        catalog_tables: Mapping[str, str | None] | None = None,
         connect_timeout_seconds: int = 10,
         connect: ConnectCallable = psycopg.connect,
     ) -> None:
@@ -283,8 +354,9 @@ class PostgresContextRepository:
         self._dsn = normalized_dsn
         self._semantic_agent_version = normalized_version
         self._context_schema = normalized_schema
-        self._load_sql = LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE.format(
+        self._load_sql = render_versioned_context_sql(
             context_schema=normalized_schema,
+            catalog_tables=catalog_tables,
         )
         self._connect_timeout_seconds = connect_timeout_seconds
         self._connect = connect
