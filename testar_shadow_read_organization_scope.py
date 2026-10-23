@@ -32,6 +32,16 @@ from app.domain.shadow_evidence_types import (
 from app.infrastructure.persistence.postgres_shadow_evidence_repository import (
     PostgresShadowEvidenceRepository,
 )
+from app.test_runtime.composition import create_shadow_test_runtime
+from app.test_runtime.offline_adapters import (
+    ShadowTestContextRepository,
+    ShadowTestSqlGenerator,
+    ShadowTestSqlRepairer,
+)
+from testar_internal_shadow_read_v1_http_handler import (
+    _env as _offline_env,
+    _run_asgi as _asgi_request,
+)
 
 
 def _record(organization_id: str, run_id: str) -> dict[str, Any]:
@@ -94,6 +104,47 @@ def test_read_and_visualization_never_return_foreign_tenant() -> None:
     assert {item["run_id"] for item in legacy["items"]} == {
         "run-one", "run-two", "run-legacy",
     }
+
+
+def test_actual_s2s_asgi_routes_enforce_configured_organization() -> None:
+    """Exercise production composition/HTTP handler with in-memory sources."""
+    repo = FakeShadowEvidenceRepository()
+    own = _record("tenant-one", "asgi-one")
+    foreign = _record("tenant-two", "asgi-two")
+    repo.create(own)
+    repo.create(foreign)
+    env = _offline_env()
+    env["LANGGRAPH_EXPECTED_ORGANIZATION_ID"] = "tenant-one"
+    runtime = create_shadow_test_runtime(
+        env,
+        shadow_repository_override=repo,
+        context_repository_override=ShadowTestContextRepository(),
+        sql_generator_override=ShadowTestSqlGenerator(),
+        sql_repairer_override=ShadowTestSqlRepairer(),
+    )
+    base = "/v1/internal/shadow-runs/"
+    own_status, own_body = _asgi_request(
+        runtime.app, "GET", base + own["shadow_record_id"]
+    )
+    assert own_status == 200
+    assert own_body["run_id"] == "asgi-one"
+
+    for path in (
+        base + foreign["shadow_record_id"],
+        base + foreign["shadow_record_id"] + "/visualization",
+    ):
+        code, body = _asgi_request(runtime.app, "GET", path)
+        assert code == 404
+        assert body["error"]["code"] == "SHADOW_RECORD_NOT_FOUND"
+        assert "tenant-two" not in repr(body)
+
+    status, result = _asgi_request(
+        runtime.app,
+        "GET",
+        "/v1/internal/agent-runs/agent-shared/shadow-runs",
+    )
+    assert status == 200
+    assert [item["run_id"] for item in result["items"]] == ["asgi-one"]
 
 
 class ReadCountingRepository(FakeShadowEvidenceRepository):
@@ -249,6 +300,7 @@ def test_invalid_scope_refused_before_any_database_connection() -> None:
 def main() -> None:
     tests = (
         test_read_and_visualization_never_return_foreign_tenant,
+        test_actual_s2s_asgi_routes_enforce_configured_organization,
         test_comparison_rejects_foreign_tenant_before_repository_access,
         test_postgres_limits_rows_before_application_deserialization,
         test_invalid_scope_refused_before_any_database_connection,
