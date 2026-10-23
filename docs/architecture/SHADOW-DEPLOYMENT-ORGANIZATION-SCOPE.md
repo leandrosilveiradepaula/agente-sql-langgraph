@@ -1,0 +1,57 @@
+# Shadow TEST — organização vinculada à implantação (opt-in)
+
+**Problema real:** o runtime Shadow já recebia `principal.organization_id`
+no contrato v1, mas não confrontava esse identificador com a organização
+cujo contexto/DSN foi implantado. O adapter PostgreSQL usa configuração
+de fonte por processo; ele não aplica RBAC por `user_profile`.
+
+## Proteção implementada
+
+`LANGGRAPH_EXPECTED_ORGANIZATION_ID` é uma configuração opcional
+**estrutural por implantação**. Quando fornecida, o runtime exige uma
+igualdade exata (case-sensitive) com `principal.organization_id`
+tanto em Generate quanto em Execute Approved Shadow, **antes de qualquer
+leitura de contexto, chamada de LLM, repair, preflight ou persistência
+de evidência**.
+
+A configuração é validada no startup; valores vazios, não identificadores,
+SQL, URLs e valores acima de 128 caracteres falham com erro sanitizado.
+Rejeições de organização ausente/diferente retornam
+`INTERNAL_ORGANIZATION_SCOPE_MISMATCH` e não persistem payload não
+autorizado. O caminho Execute Approved não devolve a SQL fornecida
+nesses casos. A opção não muda `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`.
+
+**Compatibilidade:** sem a nova variável, a API mantém seu comportamento
+legado. Isso preserva o Shadow de demonstração, **mas não é garantia de
+isolamento multi-tenant**.
+
+## Pré-condição para uso em tenants reais
+
+Não habilitar a variável em produção/Shadow atual enquanto Produto/n8n
+não obtiverem `organization_id` de identidade/autorização confiável e
+o transmitirem pelo canal S2S. No estado atual da Demo, a sessão envia
+somente `id`, `email` e `profile`; ativar este guard agora bloquearia
+todas as chamadas Shadow. A string não pode vir da pergunta, do modelo,
+da resposta oficial, de um cookie editável ou do benchmark.
+
+Para cada implantação por tenant, a origem de dados, o DSN, a versão do
+contexto, o segredo S2S e o banco de evidências também precisam estar
+isolados e revisados. Uma correspondência de `organization_id` não
+autentica um usuário: Produto conserva autenticação, permissões e
+ownership; o token S2S e o isolamento de banco continuam mandatórios.
+Não usar essa validação como pretexto para compartilhar DSNs/segredos
+entre organizações.
+
+## Evidência offline
+
+`testar_shadow_test_runtime.py` instancia dois runtimes com IDs de
+organização distintos e os mesmos componentes. As tentativas cruzadas
+ou sem organização são rejeitadas antes de gerador, preflight e
+persistência. Chamadas de organização correspondente continuam
+utilizando gerador/preflight fakes sem SQL financeiro. Isso demonstra
+o gate por deployment, **não** a portabilidade semântica completa, o
+enforcement de roles, a configuração de tenant na interface ou a
+equivalência n8n↔LangGraph no ambiente real.
+
+Nenhum n8n, Vercel, banco, tenant ativo, LLM paga, contexto versionado
+ou cutover foi alterado pelo PR.

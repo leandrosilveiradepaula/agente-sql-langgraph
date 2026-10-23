@@ -15,6 +15,8 @@ from app.application.internal_sql_agent_v1_shared import (
     preflight_approved,
     preflight_repairable,
     principal_to_user,
+    organization_scope_matches,
+    validated_organization_scope,
     shadow_record_id,
     state_errors,
     status_from_final_status,
@@ -53,6 +55,7 @@ class ExecuteApprovedSqlShadowUseCase:
         shadow_repository: ShadowEvidenceRepository | None = None,
         langgraph_version: str | None = None,
         langgraph_commit: str | None = None,
+        expected_organization_id: str | None = None,
     ) -> None:
         if engine_preflight is None:
             raise RuntimeError("engine_preflight deve ser injetado.")
@@ -64,6 +67,9 @@ class ExecuteApprovedSqlShadowUseCase:
         self._shadow_repository = shadow_repository
         self._langgraph_version = langgraph_version
         self._langgraph_commit = langgraph_commit
+        self._expected_organization_id = validated_organization_scope(
+            expected_organization_id
+        )
         self._security_gate = security_gate
         self._contract_gate = contract_gate
         self._engine_preflight = create_engine_preflight_node(engine_preflight)
@@ -74,6 +80,15 @@ class ExecuteApprovedSqlShadowUseCase:
         request: ExecuteApprovedSqlShadowV1Request,
     ) -> ExecuteApprovedSqlShadowV1Response:
         validation = validate_execute_shadow_request(request)
+        scope_ok = organization_scope_matches(
+            request, self._expected_organization_id
+        )
+        if not scope_ok:
+            validation.append(error(
+                "INTERNAL_ORGANIZATION_SCOPE_MISMATCH",
+                "principal",
+                "Request is not authorized for this organization scope.",
+            ))
         agent_run_id = string_field(request, "agent_run_id")
         run_id = new_run_id(self._id_generator)
         created_at = now_utc_iso()
@@ -88,18 +103,22 @@ class ExecuteApprovedSqlShadowUseCase:
                 run_id=run_id,
                 status="rejected",
                 message="Execute approved SQL shadow request rejected.",
-                approved_sql_original=approved_sql if approved_sql else None,
+                approved_sql_original=(
+                    approved_sql if scope_ok and approved_sql else None
+                ),
                 state={},
                 repaired_sql_proposal=None,
                 requires_reapproval=False,
                 errors=validation,
             )
-            self._persist_shadow(
-                request if isinstance(request, Mapping) else {},
-                {},
-                response,
-                created_at,
-            )
+            # No cross-tenant evidence persistence, gates or provider use.
+            if scope_ok:
+                self._persist_shadow(
+                    request if isinstance(request, Mapping) else {},
+                    {},
+                    response,
+                    created_at,
+                )
             return response
         try:
             query_plan = _build_synthetic_query_plan_from_approved_sql(approved_sql)

@@ -425,6 +425,102 @@ def test_catalogos_versionados_runtime_rejeitam_injecao() -> None:
             raise AssertionError("invalid catalog config must fail closed")
 
 
+def test_runtime_com_scope_organizacao_rejeita_outra_organizacao_sem_efeitos() -> None:
+    """Two different tenant-bound runtimes run the same code, no SQL or LLM."""
+    for expected, foreign in (
+        ("org-alpha", "org-beta"),
+        ("org-beta", "org-alpha"),
+    ):
+        repository = FakeShadowEvidenceRepository()
+        sql_generator = ShadowTestSqlGenerator()
+        runtime = create_shadow_test_runtime(
+            _env(LANGGRAPH_EXPECTED_ORGANIZATION_ID=expected),
+            shadow_repository_override=repository,
+            context_repository_override=ShadowTestContextRepository(),
+            sql_generator_override=sql_generator,
+            sql_repairer_override=ShadowTestSqlRepairer(),
+        )
+        assert runtime.config.expected_organization_id == expected
+        assert expected not in repr(runtime.config)
+        for claimed in (foreign, None):
+            for event, path, payload in (
+                ("generate", "/v1/internal/sql-agent/generate", _generate_payload()),
+                (
+                    "execute_approved",
+                    "/v1/internal/sql-agent/execute-approved-shadow",
+                    _execute_payload(),
+                ),
+            ):
+                claim = deepcopy(payload)
+                if claimed is None:
+                    claim["principal"].pop("organization_id", None)
+                else:
+                    claim["principal"]["organization_id"] = claimed
+                status, body = _run_asgi(runtime.app, "POST", path, claim)
+                assert status == 422, (event, status)
+                assert body["status"] == "rejected", (event, body.get("status"))
+                assert "INTERNAL_ORGANIZATION_SCOPE_MISMATCH" in {
+                    item["code"] for item in body["errors"]
+                }
+                assert body.get("sql") in (None, "")
+                assert body.get("approved_sql_original") in (None, "")
+                assert sql_generator.calls == 0
+                assert runtime.engine_preflight.calls == 0
+                assert repository.create_calls == 0
+                assert repository.finalize_calls == 0
+                assert not repository.records
+
+        # Within the matching scope, normal generation and safe preflight
+        # stay enabled. This is NOT an authorization/tenant parity claim.
+        good_generate = _generate_payload()
+        good_generate["principal"]["organization_id"] = expected
+        status, body = _run_asgi(
+            runtime.app,
+            "POST",
+            "/v1/internal/sql-agent/generate",
+            good_generate,
+        )
+        assert status == 200
+        assert body["status"] == "success"
+        assert sql_generator.calls == 1
+        assert runtime.engine_preflight.calls == 1
+        assert repository.create_calls > 0
+
+        good_execute = _execute_payload()
+        good_execute["principal"]["organization_id"] = expected
+        status, body = _run_asgi(
+            runtime.app,
+            "POST",
+            "/v1/internal/sql-agent/execute-approved-shadow",
+            good_execute,
+        )
+        assert status == 200
+        assert body["status"] == "success"
+        assert runtime.engine_preflight.calls == 2
+        assert runtime.config.allow_real_sql_execution is False
+
+
+def test_scope_organizacao_invalido_falha_no_startup() -> None:
+    for supplied in (
+        "",
+        " ",
+        "org.alpha/branch",
+        "other\\norganization",
+        "tenant-id;DROP TABLE x",
+        "s" * 129,
+    ):
+        try:
+            load_shadow_test_runtime_config(
+                _env(LANGGRAPH_EXPECTED_ORGANIZATION_ID=supplied)
+            )
+        except RuntimeError as error:
+            assert str(error) == "LANGGRAPH_EXPECTED_ORGANIZATION_ID is invalid."
+        else:
+            raise AssertionError("invalid tenant scope must fail before startup")
+    legacy = load_shadow_test_runtime_config(_env())
+    assert legacy.expected_organization_id is None
+
+
 def test_fake_repository_nao_e_usado_no_composition_root_test_real() -> None:
     runtime = create_shadow_test_runtime(_env())
     assert not isinstance(runtime.raw_shadow_repository, FakeShadowEvidenceRepository)
@@ -545,6 +641,8 @@ def main() -> None:
         test_shadow_runtime_propaga_schema_contexto_para_repository,
         test_catalogos_versionados_runtime_sem_dre,
         test_catalogos_versionados_runtime_rejeitam_injecao,
+        test_runtime_com_scope_organizacao_rejeita_outra_organizacao_sem_efeitos,
+        test_scope_organizacao_invalido_falha_no_startup,
         test_fake_repository_nao_e_usado_no_composition_root_test_real,
         test_dsn_nao_aparece_em_logs_ou_erros,
         test_request_logging_sanitizado,
