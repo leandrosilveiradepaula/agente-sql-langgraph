@@ -14,7 +14,11 @@ Separate from both the 68-node official workflow and the seven-node Shadow gener
 - Inbound arbitrary target_path, URL, SQL, question or other keys are rejected.
 - Only n8n -> LangGraph uses Authorization: Bearer and the existing separate S2S token.
 - Only safe run IDs, status, dates, flags, bounded numeric graph metadata
-  and graph topology are forwarded. No SQL, prompts, raw responses, diagnostics or secrets.
+  and graph topology are forwarded. Canonical LangGraph `final_status`,
+  `sequence`, and UTC timestamps with `+00:00` are normalized to Product
+  `status`, `order`, and compatible timestamps. Repair/reapproval flags
+  come from canonical visualization flags, and list responses cannot exceed
+  the requested limit. No SQL, prompts, raw responses, diagnostics or secrets.
 - Product MUST enforce its own session, profile and run ownership before calling
   this privileged backend-only relay. The relay cannot authenticate individual tenants.
 
