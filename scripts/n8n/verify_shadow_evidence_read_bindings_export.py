@@ -105,7 +105,8 @@ def validate_export(raw: object, workflow_id: str) -> dict[str, object]:
     settings = raw.get("settings")
     if not isinstance(settings, Mapping) or any(
         settings.get(k) != v for k, v in expected["settings"].items()
-    ):
+    ) or settings.get("errorWorkflow") not in (None, ""):
+        # An error workflow can invoke unrelated automation on failure.
         reject("EVIDENCE_PERSISTENCE_UNSAFE")
 
     for name, node in by_name.items():
