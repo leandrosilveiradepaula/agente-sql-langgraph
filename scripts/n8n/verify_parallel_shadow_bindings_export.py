@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Validate one private n8n Shadow workflow export against an exact contract.
 
-Inactive draft is the DEFAULT. The explicit --expect-active mode is only
-for the wrapper's --published export, never a request to activate the n8n
-workflow. Neither mode reads credential values or executes workflows.
+Inactive draft is the DEFAULT. The explicit --expect-active mode validates
+a published export when the n8n CLI supports --published. For n8n 2.4.8
+ONLY, --require-active-version-match allows the wrapper's exported CURRENT
+record iff its immutable versionId equals activeVersionId: there can then be
+no newer draft version. Neither mode activates a workflow or reads secrets.
 """
 from __future__ import annotations
 
@@ -24,6 +26,11 @@ from scripts.n8n.render_parallel_shadow_workflow import (
 
 MAX_BYTES = 2 * 1024 * 1024
 EXPECTED_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+# n8n@2.4.8 WorkflowEntity.versionId and .activeVersionId are UUIDs.
+# Fail closed rather than compare unknown or falsy version metadata.
+VERSION_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$"
+)
 CALL = "Call LangGraph Shadow"
 READ = "Read Correlated Evidence"
 WEBHOOK = "Webhook - Parallel Shadow"
@@ -60,6 +67,7 @@ def _credential_id(node: Mapping) -> str:
 
 def validate_export(
     raw: object, workflow_id: str, *, expect_active: bool = False,
+    require_active_version_match: bool = False,
 ) -> dict[str, object]:
     if not isinstance(workflow_id, str) or not EXPECTED_ID_RE.fullmatch(workflow_id):
         _reject("SHADOW_WORKFLOW_ID_INVALID")
@@ -78,6 +86,23 @@ def validate_export(
             "SHADOW_WORKFLOW_NOT_ACTIVE"
             if expect_active else "SHADOW_WORKFLOW_NOT_INACTIVE"
         )
+    if require_active_version_match:
+        if not expect_active:
+            _reject("SHADOW_VERSION_MATCH_REQUIRES_ACTIVE")
+        # n8n@2.4.8 export:workflow reads WorkflowRepository.find():
+        # only the CURRENT version's nodes/connections are exported.
+        # They can stand in for published *only when* the immutable
+        # version ids are exactly equal. This is not an API credential
+        # or execution/correlation attestation.
+        current = raw.get("versionId")
+        active = raw.get("activeVersionId")
+        if (
+            not isinstance(current, str) or not VERSION_ID_RE.fullmatch(current)
+            or not isinstance(active, str) or not VERSION_ID_RE.fullmatch(active)
+        ):
+            _reject("SHADOW_ACTIVE_VERSION_IDENTITY_UNVERIFIED")
+        if current != active:
+            _reject("SHADOW_PUBLISHED_VERSION_DIFFERS_FROM_DRAFT")
     nodes = raw.get("nodes")
     if not isinstance(nodes, list) or len(nodes) != 7 or any(not isinstance(n, Mapping) for n in nodes):
         _reject("SHADOW_NODE_SET_MISMATCH")
@@ -165,6 +190,7 @@ def validate_export(
         "read_only": True,
         "workflow_active": expect_active,
         "workflow_state_expectation": "active" if expect_active else "inactive",
+        "published_version_identity_matches_draft": require_active_version_match,
         "node_count": 7,
         "webhook_header_auth_bound": True,
         "langgraph_header_auth_bound": True,
@@ -185,7 +211,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workflow-id", required=True)
     parser.add_argument(
         "--expect-active", action="store_true",
-        help="Validate an active published export (wrapper must use --published).",
+        help="Require active=true in exported workflow (does not publish).",
+    )
+    parser.add_argument(
+        "--require-active-version-match", action="store_true",
+        help="Only for n8n 2.4.8 current export: require versionId == activeVersionId.",
     )
     args = parser.parse_args(argv)
     try:
@@ -195,6 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         raw = json.loads(path.read_text(encoding="utf-8"))
         result = validate_export(
             raw, args.workflow_id, expect_active=args.expect_active,
+            require_active_version_match=args.require_active_version_match,
         )
     except BindingAuditError as exc:
         print(json.dumps({"status": "rejected", "reason": str(exc)}))

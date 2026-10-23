@@ -16,6 +16,8 @@ from scripts.n8n.verify_parallel_shadow_bindings_export import (
 )
 
 WORKFLOW_ID = "synthetic-workflow-id"
+VERSION_ONE = "11111111-1111-4111-8111-111111111111"
+VERSION_TWO = "22222222-2222-4222-8222-222222222222"
 
 
 def fixture():
@@ -140,6 +142,115 @@ class ParallelShadowBindingAuditTests(unittest.TestCase):
                 json.loads(bad.stdout)["reason"],
                 "SHADOW_WORKFLOW_NOT_ACTIVE",
             )
+
+    def test_n8n_248_active_current_version_requires_exact_published_identity(self):
+        data = fixture()
+        data["active"] = True
+        data["versionId"] = VERSION_ONE
+        data["activeVersionId"] = VERSION_ONE
+        report = validate_export(
+            data, WORKFLOW_ID, expect_active=True,
+            require_active_version_match=True,
+        )
+        self.assertEqual(report["status"], "pass")
+        self.assertTrue(report["published_version_identity_matches_draft"])
+        self.assertNotIn(VERSION_ONE, json.dumps(report))
+        self.assertNotIn("do-not-echo", json.dumps(report))
+
+        # No draft/published confusion and no missing, null or malformed IDs.
+        failures = [
+            ("mismatch", {"activeVersionId": VERSION_TWO}, "SHADOW_PUBLISHED_VERSION_DIFFERS_FROM_DRAFT"),
+            ("missing", {"activeVersionId": None}, "SHADOW_ACTIVE_VERSION_IDENTITY_UNVERIFIED"),
+            ("incomplete", {"activeVersionId": ""}, "SHADOW_ACTIVE_VERSION_IDENTITY_UNVERIFIED"),
+            ("unknown", {"versionId": None}, "SHADOW_ACTIVE_VERSION_IDENTITY_UNVERIFIED"),
+            ("invalid", {"versionId": "not-a-version"}, "SHADOW_ACTIVE_VERSION_IDENTITY_UNVERIFIED"),
+            ("integer", {"activeVersionId": 1234}, "SHADOW_ACTIVE_VERSION_IDENTITY_UNVERIFIED"),
+        ]
+        for label, values, error in failures:
+            modified = copy.deepcopy(data)
+            modified.update(values)
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(BindingAuditError, error):
+                    validate_export(
+                        modified, WORKFLOW_ID, expect_active=True,
+                        require_active_version_match=True,
+                    )
+        with self.assertRaisesRegex(
+            BindingAuditError, "SHADOW_VERSION_MATCH_REQUIRES_ACTIVE",
+        ):
+            validate_export(
+                fixture(), WORKFLOW_ID, require_active_version_match=True,
+            )
+        modified = copy.deepcopy(data)
+        modified["active"] = False
+        with self.assertRaisesRegex(
+            BindingAuditError, "SHADOW_WORKFLOW_NOT_ACTIVE",
+        ):
+            validate_export(
+                modified, WORKFLOW_ID, expect_active=True,
+                require_active_version_match=True,
+            )
+
+    def test_n8n_248_identity_check_does_not_relax_existing_security(self):
+        for mutation in ("code_drift", "credential_drift", "unapproved_url",
+                         "topology", "saved_runs", "retries"):
+            data = fixture()
+            data["active"] = True
+            data["versionId"] = VERSION_ONE
+            data["activeVersionId"] = VERSION_ONE
+            names = {node["name"]: node for node in data["nodes"]}
+            if mutation == "code_drift":
+                names["Validate Shadow Envelope"]["parameters"]["jsCode"] += "// malicious"
+            elif mutation == "credential_drift":
+                del names["Read Correlated Evidence"]["credentials"]
+            elif mutation == "unapproved_url":
+                names["Call LangGraph Shadow"]["parameters"]["url"] = '={{ "https://public.example.org" + $json.target_path }}'
+            elif mutation == "topology":
+                data["connections"] = {}
+            elif mutation == "saved_runs":
+                data["settings"]["saveDataErrorExecution"] = "all"
+            elif mutation == "retries":
+                names["Call LangGraph Shadow"]["retryOnFail"] = True
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(BindingAuditError):
+                    validate_export(
+                        data, WORKFLOW_ID, expect_active=True,
+                        require_active_version_match=True,
+                    )
+
+    def test_cli_requires_opt_in_for_active_version_match(self):
+        script = pathlib.Path(__file__).parent / "scripts/n8n/verify_parallel_shadow_bindings_export.py"
+        data = fixture()
+        data["active"] = True
+        data["versionId"] = VERSION_ONE
+        data["activeVersionId"] = VERSION_ONE
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "private.json"
+            path.write_text(json.dumps([data]), encoding="utf-8")
+            base = [
+                sys.executable, str(script),
+                "--workflow", str(path), "--workflow-id", WORKFLOW_ID,
+                "--expect-active",
+            ]
+            result = subprocess.run(
+                base + ["--require-active-version-match"],
+                capture_output=True, text=True, timeout=15,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(json.loads(result.stdout)["published_version_identity_matches_draft"])
+            self.assertNotIn(VERSION_ONE, result.stdout)
+            data["activeVersionId"] = VERSION_TWO
+            path.write_text(json.dumps([data]), encoding="utf-8")
+            result = subprocess.run(
+                base + ["--require-active-version-match"],
+                capture_output=True, text=True, timeout=15,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(
+                json.loads(result.stdout)["reason"],
+                "SHADOW_PUBLISHED_VERSION_DIFFERS_FROM_DRAFT",
+            )
+            self.assertNotIn(VERSION_TWO, result.stdout)
 
     def test_accepts_imported_node_ids_and_implicit_reader_get(self):
         d = fixture()
