@@ -544,6 +544,56 @@ def test_rejeita_catalogos_injetados_ou_ausentes() -> None:
     assert "tenant_context.ai_ducklake_agent_rules" in safe
 
 
+def test_fingerprint_pin_allows_only_attested_semantic_content() -> None:
+    from app.domain.context_normalizer import normalize_context_snapshot
+
+    raw = _physical_snapshot()
+    expected = normalize_context_snapshot(raw)["fingerprint"]
+    connection = FakeConnect(row=raw)
+    repo = PostgresContextRepository(
+        dsn="postgresql://one.invalid/context",
+        semantic_agent_version="semantic-test-v1",
+        connect=connection,
+        expected_context_fingerprint=expected,
+    )
+    loaded = repo.load_active_context(user_profile="audit")
+    assert loaded["fingerprint"] == expected
+
+    # Version identity alone is insufficient: any meaning-changing edit
+    # from the same schema/version must be rejected before downstream
+    # semantic resolution or a generator could observe the changed rules.
+    drifted = deepcopy(raw)
+    drifted["entidades"][0]["user_term"] = "unexpected-different-intent-signal"
+    bad_connector = FakeConnect(row=drifted)
+    drifted_repo = PostgresContextRepository(
+        dsn="postgresql://other.invalid/context",
+        semantic_agent_version="semantic-test-v1",
+        connect=bad_connector,
+        expected_context_fingerprint=expected,
+    )
+    try:
+        drifted_repo.load_active_context(user_profile="audit")
+    except ContextRepositoryError as error:
+        assert "fingerprint" in str(error).lower()
+        assert expected not in str(error)
+        assert "unexpected-different-intent-signal" not in str(error)
+        assert "postgresql://" not in str(error)
+    else:
+        raise AssertionError("Semantic drift with same version must fail")
+
+    try:
+        PostgresContextRepository(
+            dsn="postgresql://fake.invalid/ctx",
+            semantic_agent_version="semantic-test-v1",
+            connect=FakeConnect(row=raw),
+            expected_context_fingerprint="invalid-SQL;DROP",
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Invalid fingerprint pin must fail at construction")
+
+
 def main() -> None:
     tests = [
         (
@@ -586,6 +636,7 @@ def main() -> None:
             "rejeita fontes de catálogo inválidas e DRE ausente",
             test_rejeita_catalogos_injetados_ou_ausentes,
         ),
+        ("pin imutável contra drift semântico", test_fingerprint_pin_allows_only_attested_semantic_content),
     ]
 
     for index, (name, test_function) in enumerate(
