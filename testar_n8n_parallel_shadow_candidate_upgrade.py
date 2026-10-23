@@ -148,6 +148,36 @@ class CandidateReconciliationTests(unittest.TestCase):
             self.assertEqual(len(build_reconciliation(
                 api.workflow, WORKFLOW_ID, _historical_code())[1]), 0)
 
+    def test_offline_export_mode_requires_no_api_key_and_never_writes(self):
+        import subprocess
+        import sys
+        script = pathlib.Path(__file__).parent / "scripts/n8n/reconcile_parallel_shadow_candidate.py"
+        data = old_candidate()
+        with tempfile.TemporaryDirectory() as temp:
+            path = pathlib.Path(temp) / "private.json"
+            path.write_text(json.dumps([data]), encoding="utf-8")
+            base = [
+                sys.executable, str(script), "--workflow-file", str(path),
+                "--workflow-id", WORKFLOW_ID,
+            ]
+            import os
+            env = dict(os.environ)
+            env.pop("N8N_API_KEY", None)
+            result = subprocess.run(
+                base, capture_output=True, text=True, timeout=15, env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(json.loads(result.stdout)["status"], "ready")
+            self.assertNotIn("do-not-echo", result.stdout + result.stderr)
+            blocked = subprocess.run(
+                base + ["--apply"], capture_output=True, text=True,
+                timeout=15, env=env,
+            )
+            self.assertEqual(blocked.returncode, 2)
+            self.assertEqual(
+                json.loads(blocked.stdout)["reason"], "OFFLINE_EXPORT_CANNOT_APPLY",
+            )
+
     def test_api_rejects_insecure_or_redirecting_configuration(self):
         for base in ("http://n8n.example.org", "https://user:pass@n8n.example.org",
                      "https://n8n.example.org/path", "https://n8n.example.org/#frag"):

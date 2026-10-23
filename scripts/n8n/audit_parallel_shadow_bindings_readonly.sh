@@ -14,6 +14,7 @@ N8N_CONTAINER="${N8N_CONTAINER:-}"
 WORKFLOW_ID=""
 ACTIVE_PUBLISHED=false
 ACTIVE_VERSION_MATCH=false
+UPGRADE_PLAN=false
 PRIVATE_DIR=""
 REMOTE_DIR=""
 
@@ -38,9 +39,14 @@ while (( $# > 0 )); do
     --active-version-match)
       ACTIVE_VERSION_MATCH=true
       shift ;;
+    --upgrade-plan)
+      # n8n 2.4.8, active + matching UUID identity, no API key or POST.
+      UPGRADE_PLAN=true
+      ACTIVE_VERSION_MATCH=true
+      shift ;;
     -h|--help)
-      echo 'Usage: bash scripts/n8n/audit_parallel_shadow_bindings_readonly.sh --workflow-id ID [--container NAME] [--active-published | --active-version-match]'
-      echo 'Default: inactive draft. --active-published: CLI --published; --active-version-match: n8n 2.4.8 only, require identical current/active version IDs.'
+      echo 'Usage: bash scripts/n8n/audit_parallel_shadow_bindings_readonly.sh --workflow-id ID [--container NAME] [--active-published | --active-version-match | --upgrade-plan]'
+      echo 'Default: inactive draft. --active-published: CLI --published; --active-version-match: n8n 2.4.8 matching versions; --upgrade-plan: read-only historical reconciliation.'
       exit 0 ;;
     *) reject "UNKNOWN_ARGUMENT" ;;
   esac
@@ -130,11 +136,21 @@ fi
 if [[ "$ACTIVE_VERSION_MATCH" == true ]]; then
   VERIFY_ARGS+=(--require-active-version-match)
 fi
-if ! python3 "$ROOT/scripts/n8n/verify_parallel_shadow_bindings_export.py" \
-  "${VERIFY_ARGS[@]}" >"$PRIVATE_DIR/report.json" 2>"$PRIVATE_DIR/verify.err"; then
-  # Only the verifier's sanitized, machine-generated reason is printed.
-  cat "$PRIVATE_DIR/report.json"
-  reject "WORKFLOW_BINDING_VERIFICATION_FAILED"
+if [[ "$UPGRADE_PLAN" == true ]]; then
+  if ! python3 "$ROOT/scripts/n8n/reconcile_parallel_shadow_candidate.py" \
+    --workflow-file "$PRIVATE_DIR/workflow.json" \
+    --workflow-id "$WORKFLOW_ID" \
+    >"$PRIVATE_DIR/report.json" 2>"$PRIVATE_DIR/verify.err"; then
+    cat "$PRIVATE_DIR/report.json"
+    reject "CANDIDATE_UPGRADE_PLAN_FAILED"
+  fi
+else
+  if ! python3 "$ROOT/scripts/n8n/verify_parallel_shadow_bindings_export.py" \
+    "${VERIFY_ARGS[@]}" >"$PRIVATE_DIR/report.json" 2>"$PRIVATE_DIR/verify.err"; then
+    # Only the verifier's sanitized, machine-generated reason is printed.
+    cat "$PRIVATE_DIR/report.json"
+    reject "WORKFLOW_BINDING_VERIFICATION_FAILED"
+  fi
 fi
 
 # Verify remote sensitive export deletion BEFORE reporting success.
@@ -147,7 +163,12 @@ REMOTE_DIR=""
 # Remove raw export locally before printing the sanitized report.
 rm -f -- "$PRIVATE_DIR/workflow.json"
 cat "$PRIVATE_DIR/report.json"
-echo 'G1_BINDINGS=PASS'
+if [[ "$UPGRADE_PLAN" == true ]]; then
+  echo 'G1_UPGRADE_PLAN=READ_ONLY'
+  echo 'G1_BINDINGS=LIVE_CANDIDATE_STILL_DRIFTED'
+else
+  echo 'G1_BINDINGS=PASS'
+fi
 if [[ "$ACTIVE_PUBLISHED" == true ]]; then
   echo 'G1_PUBLISHED_EXPORT_SELECTED=true'
 else

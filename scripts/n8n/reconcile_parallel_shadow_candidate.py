@@ -340,9 +340,23 @@ def reconcile(api, workflow_id: str, *, apply: bool = False,
     }
 
 
+class _OfflineExportApi:
+    """In-memory GET-only adapter; no HTTP, API key or workflow mutation."""
+
+    def __init__(self, exported: dict):
+        self.exported = exported
+
+    def exchange(self, workflow_id: str, method: str,
+                 payload: dict | None = None) -> dict:
+        if method != "GET" or self.exported.get("id") != workflow_id:
+            _fail("OFFLINE_EXPORT_ACCESS_REJECTED")
+        return copy.deepcopy(self.exported)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--n8n-base-url", required=True)
+    parser.add_argument("--n8n-base-url")
+    parser.add_argument("--workflow-file", type=pathlib.Path)
     parser.add_argument("--workflow-id", required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--expected-sha256", default="")
@@ -351,9 +365,31 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not WORKFLOW_ID_RE.fullmatch(args.workflow_id):
             _fail("WORKFLOW_ID_INVALID")
-        api = N8nApi(
-            args.n8n_base_url, os.environ.get("N8N_API_KEY", ""),
-        )
+        if bool(args.workflow_file) == bool(args.n8n_base_url):
+            _fail("SELECT_ONE_INPUT_SOURCE")
+        if args.workflow_file is not None:
+            # Allow a local export ONLY for read-only dry-run. API key not
+            # required, and even an operator opt-in cannot mutate this mode.
+            if args.apply:
+                _fail("OFFLINE_EXPORT_CANNOT_APPLY")
+            path = args.workflow_file
+            if not path.is_file() or not 0 < path.stat().st_size <= MAX_BYTES:
+                _fail("PRIVATE_EXPORT_INVALID")
+            try:
+                exported = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, ValueError):
+                _fail("PRIVATE_EXPORT_INVALID")
+            if isinstance(exported, list):
+                if len(exported) != 1:
+                    _fail("PRIVATE_EXPORT_NOT_SINGLE")
+                exported = exported[0]
+            if not isinstance(exported, dict):
+                _fail("PRIVATE_EXPORT_INVALID")
+            api = _OfflineExportApi(exported)
+        else:
+            api = N8nApi(
+                args.n8n_base_url, os.environ.get("N8N_API_KEY", ""),
+            )
         report = reconcile(
             api, args.workflow_id, apply=args.apply,
             expected_hash=args.expected_sha256,

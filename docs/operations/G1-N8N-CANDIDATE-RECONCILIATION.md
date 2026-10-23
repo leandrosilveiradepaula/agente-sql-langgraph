@@ -21,8 +21,24 @@ Fontes verificadas:
 
 ## Modo 1: revisão somente leitura (padrão)
 
-Somente após credencial API com escopo de leitura autenticada e acesso
-HTTPS válido, provisionada localmente no terminal da VPS (não neste chat):
+**Opção preferida no n8n 2.4.8: SEM criar API key nova.**
+O auditor já existente exporta o JSON para diretórios privados,
+consulta o reconciliador offline e apaga o arquivo antes de imprimir
+apenas o relatório sanitizado:
+
+```bash
+cd /docker/agente-sql-langgraph-repo
+bash scripts/n8n/audit_parallel_shadow_bindings_readonly.sh \
+  --workflow-id LwUsMRWi34D2ARWu1YzgV --upgrade-plan
+```
+
+Este comando funciona mesmo enquanto a auditoria de vínculos
+anterior reporta \`SHADOW_NODE_CONFIGURATION_DRIFT\`: valida a
+cópia corrigida EM MEMÓRIA, sem confundir o candidato real com um PASS.
+Nenhum webhook, token, LLM, SQL, publish ou import é executado.
+
+**Alternativa** com API HTTPS já disponibilizada e credencial com escopo
+de leitura, provisionada localmente (não neste chat):
 
 ```bash
 cd /docker/agente-sql-langgraph-repo
