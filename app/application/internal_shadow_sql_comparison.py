@@ -10,6 +10,10 @@ from copy import deepcopy
 import re
 from typing import Any
 
+from app.application.internal_sql_agent_v1_shared import (
+    organization_scope_matches,
+    validated_organization_scope,
+)
 from app.domain.result_normalization import stable_fingerprint
 from app.domain.shadow_evidence_types import validate_shadow_run_record
 from app.domain.sql_analysis import SqlAnalysisError, analyze_sql
@@ -29,10 +33,18 @@ _COMPARISON_FIELDS = (
 class CompareShadowSqlUseCase:
     """Read existing evidence only, compare statements, return sanitized facets."""
 
-    def __init__(self, *, repository: ShadowEvidenceRepository) -> None:
+    def __init__(
+        self,
+        *,
+        repository: ShadowEvidenceRepository,
+        expected_organization_id: str | None = None,
+    ) -> None:
         if repository is None or not callable(getattr(repository, "fetch_by_shadow_record_id", None)):
             raise RuntimeError("Shadow evidence repository must be injected.")
         self._repository = repository
+        self._expected_organization_id = validated_organization_scope(
+            expected_organization_id
+        )
 
     def execute(self, request: object) -> dict[str, Any]:
         if not isinstance(request, Mapping) or not _valid_request(request):
@@ -40,6 +52,10 @@ class CompareShadowSqlUseCase:
         agent_id = str(request["agent_run_id"])
         shadow_id = str(request["shadow_record_id"])
         principal = request["principal"]
+        if not organization_scope_matches(request, self._expected_organization_id):
+            # No foreign principal may trigger a repository lookup, SQL
+            # analysis, provider, benchmark or financial execution.
+            return _response("rejected", "SHADOW_COMPARE_TENANT_MISMATCH", agent_id)
         try:
             retrieved = self._repository.fetch_by_shadow_record_id(shadow_id)
         except Exception:

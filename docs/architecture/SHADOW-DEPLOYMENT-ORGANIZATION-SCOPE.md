@@ -55,3 +55,41 @@ equivalência n8n↔LangGraph no ambiente real.
 
 Nenhum n8n, Vercel, banco, tenant ativo, LLM paga, contexto versionado
 ou cutover foi alterado pelo PR.
+
+
+## Fechamento do caminho de leitura/comparação (candidato offline 2026-10-23)
+
+O escopo por deployment precisa proteger **toda** a superfície Shadow,
+não apenas Generate e Execute Approved. A configuração já existente
+`LANGGRAPH_EXPECTED_ORGANIZATION_ID` passa também para:
+
+- `GET /v1/internal/shadow-runs/{shadow_record_id}` (safe view);
+- `GET /v1/internal/shadow-runs/{shadow_record_id}/visualization`;
+- `GET /v1/internal/agent-runs/{agent_run_id}/shadow-runs`;
+- `POST /v1/internal/sql-agent/compare-shadow-sql` (avaliação posterior).
+
+Nos dois endpoints individuais, evidência com organização diferente ou
+ausente retorna **404 indistinguível de não encontrada**, sem renderizar
+dados. A listagem inclui apenas evidência pertencente ao escopo configurado,
+mesmo quando IDs de runs colidem entre organizações. Comparação recebe
+a restrição ainda **antes de consultar** o repositório; uma identidade
+da organização correta não autoriza evidência armazenada com principal
+divergente.
+
+O repositório PostgreSQL usa adicionalmente um filtro **SELECT parametrizado**
+por `principal ->> 'organization_id'`, aplicado no banco antes da
+desserialização. O nome da organização jamais é interpolado na SQL.
+Consultas antigas sem escopo continuam compatíveis, mas **não atestam
+segregação multicliente**. O servidor S2S continua protegendo as rotas.
+
+Validação sintética offline: `python testar_shadow_read_organization_scope.py`
+(verificações de duas organizações, mesmo `agent_run_id`, operações de
+leitura, comparação, ASGI e SQL parametrizada). Também integrado a
+`python scripts/check_all.py`.
+
+**Limites:** a proteção não cria memberships, RLS, DSN separado, política
+do Produto, implantação física isolada ou paridade de SQL/resultados.
+Sem `LANGGRAPH_EXPECTED_ORGANIZATION_ID` explicitamente configurado,
+o comportamento legado mantém-se, inclusive leitura não filtrada. O
+candidato não ativa flags, não muda banco/n8n, não executa SQL de negócio,
+não consulta a LLM e não autoriza publicação/cutover.

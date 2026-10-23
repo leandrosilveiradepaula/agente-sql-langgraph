@@ -168,6 +168,7 @@ def create_shadow_test_runtime(
         ),
         compare_shadow_sql_use_case=CompareShadowSqlUseCase(
             repository=observed_repository,
+            expected_organization_id=config.expected_organization_id,
         ),
         request_limits=request_limits,
         response_limits=response_limits,
@@ -175,12 +176,15 @@ def create_shadow_test_runtime(
     shadow_read_handler = create_internal_shadow_read_v1_http_handler(
         get_shadow_run_use_case=GetShadowRunSafeViewUseCase(
             repository=observed_repository,
+            expected_organization_id=config.expected_organization_id,
         ),
         list_agent_shadow_runs_use_case=ListAgentShadowRunsUseCase(
             repository=observed_repository,
+            expected_organization_id=config.expected_organization_id,
         ),
         get_shadow_run_visualization_use_case=GetShadowRunVisualizationUseCase(
             repository=observed_repository,
+            expected_organization_id=config.expected_organization_id,
         ),
         response_limits=response_limits,
     )
@@ -252,10 +256,14 @@ def _postgres_shadow_repository(
     connect_override: Any | None,
 ) -> PostgresShadowEvidenceRepository:
     if connect_override is None:
-        return PostgresShadowEvidenceRepository(dsn=config.shadow_database_dsn)
+        return PostgresShadowEvidenceRepository(
+            dsn=config.shadow_database_dsn,
+            expected_organization_id=config.expected_organization_id,
+        )
     return PostgresShadowEvidenceRepository(
         dsn=config.shadow_database_dsn,
         connect=connect_override,
+        expected_organization_id=config.expected_organization_id,
     )
 
 
