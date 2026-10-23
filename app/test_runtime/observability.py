@@ -37,8 +37,17 @@ class ObservedShadowEvidenceRepository:
     def fetch_by_shadow_record_id(self, shadow_record_id: str) -> Any:
         return self.inner.fetch_by_shadow_record_id(shadow_record_id)
 
-    def list_by_agent_run_id(self, agent_run_id: str) -> Any:
-        return self.inner.list_by_agent_run_id(agent_run_id)
+    def list_by_agent_run_id(
+        self, agent_run_id: str, *, run_id: str | None = None,
+    ) -> Any:
+        # Preserve old unfiltered callers, but forward exact attempt IDs
+        # through the observability layer. Dropping this selector makes the
+        # live read fail after its HTTP 202 acknowledgment.
+        if run_id is None:
+            return self.inner.list_by_agent_run_id(agent_run_id)
+        return self.inner.list_by_agent_run_id(
+            agent_run_id, run_id=run_id,
+        )
 
     def persistence_status(self, value: str | None) -> str | None:
         if not value:
