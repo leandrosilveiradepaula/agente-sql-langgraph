@@ -93,3 +93,28 @@ Sem `LANGGRAPH_EXPECTED_ORGANIZATION_ID` explicitamente configurado,
 o comportamento legado mantém-se, inclusive leitura não filtrada. O
 candidato não ativa flags, não muda banco/n8n, não executa SQL de negócio,
 não consulta a LLM e não autoriza publicação/cutover.
+
+
+## Defesa adicional na persistência (G4, candidato offline 2026-10-23)
+
+Mesmo após autenticação S2S e gate de organização no caso de uso, a
+camada PostgreSQL precisa defender suas próprias mutações:
+
+- `create` em deployment vinculado recusa qualquer principal sem
+  `organization_id` igual ao escopo server-side, **antes da conexão**;
+- `update_evidence` valida o principal enviado **e** condiciona o UPDATE
+  ao `principal ->> 'organization_id'` **já persistido** na linha;
+- `finalize` não recebe principal no contrato; o UPDATE valida o
+  `organization_id` da linha no WHERE e retorna `not_found` se ela
+  não pertencer ao deployment;
+- sem escopo configurado, mantém o comportamento anterior. Este modo
+  legado **não é segregação multicliente**.
+
+Todas as condições SQL são estruturais e parametrizadas; os valores não
+entram na string SQL. Uma tentativa fora do escopo não revela o tenant
+esperado nem qualquer SQL armazenada. Essa defesa não altera tabelas,
+RLS, migrations, credenciais, privilégios, o fluxo oficial n8n ou o
+controle humano de ativação. O teste `testar_shadow_evidence_persistence.py`
+comprova as quatro operações em modo vinculado/legado e que UPDATE sem
+linha elegível devolve `not_found`. Não substitui prova de isolamento
+em banco real com policies e conexões por tenant.
