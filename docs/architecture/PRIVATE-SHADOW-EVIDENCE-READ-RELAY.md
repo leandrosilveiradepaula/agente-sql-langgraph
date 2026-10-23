@@ -50,7 +50,7 @@ Executar no host Docker autorizado, sem informar tokens:
 
 ```bash
 cd /docker/agente-sql-langgraph-repo
-bash scripts/n8n/audit_shadow_evidence_read_bindings_readonly.sh \\
+bash scripts/n8n/audit_shadow_evidence_read_bindings_readonly.sh \
   --workflow-id ID_REAL_DO_WORKFLOW_NOVO
 ```
 
