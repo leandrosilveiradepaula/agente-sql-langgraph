@@ -514,8 +514,7 @@ def test_scope_organizacao_invalido_falha_no_startup() -> None:
                 _env(LANGGRAPH_EXPECTED_ORGANIZATION_ID=supplied)
             )
         except RuntimeError as error:
-            assert "LANGGRAPH_EXPECTED_ORGANIZATION_ID" in str(error)
-            assert supplied not in str(error)
+            assert str(error) == "LANGGRAPH_EXPECTED_ORGANIZATION_ID is invalid."
         else:
             raise AssertionError("invalid tenant scope must fail before startup")
     legacy = load_shadow_test_runtime_config(_env())
