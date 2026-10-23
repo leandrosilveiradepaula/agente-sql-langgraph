@@ -56,6 +56,10 @@ def test_parallel_n8n_workflow_contract() -> None:
     prepare = by_name["Validate Shadow Envelope"]["parameters"]["jsCode"]
     assert "generate" in prepare and "execute_approved" in prepare
     assert "approved_sql" in prepare and "correlation_metadata" in prepare
+    assert "organization_id" in prepare
+    response_check = by_name["Validate LangGraph Response"]["parameters"]["jsCode"]
+    assert "503" in response_check and "infrastructure_error" in response_check
+    assert "body.contract_version" in by_name["Assert Shadow Evidence"]["parameters"]["jsCode"]
     assert "SHADOW_ENVELOPE" in prepare
     assert "INTERNAL_GENERATE_QUESTION_REQUIRED" not in prepare
     assert "sql_template" not in prepare.lower()
@@ -138,6 +142,25 @@ const normalized = runCode("Validate Shadow Envelope", {body: payload});
 assert.equal(normalized.agent_run_id, agentRunId);
 assert.equal(normalized.shadow_request.question, question);
 assert.equal(normalized.shadow_request.correlation_metadata.request_id, requestId);
+assert.equal(normalized.shadow_request.principal.organization_id, undefined);
+const organizationId = "synthetic-org-blue";
+const scopedPayload = {...payload, principal: {...payload.principal, organization_id: organizationId}};
+const scoped = runCode("Validate Shadow Envelope", {body: scopedPayload});
+assert.equal(scoped.shadow_request.principal.organization_id, organizationId);
+assert.equal(JSON.parse(
+  expression("Call LangGraph Shadow", "jsonBody", scoped)
+).principal.organization_id, organizationId);
+assert.equal(scoped.agent_run_id, normalized.agent_run_id);
+// The n8n relay is not an identity provider. It must reject malformed
+// organization claims, never drop one silently or transform it to a default.
+for (const invalid of [
+  "", " ", "org/other", "tenant;DROP", "org\\nanother",
+  "x".repeat(129), 0, false, null, {}, ["org"]
+]) {
+  assert.throws(() => runCode("Validate Shadow Envelope", {
+    body: {...payload, principal: {...payload.principal, organization_id: invalid}}
+  }), /SHADOW_ENVELOPE_ORGANIZATION_INVALID/);
+}
 assert.deepEqual(Object.keys(normalized.shadow_request).sort(),
   ["agent_run_id", "contract_version", "correlation_metadata", "principal", "question"].sort());
 const ack = JSON.parse(expression("Acknowledge Shadow Receipt", "responseBody", normalized));
@@ -185,7 +208,7 @@ assert.equal(evidenceUrl,
   "http://shadow-internal:8000/v1/internal/agent-runs/agent-synthetic-1/shadow-runs?limit=10");
 const evidence = runCode("Assert Shadow Evidence", {
   statusCode: 200, body: {
-    agent_run_id: agentRunId, items: [{
+    contract_version: "1", agent_run_id: agentRunId, items: [{
       agent_run_id: agentRunId, run_id: "run-one", event_type: "generate",
       status: "success", shadow_record_id: "record-one"
     }]
@@ -193,6 +216,45 @@ const evidence = runCode("Assert Shadow Evidence", {
 }, {"Validate LangGraph Response": response});
 assert.equal(evidence.correlated, true);
 assert.equal(evidence.shadow_record_id, "record-one");
+assert.throws(() => runCode("Assert Shadow Evidence", {
+  statusCode: 200, body: {
+    contract_version: "2", agent_run_id: agentRunId, items: [{
+      agent_run_id: agentRunId, run_id: "run-one", event_type: "generate",
+      status: "success", shadow_record_id: "record-one"
+    }]
+  }
+}, {"Validate LangGraph Response": response}),
+/LANGGRAPH_SHADOW_EVIDENCE_LOOKUP_REJECTED/);
+// An authorized infrastructure failure is a valid, persisted terminal result.
+// Correlate the evidence rather than losing telemetry after the HTTP 202 ack.
+const infrastructureResponse = runCode("Validate LangGraph Response", {
+  statusCode: 503,
+  body: {
+    contract_version: "1", status: "infrastructure_error",
+    agent_run_id: agentRunId, run_id: "run-infrastructure"
+  }
+}, {"Validate Shadow Envelope": scoped});
+assert.equal(infrastructureResponse.status, "infrastructure_error");
+const infrastructureEvidence = runCode("Assert Shadow Evidence", {
+  statusCode: 200, body: {
+    contract_version: "1", agent_run_id: agentRunId, items: [{
+      agent_run_id: agentRunId, run_id: "run-infrastructure", event_type: "generate",
+      status: "infrastructure_error", shadow_record_id: "record-infrastructure"
+    }]
+  }
+}, {"Validate LangGraph Response": infrastructureResponse});
+assert.equal(infrastructureEvidence.correlated, true);
+assert.equal(infrastructureEvidence.shadow_record_id, "record-infrastructure");
+for (const [code, status] of [
+  [503, "success"], [503, "rejected"], [200, "infrastructure_error"],
+  [422, "infrastructure_error"], [500, "infrastructure_error"]
+]) {
+  assert.throws(() => runCode("Validate LangGraph Response", {
+    statusCode: code,
+    body: {contract_version:"1",status,agent_run_id:agentRunId,run_id:"run-other"}
+  }, {"Validate Shadow Envelope": scoped}),
+  /LANGGRAPH_SHADOW_GENERATE_RESPONSE_REJECTED/);
+}
 assert.throws(() => runCode("Validate Shadow Envelope", {
   body: {...payload, question: ""}
 }), /SHADOW_ENVELOPE_QUESTION_REJECTED/);
@@ -209,7 +271,7 @@ const duplicate = {
   status: "success", shadow_record_id: "record-one"
 };
 assert.throws(() => runCode("Assert Shadow Evidence", {
-  statusCode: 200, body: {agent_run_id: agentRunId, items: [duplicate, duplicate]}
+  statusCode: 200, body: {contract_version: "1", agent_run_id: agentRunId, items: [duplicate, duplicate]}
 }, {"Validate LangGraph Response": response}),
 /LANGGRAPH_SHADOW_EVIDENCE_CORRELATION_REJECTED/);
 const sqlOpaque = "  opaque text of approved SQL  ";
@@ -224,6 +286,10 @@ assert.throws(() => runCode("Validate Shadow Envelope", {
   body: {...executionPayload, llm_selection: selected}
 }), /SHADOW_ENVELOPE_LLM_SELECTION_REJECTED/);
 assert.equal(normalizedExecution.shadow_request.approved_sql, sqlOpaque);
+const scopedExecution = runCode("Validate Shadow Envelope", {
+  body: {...executionPayload, principal: {...payload.principal, organization_id: organizationId}}
+});
+assert.equal(scopedExecution.shadow_request.principal.organization_id, organizationId);
 assert.equal(normalizedExecution.shadow_request.question, undefined);
 assert.equal(expression("Call LangGraph Shadow", "url", normalizedExecution),
   "http://shadow-internal:8000/v1/internal/sql-agent/execute-approved-shadow");
@@ -233,7 +299,7 @@ const executionResponse = runCode("Validate LangGraph Response", {
 }, {"Validate Shadow Envelope": normalizedExecution});
 assert.equal(executionResponse.status, "rejected");
 const executionEvidence = runCode("Assert Shadow Evidence", {
-  statusCode: 200, body: {agent_run_id: agentRunId, items: [{
+  statusCode: 200, body: {contract_version: "1", agent_run_id: agentRunId, items: [{
     agent_run_id: agentRunId, run_id: "run-two",
     event_type: "execute_approved_shadow", status: "rejected",
     shadow_record_id: "record-two"
