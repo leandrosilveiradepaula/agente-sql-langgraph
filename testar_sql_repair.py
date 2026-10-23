@@ -88,6 +88,9 @@ def test_exemplos_e_golden_answers_nao_cruzam_limite_do_reparo() -> None:
     adversarial["selected_pattern"]["matched_example"] = sentinel
     adversarial["selected_pattern"]["expected_sql"] = sentinel
     adversarial["selected_pattern"]["hidden_benchmark"] = {"answer": sentinel}
+    adversarial["selected_pattern"]["sql_pattern"] = "SELECT '" + sentinel + "'"
+    adversarial["selected_pattern"]["notes"] = sentinel
+    adversarial["sql_pattern_metadata"] = "SELECT '" + sentinel + "'"
     original_plan = deepcopy(adversarial)
     safe = build_sql_repair_request(
         current_sql=CURRENT_SQL,
@@ -101,6 +104,10 @@ def test_exemplos_e_golden_answers_nao_cruzam_limite_do_reparo() -> None:
     assert safe == original
     assert request_fingerprint(safe) == request_fingerprint(original)
     assert sentinel not in dumps(safe, ensure_ascii=False)
+    assert "sql_pattern" not in safe["repair_context"]["selected_pattern"]
+    assert "notes" not in safe["repair_context"]["selected_pattern"]
+    from app.integrations.google_gemini.contracts import build_gemini_repair_prompt
+    assert sentinel not in build_gemini_repair_prompt(safe)
     assert adversarial == original_plan
 
 
