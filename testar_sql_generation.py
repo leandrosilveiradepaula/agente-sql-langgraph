@@ -120,9 +120,11 @@ def test_constroi_requisicao_do_query_plan() -> None:
     assert context["authorized_tables"][0]["qualified_name"] == (
         "schema_test.table_test"
     )
-    assert context["pattern_metadata"]["sql_pattern_metadata"] == (
-        "SELECT 1"
-    )
+    assert context["pattern_metadata"] == {
+        "pattern_name": _query_plan()["selected_pattern"]["pattern_name"],
+    }
+    assert "sql_pattern" not in context["selected_pattern"]
+    assert "notes" not in context["selected_pattern"]
     assert context["grouping_dimensions"] == []
 
 
@@ -138,6 +140,14 @@ def test_exemplos_historicos_nao_cruzam_limite_do_gerador() -> None:
     altered["selected_pattern"]["matched_example"] = marker
     altered["selected_pattern"]["golden_answer"] = marker
     altered["selected_pattern"]["untrusted_extra"] = {"sql": marker}
+    # An arbitrary catalog pattern or note must not become a sample answer.
+    altered["selected_pattern"]["sql_pattern"] = "SELECT '" + marker + "'"
+    altered["selected_pattern"]["notes"] = marker
+    altered["sql_pattern_metadata"] = "SELECT '" + marker + "'"
+    altered["planning_context"]["selected_pattern"] = {
+        "sql_pattern": marker, "notes": marker,
+        "business_question_examples": [marker],
+    }
     altered["selection_diagnostic"]["candidates"] = [
         {"criteria": {"matched_example": marker}}
     ]
@@ -150,6 +160,13 @@ def test_exemplos_historicos_nao_cruzam_limite_do_gerador() -> None:
     assert candidate["generation_context"]["selected_pattern"]["pattern_name"] == (
         original["selected_pattern"]["pattern_name"]
     )
+    assert set(candidate["generation_context"]["pattern_metadata"]) == {
+        "pattern_name",
+    }
+    assert "sql_pattern" not in candidate["generation_context"]["selected_pattern"]
+    assert "notes" not in candidate["generation_context"]["selected_pattern"]
+    from app.integrations.google_gemini.contracts import build_gemini_prompt
+    assert marker not in build_gemini_prompt(candidate)
     assert altered == snapshot  # no mutation of QueryPlan or audit evidence
 
 

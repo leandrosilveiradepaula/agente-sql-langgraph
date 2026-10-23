@@ -257,7 +257,6 @@ _PLAN_FIELDS_USED = [
     "planning_context.planned_metrics",
     "planning_context.planned_filters",
     "planning_context.resolved_filter_bindings",
-    "sql_pattern_metadata",
 ]
 
 _OUTPUT_CONSTRAINTS = [
@@ -564,14 +563,11 @@ def build_sql_generation_request(
             "planned_metrics": planned_metrics,
             "planned_filters": planned_filters,
             "filter_bindings": filter_bindings,
+            # The selected pattern's identity is safe; unstructured notes
+            # and SQL templates remain private planner/evaluator data.
             "pattern_metadata": {
                 "pattern_name": selected_pattern.get(
                     "pattern_name",
-                    "",
-                ),
-                "notes": selected_pattern.get("notes"),
-                "sql_pattern_metadata": query_plan.get(
-                    "sql_pattern_metadata",
                     "",
                 ),
             },

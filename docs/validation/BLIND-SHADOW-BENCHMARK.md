@@ -133,3 +133,23 @@ Produto → n8n → LangGraph real com correlação) nem Jornada 4 (paridade
 numérica autorizada). Não prova que o workflow legado de 68 nós está
 publicado nem que foi substituído. A fonte oficial continua n8n+Gemini;
 o novo caminho permanece Shadow com SQL real desligada.
+
+
+## Fronteira de SQL catalogada x SQL gerada (G3)
+
+`ai_ducklake_sql_patterns.sql_pattern`, `notes` de padrões e
+`QueryPlan.sql_pattern_metadata` podem carregar SQL histórica ou
+pré-escrita; permanecem no **planejador/evidência** para auditoria, mas
+não atravessam o contrato LLM de Generate/Repair. O padrão enviado ao
+provedor contém somente intenção, nome, prioridade e referências de
+tabelas/regras autorizadas. `generation_context.pattern_metadata`
+mantém exclusivamente `pattern_name`. As regras, dimensões, métricas,
+filtros e joins continuam vindo do catálogo semântico versionado, sem
+resposta pronta codificada no novo motor.
+
+Os testes injetam SQL e markers de respostas históricas nesses três
+campos e verificam tanto os payloads quanto os prompts Gemini, sem
+mutação do QueryPlan e com fingerprints independentes de SQL pré-escrita.
+Isso protege essas rotas conhecidas, não certifica todos os textos
+livres de regras externas: catálogos continuam exigindo governança
+contra exemplos/expectativas de benchmark incorporados indevidamente.

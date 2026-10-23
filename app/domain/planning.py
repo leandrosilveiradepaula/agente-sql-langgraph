@@ -315,16 +315,16 @@ def selected_pattern_from_query_pattern(
     }
 
 # Pattern examples are used solely while choosing semantic candidates.
-# No literal examples, diagnostic match strings or unreviewed payload
-# attributes may cross the QueryPlan -> LLM generation/repair boundary.
+# Raw SQL templates and free-form notes remain versioned PLANNER metadata,
+# not provider instructions: they may contain historical/expected SQL.
+# Only structural identifiers and references may cross the shared
+# Generate/Repair boundary; metrics/filters/rules arrive separately.
 _PROVIDER_VISIBLE_SELECTED_PATTERN_FIELDS = (
     "intent_name",
     "pattern_name",
     "priority",
     "required_tables",
     "required_rules",
-    "sql_pattern",
-    "notes",
 )
 
 
@@ -332,9 +332,9 @@ def selected_pattern_for_provider(pattern: Mapping[str, Any]) -> dict[str, Any]:
     """Project only versioned planning metadata authorized for an LLM.
 
     Defensive allowlist: legacy or injected QueryPlans may still carry
-    `business_question_examples` or `matched_example`. Ignore both
-    instead of copying all fields. Neither the selected semantics nor the
-    original plan are mutated.
+    `business_question_examples`, `matched_example`, raw `sql_pattern`,
+    free-form `notes` and benchmark/expected SQL. Ignore them instead
+    of copying all fields; neither the plan nor its audit data is mutated.
     """
     return deepcopy({
         key: pattern[key]
