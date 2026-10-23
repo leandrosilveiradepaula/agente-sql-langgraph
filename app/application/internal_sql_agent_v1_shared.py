@@ -663,6 +663,34 @@ def preflight_repairable(state: Mapping[str, Any]) -> bool:
     )
 
 
+def validated_organization_scope(value: str | None) -> str | None:
+    """A deployment-wide single-tenant binding, not a client-specific rule."""
+    if value is None:
+        return None
+    if not _valid_identifier(value, 128):
+        raise ValueError("Expected organization scope is invalid.")
+    return value
+
+
+def organization_scope_matches(
+    request: object, expected_organization_id: str | None
+) -> bool:
+    """Fail closed when a tenant-bound runtime receives another tenant's run.
+
+    A matching claim is *not* authentication: the trusted S2S caller and
+    Product ownership checks remain required separately.
+    """
+    if expected_organization_id is None:
+        return True
+    if not isinstance(request, Mapping):
+        return False
+    principal = request.get("principal")
+    return (
+        isinstance(principal, Mapping)
+        and principal.get("organization_id") == expected_organization_id
+    )
+
+
 def principal_to_user(
     value: object,
 ) -> InternalSqlAgentPrincipal:
