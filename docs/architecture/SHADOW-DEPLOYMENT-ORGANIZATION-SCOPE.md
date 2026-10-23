@@ -137,3 +137,21 @@ reconhecido, não provoca novo update/finalize. O FakeRepository espelha as
 mesmas restrições de integridade. Isso protege evidências assinadas para
 auditoria G1/G4 e impede falso "já existia" em colisões, mas não torna o
 workflow n8n ativo nem demonstra paridade financeira.
+
+
+## Prova de integridade no PostgreSQL real descartável (G4)
+
+CI adicional `.github/workflows/shadow-evidence-integrity-postgres.yml` utiliza
+PostgreSQL 16 efêmero, banco `synthetic_ci` com credenciais sintéticas da
+própria execução, e a migração de evidências já versionada 001. O teste
+`scripts/validation/test_shadow_evidence_integrity_postgres.py` é bloqueado
+fora do GitHub Actions + banco loopback + `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`.
+Confere no PostgreSQL real: INSERT e duplicata idêntica; replay sem mutação de
+`updated_at`; colisão com SQL/fingerprint diferente; UPDATE/FINALIZE inválidos;
+colisão entre organizações sem visibilidade; listagem scoped/bounded com dois
+tenants e mesmo `agent_run_id`, e seleção exata por `run_id`.
+
+A consulta SQL sintética é **apenas um valor textual de evidência** e jamais
+executada no warehouse. CI em PostgreSQL descartável não comprova paridade
+financeira, política de deploy, autorização de ativação do n8n ou isolamento de
+credenciais na instalação real. Esta verificação independe da Vercel.
