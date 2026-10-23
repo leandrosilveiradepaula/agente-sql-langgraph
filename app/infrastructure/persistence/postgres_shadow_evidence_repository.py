@@ -114,6 +114,18 @@ SET
 WHERE shadow_record_id = %(shadow_record_id)s
 """
 
+# Update/finalize must check the *persisted* record's existing tenant,
+# never just the incoming principal. These are fixed structural SQL queries:
+# the deployment organization always remains a bound parameter.
+UPDATE_SHADOW_EVIDENCE_SCOPED_SQL = (
+    UPDATE_SHADOW_EVIDENCE_SQL.rstrip()
+    + "\nAND principal ->> 'organization_id' = %(organization_id)s\n"
+)
+FINALIZE_SHADOW_RUN_SCOPED_SQL = (
+    FINALIZE_SHADOW_RUN_SQL.rstrip()
+    + "\nAND principal ->> 'organization_id' = %(organization_id)s\n"
+)
+
 FETCH_SHADOW_RUN_SQL = """
 SELECT
   shadow_record_id,
@@ -258,6 +270,10 @@ class PostgresShadowEvidenceRepository:
 
     def create(self, record: ShadowRunRecord) -> ShadowRepositoryResult:
         captured = validate_shadow_run_record(record)
+        # A tenant-bound deployment must never persist an unscoped/foreign
+        # principal, even if a new caller bypasses upstream use-case checks.
+        if not self._record_in_scope(captured):
+            return _scope_rejected_result(captured)
         return self._execute_write(
             INSERT_SHADOW_RUN_SQL,
             _record_parameters(captured),
@@ -268,16 +284,33 @@ class PostgresShadowEvidenceRepository:
 
     def update_evidence(self, record: ShadowRunRecord) -> ShadowRepositoryResult:
         captured = validate_shadow_run_record(record)
+        if not self._record_in_scope(captured):
+            return _scope_rejected_result(captured)
         return self._execute_write(
-            UPDATE_SHADOW_EVIDENCE_SQL,
-            _record_parameters(captured),
+            UPDATE_SHADOW_EVIDENCE_SCOPED_SQL
+            if self._expected_organization_id is not None
+            else UPDATE_SHADOW_EVIDENCE_SQL,
+            {
+                **_record_parameters(captured),
+                **self._scope_parameters(),
+            },
             captured,
             status="updated",
             zero_status="not_found",
         )
 
     def finalize(self, request: FinalizeShadowRunRequest) -> ShadowRepositoryResult:
-        parameters = deepcopy(dict(request))
+        # Finalize does not carry a principal. The database must attest
+        # the already-persisted tenant before updating a record by ID.
+        parameters = {
+            **deepcopy(dict(request)),
+            **self._scope_parameters(),
+        }
+        statement = (
+            FINALIZE_SHADOW_RUN_SCOPED_SQL
+            if self._expected_organization_id is not None
+            else FINALIZE_SHADOW_RUN_SQL
+        )
         try:
             with self._connect(
                 self._dsn,
@@ -285,7 +318,7 @@ class PostgresShadowEvidenceRepository:
                 row_factory=dict_row,
             ) as connection:
                 with connection.cursor() as cursor:
-                    cursor.execute(FINALIZE_SHADOW_RUN_SQL, parameters)
+                    cursor.execute(statement, parameters)
                     rowcount = int(getattr(cursor, "rowcount", -1))
                 _commit(connection)
         except psycopg.Error:
@@ -311,6 +344,21 @@ class PostgresShadowEvidenceRepository:
             "diagnostic": None,
             "duration_ms": None,
         }
+
+    def _record_in_scope(self, record: ShadowRunRecord) -> bool:
+        if self._expected_organization_id is None:
+            return True
+        principal = record.get("principal")
+        return (
+            isinstance(principal, dict)
+            and principal.get("organization_id") == self._expected_organization_id
+        )
+
+    def _scope_parameters(self) -> dict[str, str]:
+        return (
+            {"organization_id": self._expected_organization_id}
+            if self._expected_organization_id is not None else {}
+        )
 
     def fetch_by_shadow_record_id(
         self,
@@ -530,6 +578,24 @@ def _commit(connection: Any) -> None:
     if callable(commit):
         commit()
 
+
+
+def _scope_rejected_result(record: ShadowRunRecord) -> ShadowRepositoryResult:
+    # Do not reflect the foreign tenant ID, SQL, DSN or row state.
+    return {
+        "status": "rejected",
+        "shadow_record_id": record["shadow_record_id"],
+        "agent_run_id": record["agent_run_id"],
+        "run_id": record["run_id"],
+        "evidence_fingerprint": record["evidence_fingerprint"],
+        "diagnostic": {
+            "code": "SHADOW_ORGANIZATION_SCOPE_MISMATCH",
+            "message": "Shadow evidence organization scope mismatch.",
+            "failure_category": "rejected",
+            "safe_details": {},
+        },
+        "duration_ms": None,
+    }
 
 
 def _not_found_result(
