@@ -15,6 +15,7 @@ from app.application.internal_sql_agent_v1 import (
     ExecuteApprovedSqlShadowUseCase,
     GenerateSqlUseCase,
 )
+from app.application.internal_sql_agent_v1_shared import persist_shadow_record
 from app.domain.shadow_evidence_types import (
     ShadowEvidenceValidationError,
     build_execute_shadow_record,
@@ -780,6 +781,9 @@ def test_postgres_tenant_bound_writes_fail_closed_and_do_not_cross_rows() -> Non
     assert cursor.query == FINALIZE_SHADOW_RUN_SCOPED_SQL
     assert cursor.parameters["organization_id"] == "org-1"
     assert "AND principal ->> 'organization_id' = %(organization_id)s" in cursor.query
+    assert "AND evidence_fingerprint = %(evidence_fingerprint)s" in cursor.query
+    assert cursor.parameters["evidence_fingerprint"] == allowed["evidence_fingerprint"]
+    assert allowed["evidence_fingerprint"] not in cursor.query
     assert "org-1" not in cursor.query
 
     # Simulate foreign/missing persisted row (WHERE predicate matched zero
@@ -788,6 +792,44 @@ def test_postgres_tenant_bound_writes_fail_closed_and_do_not_cross_rows() -> Non
     for result in (bound.update_evidence(allowed), bound.finalize(finale)):
         assert result["status"] == "not_found"
         assert result["diagnostic"]["code"] == "SHADOW_RECORD_NOT_FOUND"
+
+
+def test_persist_pipeline_never_finalizes_after_rejected_write() -> None:
+    """A declined create/update must never finalize another ID's record."""
+    record = _generate_record()
+
+    class StagedRepository:
+        def __init__(self, create_status, update_status):
+            self.create_status = create_status
+            self.update_status = update_status
+            self.calls: list[str] = []
+
+        def create(self, captured):
+            self.calls.append("create")
+            return {"status": self.create_status}
+
+        def update_evidence(self, captured):
+            self.calls.append("update")
+            return {"status": self.update_status}
+
+        def finalize(self, captured):
+            self.calls.append("finalize")
+            return {"status": "finalized"}
+
+    for status in ("rejected", "error", "not_found", None):
+        repository = StagedRepository(status, "updated")
+        persist_shadow_record(repository, record)
+        assert repository.calls == ["create"], status
+
+    for status in ("rejected", "error", "not_found", "already_exists", None):
+        repository = StagedRepository("created", status)
+        persist_shadow_record(repository, record)
+        assert repository.calls == ["create", "update"], status
+
+    for allowed_create in ("created", "already_exists"):
+        repository = StagedRepository(allowed_create, "updated")
+        persist_shadow_record(repository, record)
+        assert repository.calls == ["create", "update", "finalize"]
 
 
 def test_postgres_unbound_legacy_writes_keep_original_queries() -> None:
@@ -1036,6 +1078,7 @@ def main() -> None:
         test_postgres_create_returns_already_exists_when_rowcount_zero,
         test_postgres_finalize_returns_not_found_when_rowcount_zero,
         test_postgres_tenant_bound_writes_fail_closed_and_do_not_cross_rows,
+        test_persist_pipeline_never_finalizes_after_rejected_write,
         test_postgres_unbound_legacy_writes_keep_original_queries,
         test_postgres_fetch_and_list_normalize_timestamps_for_fingerprint,
         test_generate_shadow_postgres_round_trip_matches_fingerprint,
