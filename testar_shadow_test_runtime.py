@@ -369,6 +369,62 @@ def test_shadow_runtime_propaga_schema_contexto_para_repository() -> None:
     )
 
 
+def test_catalogos_versionados_runtime_sem_dre() -> None:
+    mapping = {
+        "rules": "tenant_rules_v2",
+        "entities": "tenant_aliases_v2",
+        "dre": None,
+        "patterns": "tenant_patterns_v2",
+        "catalog": "tenant_table_catalog_v2",
+    }
+    env = _env(
+        POSTGRES_CONTEXT_SCHEMA="tenant_catalogs",
+        CONTEXT_CATALOG_TABLES_JSON=json.dumps(mapping),
+    )
+    config = load_shadow_test_runtime_config(env)
+    assert config.context_catalog_tables == mapping
+    assert "tenant_rules_v2" not in repr(config)
+
+    runtime = create_shadow_test_runtime(env)
+    assert isinstance(runtime.context_repository, PostgresContextRepository)
+    query = runtime.context_repository._load_sql
+    for relation in (
+        "tenant_catalogs.tenant_rules_v2",
+        "tenant_catalogs.tenant_aliases_v2",
+        "tenant_catalogs.tenant_patterns_v2",
+        "tenant_catalogs.tenant_table_catalog_v2",
+    ):
+        assert relation in query
+    assert "ai_ducklake_dre_mapping" not in query
+    assert "WHERE FALSE" in query
+    assert runtime.config.allow_real_sql_execution is False
+
+
+def test_catalogos_versionados_runtime_rejeitam_injecao() -> None:
+    configurations = (
+        "{not-json}",
+        "[]",
+        "{}",
+        '{"rules":"unsafe;DELETE FROM x"}',
+        '{"rules":"other.schema"}',
+        '{"benchmark":"benchmark_answers"}',
+        '{"catalog":null}',
+        '{"dre":"schema.table"}',
+        '{"rules":4}',
+        " " + ("a" * 2049),
+    )
+    for configured in configurations:
+        try:
+            load_shadow_test_runtime_config(
+                _env(CONTEXT_CATALOG_TABLES_JSON=configured)
+            )
+        except RuntimeError as error:
+            assert "CONTEXT_CATALOG_TABLES_JSON" in str(error)
+            assert "DELETE" not in str(error)
+        else:
+            raise AssertionError("invalid catalog config must fail closed")
+
+
 def test_fake_repository_nao_e_usado_no_composition_root_test_real() -> None:
     runtime = create_shadow_test_runtime(_env())
     assert not isinstance(runtime.raw_shadow_repository, FakeShadowEvidenceRepository)
@@ -487,6 +543,8 @@ def main() -> None:
         test_watson_e_execute_sql_real_nao_instanciados,
         test_postgres_repository_selecionado_quando_configurado,
         test_shadow_runtime_propaga_schema_contexto_para_repository,
+        test_catalogos_versionados_runtime_sem_dre,
+        test_catalogos_versionados_runtime_rejeitam_injecao,
         test_fake_repository_nao_e_usado_no_composition_root_test_real,
         test_dsn_nao_aparece_em_logs_ou_erros,
         test_request_logging_sanitizado,

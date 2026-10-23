@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
@@ -17,6 +19,9 @@ CONTEXT_POSTGRES_DSN_ENV = "CONTEXT_POSTGRES_DSN"
 SEMANTIC_AGENT_VERSION_ENV = "SEMANTIC_AGENT_VERSION"
 POSTGRES_CONNECT_TIMEOUT_ENV = "POSTGRES_CONNECT_TIMEOUT_SECONDS"
 DEFAULT_POSTGRES_CONNECT_TIMEOUT_SECONDS = 10
+CONTEXT_CATALOG_TABLES_ENV = "CONTEXT_CATALOG_TABLES_JSON"
+_CONTEXT_CATALOG_KEYS = frozenset({"rules", "entities", "dre", "patterns", "catalog"})
+_CONTEXT_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +39,9 @@ class ShadowTestRuntimeConfig:
     allow_real_sql_execution: bool
     langgraph_version: str | None
     langgraph_commit: str | None
+    context_catalog_tables: Mapping[str, str | None] | None = field(
+        default=None, repr=False
+    )
 
 
 def load_shadow_test_runtime_config(
@@ -86,6 +94,7 @@ def load_shadow_test_runtime_config(
         allow_real_sql_execution=False,
         langgraph_version=_safe_optional(env.get("LANGGRAPH_VERSION")),
         langgraph_commit=_safe_optional(env.get("LANGGRAPH_COMMIT")),
+        context_catalog_tables=_context_catalog_tables(env),
     )
 
 
@@ -152,3 +161,27 @@ def _safe_optional(value: str | None) -> str | None:
     if not all(char.isalnum() or char in "._:-" for char in text):
         raise RuntimeError("Version metadata contains invalid characters.")
     return text
+
+def _context_catalog_tables(
+    environ: Mapping[str, str],
+) -> dict[str, str | None] | None:
+    """Parse strictly versioned, tenant-scoped context-source identifiers."""
+    raw = environ.get(CONTEXT_CATALOG_TABLES_ENV)
+    if raw is None or not raw.strip():
+        return None
+    if len(raw) > 2048:
+        raise RuntimeError("CONTEXT_CATALOG_TABLES_JSON is invalid.")
+    try:
+        tables = json.loads(raw)
+    except (ValueError, TypeError):
+        raise RuntimeError("CONTEXT_CATALOG_TABLES_JSON is invalid.") from None
+    if not isinstance(tables, dict) or not tables:
+        raise RuntimeError("CONTEXT_CATALOG_TABLES_JSON is invalid.")
+    if set(tables) - _CONTEXT_CATALOG_KEYS:
+        raise RuntimeError("CONTEXT_CATALOG_TABLES_JSON is invalid.")
+    for key, name in tables.items():
+        if key == "dre" and name is None:
+            continue
+        if not isinstance(name, str) or not _CONTEXT_IDENTIFIER.fullmatch(name):
+            raise RuntimeError("CONTEXT_CATALOG_TABLES_JSON is invalid.")
+    return tables

@@ -8,7 +8,9 @@ from psycopg.rows import dict_row
 
 from app.adapters.postgres.context_repository import (
     LOAD_SEMANTIC_CONTEXT_SQL,
+    LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE,
     PostgresContextRepository,
+    render_versioned_context_sql,
 )
 from app.ports.context_repository import ContextRepositoryError
 
@@ -242,6 +244,9 @@ def test_carrega_snapshot_com_query_parametrizada() -> None:
         "agent_version": "semantic-test-v1",
     }
 
+    assert LOAD_SEMANTIC_CONTEXT_SQL_TEMPLATE.format(
+        context_schema="public"
+    ) == LOAD_SEMANTIC_CONTEXT_SQL
     assert "%(agent_version)s" in LOAD_SEMANTIC_CONTEXT_SQL
     assert "semantic-test-v1" not in LOAD_SEMANTIC_CONTEXT_SQL
 
@@ -445,6 +450,100 @@ def test_valida_configuracao_do_adapter() -> None:
             )
 
 
+def test_portabilidade_contextos_fisicamente_distintos() -> None:
+    """Same adapter process with independent source schema and catalog names."""
+    first_connection = FakeConnect(row=_physical_snapshot())
+    first = _repository(first_connection)
+    first_context = first.load_active_context(user_profile="user")
+    assert first_context["allowed_schemas"] == ["schema_test"]
+
+    other = _physical_snapshot()
+    other["catalogo"][0]["table_name"] = "facts_other"
+    other["catalogo"][0]["schema_name"] = "other_data"
+    other["catalogo"][0]["key_columns"] = ["other_key"]
+    other["catalogo"][0]["primary_key"] = ["other_key"]
+    other["catalogo"][0]["metric_columns"] = ["other_amount"]
+    other["padroes"][0]["required_tables"] = ["other_data.facts_other"]
+    alternate_connection = FakeConnect(row=other)
+    second = PostgresContextRepository(
+        dsn="postgresql://another.invalid/context",
+        semantic_agent_version="semantic-test-v1",
+        context_schema="another_context",
+        catalog_tables={
+            "rules": "versioned_rules",
+            "entities": "versioned_entities",
+            "dre": None,
+            "patterns": "versioned_patterns",
+            "catalog": "versioned_catalog",
+        },
+        connect=alternate_connection,
+    )
+    second_context = second.load_active_context(user_profile="user")
+
+    assert second_context["version"] == first_context["version"]
+    assert second_context["allowed_schemas"] == ["other_data"]
+    assert second_context["fingerprint"] != first_context["fingerprint"]
+    compiled = alternate_connection.cursor.executed_query
+    assert compiled is not None
+    for relation in (
+        "another_context.versioned_rules",
+        "another_context.versioned_entities",
+        "another_context.versioned_patterns",
+        "another_context.versioned_catalog",
+    ):
+        assert relation in compiled
+    assert "another_context.ai_ducklake" not in compiled
+    assert "ai_ducklake_dre_mapping" not in compiled
+    assert "WHERE FALSE" in compiled
+    assert "NULL::text AS dre_code" in compiled
+    assert "benchmark" not in compiled.casefold()
+    assert alternate_connection.cursor.executed_parameters == {
+        "agent_version": "semantic-test-v1",
+    }
+
+
+def test_rejeita_catalogos_injetados_ou_ausentes() -> None:
+    for config in (
+        {"rules": "other_schema.rules"},
+        {"rules": "rules; DROP TABLE catalog"},
+        {"dre": "public.dre"},
+        {"dre": " "},
+        {"rules": None},
+        {"patterns": None},
+        {"catalog": "invalid-id"},
+        {"entities": "Name With Space"},
+        {"unknown_collection": "safe_name"},
+        ["rules_v1"],
+    ):
+        try:
+            render_versioned_context_sql(
+                context_schema="tenant_context",
+                catalog_tables=config,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("An unsafe or unknown source should be rejected")
+
+    for schema in ("tenant.context", "tenant;DROP", " ", "data\\schema"):
+        try:
+            render_versioned_context_sql(context_schema=schema)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("An invalid schema must be rejected")
+
+    # The optional collection can be omitted explicitly but must not be
+    # emulated with a made-up financial mapping or default fallback.
+    safe = render_versioned_context_sql(
+        context_schema="tenant_context",
+        catalog_tables={"dre": None},
+    )
+    assert "ai_ducklake_dre_mapping" not in safe
+    assert "WHERE FALSE" in safe
+    assert "tenant_context.ai_ducklake_agent_rules" in safe
+
+
 def main() -> None:
     tests = [
         (
@@ -478,6 +577,14 @@ def main() -> None:
         (
             "valida configuração do adapter",
             test_valida_configuracao_do_adapter,
+        ),
+        (
+            "carrega dois contextos materialmente distintos",
+            test_portabilidade_contextos_fisicamente_distintos,
+        ),
+        (
+            "rejeita fontes de catálogo inválidas e DRE ausente",
+            test_rejeita_catalogos_injetados_ou_ausentes,
         ),
     ]
 

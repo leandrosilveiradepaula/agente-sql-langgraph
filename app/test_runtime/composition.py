@@ -269,6 +269,7 @@ def _postgres_context_repository(
         dsn=config.context_postgres_dsn,
         semantic_agent_version=config.semantic_agent_version,
         context_schema=config.context_schema,
+        catalog_tables=config.context_catalog_tables,
         connect_timeout_seconds=config.context_connect_timeout_seconds,
         **kwargs,
     )
