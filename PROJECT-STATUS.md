@@ -1,3 +1,13 @@
+## Gate G2 — inventário integral de encaminhamento (2026-10-23, snapshot do operador)
+
+- Inventário sanitizado de **68 nós** do JSON fornecido pelo operador em 20/10: `docs/audits/n8n-official-68-node-externalization-ledger.md`.
+- Grafo estático do arquivo: **60 nós alcançáveis**, **8 inalcançáveis**; os oito não comprovam comportamento ativo. Triagem por responsabilidade com candidatos FORBIDDEN, TRANSITIONAL e STRUCTURAL; não é auditoria de cada expressão nem reconciliação com `--published`.
+- Principal direção: externalizar métricas, aliases, filtros, schema, prompt, planos e relatórios em contexto versionado; **não** transportar os hardcodes do cleaner para LangGraph. Cache/credenciais/tenant e pré-aprovação exigem gates próprios.
+- O adapter PostgreSQL atual consulta fontes canônicas incluindo mapeamento DRE; **portabilidade sem DRE, denominações físicas diferentes e enforcement por tenant não estão atestados**. Não ativar adaptação implícita por cliente.
+- Workflow oficial e versões/credenciais runtime não foram alterados por este inventário. G1/G2 e paridade financeira continuam pendentes.
+
+---
+
 ## Gate G1 — evidência operacional observada em 2026-10-21 (UTC)
 
 - Na VPS, o operador confirmou n8n **2.4.8**, um contêiner detectado,
