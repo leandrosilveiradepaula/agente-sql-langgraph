@@ -123,7 +123,8 @@ UPDATE_SHADOW_EVIDENCE_SCOPED_SQL = (
 )
 FINALIZE_SHADOW_RUN_SCOPED_SQL = (
     FINALIZE_SHADOW_RUN_SQL.rstrip()
-    + "\nAND principal ->> 'organization_id' = %(organization_id)s\n"
+    + "\nAND principal ->> 'organization_id' = %(organization_id)s"
+    + "\nAND evidence_fingerprint = %(evidence_fingerprint)s\n"
 )
 
 FETCH_SHADOW_RUN_SQL = """
