@@ -141,3 +141,26 @@ shadow evidence.
 - Native repository-level limit/pagination for large shadow evidence stores.
 - Optional Mermaid rendering endpoint only if explicitly approved.
 - Internal service-to-service auth and audit trail before production exposure.
+
+
+## Exact-attempt list filter (opt-in, backward compatible)
+
+`GET /v1/internal/agent-runs/{agent_run_id}/shadow-runs?run_id={run_id}&limit=10`
+accepts an **optional** single ASCII `run_id`. After S2S authentication,
+the reader applies its configured tenant scope and this exact run identity
+**before** ordering and the existing presentation limit. Supplying duplicate,
+blank or malformed run IDs yields HTTP 400; no SQL, question, credential or
+unknown tenant metadata is returned. If no `run_id` is supplied the existing
+chronological list behavior is unchanged.
+
+n8n's new parallel candidate uses the `run_id` from the preceding
+LangGraph response for this query. This corrects a case where 10 older
+attempts for one `agent_run_id` hide the current attempt from the
+previous `?limit=10` list and incorrectly fail evidence correlation.
+Both the n8n template renderer and inactive-import binding verifier track
+this contract. There is **no activation/import**, database schema change,
+real SQL execution or network call by this change.
+
+This bounded response is for correlation, not a paginated audit log.
+The underlying repository may load other evidence for the `agent_run_id`
+prior to the in-process projection; configured tenant scope remains enforced.
