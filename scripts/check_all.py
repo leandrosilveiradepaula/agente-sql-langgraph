@@ -94,6 +94,7 @@ STEPS = [
     ("testar_n8n_isolated_shadow_workflow.py", [sys.executable, "testar_n8n_isolated_shadow_workflow.py"]),
     ("testar_n8n_parallel_shadow_workflow.py", [sys.executable, "testar_n8n_parallel_shadow_workflow.py"]),
     ("testar_n8n_shadow_evidence_read_workflow.py", [sys.executable, "testar_n8n_shadow_evidence_read_workflow.py"]),
+    ("testar_n8n_shadow_evidence_binding_audit.py", [sys.executable, "testar_n8n_shadow_evidence_binding_audit.py"]),
     ("testar_n8n_private_shadow_renderer.py", [sys.executable, "testar_n8n_private_shadow_renderer.py"]),
     ("testar_n8n_parallel_shadow_binding_audit.py", [sys.executable, "testar_n8n_parallel_shadow_binding_audit.py"]),
     ("testar_internal_shadow_sql_comparison.py", [sys.executable, "testar_internal_shadow_sql_comparison.py"]),
