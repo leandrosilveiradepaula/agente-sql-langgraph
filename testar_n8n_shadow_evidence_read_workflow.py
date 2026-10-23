@@ -57,15 +57,46 @@ const canonicalDetail=run(sanitize,{statusCode:200,body:{contract_version:'1',..
 assert.equal(canonicalDetail.safe_response.status,'rejected');
 const canonicalGraph=run(sanitize,{statusCode:200,body:{
  contract_version:'1',run:{...canonical,requires_reapproval:undefined},
- steps:[{id:'step-1',label:'security_gate',status:'ok',sequence:1,step_type:'gate',metadata:{duration_ms:3,secret:'secret-hidden'}}],
- edges:[],flags:{requires_reapproval:true,has_repair:true,has_error:false}
+ steps:[
+  {id:'step-1',label:'security_gate',status:'ok',sequence:1,step_type:'gate',metadata:{duration_ms:3,secret:'secret-hidden'}},
+  {id:'step-2',label:'repair_sql',status:'warning',sequence:2,step_type:'repair',metadata:{repair_attempt:1,raw_sql:'SELECT hidden'}}
+ ],
+ edges:[{source:'step-1',target:'step-2',edge_type:'repair'}],
+ flags:{requires_reapproval:true,has_repair:true,has_error:false,persistence_failure:true,has_unknown_evidence:true}
 }},graph);
 assert.equal(canonicalGraph.safe_response.run.status,'rejected');
 assert.equal(canonicalGraph.safe_response.run.requires_reapproval,true);
 assert.equal(canonicalGraph.safe_response.run.has_repair,true);
 assert.equal(canonicalGraph.safe_response.steps[0].order,1);
 assert.equal(canonicalGraph.safe_response.steps[0].metadata.duration_ms,3);
+assert.equal(canonicalGraph.safe_response.steps[0].metadata.kind,'gate');
+assert.equal(canonicalGraph.safe_response.steps[1].metadata.kind,'repair');
+assert.equal(canonicalGraph.safe_response.steps[1].metadata.repair_attempt,1);
+assert.equal(canonicalGraph.safe_response.edges[0].label,'repair');
+assert.deepEqual(Array.from(canonicalGraph.safe_response.flags.warnings),[
+ 'shadow_persistence_failure','shadow_evidence_incomplete'
+]);
+assert.equal(JSON.stringify(canonicalGraph).includes('SELECT hidden'),false);
 assert.equal(JSON.stringify(canonicalGraph).includes('secret-hidden'),false);
+// Reject timestamp/status/step/edge content that could carry SQL or secrets.
+assert.throws(()=>run(sanitize,{statusCode:200,body:{contract_version:'1',...item,created_at:'SELECT secret'}},detail));
+assert.throws(()=>run(sanitize,{statusCode:200,body:{contract_version:'1',...item,status:'SELECT secret'}},detail));
+assert.throws(()=>run(sanitize,{statusCode:200,body:{contract_version:'1',...item,event_type:'SELECT secret'}},detail));
+assert.throws(()=>run(sanitize,{statusCode:200,body:{contract_version:'1',...item,status:'rejected',final_status:'success'}},detail));
+for(const bad of [
+  {steps:[{id:'step-1',label:'SELECT secret',status:'ok',sequence:1,step_type:'gate'}]},
+  {steps:[{id:'step-1',label:'security_gate',status:'ok',sequence:1,step_type:'SELECT secret'}]},
+  {steps:[{id:'step-1',label:'security_gate',status:'ok',sequence:1,order:2,step_type:'gate'}]},
+  {edges:[{source:'step-1',target:'step-2',edge_type:'SELECT secret'}]},
+  {edges:[{source:'step-1',target:'step-2',edge_type:'repair',label:'normal'}]},
+  {edges:[{source:'step-1',target:'step-2',label:'SELECT confidential'}]}
+]){
+ const base={contract_version:'1',run:{...canonical,requires_reapproval:undefined},
+  steps:[{id:'step-1',label:'security_gate',status:'ok',sequence:1,step_type:'gate'},
+         {id:'step-2',label:'repair_sql',status:'warning',sequence:2,step_type:'repair'}],
+  edges:[{source:'step-1',target:'step-2',edge_type:'repair'}],flags:{}};
+ assert.throws(()=>run(sanitize,{statusCode:200,body:{...base,...bad}},graph));
+}
 const shortList=run(validate,{body:{...req,limit:1}});
 assert.throws(()=>run(sanitize,{statusCode:200,body:{contract_version:'1',agent_run_id:'agent-1',items:[item,{...item,shadow_record_id:'shadow-2'}]}},shortList));
 

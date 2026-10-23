@@ -14,7 +14,15 @@ Separate from both the 68-node official workflow and the seven-node Shadow gener
 - Inbound arbitrary target_path, URL, SQL, question or other keys are rejected.
 - Only n8n -> LangGraph uses Authorization: Bearer and the existing separate S2S token.
 - Only safe run IDs, status, dates, flags, bounded numeric graph metadata
-  and graph topology are forwarded. Canonical LangGraph `final_status`,
+  and graph topology are forwarded. The canonical LangGraph step kind
+  (`step_type`) is projected into the UI-supported `metadata.kind` field;
+  canonical edge kinds (`edge_type`: normal, conditional, repair, terminal)
+  are projected into the UI-supported `label` field. Both are restricted
+  to structural values to prevent raw SQL, prompts or arbitrary labels from
+  passing through a privileged endpoint. Date fields must be ISO-8601
+  with timezone; event/status/step fields are validated, not blindly copied.
+  Canonical `persistence_failure` and `has_unknown_evidence` flags generate
+  only bounded, predefined warning codes; no raw diagnostic text is forwarded. Canonical LangGraph `final_status`,
   `sequence`, and UTC timestamps with `+00:00` are normalized to Product
   `status`, `order`, and compatible timestamps. Repair/reapproval flags
   come from canonical visualization flags, and list responses cannot exceed
@@ -39,3 +47,39 @@ the official n8n or the existing Shadow generation workflow.
 
 An HTTP 200 safe read response confirms retrieval only; it does not prove SQL
 parity, LLM provider equivalence or financial results.
+
+## Auditoria de bindings do relay importado (read-only)
+
+**Somente após uma importação separadamente autorizada**, ainda **inativa**,
+com o Webhook Header Auth exclusivo salvo e com o HTTP Header Auth do
+LangGraph associado ao nó `Read LangGraph Evidence`, conferir o ID real
+do NOVO workflow (nunca usar o ID de produção nem do Shadow de sete nós).
+Executar no host Docker autorizado, sem informar tokens:
+
+```bash
+cd /docker/agente-sql-langgraph-repo
+bash scripts/n8n/audit_shadow_evidence_read_bindings_readonly.sh \
+  --workflow-id ID_REAL_DO_WORKFLOW_NOVO
+```
+
+A auditoria usa `n8n export:workflow --id` na versão *draft* (não publica,
+não ativa e não usa o workflow oficial). Guarda o JSON bruto apenas em
+arquivos temporários restritos no host e no contêiner e os remove antes
+de declarar sucesso. Não expõe conteúdo de nós, URLs internas, IDs/nome de
+credenciais nem segredos.
+
+Um resultado `EVIDENCE_READ_BINDINGS=PASS` comprova apenas: cinco nós,
+configuração igual ao template revisado, caminho `GET` privado e
+estático, nenhuma expressão `$env` necessária, armazenamento de execuções
+desabilitado, dois IDs de credenciais Header Auth **distintos**, topologia
+sem deriva e workflow inativo. Os testes offline exercitam erros de
+bind, injeção de URL, métodos não-GET, alterações de código e opções de
+execução perigosas. A ferramenta aceita IDs de nós gerados pelo n8n 2.x
+e a omissão do método GET padrão na exportação.
+
+Um PASS **não comprova** valores corretos das credenciais, conexão
+n8n→LangGraph, existência dos endpoints na imagem implantada, autorização
+multi-tenant nem leitura real de evidências. Essas verificações exigem
+suas etapas operacionais e autorizações próprias. Não rodar chamadas
+reais, alterar variáveis Vercel ou publicar o workflow em resposta a uma
+falha da auditoria.

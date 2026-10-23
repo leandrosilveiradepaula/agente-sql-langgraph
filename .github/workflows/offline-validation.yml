@@ -86,6 +86,7 @@ jobs:
         run: |
           python3 testar_n8n_private_shadow_renderer.py
           bash -n scripts/n8n/probe_parallel_shadow_prerequisites_readonly.sh
+          bash -n scripts/n8n/audit_shadow_evidence_read_bindings_readonly.sh
       - name: Reproduce restrictive checkout permissions
         run: |
           chmod 700 app/test_runtime
