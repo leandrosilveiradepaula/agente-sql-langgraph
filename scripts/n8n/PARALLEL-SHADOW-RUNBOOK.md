@@ -221,3 +221,49 @@ No runtime credentials, real Gemini calls, financial SQL execution,
 Vercel deployment or n8n activation. This is a stronger **offline** G1
 integration proof, **not** the missing Product official run receipt ↔
 live n8n webhook ↔ live persisted LangGraph evidence correlation.
+
+
+## G1: auditoria de workflow **já ativo e publicado** (operação read-only)
+
+O auditor de vínculos original exige `active=false`, adequado **antes de
+publicar** o workflow. Se o candidato de sete nós já estiver ativo, uma
+falha `SHADOW_WORKFLOW_NOT_INACTIVE` é um conflito de *modo de auditoria*;
+ela não é evidência de credential errada e **não é motivo para desativar**
+um fluxo para fazer o teste passar.
+
+A variante explicitamente autorizada verifica a versão que o **n8n
+Server CLI exporta com `--published`**, rejeitando instalações sem esse
+suporte. **Nunca** cai silenciosamente para a exportação do rascunho.
+Exige `active=true` e mantém ID do workflow, sete nós, código/parametrização,
+URL interna privada, topologia, flags de execução, armazenamento desligado,
+separação do Header Auth do webhook versus S2S e método GET de leitura:
+
+```bash
+cd /docker/agente-sql-langgraph-repo || exit 1
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main || exit 1
+bash scripts/n8n/probe_parallel_shadow_prerequisites_readonly.sh
+bash scripts/n8n/audit_parallel_shadow_bindings_readonly.sh \
+  --workflow-id LwUsMRWi34D2ARWu1YzgV --active-published
+```
+
+Os comandos não publicam, desativam, importam ou executam nenhum workflow.
+O script remove a exportação privada **antes** de emitir o JSON de
+evidência e não imprime nomes, valores ou IDs das credenciais. Uma falha
+em qualquer gate continua interrompendo a auditoria com códigos estáveis.
+`G1_PUBLISHED_EXPORT_SELECTED=true` demonstra apenas a exportação
+selecionada por este script; o relatório `workflow_active=true` é
+atestado a partir do campo no JSON **exportado**, sem prova de roteamento
+do webhook, execução autenticada, processamento LangGraph ou paridade.
+
+O preflight também imprime o `LANGGRAPH_COMMIT` e a
+`SEMANTIC_AGENT_VERSION` de runtime **somente quando conformes ao
+formato seguro**; caso contrário diz `UNVERIFIED`. O SHA do checkout
+`git rev-parse HEAD` sozinho não é o commit do contêiner em execução.
+`LANGGRAPH_SHADOW_INTERNAL_BASE_URL_PRESENT=false` é esperado em
+n8n 2.x quando as URLs privadas foram **renderizadas no candidato**;
+não alterar `N8N_BLOCK_ENV_ACCESS_IN_NODE` para satisfazer esse teste.
+
+**Próximo gate, se o relatório for PASS:** atestar no produto
+`agent_run_id` oficial, despacho HTTP 202 e evidência correlacionada
+`agent_run_id/run_id/shadow_record_id` na mesma run, sem SQL real no Shadow.
+Este comando não consome Gemini ou SQL e não fecha G1 sozinho.

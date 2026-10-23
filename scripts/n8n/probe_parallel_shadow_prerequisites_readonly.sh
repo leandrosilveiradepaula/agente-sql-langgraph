@@ -21,9 +21,24 @@ docker inspect "$CONTAINER" --format \
   'SHADOW_STATE={{.State.Status}} SHADOW_HEALTH={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
 docker exec -i "$CONTAINER" python - <<'PY'
 import os
+import re
+
 if os.environ.get("LANGGRAPH_ALLOW_REAL_SQL_EXECUTION") != "false":
     raise SystemExit("SHADOW_SAFETY=FAIL real_sql_enabled")
 print("SHADOW_SQL_REAL_DISABLED=true")
+commit = os.environ.get("LANGGRAPH_COMMIT", "")
+if re.fullmatch(r"[0-9a-f]{40}", commit):
+    print("SHADOW_RUNTIME_COMMIT=" + commit)
+else:
+    print("SHADOW_RUNTIME_COMMIT=UNVERIFIED")
+version = os.environ.get("SEMANTIC_AGENT_VERSION", "")
+if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", version):
+    print("SHADOW_CONTEXT_VERSION=" + version)
+else:
+    print("SHADOW_CONTEXT_VERSION=UNVERIFIED")
+print("SHADOW_CONTEXT_PIN_PRESENT=" + str(
+    bool(os.environ.get("SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT"))
+).lower())
 print("SHADOW_CONTEXT_PRESENT=" + str(
     bool(os.environ.get("SEMANTIC_AGENT_VERSION"))
 ).lower())

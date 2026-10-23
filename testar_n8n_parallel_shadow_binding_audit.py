@@ -38,6 +38,102 @@ class ParallelShadowBindingAuditTests(unittest.TestCase):
         self.assertFalse(result["shadow_execution_verified"])
         self.assertNotIn("do-not-echo", json.dumps(result))
 
+    def test_only_explicit_published_mode_accepts_a_real_active_workflow(self):
+        data = fixture()
+        data["active"] = True
+        with self.assertRaisesRegex(
+            BindingAuditError, "SHADOW_WORKFLOW_NOT_INACTIVE"
+        ):
+            validate_export(data, WORKFLOW_ID)
+        report = validate_export(data, WORKFLOW_ID, expect_active=True)
+        self.assertTrue(report["workflow_active"])
+        self.assertEqual(report["workflow_state_expectation"], "active")
+        self.assertEqual(report["node_count"], 7)
+        self.assertTrue(report["webhook_credential_separate"])
+        self.assertFalse(report["credentials_values_verified"])
+        self.assertFalse(report["authenticated_http_verified"])
+        self.assertFalse(report["shadow_execution_verified"])
+        self.assertNotIn("do-not-echo", json.dumps(report))
+        with self.assertRaisesRegex(
+            BindingAuditError, "SHADOW_WORKFLOW_NOT_ACTIVE"
+        ):
+            validate_export(fixture(), WORKFLOW_ID, expect_active=True)
+
+    def test_active_mode_does_not_relax_credential_topology_or_safety_checks(self):
+        for mutation in (
+            "archived", "credential_missing", "credential_shared", "code_drift",
+            "public_url", "pinned_data", "execution_saved", "extra_node",
+            "unsafe_flag", "read_post",
+        ):
+            data = fixture()
+            data["active"] = True
+            by_name = {node["name"]: node for node in data["nodes"]}
+            webhook = by_name["Webhook - Parallel Shadow"]
+            call = by_name["Call LangGraph Shadow"]
+            read = by_name["Read Correlated Evidence"]
+            if mutation == "archived":
+                data["isArchived"] = True
+            elif mutation == "credential_missing":
+                del webhook["credentials"]
+            elif mutation == "credential_shared":
+                webhook["credentials"] = copy.deepcopy(call["credentials"])
+            elif mutation == "code_drift":
+                by_name["Validate Shadow Envelope"]["parameters"]["jsCode"] += "// changed"
+            elif mutation == "public_url":
+                call["parameters"]["url"] = '={{ "https://example.org" + $json.target_path }}'
+            elif mutation == "pinned_data":
+                data["pinData"] = {"some": [{"json": {"unexpected": True}}]}
+            elif mutation == "execution_saved":
+                data["settings"]["saveDataErrorExecution"] = "all"
+            elif mutation == "extra_node":
+                data["nodes"].append(copy.deepcopy(call))
+            elif mutation == "unsafe_flag":
+                call["continueOnFail"] = True
+            elif mutation == "read_post":
+                read["parameters"]["method"] = "POST"
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(BindingAuditError):
+                    validate_export(data, WORKFLOW_ID, expect_active=True)
+
+    def test_cli_validates_active_only_with_explicit_expectation(self):
+        script = pathlib.Path(__file__).parent / "scripts/n8n/verify_parallel_shadow_bindings_export.py"
+        data = fixture()
+        data["active"] = True
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "private.json"
+            path.write_text(json.dumps([data]), encoding="utf-8")
+            base = [
+                sys.executable, str(script),
+                "--workflow", str(path), "--workflow-id", WORKFLOW_ID,
+            ]
+            blocked = subprocess.run(
+                base, capture_output=True, text=True, timeout=15,
+            )
+            self.assertEqual(blocked.returncode, 2)
+            self.assertEqual(
+                json.loads(blocked.stdout)["reason"],
+                "SHADOW_WORKFLOW_NOT_INACTIVE",
+            )
+            allowed = subprocess.run(
+                base + ["--expect-active"],
+                capture_output=True, text=True, timeout=15,
+            )
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+            self.assertTrue(json.loads(allowed.stdout)["workflow_active"])
+            self.assertNotIn("do-not-echo", allowed.stdout)
+            self.assertNotIn("shadow-internal", allowed.stdout)
+            data["active"] = False
+            path.write_text(json.dumps(data), encoding="utf-8")
+            bad = subprocess.run(
+                base + ["--expect-active"],
+                capture_output=True, text=True, timeout=15,
+            )
+            self.assertEqual(bad.returncode, 2)
+            self.assertEqual(
+                json.loads(bad.stdout)["reason"],
+                "SHADOW_WORKFLOW_NOT_ACTIVE",
+            )
+
     def test_accepts_imported_node_ids_and_implicit_reader_get(self):
         d = fixture()
         for index, node in enumerate(d["nodes"]):
