@@ -28,7 +28,9 @@ class GetShadowRunSafeViewService(Protocol):
 
 
 class ListAgentShadowRunsService(Protocol):
-    def execute(self, agent_run_id: str, *, limit: int) -> Mapping[str, Any]:
+    def execute(
+        self, agent_run_id: str, *, limit: int, run_id: str | None = None,
+    ) -> Mapping[str, Any]:
         ...
 
 
@@ -104,9 +106,20 @@ class InternalShadowReadV1HttpHandler:
                     route["agent_run_id"],
                     field="agent_run_id",
                 )
-                limit = _limit_from_query(str(envelope.get("query_string", "")))
+                query = str(envelope.get("query_string", ""))
+                limit = _limit_from_query(query)
+                run_id = _run_id_from_query(query)
+                # Preserve pre-existing list service call when not filtered.
+                if run_id is None:
+                    body = self._list_shadow_runs.execute(
+                        agent_run_id, limit=limit,
+                    )
+                else:
+                    body = self._list_shadow_runs.execute(
+                        agent_run_id, limit=limit, run_id=run_id,
+                    )
                 return _json_response(
-                    self._list_shadow_runs.execute(agent_run_id, limit=limit),
+                    body,
                     response_limits=self._response_limits,
                 )
             return self._error_response("HTTP_ROUTE_NOT_FOUND", status_code=404)
@@ -174,6 +187,17 @@ def _parse_route(path: str) -> dict[str, str]:
     ):
         return {"kind": "agent_list", "agent_run_id": parts[3]}
     return {"kind": "not_found"}
+
+
+def _run_id_from_query(query_string: str) -> str | None:
+    """An optional single exact attempt ID; never a SQL identifier/filter."""
+    parsed = parse_qs(query_string, keep_blank_values=True, strict_parsing=False)
+    values = parsed.get("run_id")
+    if values is None:
+        return None
+    if len(values) != 1:
+        raise ShadowReadError("SHADOW_RUN_ID_INVALID", 400)
+    return validate_shadow_read_id(values[0], field="run_id")
 
 
 def _limit_from_query(query_string: str) -> int:
