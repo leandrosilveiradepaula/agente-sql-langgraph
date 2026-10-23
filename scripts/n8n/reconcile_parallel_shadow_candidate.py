@@ -54,6 +54,10 @@ CALL_NAME = "Call LangGraph Shadow"
 READ_NAME = "Read Correlated Evidence"
 WORKFLOW_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 MAX_BYTES = 2 * 1024 * 1024
+# n8n@2.4.8 public API node.yml explicitly marks timestamps as readOnly.
+# These may appear in an exported node but must never be PUT back.
+# All edit-authorized fields below come from the published node.yml.
+API_NODE_READ_ONLY_FIELDS = frozenset(("createdAt", "updatedAt"))
 API_NODE_FIELDS = frozenset((
     "id", "name", "type", "typeVersion", "position", "parameters",
     "credentials", "webhookId", "disabled", "notes", "notesInFlow",
@@ -239,19 +243,36 @@ def _public_update_payload(workflow: dict) -> dict:
     if not isinstance(workflow.get("connections"), dict):
         _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED")
     settings = workflow.get("settings")
-    if not isinstance(settings, dict) or set(settings) - API_SETTINGS_FIELDS:
-        _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED")
+    if not isinstance(settings, dict):
+        _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED_SETTINGS")
+    if set(settings) - API_SETTINGS_FIELDS:
+        # Unknown settings can alter workflow execution or exposure; never
+        # drop or forward them merely to satisfy an API schema check.
+        _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED_SETTINGS_FIELDS")
     nodes = workflow.get("nodes")
-    if not isinstance(nodes, list) or any(
-        not isinstance(node, dict) or set(node) - API_NODE_FIELDS
-        for node in nodes
-    ):
-        _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED")
+    if not isinstance(nodes, list) or len(nodes) != 7:
+        _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED_NODES")
+    public_nodes = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED_NODES")
+        unknown_fields = set(node) - API_NODE_FIELDS - API_NODE_READ_ONLY_FIELDS
+        if unknown_fields:
+            # Deliberately report only the category, not untrusted key names
+            # or values supplied by a potentially modified workflow.
+            _fail("N8N_UPDATE_SCHEMA_UNSUPPORTED_NODE_FIELDS")
+        # Project to *only* editable schema fields. The only discarded
+        # fields are documented n8n-managed timestamps; credentials,
+        # workflow topology, parameters and node IDs remain unchanged.
+        public_nodes.append({
+            key: copy.deepcopy(value) for key, value in node.items()
+            if key in API_NODE_FIELDS
+        })
     payload = {
         "name": workflow["name"],
-        "nodes": nodes,
-        "connections": workflow["connections"],
-        "settings": settings,
+        "nodes": public_nodes,
+        "connections": copy.deepcopy(workflow["connections"]),
+        "settings": copy.deepcopy(settings),
     }
     if "staticData" in workflow:
         if workflow["staticData"] is not None and not isinstance(

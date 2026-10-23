@@ -113,6 +113,46 @@ class CandidateReconciliationTests(unittest.TestCase):
                 except ReconcileError as exc:
                     self.assertEqual(str(exc), "OTHER_BINDING_GUARD_FAILED")
 
+    def test_n8n_248_read_only_node_metadata_not_put_back(self):
+        data = old_candidate()
+        node = data["nodes"][2]
+        # Node public API schema marks these attributes readOnly. Real n8n
+        # exports may include them, even though a subsequent PUT must not.
+        node["createdAt"] = "2026-10-22T09:13:10.000Z"
+        node["updatedAt"] = "2026-10-23T09:13:10.000Z"
+        original = copy.deepcopy(data)
+        revised, changes = build_reconciliation(data, WORKFLOW_ID, _historical_code())
+        self.assertEqual(len(changes), 4)
+        payload = _public_update_payload(revised)
+        self.assertNotIn("createdAt", payload["nodes"][2])
+        self.assertNotIn("updatedAt", payload["nodes"][2])
+        self.assertEqual(
+            payload["nodes"][2],
+            {k: v for k, v in revised["nodes"][2].items()
+             if k not in ("createdAt", "updatedAt")},
+        )
+        self.assertEqual(original, data)
+        # The original private backup and version fingerprint remain intact.
+        fake = FakeApi(data)
+        report = reconcile(fake, WORKFLOW_ID, known=_historical_code())
+        self.assertEqual(report["status"], "ready")
+        self.assertEqual(fake.calls, ["GET"])
+
+    def test_schema_fails_closed_for_unknown_settings_or_node_fields(self):
+        for kind, code in (
+            ("node", "N8N_UPDATE_SCHEMA_UNSUPPORTED_NODE_FIELDS"),
+            ("settings", "N8N_UPDATE_SCHEMA_UNSUPPORTED_SETTINGS_FIELDS"),
+        ):
+            data = old_candidate()
+            if kind == "node":
+                data["nodes"][1]["unexpected_field"] = "untrusted-sensitive-value"
+            else:
+                data["settings"]["unexpected_setting"] = "untrusted-sensitive-value"
+            with self.subTest(kind=kind):
+                with self.assertRaisesRegex(ReconcileError, code):
+                    reconcile(FakeApi(data), WORKFLOW_ID,
+                              known=_historical_code())
+
     def test_plan_is_read_only_and_apply_needs_explicit_version_identity(self):
         api = FakeApi(old_candidate())
         report = reconcile(api, WORKFLOW_ID, known=_historical_code())
