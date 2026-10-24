@@ -129,3 +129,34 @@ https://github.com/n8n-io/n8n/blob/n8n%402.4.8/packages/cli/src/public-api/v1/ha
 **Não executar --apply apenas porque o plano passa**: a aplicação
 continua dependendo do runtime atualizado, autorização específica,
 credencial API de menor privilégio e backup/rollback.
+
+
+## n8n 2.4.8: timeSavedMode in export, absent from public PUT
+
+**VPS observation (2026-10-23):** after PR #167 merged, the only
+out-of-schema key under `settings` was `timeSavedMode`.
+The live candidate was not modified during this read-only diagnostic.
+
+The exact n8n 2.4.8 `workflowSettings.yml` declares
+`additionalProperties: false` and does not contain this field:
+https://github.com/n8n-io/n8n/blob/n8n%402.4.8/packages/cli/src/public-api/v1/handlers/workflows/spec/schemas/workflowSettings.yml
+
+But n8n's internal `IWorkflowSettings` supports
+`timeSavedMode?: 'fixed' | 'dynamic'`, and its
+`WorkflowService.update` merges submitted settings into the persisted
+settings rather than replacing them. Sources:
+- https://github.com/n8n-io/n8n/blob/n8n%402.4.8/packages/workflow/src/interfaces.ts
+- https://github.com/n8n-io/n8n/blob/n8n%402.4.8/packages/cli/src/workflows/workflow.service.ts
+
+Reconciliation therefore validates the value (`fixed` or `dynamic`),
+retains it in the private original/snapshot, **omits this one field only**
+from the public PUT and, after a separately approved update, checks
+that **all settings** in the returned GET are identical to the original.
+Any other unknown settings still fail closed and no schema constraints
+or workflow security checks are relaxed. Post-PUT settings drift is
+reported as `POST_APPLY_VERIFY_FAILED_BACKUP_REQUIRED` and leaves
+the private backup for supervised recovery. Do not infer that dry-run
+success attests real publication or G1.
+
+**Next action:** after CI and merge, execute the already-versioned
+read-only `--upgrade-plan` command once; do not run `--apply`.
