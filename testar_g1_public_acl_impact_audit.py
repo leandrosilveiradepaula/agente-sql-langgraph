@@ -89,8 +89,14 @@ class PublicAclAuditTests(unittest.TestCase):
         self.assertNotIn("postgres", str(output).lower())
         self.assertNotIn("secret", str(output).lower())
         self.assertNotIn("readonly_role", str(output).lower())
-        self.assertTrue(all(q.lstrip().upper().startswith("SELECT")
+        self.assertTrue(all(q.lstrip().upper().startswith(("SELECT", "WITH"))
                             for q, _ in db.queries))
+        self.assertFalse(any(
+            token in q.lstrip().upper()
+            for q, _ in db.queries
+            for token in ("INSERT INTO ", "UPDATE PG_", "DELETE FROM ",
+                          "DROP TABLE ", "CREATE ROLE ", "REVOKE ")
+        ))
 
     def test_role_present_is_reported_without_creation(self):
         db = CatalogDB(role_exists=True, public_temp=False)
