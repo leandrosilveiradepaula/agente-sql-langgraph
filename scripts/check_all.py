@@ -418,6 +418,10 @@ STEPS = [
         "testar_postgres_context_graph_bootstrap.py",
         [sys.executable, "testar_postgres_context_graph_bootstrap.py"],
     ),
+    (
+        "testar_g1_readonly_rollout.py",
+        [sys.executable, "testar_g1_readonly_rollout.py"],
+    ),
     ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
     ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),]
 
