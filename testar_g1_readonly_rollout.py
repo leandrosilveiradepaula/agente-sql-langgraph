@@ -242,7 +242,8 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
             ])
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "g1-private.json"
-            with mock.patch.object(rollout, "read_n8n_runtime_version"), \
+            with mock.patch.object(rollout, "load_config", return_value=cfg), \
+                 mock.patch.object(rollout, "read_n8n_runtime_version"), \
                  mock.patch.object(rollout, "N8nApi", return_value=api), \
                  mock.patch.object(rollout.getpass, "getpass", side_effect=secret_input), \
                  mock.patch.object(rollout, "confirm"), \
