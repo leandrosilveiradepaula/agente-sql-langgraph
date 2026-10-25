@@ -17,6 +17,10 @@ import os
 import secrets
 import stat
 import sys
+import ssl
+import subprocess
+import re
+from urllib.request import build_opener, HTTPSHandler, HTTPRedirectHandler
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -102,95 +106,184 @@ def require_verified_tls_dsn(dsn: str, expected_database: str, project_ref: str)
         raise RolloutError("identidade do projeto nao confere no DSN")
 
 
+# Public API PUT contract comes from the n8n 2.4.8 schema already audited by
+# scripts/n8n/reconcile_parallel_shadow_candidate.py.  Keep the GET snapshot
+# separate from the smaller, strictly editable PUT payload.
+API_NODE_FIELDS = frozenset((
+    "id", "name", "type", "typeVersion", "position", "parameters",
+    "credentials", "webhookId", "disabled", "notes", "notesInFlow",
+    "executeOnce", "alwaysOutputData", "retryOnFail", "maxTries",
+    "waitBetweenTries", "continueOnFail", "onError",
+))
+API_NODE_READONLY = frozenset(("createdAt", "updatedAt"))
+API_SETTINGS_FIELDS = frozenset((
+    "executionOrder", "saveDataSuccessExecution", "saveDataErrorExecution",
+    "saveManualExecutions", "saveExecutionProgress", "executionTimeout",
+    "errorWorkflow", "timezone", "callerPolicy", "callerIds",
+    "timeSavedPerExecution", "availableInMCP",
+))
+API_SETTINGS_RETAINED = frozenset(("timeSavedMode",))
+WORKFLOW_STATE_FIELDS = ("name", "nodes", "connections", "settings",
+                         "staticData", "pinData", "meta", "tags")
+
+
+def _node_for_comparison(node: Mapping[str, Any]) -> dict[str, Any]:
+    if set(node) - API_NODE_FIELDS - API_NODE_READONLY:
+        raise RolloutError("campos nao homologados em um no n8n")
+    return {k: node[k] for k in node if k in API_NODE_FIELDS}
+
+
 def workflow_projection(workflow: Mapping[str, Any]) -> dict[str, Any]:
-    """The documented n8n PUT shape, retaining public workflow state only."""
-    keys = ("name", "nodes", "connections", "settings")
-    projected = {key: workflow[key] for key in keys if key in workflow}
-    if {"name", "nodes", "connections", "settings"} - projected.keys():
-        raise RolloutError("workflow nao contem a projecao PUT completa")
-    return projected
+    """Strict, editable n8n@2.4.8 public PUT fields; no pinData/meta/tags."""
+    if not isinstance(workflow.get("name"), str) or not workflow["name"]:
+        raise RolloutError("workflow sem nome")
+    if not isinstance(workflow.get("connections"), dict):
+        raise RolloutError("workflow sem conexoes")
+    settings = workflow.get("settings")
+    if not isinstance(settings, dict):
+        raise RolloutError("workflow sem settings")
+    if set(settings) - API_SETTINGS_FIELDS - API_SETTINGS_RETAINED:
+        raise RolloutError("settings do n8n fora do contrato PUT")
+    if "timeSavedMode" in settings and settings["timeSavedMode"] not in ("fixed", "dynamic"):
+        raise RolloutError("settings retidas nao homologadas")
+    nodes = workflow.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        raise RolloutError("workflow sem nos")
+    projected_nodes = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            raise RolloutError("no n8n invalido")
+        projected_nodes.append(_node_for_comparison(node))
+    out = {
+        "name": workflow["name"],
+        "nodes": projected_nodes,
+        "connections": workflow["connections"],
+        "settings": {k: v for k, v in settings.items() if k in API_SETTINGS_FIELDS},
+    }
+    if "staticData" in workflow:
+        if workflow["staticData"] is not None and not isinstance(workflow["staticData"], (dict, str)):
+            raise RolloutError("staticData n8n invalido")
+        out["staticData"] = workflow["staticData"]
+    return out
+
+
+def workflow_state(workflow: Mapping[str, Any]) -> dict[str, Any]:
+    """Stable runtime fields for drift detection, not a public PUT payload."""
+    state = {k: workflow[k] for k in WORKFLOW_STATE_FIELDS if k in workflow}
+    state["nodes"] = [_node_for_comparison(x) for x in workflow["nodes"]]
+    return state
 
 
 def workflow_fingerprint(workflow: Mapping[str, Any]) -> str:
-    return fingerprint(workflow_projection(workflow))
+    return fingerprint(workflow_state(workflow))
 
 
-def validate_workflow(workflow: Mapping[str, Any], config: RolloutConfig, *, require_old_bindings: bool = True) -> None:
+def validate_workflow(workflow: Mapping[str, Any], config: RolloutConfig,
+                      *, require_old_bindings: bool = True) -> None:
     n8n = config.n8n
     if workflow.get("id") != n8n["workflow_id"] or workflow.get("name") != n8n["workflow_name"]:
         raise RolloutError("identidade do workflow diverge")
-    if len(workflow.get("nodes", [])) != n8n["expected_node_count"]:
+    nodes_list = workflow.get("nodes")
+    if not isinstance(nodes_list, list) or len(nodes_list) != n8n["expected_node_count"]:
         raise RolloutError("quantidade de nos do workflow diverge")
-    if workflow.get("active") is not True or not workflow.get("versionId") or workflow.get("versionId") != workflow.get("activeVersionId"):
-        raise RolloutError("workflow publicado nao coincide com sua versao ativa")
-    nodes = {node.get("id"): node for node in workflow["nodes"] if isinstance(node, dict)}
-    if set(n8n["binding_node_ids"]) - nodes.keys():
-        raise RolloutError("nos financeiros autorizados ausentes")
+    if workflow.get("active") is not True or not workflow.get("versionId") or \
+            workflow.get("versionId") != workflow.get("activeVersionId"):
+        raise RolloutError("workflow publicado nao coincide com versao ativa")
+    nodes = {node.get("id"): node for node in nodes_list if isinstance(node, dict)}
+    if len(nodes) != len(nodes_list) or set(n8n["binding_node_ids"]) - nodes.keys():
+        raise RolloutError("nos nao unicos ou financeiros ausentes")
     if require_old_bindings:
         old_id = n8n["old_credential_id"]
-        old_uses = [node_id for node_id, node in nodes.items() if node.get("credentials", {}).get("postgres", {}).get("id") == old_id]
-        if set(old_uses) != set(n8n["binding_node_ids"]):
-            raise RolloutError("credencial antiga possui uso fora dos dois nos autorizados")
-    if n8n["webhook_path"] not in canonical_json(workflow):
-        raise RolloutError("webhook esperado nao foi encontrado no workflow")
+        old_uses = {node_id for node_id, node in nodes.items()
+                    if node.get("credentials", {}).get("postgres", {}).get("id") == old_id}
+        if old_uses != set(n8n["binding_node_ids"]):
+            raise RolloutError("credencial antiga possui uso inesperado")
+    # Check the webhook's actual path, not arbitrary JSON text.
+    webhook_nodes = [n for n in nodes_list if n.get("type") == "n8n-nodes-base.webhook"
+                     and (n.get("parameters", {}).get("path") == n8n["webhook_path"]
+                          or n.get("webhookId") == n8n["webhook_path"])]
+    if len(webhook_nodes) != 1:
+        raise RolloutError("webhook oficial nao identificado")
+    # Refuse to mutate when API PUT could discard unrecognized fields.
+    workflow_projection(workflow)
 
 
-def rebind_only(workflow: Mapping[str, Any], config: RolloutConfig, new_credential_id: str, new_credential_name: str) -> dict[str, Any]:
+def rebind_only(workflow: Mapping[str, Any], config: RolloutConfig,
+                new_credential_id: str, new_credential_name: str) -> dict[str, Any]:
     updated = json.loads(canonical_json(workflow_projection(workflow)))
     binding_ids = set(config.n8n["binding_node_ids"])
     changed = 0
     for node in updated["nodes"]:
         if node.get("id") in binding_ids:
-            credentials = node.get("credentials")
-            if not isinstance(credentials, dict) or not isinstance(credentials.get("postgres"), dict):
+            creds = node.get("credentials")
+            if not isinstance(creds, dict) or not isinstance(creds.get("postgres"), dict):
                 raise RolloutError("no autorizado sem credencial postgres")
-            credentials["postgres"] = {"id": new_credential_id, "name": new_credential_name}
+            creds["postgres"] = {"id": new_credential_id, "name": new_credential_name}
             changed += 1
-    if changed != 2:
-        raise RolloutError("alteracao nao ficou limitada aos dois nos")
+    if changed != len(binding_ids):
+        raise RolloutError("alteracao fora dos dois nos financeiros")
     return updated
 
 
-def assert_only_two_rebindings(before: Mapping[str, Any], after: Mapping[str, Any], config: RolloutConfig) -> None:
+def assert_only_two_rebindings(before: Mapping[str, Any], after: Mapping[str, Any],
+                               config: RolloutConfig) -> None:
+    """Only the two postgres credential references may differ."""
     allowed = set(config.n8n["binding_node_ids"])
-    before_nodes = {node["id"]: node for node in workflow_projection(before)["nodes"]}
-    after_nodes = {node["id"]: node for node in after["nodes"]}
-    if before_nodes.keys() != after_nodes.keys():
+    old_nodes = {n["id"]: _node_for_comparison(n) for n in before["nodes"]}
+    new_nodes = {n["id"]: _node_for_comparison(n) for n in after["nodes"]}
+    if set(old_nodes) != set(new_nodes):
         raise RolloutError("conjunto de nos mudou")
-    for node_id, node in before_nodes.items():
-        candidate = after_nodes[node_id]
+    for node_id in old_nodes:
+        a = json.loads(canonical_json(old_nodes[node_id]))
+        b = json.loads(canonical_json(new_nodes[node_id]))
         if node_id in allowed:
-            node = json.loads(canonical_json(node)); candidate = json.loads(canonical_json(candidate))
-            node["credentials"]["postgres"] = candidate["credentials"]["postgres"]
-        if canonical_json(node) != canonical_json(candidate):
-            raise RolloutError("no fora do escopo foi alterado")
-    for key in ("connections", "settings"):
+            if not isinstance(a.get("credentials", {}).get("postgres"), dict) \
+                    or not isinstance(b.get("credentials", {}).get("postgres"), dict):
+                raise RolloutError("credential postgres ausente")
+            a["credentials"]["postgres"] = b["credentials"]["postgres"]
+        if a != b:
+            raise RolloutError("alteracao indevida nos parametros de um no")
+    for key in ("name", "connections", "settings", "staticData", "pinData", "meta", "tags"):
         if before.get(key) != after.get(key):
-            raise RolloutError(f"{key} foi alterado fora do contrato")
+            raise RolloutError("drift no workflow fora dos dois bindings")
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
 
 
 class N8nApi:
-    def __init__(self, base_url: str, api_key: str, opener: Callable[..., Any] = urlopen):
-        if not base_url.startswith("https://"):
-            raise RolloutError("n8n exige URL HTTPS")
+    def __init__(self, base_url: str, api_key: str, opener: Any = None):
+        parsed = urlparse(base_url)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password \
+                or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+            raise RolloutError("n8n exige uma base HTTPS sem redirecionamento")
+        if not isinstance(api_key, str) or len(api_key.strip()) < 16:
+            raise RolloutError("n8n API key ausente")
         self._base = base_url.rstrip("/")
         self._api_key = api_key
-        self._opener = opener
+        self._opener = opener or build_opener(
+            HTTPSHandler(context=ssl.create_default_context()), _NoRedirect()
+        )
 
     def request(self, method: str, path: str, body: Mapping[str, Any] | None = None) -> Any:
+        if method not in ("GET", "POST", "PUT") or not path.startswith("/api/v1/") or "//" in path:
+            raise RolloutError("request n8n fora do contrato")
         payload = None if body is None else canonical_json(body).encode("utf-8")
         request = Request(self._base + path, data=payload, method=method, headers={
-            "X-N8N-API-KEY": self._api_key,
-            "Content-Type": "application/json",
+            "X-N8N-API-KEY": self._api_key, "Content-Type": "application/json",
             "Accept": "application/json",
         })
         try:
-            with self._opener(request, timeout=20) as response:
+            with self._opener.open(request, timeout=20) as response:
                 if response.geturl() != self._base + path:
                     raise RolloutError("redirect n8n bloqueado")
-                return json.loads(response.read().decode("utf-8"))
+                result = json.loads(response.read().decode("utf-8"))
+            return result
         except Exception as exc:
-            raise RolloutError(f"n8n API indisponivel ou resposta invalida em {method} {path}") from exc
+            # Never echo URLs, request/response JSON, exceptions or credentials.
+            raise RolloutError("n8n API indisponivel ou resposta inesperada") from exc
 
 
 def validate_credential_schema(schema: Mapping[str, Any], config: RolloutConfig) -> None:
