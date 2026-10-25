@@ -593,6 +593,55 @@ def print_status(role: str, bindings: str, rollback: str) -> None:
     print(f"G1_ROLLBACK={rollback}")
 
 
+OPERATION_STATUS = {
+    "role": "NOT_APPLIED",
+    "bindings": "NOT_APPLIED",
+    "rollback": "NOT_REQUIRED",
+}
+
+
+def _role_exists(admin: Any, config: RolloutConfig) -> bool:
+    return admin.execute(
+        "SELECT 1 FROM pg_roles WHERE rolname=%s", (config.raw["role_name"],)
+    ).fetchone() is not None
+
+
+def _role_settings_confirmed(admin: Any, config: RolloutConfig) -> None:
+    row = admin.execute(
+        "SELECT rolconfig FROM pg_roles WHERE rolname=%s",
+        (config.raw["role_name"],),
+    ).fetchone()
+    if not row or not isinstance(row[0], (list, tuple)) \
+            or "default_transaction_read_only=on" not in row[0]:
+        raise RolloutError("role nao tem default read-only validado")
+
+
+def _load_verified_snapshot(path: Path, config: RolloutConfig) -> Mapping[str, Any]:
+    snapshot = read_private_snapshot(path)
+    original = snapshot["workflow"]
+    validate_workflow(original, config)
+    if snapshot.get("fingerprint") != workflow_fingerprint(original):
+        raise RolloutError("snapshot alterado ou corrompido")
+    if snapshot.get("old_credential_id") != config.n8n["old_credential_id"]:
+        raise RolloutError("snapshot de outra credencial")
+    if snapshot.get("credential_id") == config.n8n["old_credential_id"]:
+        raise RolloutError("snapshot sem credencial nova")
+    return snapshot
+
+
+def _assert_post_apply(workflow: Mapping[str, Any], snapshot: Mapping[str, Any],
+                       config: RolloutConfig) -> None:
+    validate_workflow(workflow, config, require_old_bindings=False)
+    expected = snapshot["workflow"]
+    assert_only_two_rebindings(expected, workflow, config)
+    assert_binding_id(workflow, config, snapshot["credential_id"])
+    # Require the old credential to have been unbound from the financial nodes.
+    if any(n.get("credentials", {}).get("postgres", {}).get("id")
+           == config.n8n["old_credential_id"] for n in workflow["nodes"]
+           if n["id"] in config.n8n["binding_node_ids"]):
+        raise RolloutError("credencial administrativa ainda vinculada")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path(__file__).with_suffix(".json"))
@@ -601,116 +650,162 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--rollback", action="store_true")
     parser.add_argument("--n8n-url")
-    parser.add_argument("--snapshot", type=Path, default=Path.home() / ".local/state/agente-sql-langgraph/g1-readonly-snapshot.json")
+    parser.add_argument("--n8n-container", default=os.environ.get("N8N_CONTAINER", ""))
+    parser.add_argument("--snapshot", type=Path,
+        default=Path.home() / ".local/state/agente-sql-langgraph/g1-readonly-snapshot.json")
     parser.add_argument("--project-ref", default=os.environ.get("G1_SUPABASE_PROJECT_REF"))
     args = parser.parse_args(argv)
-    modes = sum((args.apply, args.verify, args.rollback))
-    if modes > 1:
-        parser.error("use somente um modo mutavel")
+    if sum(bool(x) for x in (args.apply, args.verify, args.rollback, args.dry_run)) > 1:
+        parser.error("selecione somente um modo")
     config = load_config(args.config)
-    if not args.n8n_url or not args.project_ref:
-        raise RolloutError("n8n-url e project-ref sao obrigatorios no host autorizado")
-    api_key = getpass.getpass("n8n API key (nao sera exibida): ")
+    if not args.n8n_url or not args.project_ref \
+            or not re.fullmatch(r"[a-z0-9]{12,35}", args.project_ref):
+        raise RolloutError("n8n-url/project-ref ausente ou invalido")
+    read_n8n_runtime_version(config, args.n8n_container)
+    api_key = getpass.getpass("n8n API key (sem eco): ")
     api = N8nApi(args.n8n_url, api_key)
-    workflow = api.request("GET", f"/api/v1/workflows/{config.n8n['workflow_id']}")
-    validate_workflow(workflow, config)
-    current_fingerprint = workflow_fingerprint(workflow)
-    schema = api.request("GET", "/api/v1/credentials/schema/postgres")
-    validate_credential_schema(schema, config)
-    if args.rollback:
+    api_key = ""
+    workflow_path = f"/api/v1/workflows/{config.n8n['workflow_id']}"
+    workflow = api.request("GET", workflow_path)
+    validate_workflow(workflow, config, require_old_bindings=not (args.rollback or args.verify))
+    validate_credential_schema(api.request("GET", "/api/v1/credentials/schema/postgres"), config)
+
+    if args.rollback or args.verify:
+        snapshot = _load_verified_snapshot(args.snapshot, config)
+        _assert_post_apply(workflow, snapshot, config)
+        if args.verify:
+            # No plaintext role password is stored outside n8n's vault.
+            # Independently revalidate effective grants via the administrative
+            # connection; the live role login was checked during apply.
+            dsn = getpass.getpass("DSN admin do projeto (sem eco): ")
+            require_verified_tls_dsn(dsn, config.raw["database"], args.project_ref)
+            try:
+                import psycopg
+            except ImportError as exc:
+                raise RolloutError("psycopg indisponivel") from exc
+            with psycopg.connect(dsn, autocommit=True) as admin:
+                validate_database(admin, config)
+                assert_role_effective_permissions(admin, config)
+                _role_settings_confirmed(admin, config)
+            print_status("EFFECTIVE_GRANTS_PASS", "PUBLISHED_BINDINGS_PASS", str(args.snapshot))
+            return 0
         confirm("ROLLBACK-G1")
-        snapshot = read_private_snapshot(args.snapshot)
-        current = api.request("GET", f"/api/v1/workflows/{config.n8n['workflow_id']}")
-        validate_workflow(current, config, require_old_bindings=False)
-        expected = rebind_only(snapshot["workflow"], config, snapshot["credential_id"], snapshot.get("credential_name", ""))
-        if workflow_fingerprint(workflow_projection(current)) != workflow_fingerprint(expected):
-            raise RolloutError("rollback bloqueado: houve drift concorrente no workflow")
-        restored = workflow_projection(snapshot["workflow"])
-        api.request("PUT", f"/api/v1/workflows/{config.n8n['workflow_id']}", restored)
-        final = api.request("GET", f"/api/v1/workflows/{config.n8n['workflow_id']}")
+        current = api.request("GET", workflow_path)
+        _assert_post_apply(current, snapshot, config)
+        updated = rebind_only(
+            current, config, snapshot["old_credential_id"],
+            snapshot["old_credential_name"],
+        )
+        assert_only_two_rebindings(current, updated, config)
+        OPERATION_STATUS["bindings"] = "ROLLBACK_PUT_ATTEMPTED"
+        OPERATION_STATUS["rollback"] = str(args.snapshot)
+        api.request("PUT", workflow_path, updated)
+        final = api.request("GET", workflow_path)
         validate_workflow(final, config)
-        if workflow_fingerprint(final) != snapshot["fingerprint"]:
-            raise RolloutError("rollback nao restaurou o fingerprint original")
+        assert_only_two_rebindings(current, final, config)
+        assert_binding_id(final, config, snapshot["old_credential_id"])
+        assert_only_two_rebindings(snapshot["workflow"], final, config)
+        OPERATION_STATUS["bindings"] = "ROLLED_BACK"
         print_status("RETAINED_FOR_REVIEW", "ROLLED_BACK", str(args.snapshot))
         return 0
-    if args.verify:
-        snapshot = read_private_snapshot(args.snapshot)
-        validate_workflow(workflow, config, require_old_bindings=False)
-        expected = rebind_only(snapshot["workflow"], config, snapshot["credential_id"], snapshot.get("credential_name", ""))
-        if workflow_fingerprint(workflow) != workflow_fingerprint(expected):
-            raise RolloutError("verificacao bloqueada: bindings nao conferem com o snapshot")
-        print_status("VERIFY_REQUIRES_OPERATOR_DB_ACCESS", "PASS", str(args.snapshot))
-        return 0
-    if not args.apply:
-        dsn = getpass.getpass("DSN PostgreSQL administrador (TLS verify-full, nao sera exibido): ")
-        require_verified_tls_dsn(dsn, config.raw["database"], args.project_ref)
-        try:
-            import psycopg
-        except ImportError as exc:
-            raise RolloutError("psycopg[binary] nao esta disponivel") from exc
-        admin = psycopg.connect(dsn, autocommit=True)
-        try:
-            validate_database(admin, config)
-            if admin.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (config.raw["role_name"],)).fetchone():
-                raise RolloutError("role de rollout ja existe")
-        finally:
-            admin.close()
-        print_status("NOT_APPLIED", f"PREFLIGHT:{current_fingerprint[:12]}", "READY")
-        return 0
-    confirm()
-    dsn = getpass.getpass("DSN PostgreSQL administrador (TLS verify-full, nao sera exibido): ")
+
+    # All preflight checks (including discovering a safe connection template)
+    # are performed before any role, credential or workflow is modified.
+    require_old_credential_visible(api, config)
+    starting_fingerprint = workflow_fingerprint(workflow)
+    if args.apply and (args.snapshot.exists() or args.snapshot.is_symlink()):
+        raise RolloutError("snapshot ja existe; nao sobrescrever operacao anterior")
+    dsn = getpass.getpass("DSN admin PostgreSQL do projeto (sem eco): ")
     require_verified_tls_dsn(dsn, config.raw["database"], args.project_ref)
+    template = pooler_template_from_admin_dsn(dsn, config, args.project_ref)
     try:
-        import psycopg  # local import: no connection in dry-run/tests
+        import psycopg
     except ImportError as exc:
-        raise RolloutError("psycopg[binary] nao esta disponivel") from exc
-    admin = psycopg.connect(dsn, autocommit=True)
-    password = secrets.token_urlsafe(32)
-    try:
+        raise RolloutError("psycopg indisponivel") from exc
+
+    password = ""
+    with psycopg.connect(dsn, autocommit=True) as admin:
         validate_database(admin, config)
-        provision_role(admin, config, password)
-        assert_role_effective_permissions(admin, config)
-        # The only way to obtain the connection template is the authorized n8n API;
-        # no existing password is read, copied, or logged.
-        old = api.request("GET", f"/api/v1/credentials/{config.n8n['old_credential_id']}")
-        fields = config.n8n["connection_fields"]
-        data = old.get("data", {})
-        template = {fields[key]: data[fields[key]] for key in ("host", "port", "database", "ssl") if fields[key] in data}
-        if set(template) != {fields[key] for key in ("host", "port", "database", "ssl")}:
-            raise RolloutError("credencial antiga nao forneceu parametros publicos de conexao")
-        readonly = psycopg.connect(build_pooler_dsn(template, config, args.project_ref, password), autocommit=True)
-        try:
+        if _role_exists(admin, config):
+            raise RolloutError("role ja existe; recuperar operacao anterior antes de aplicar")
+        # Validate new credential fields before creating the DB role.
+        connection_fields = config.n8n["connection_fields"]
+        credential_data_base = {
+            connection_fields[key]: template[key]
+            for key in ("host", "port", "database", "ssl")
+        }
+        credential_data_base["ignoreSSLIssues"] = False
+        if not args.apply:
+            print_status("NOT_APPLIED", f"PREFLIGHT:{starting_fingerprint[:12]}", "READY")
+            return 0
+        confirm("APPLY-G1")
+        password = secrets.token_urlsafe(32)
+        # Postgres DDL is transactional.  On failure within this block, the
+        # role and ALL GRANTs roll back together without touching other roles.
+        with admin.transaction():
+            provision_role(admin, config, password)
+            assert_role_effective_permissions(admin, config)
+            _role_settings_confirmed(admin, config)
+        OPERATION_STATUS["role"] = "CREATED"
+        OPERATION_STATUS["rollback"] = "ROLE_RETAINED_FOR_REVIEW"
+        readonly_dsn = build_pooler_dsn(template, config, args.project_ref, password)
+        with psycopg.connect(readonly_dsn, autocommit=True) as readonly:
             verify_role(readonly, config)
-        finally:
-            readonly.close()
-        credential_name = f"{config.raw['role_name']}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-        credential = api.request("POST", "/api/v1/credentials", {"name": credential_name, "type": config.n8n["credential_type"], "data": {**template, fields["user"]: config.raw["role_name"], fields["password"]: password}})
-        credential_id = credential.get("id")
-        if not isinstance(credential_id, str) or not credential_id:
-            raise RolloutError("n8n nao confirmou criacao da nova credencial")
-        refreshed = api.request("GET", f"/api/v1/workflows/{config.n8n['workflow_id']}")
-        validate_workflow(refreshed, config)
-        if workflow_fingerprint(refreshed) != current_fingerprint:
-            raise RolloutError("drift concorrente detectado antes do PUT")
-        updated = rebind_only(refreshed, config, credential_id, credential_name)
-        assert_only_two_rebindings(refreshed, updated, config)
-        private_snapshot(args.snapshot, {"fingerprint": current_fingerprint, "workflow": workflow_projection(refreshed), "credential_id": credential_id, "credential_name": credential_name})
-        api.request("PUT", f"/api/v1/workflows/{config.n8n['workflow_id']}", updated)
-        verified = api.request("GET", f"/api/v1/workflows/{config.n8n['workflow_id']}")
-        validate_workflow(verified, config)
-        assert_only_two_rebindings(refreshed, workflow_projection(verified), config)
-        if verified.get("activeVersionId") != verified.get("versionId"):
-            raise RolloutError("workflow deixou de apontar para a versao publicada")
-        print_status(config.raw["role_name"], "PASS", str(args.snapshot))
+        new_name = f"{config.raw['role_name']}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        credential_data_base[connection_fields["user"]] = (
+            f"{config.raw['role_name']}.{args.project_ref}"
+        )
+        credential_data_base[connection_fields["password"]] = password
+        created = api.request("POST", "/api/v1/credentials", {
+            "name": new_name, "type": config.n8n["credential_type"],
+            "data": credential_data_base,
+        })
+        new_id = created.get("id") if isinstance(created, dict) else None
+        if not isinstance(new_id, str) or not new_id or new_id == config.n8n["old_credential_id"]:
+            raise RolloutError("n8n nao confirmou credencial nova")
+        OPERATION_STATUS["bindings"] = "NEW_CREDENTIAL_CREATED_UNBOUND"
+        # Public API returns metadata, NOT the old/new plaintext credential.
+        credential_meta = api.request("GET", f"/api/v1/credentials/{new_id}")
+        if not isinstance(credential_meta, dict) or credential_meta.get("id") != new_id:
+            raise RolloutError("n8n nao confirmou acesso a nova credencial")
+        if new_id not in list_n8n_credential_ids(api):
+            raise RolloutError("credencial nao acessivel ao operador n8n")
+        current = api.request("GET", workflow_path)
+        validate_workflow(current, config)
+        if workflow_fingerprint(current) != starting_fingerprint:
+            raise RolloutError("workflow foi alterado durante o preflight")
+        updated = rebind_only(current, config, new_id, new_name)
+        assert_only_two_rebindings(current, updated, config)
+        backup = {
+            "workflow": current, "fingerprint": workflow_fingerprint(current),
+            "old_credential_id": config.n8n["old_credential_id"],
+            "old_credential_name": config.n8n.get("old_credential_name", "Postgres account 2"),
+            "credential_id": new_id, "credential_name": new_name,
+        }
+        private_snapshot(args.snapshot, backup)
+        OPERATION_STATUS["rollback"] = str(args.snapshot)
+        # If timeout occurs during PUT, do not claim a rollback or success.
+        OPERATION_STATUS["bindings"] = "PUT_ATTEMPTED_VERIFY_REQUIRED"
+        api.request("PUT", workflow_path, updated)
+        published = api.request("GET", workflow_path)
+        _assert_post_apply(published, backup, config)
+        assert_only_two_rebindings(current, published, config)
+        OPERATION_STATUS["bindings"] = "PASS"
+        print_status("SELECT_ONLY_VERIFIED", "PASS", str(args.snapshot))
         return 0
-    finally:
-        password = ""
-        admin.close()
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except RolloutError as exc:
-        print(f"G1_ROLE=NOT_APPLIED\nG1_N8N_BINDINGS=NOT_APPLIED\nG1_ROLLBACK=REQUIRED\nERROR={exc}", file=sys.stderr)
+        print_status(OPERATION_STATUS["role"], OPERATION_STATUS["bindings"],
+                     OPERATION_STATUS["rollback"])
+        print("ERROR=" + str(exc), file=sys.stderr)
+        raise SystemExit(2)
+    except Exception:
+        # Never include PostgreSQL/n8n exception strings: they may embed DSNs.
+        print_status(OPERATION_STATUS["role"], OPERATION_STATUS["bindings"],
+                     OPERATION_STATUS["rollback"])
+        print("ERROR=OPERACAO_FALHOU_REQUER_RECONCILIACAO", file=sys.stderr)
         raise SystemExit(2)
