@@ -1,0 +1,39 @@
+{
+  "rollout_id": "g1-demo-readonly-v1",
+  "database": "postgres",
+  "role_name": "finance_g1_readonly",
+  "schema": "rivatti_demo_masked",
+  "relation_types": ["BASE TABLE", "VIEW"],
+  "relations": [
+    "gold_lancamentos_contabeis",
+    "gold_rateios_lancamentos_contabeis",
+    "gold_orcamento",
+    "gold_rateios_orcamentos",
+    "gold_unidade_negocio",
+    "gold_centro_custo",
+    "gold_plano_contas",
+    "gold_mascaras_demonstrativos"
+  ],
+  "n8n": {
+    "workflow_id": "2E6mbYg8CEJhGhqs",
+    "workflow_name": "DEMO - Agente SQL Financeiro - Grupo Horizonte - Supabase - granularidade semantica",
+    "expected_node_count": 68,
+    "expected_n8n_version": "2.4.8",
+    "webhook_path": "80435f7e-61fe-4567-b79d-838ce3f24022",
+    "credential_type": "postgres",
+    "old_credential_id": "h65jEwCzKR83qQ34",
+    "old_credential_name": "Postgres account 2",
+    "binding_node_ids": [
+      "8b76a590-e349-40af-bdbd-1a7d3f5d4d27",
+      "85c4514e-bbd0-45fa-a0ce-6bbd5ef2c284"
+    ],
+    "connection_fields": {
+      "host": "host",
+      "port": "port",
+      "database": "database",
+      "ssl": "ssl",
+      "user": "user",
+      "password": "password"
+    }
+  }
+}
