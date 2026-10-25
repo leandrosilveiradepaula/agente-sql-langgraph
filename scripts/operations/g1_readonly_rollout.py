@@ -68,7 +68,8 @@ def load_config(path: Path) -> RolloutConfig:
     if not isinstance(raw, dict) or required - raw.keys() or not isinstance(raw["n8n"], dict):
         raise RolloutError("configuracao de rollout incompleta")
     n8n_required = {"workflow_id", "workflow_name", "expected_node_count", "expected_n8n_version", "webhook_path", "credential_type", "old_credential_id", "binding_node_ids", "connection_fields"}
-    if n8n_required - raw["n8n"].keys() or len(raw["relations"]) != 8 or len(raw["n8n"]["binding_node_ids"]) != 2:
+    if n8n_required - raw["n8n"].keys() or not isinstance(raw["relations"], list) \
+            or not raw["relations"] or len(raw["n8n"]["binding_node_ids"]) != 2:
         raise RolloutError("configuracao de rollout fora do contrato G1")
     if len(set(raw["relations"])) != len(raw["relations"]):
         raise RolloutError("relacoes duplicadas na configuracao")
@@ -297,63 +298,132 @@ def validate_credential_schema(schema: Mapping[str, Any], config: RolloutConfig)
 
 
 def validate_database(connection: DbConnection, config: RolloutConfig) -> None:
-    database, = connection.execute("SELECT current_database()", ()).fetchone()
-    if database != config.raw["database"]:
+    row = connection.execute("SELECT current_database()", ()).fetchone()
+    if not row or row[0] != config.raw["database"]:
         raise RolloutError("database conectado diverge da configuracao")
     relation_rows = connection.execute(
-        "SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = %s", (config.raw["schema"],)
+        "SELECT table_name, table_type FROM information_schema.tables WHERE table_schema=%s",
+        (config.raw["schema"],),
     ).fetchall()
-    relation_types = dict(relation_rows)
-    missing = [name for name in config.raw["relations"] if relation_types.get(name) not in config.raw["relation_types"]]
-    if missing:
-        raise RolloutError("relacao permitida ausente ou com tipo nao autorizado")
+    known = dict(relation_rows)
+    if any(known.get(x) not in config.raw["relation_types"] for x in config.raw["relations"]):
+        raise RolloutError("objeto de leitura ausente ou com tipo nao autorizado")
+    # PUBLIC is an ACL grantee (oid 0), not a real pg_roles member named "public".
     public_dml = connection.execute(
         "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-        "WHERE n.nspname=%s AND c.relname = ANY(%s) AND (has_table_privilege('public', c.oid, 'INSERT') "
-        "OR has_table_privilege('public', c.oid, 'UPDATE') OR has_table_privilege('public', c.oid, 'DELETE') "
-        "OR has_table_privilege('public', c.oid, 'TRUNCATE'))", (config.raw["schema"], config.raw["relations"])
+        "JOIN LATERAL aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a ON true "
+        "WHERE n.nspname=%s AND c.relname=ANY(%s) AND a.grantee=0 "
+        "AND a.privilege_type IN ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER')",
+        (config.raw["schema"], config.raw["relations"]),
     ).fetchall()
     if public_dml:
-        raise RolloutError("PUBLIC possui DML em relacao do contrato")
-    definer = connection.execute(
+        raise RolloutError("PUBLIC possui DML em relacao financeira")
+    public_definer = connection.execute(
         "SELECT p.oid::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
-        "WHERE n.nspname=%s AND p.prosecdef AND has_function_privilege('public', p.oid, 'EXECUTE')", (config.raw["schema"],)
+        "JOIN LATERAL aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a ON true "
+        "WHERE n.nspname=%s AND p.prosecdef AND a.grantee=0 AND a.privilege_type='EXECUTE'",
+        (config.raw["schema"],),
     ).fetchall()
-    if definer:
-        raise RolloutError("SECURITY DEFINER acessivel por PUBLIC no schema do contrato")
+    if public_definer:
+        raise RolloutError("SECURITY DEFINER financeiro executavel por PUBLIC")
 
 
-def build_pooler_dsn(template: Mapping[str, Any], config: RolloutConfig, project_ref: str, password: str) -> str:
+def pooler_template_from_admin_dsn(dsn: str, config: RolloutConfig,
+                                   project_ref: str) -> dict[str, Any]:
+    """No credential secrets fetched from n8n. Use the privately prompted admin DSN."""
+    require_verified_tls_dsn(dsn, config.raw["database"], project_ref)
+    parsed = urlparse(dsn)
+    if not parsed.hostname or not parsed.hostname.endswith(".pooler.supabase.com") \
+            or parsed.port not in (5432, 6543):
+        raise RolloutError("DSN administrador nao aponta para Supavisor autorizado")
+    return {"host": parsed.hostname, "port": parsed.port,
+            "database": config.raw["database"], "ssl": "require",
+            "ignoreSSLIssues": False}
+
+
+def build_pooler_dsn(template: Mapping[str, Any], config: RolloutConfig,
+                     project_ref: str, password: str) -> str:
     fields = config.n8n["connection_fields"]
-    host, port, database, ssl = (template[fields[key]] for key in ("host", "port", "database", "ssl"))
-    if not isinstance(host, str) or not host or not str(port).isdigit() or database != config.raw["database"]:
-        raise RolloutError("template da credencial nao identifica o pooler correto")
-    if ssl in {False, "false", "disable", ""}:
-        raise RolloutError("template n8n nao exige TLS")
+    host, port, database, ssl_mode = (
+        template[fields[key]] for key in ("host", "port", "database", "ssl")
+    )
+    if not isinstance(host, str) or not host.endswith(".pooler.supabase.com") \
+            or str(port) not in ("5432", "6543") or database != config.raw["database"] \
+            or ssl_mode != "require" or template.get("ignoreSSLIssues") is not False:
+        raise RolloutError("credencial n8n sem TLS e pooler homologados")
     username = f"{config.raw['role_name']}.{project_ref}"
-    return f"postgresql://{quote(username, safe='')}:{quote(password, safe='')}@{host}:{port}/{database}?sslmode=verify-full"
+    return (f"postgresql://{quote(username, safe='')}:{quote(password, safe='')}"
+            f"@{host}:{port}/{database}?sslmode=verify-full")
 
 
 def assert_role_effective_permissions(connection: DbConnection, config: RolloutConfig) -> None:
+    """Effective rights, including PUBLIC grants, not just explicit role GRANTs."""
     role = config.raw["role_name"]
-    memberships = connection.execute(
-        "SELECT 1 FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member "
-        "WHERE member.rolname=%s", (role,)
-    ).fetchall()
-    if memberships:
-        raise RolloutError("role recebeu membership inesperado")
+    flags = connection.execute(
+        "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls, "
+        "rolcanlogin, rolinherit FROM pg_roles WHERE rolname=%s", (role,)
+    ).fetchone()
+    if not flags or any(flags[:5]) or not flags[5] or flags[6]:
+        raise RolloutError("role recebeu flags administrativas ou heranca")
+    members = connection.execute(
+        "SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.member "
+        "WHERE r.rolname=%s LIMIT 1", (role,)
+    ).fetchone()
+    if members:
+        raise RolloutError("role recebeu memberships nao autorizados")
+    db_or_schema_create = connection.execute(
+        "SELECT has_database_privilege(%s, %s, 'CREATE') OR "
+        "has_database_privilege(%s, %s, 'TEMPORARY') OR "
+        "EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname NOT LIKE 'pg_toast%%' "
+        "AND n.nspname NOT LIKE 'pg_temp%%' "
+        "AND has_schema_privilege(%s, n.oid, 'CREATE'))",
+        (role, config.raw["database"], role, config.raw["database"], role),
+    ).fetchone()
+    if not db_or_schema_create or db_or_schema_create[0]:
+        raise RolloutError("role pode criar objetos ou tabelas temporarias")
+    unapproved_read = connection.execute(
+        "SELECT c.oid::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE c.relkind IN ('r','v','m','p','f') "
+        "AND n.nspname NOT IN ('pg_catalog','information_schema') "
+        "AND n.nspname NOT LIKE 'pg_toast%%' AND n.nspname NOT LIKE 'pg_temp%%' "
+        "AND has_schema_privilege(%s,n.oid,'USAGE') "
+        "AND has_table_privilege(%s,c.oid,'SELECT') "
+        "AND NOT (n.nspname=%s AND c.relname=ANY(%s)) LIMIT 1",
+        (role, role, config.raw["schema"], config.raw["relations"]),
+    ).fetchone()
+    if unapproved_read:
+        raise RolloutError("role le objetos fora do catalogo permitido")
+    writable = connection.execute(
+        "SELECT c.oid::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE c.relkind IN ('r','v','m','p','f') AND "
+        "(has_table_privilege(%s,c.oid,'INSERT') OR "
+        "has_table_privilege(%s,c.oid,'UPDATE') OR "
+        "has_table_privilege(%s,c.oid,'DELETE') OR "
+        "has_table_privilege(%s,c.oid,'TRUNCATE') OR "
+        "has_table_privilege(%s,c.oid,'REFERENCES') OR "
+        "has_table_privilege(%s,c.oid,'TRIGGER')) LIMIT 1",
+        (role, role, role, role, role, role),
+    ).fetchone()
+    if writable:
+        raise RolloutError("role pode modificar uma relacao")
     sequence_access = connection.execute(
-        "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-        "WHERE c.relkind='S' AND has_sequence_privilege(%s, c.oid, 'USAGE,SELECT,UPDATE') LIMIT 1", (role,)
-    ).fetchall()
+        "SELECT 1 FROM pg_class c WHERE c.relkind='S' AND "
+        "(has_sequence_privilege(%s,c.oid,'USAGE') OR "
+        "has_sequence_privilege(%s,c.oid,'SELECT') OR "
+        "has_sequence_privilege(%s,c.oid,'UPDATE')) LIMIT 1",
+        (role, role, role),
+    ).fetchone()
     if sequence_access:
-        raise RolloutError("role recebeu privilegio em sequence")
-    external_schema = connection.execute(
-        "SELECT 1 FROM pg_namespace n WHERE n.nspname NOT IN ('pg_catalog','information_schema',%s) "
-        "AND n.nspname NOT LIKE 'pg_toast%%' AND has_schema_privilege(%s, n.oid, 'USAGE,CREATE') LIMIT 1", (config.raw["schema"], role)
-    ).fetchall()
-    if external_schema:
-        raise RolloutError("role recebeu acesso a schema externo")
+        raise RolloutError("role possui acesso a sequence")
+    definer = connection.execute(
+        "SELECT p.oid::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+        "WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog','information_schema') "
+        "AND has_schema_privilege(%s,n.oid,'USAGE') "
+        "AND has_function_privilege(%s,p.oid,'EXECUTE') LIMIT 1",
+        (role, role),
+    ).fetchone()
+    if definer:
+        raise RolloutError("role pode chamar SECURITY DEFINER")
 
 
 def read_private_snapshot(path: Path) -> Mapping[str, Any]:
@@ -390,26 +460,46 @@ def provision_role(connection: DbConnection, config: RolloutConfig, password: st
 
 
 def verify_role(connection: DbConnection, config: RolloutConfig) -> None:
-    current_user, read_only = connection.execute("SELECT current_user, current_setting('transaction_read_only')", ()).fetchone()
-    if current_user != config.raw["role_name"] or str(read_only).lower() not in {"on", "true"}:
-        raise RolloutError("nova conexao nao confirmou identidade/read-only")
+    row = connection.execute(
+        "SELECT current_user, current_database(), current_setting('transaction_read_only')"
+    ).fetchone()
+    if not row or row != (config.raw["role_name"], config.raw["database"], "on"):
+        raise RolloutError("sessao read-only nao confirmou usuario, banco e transacao")
     schema = quote_ident(config.raw["schema"])
     for relation in config.raw["relations"]:
-        rows = connection.execute(f"SELECT 1 FROM {schema}.{quote_ident(relation)} LIMIT 1")
-        _ = rows
-    prohibited = connection.execute(
+        connection.execute(f"SELECT 1 FROM {schema}.{quote_ident(relation)} LIMIT 1").fetchone()
+    # Read-only role can see its own privileges; no DML is ever attempted.
+    allowed = connection.execute(
         "SELECT has_database_privilege(current_user, current_database(), 'CREATE') OR "
+        "has_database_privilege(current_user, current_database(), 'TEMPORARY') OR "
         "has_schema_privilege(current_user, %s, 'CREATE')", (config.raw["schema"],)
-    ).fetchone()[0]
-    if prohibited:
-        raise RolloutError("role recebeu privilegio de criacao")
+    ).fetchone()
+    if not allowed or allowed[0]:
+        raise RolloutError("nova sessao tem privilegio de escrita/DDL")
 
 
 def private_snapshot(path: Path, content: Mapping[str, Any]) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.parent.chmod(0o700)
-    path.write_text(canonical_json(content), encoding="utf-8")
-    path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    """Atomic exclusive backup; must be created before the public n8n PUT."""
+    parent = path.parent
+    parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if parent.is_symlink() or path.is_symlink():
+        raise RolloutError("snapshot privado nao aceita symlinks")
+    parent.chmod(0o700)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise RolloutError("snapshot ja existe ou nao pode ser criado") from exc
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(canonical_json(content))
+            file.flush()
+            os.fsync(file.fileno())
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
 
 
 def confirm(token: str = "APPLY-G1") -> None:
