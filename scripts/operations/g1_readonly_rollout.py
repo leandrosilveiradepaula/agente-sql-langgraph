@@ -73,6 +73,17 @@ def load_config(path: Path) -> RolloutConfig:
         raise RolloutError("configuracao de rollout fora do contrato G1")
     if len(set(raw["relations"])) != len(raw["relations"]):
         raise RolloutError("relacoes duplicadas na configuracao")
+    # The physical credential field names are pinned to the target n8n
+    # version in rollout data, never inferred from a different release.
+    fields = raw["n8n"].get("connection_fields")
+    expected = {
+        "host", "port", "database", "ssl", "user", "password",
+        "allow_unauthorized_certs",
+    }
+    if not isinstance(fields, dict) or set(fields) != expected \
+            or any(not isinstance(v, str) or not v for v in fields.values()) \
+            or len(set(fields.values())) != len(fields):
+        raise RolloutError("mapeamento da credencial n8n fora do contrato")
     return RolloutConfig(raw)
 
 
@@ -311,11 +322,14 @@ def validate_credential_schema(schema: Mapping[str, Any], config: RolloutConfig)
     if not isinstance(ssl_field, dict):
         raise RolloutError("campo SSL sem contrato")
     # n8n uses an enum containing 'require', not a boolean 'true' for SSL.
-    ssl_options = ssl_field.get("enum", ())
-    if isinstance(ssl_options, (list, tuple)) and ssl_options and "require" not in ssl_options:
+    ssl_options = ssl_field.get("enum")
+    if not isinstance(ssl_options, list) or "require" not in ssl_options:
         raise RolloutError("schema postgres n8n nao oferece SSL require")
-    if "ignoreSSLIssues" not in properties:
-        raise RolloutError("schema n8n nao suporta verificacao de certificado")
+    # n8n@2.4.8 Postgres.credentials.ts uses allowUnauthorizedCerts, NOT
+    # ignoreSSLIssues.  Require the actual boolean property in the schema.
+    tls_field = properties[config.n8n["connection_fields"]["allow_unauthorized_certs"]]
+    if not isinstance(tls_field, dict) or tls_field.get("type") != "boolean":
+        raise RolloutError("schema n8n nao confirma certificado TLS verificavel")
 
 
 def read_n8n_runtime_version(config: RolloutConfig, container: str = "") -> None:
@@ -342,30 +356,23 @@ def read_n8n_runtime_version(config: RolloutConfig, container: str = "") -> None
         raise RolloutError("n8n fora da versao homologada")
 
 
-def list_n8n_credential_ids(api: N8nApi) -> set[str]:
-    ids: set[str] = set()
-    cursor = None
-    for _ in range(30):
-        path = "/api/v1/credentials?limit=100"
-        if cursor is not None:
-            path += "&cursor=" + quote(cursor, safe="")
-        response = api.request("GET", path)
-        rows = response.get("data") if isinstance(response, dict) else None
-        if not isinstance(rows, list):
-            raise RolloutError("API n8n nao devolveu lista segura de credenciais")
-        ids.update(x["id"] for x in rows if isinstance(x, dict) and isinstance(x.get("id"), str))
-        next_cursor = response.get("nextCursor")
-        if not next_cursor:
-            return ids
-        if not isinstance(next_cursor, str) or next_cursor == cursor:
-            raise RolloutError("paginacao de credenciais n8n invalida")
-        cursor = next_cursor
-    raise RolloutError("limite de paginacao de credenciais excedido")
+def validate_created_credential_response(
+    created: Any, config: RolloutConfig, expected_name: str
+) -> str:
+    """n8n@2.4.8 public API returns sanitized POST metadata, not GET by ID.
 
-
-def require_old_credential_visible(api: N8nApi, config: RolloutConfig) -> None:
-    if config.n8n["old_credential_id"] not in list_n8n_credential_ids(api):
-        raise RolloutError("credencial n8n antiga nao visivel para API key")
+    GET /api/v1/credentials and GET /api/v1/credentials/{id} are absent
+    from the exact version's OpenAPI.  Never call an unregistered verb.
+    """
+    if not isinstance(created, dict):
+        raise RolloutError("criacao da credencial n8n nao confirmou metadata")
+    credential_id = created.get("id")
+    if not isinstance(credential_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", credential_id) \
+            or credential_id == config.n8n["old_credential_id"] \
+            or created.get("name") != expected_name \
+            or created.get("type") != config.n8n["credential_type"]:
+        raise RolloutError("credencial n8n criada com identidade inesperada")
+    return credential_id
 
 
 def assert_binding_id(workflow: Mapping[str, Any], config: RolloutConfig,
@@ -417,8 +424,7 @@ def pooler_template_from_admin_dsn(dsn: str, config: RolloutConfig,
             or parsed.port not in (5432, 6543):
         raise RolloutError("DSN administrador nao aponta para Supavisor autorizado")
     return {"host": parsed.hostname, "port": parsed.port,
-            "database": config.raw["database"], "ssl": "require",
-            "ignoreSSLIssues": False}
+            "database": config.raw["database"], "ssl": "require"}
 
 
 def build_pooler_dsn(template: Mapping[str, Any], config: RolloutConfig,
@@ -429,7 +435,7 @@ def build_pooler_dsn(template: Mapping[str, Any], config: RolloutConfig,
     )
     if not isinstance(host, str) or not host.endswith(".pooler.supabase.com") \
             or str(port) not in ("5432", "6543") or database != config.raw["database"] \
-            or ssl_mode != "require" or template.get("ignoreSSLIssues") is not False:
+            or ssl_mode != "require":
         raise RolloutError("credencial n8n sem TLS e pooler homologados")
     username = f"{config.raw['role_name']}.{project_ref}"
     return (f"postgresql://{quote(username, safe='')}:{quote(password, safe='')}"
@@ -717,7 +723,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # All preflight checks (including discovering a safe connection template)
     # are performed before any role, credential or workflow is modified.
-    require_old_credential_visible(api, config)
+    # Both old bindings were already checked in the published workflow.
+    # n8n@2.4.8 has no public GET /api/v1/credentials collection.
+    assert_binding_id(workflow, config, config.n8n["old_credential_id"])
     starting_fingerprint = workflow_fingerprint(workflow)
     if args.apply and (args.snapshot.exists() or args.snapshot.is_symlink()):
         raise RolloutError("snapshot ja existe; nao sobrescrever operacao anterior")
@@ -740,7 +748,7 @@ def main(argv: list[str] | None = None) -> int:
             connection_fields[key]: template[key]
             for key in ("host", "port", "database", "ssl")
         }
-        credential_data_base["ignoreSSLIssues"] = False
+        credential_data_base[connection_fields["allow_unauthorized_certs"]] = False
         if not args.apply:
             print_status("NOT_APPLIED", f"PREFLIGHT:{starting_fingerprint[:12]}", "READY")
             return 0
@@ -766,16 +774,11 @@ def main(argv: list[str] | None = None) -> int:
             "name": new_name, "type": config.n8n["credential_type"],
             "data": credential_data_base,
         })
-        new_id = created.get("id") if isinstance(created, dict) else None
-        if not isinstance(new_id, str) or not new_id or new_id == config.n8n["old_credential_id"]:
-            raise RolloutError("n8n nao confirmou credencial nova")
+        new_id = validate_created_credential_response(created, config, new_name)
         OPERATION_STATUS["bindings"] = "NEW_CREDENTIAL_CREATED_UNBOUND"
-        # Public API returns metadata, NOT the old/new plaintext credential.
-        credential_meta = api.request("GET", f"/api/v1/credentials/{new_id}")
-        if not isinstance(credential_meta, dict) or credential_meta.get("id") != new_id:
-            raise RolloutError("n8n nao confirmou acesso a nova credencial")
-        if new_id not in list_n8n_credential_ids(api):
-            raise RolloutError("credencial nao acessivel ao operador n8n")
+        # n8n@2.4.8 does not expose credential GET endpoints.  The POST
+        # identity plus the published workflow GET after PUT must both match.
+        # No plaintext credential is ever read back from the vault.
         current = api.request("GET", workflow_path)
         validate_workflow(current, config)
         if workflow_fingerprint(current) != starting_fingerprint:
