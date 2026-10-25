@@ -507,16 +507,22 @@ def assert_role_effective_permissions(connection: DbConnection, config: RolloutC
 
 
 def read_private_snapshot(path: Path) -> Mapping[str, Any]:
+    if path.is_symlink() or path.parent.is_symlink():
+        raise RolloutError("snapshot nao aceita symlinks")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
-        mode = stat.S_IMODE(path.stat().st_mode)
-        # The live target is Linux. Windows' chmod emulation cannot represent
-        # POSIX owner-only ACLs, so do not report a false pass/fail in offline CI.
-        if os.name != "nt" and mode & (stat.S_IRWXG | stat.S_IRWXO):
-            raise RolloutError("snapshot privado possui permissoes inseguras")
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RolloutError("snapshot privado indisponivel") from exc
-    if not isinstance(value, dict) or not isinstance(value.get("workflow"), dict) or not isinstance(value.get("credential_id"), str):
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "r", encoding="utf-8") as file:
+            mode = stat.S_IMODE(os.fstat(file.fileno()).st_mode)
+            if os.name != "nt" and mode & (stat.S_IRWXG | stat.S_IRWXO):
+                raise RolloutError("snapshot privado possui permissoes inseguras")
+            value = json.load(file)
+    except (OSError, ValueError) as exc:
+        raise RolloutError("snapshot privado ausente ou ilegivel") from exc
+    if not isinstance(value, dict) or not isinstance(value.get("workflow"), dict) \
+            or not isinstance(value.get("credential_id"), str):
         raise RolloutError("snapshot privado invalido")
     return value
 
