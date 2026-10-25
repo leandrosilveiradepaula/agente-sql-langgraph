@@ -27,3 +27,16 @@ python3 scripts/operations/g1_readonly_rollout.py --rollback \
 O rollback pede `ROLLBACK-G1`, compara o workflow vigente com o snapshot e restaura somente os dois bindings. Se houver concorrência, não faz PUT. Papel e credencial são preservados para revisão: não há `DROP` automático. Não toque em outros nós, `Postgres account`, Shadow, Gemini, migrations ou banco fora desta operação.
 
 Sem acesso autorizado à VPS, n8n e Supabase, não execute modos mutáveis. A PR contém somente código, testes offline e rollback controlado; não comprova rollout nem execução G1 correlacionada.
+
+
+## Notas obrigatórias da revisão de segurança
+
+- A origem dos parâmetros não secretos da nova conexão é o DSN administrativo digitado privadamente na VPS, que precisa apontar para o pooler Supavisor do projeto DEMO correto, com `sslmode=verify-full`. A API pública do n8n não expõe `data` da credencial antiga; o programa não tenta recuperá-lo.
+- O nome de usuário criado no n8n é `finance_g1_readonly.<project-ref>`; o papel PostgreSQL permanece `finance_g1_readonly`. A conexão da role nova é testada antes de alterar qualquer vínculo n8n.
+- O n8n real deve ser exatamente versão 2.4.8, comprovada pelo CLI do contêiner Docker. O payload `PUT` contém apenas campos públicos editáveis; `meta`, `pinData` e settings retidas pelo servidor nunca são reenviadas.
+- O banco pode conceder `TEMPORARY` e outros privilégios a `PUBLIC` por padrão. Se o preflight detectar privilégios incompatíveis com o contrato SELECT-only, **ele deve interromper a operação sem revogar grants globais e sem alterar terceiros**. Isso será reportado como bloqueio, não como sucesso.
+- A criação do papel e os grants ocorrem em uma transação. Se uma etapa posterior falhar, o status deixa explícito que a role e/ou a credencial podem existir sem estar vinculadas; nenhuma conta é excluída automaticamente.
+- `--verify` consulta novamente grants efetivos e configurações da role pelo DSN administrativo. Não recupera a senha da role armazenada no n8n. `--rollback` retorna somente os dois nós à credencial original, sempre depois de confirmar que não houve drift nos outros 66.
+- O snapshot privado pode conter configuração sensível que já existia no workflow legado; nunca o publique em Git, issue, log ou mensagem. Se houver erro depois da tentativa de PUT, verifique a identidade publicada antes de tentar repetir o comando.
+
+**Critério de homologação:** CI verde não prova rollout real. Manter Shadow desativado e execução SQL Shadow bloqueada até receber confirmação explícita dos gates G1.
