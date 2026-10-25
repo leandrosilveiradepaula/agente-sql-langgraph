@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -34,7 +34,7 @@ class HttpClient(Protocol):
 
 
 class DbConnection(Protocol):
-    def execute(self, query: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]: ...
+    def execute(self, query: str, params: tuple[Any, ...] = ()) -> Any: ...
     def close(self) -> None: ...
 
 
@@ -96,8 +96,7 @@ def require_verified_tls_dsn(dsn: str, expected_database: str, project_ref: str)
         raise RolloutError("DSN PostgreSQL invalido")
     if parsed.path.lstrip("/") != expected_database:
         raise RolloutError("database no DSN diverge da configuracao")
-    query = parsed.query.lower()
-    if "sslmode=verify-full" not in query:
+    if parse_qs(parsed.query).get("sslmode") != ["verify-full"]:
         raise RolloutError("TLS verify-full e obrigatorio")
     if project_ref not in (parsed.username or "") and project_ref not in parsed.hostname:
         raise RolloutError("identidade do projeto nao confere no DSN")
@@ -105,7 +104,7 @@ def require_verified_tls_dsn(dsn: str, expected_database: str, project_ref: str)
 
 def workflow_projection(workflow: Mapping[str, Any]) -> dict[str, Any]:
     """The documented n8n PUT shape, retaining public workflow state only."""
-    keys = ("name", "nodes", "connections", "settings", "staticData", "pinData", "meta", "tags")
+    keys = ("name", "nodes", "connections", "settings")
     projected = {key: workflow[key] for key in keys if key in workflow}
     if {"name", "nodes", "connections", "settings"} - projected.keys():
         raise RolloutError("workflow nao contem a projecao PUT completa")
@@ -124,8 +123,6 @@ def validate_workflow(workflow: Mapping[str, Any], config: RolloutConfig, *, req
         raise RolloutError("quantidade de nos do workflow diverge")
     if workflow.get("active") is not True or not workflow.get("versionId") or workflow.get("versionId") != workflow.get("activeVersionId"):
         raise RolloutError("workflow publicado nao coincide com sua versao ativa")
-    if str(workflow.get("n8nVersion", workflow.get("meta", {}).get("n8nVersion", ""))) != n8n["expected_n8n_version"]:
-        raise RolloutError("versao n8n nao homologada")
     nodes = {node.get("id"): node for node in workflow["nodes"] if isinstance(node, dict)}
     if set(n8n["binding_node_ids"]) - nodes.keys():
         raise RolloutError("nos financeiros autorizados ausentes")
@@ -162,9 +159,12 @@ def assert_only_two_rebindings(before: Mapping[str, Any], after: Mapping[str, An
         raise RolloutError("conjunto de nos mudou")
     for node_id, node in before_nodes.items():
         candidate = after_nodes[node_id]
-        if node_id not in allowed and canonical_json(node) != canonical_json(candidate):
+        if node_id in allowed:
+            node = json.loads(canonical_json(node)); candidate = json.loads(canonical_json(candidate))
+            node["credentials"]["postgres"] = candidate["credentials"]["postgres"]
+        if canonical_json(node) != canonical_json(candidate):
             raise RolloutError("no fora do escopo foi alterado")
-    for key in ("connections", "settings", "staticData", "pinData", "meta", "tags"):
+    for key in ("connections", "settings"):
         if before.get(key) != after.get(key):
             raise RolloutError(f"{key} foi alterado fora do contrato")
 
@@ -186,6 +186,8 @@ class N8nApi:
         })
         try:
             with self._opener(request, timeout=20) as response:
+                if response.geturl() != self._base + path:
+                    raise RolloutError("redirect n8n bloqueado")
                 return json.loads(response.read().decode("utf-8"))
         except Exception as exc:
             raise RolloutError(f"n8n API indisponivel ou resposta invalida em {method} {path}") from exc
@@ -202,12 +204,12 @@ def validate_credential_schema(schema: Mapping[str, Any], config: RolloutConfig)
 
 
 def validate_database(connection: DbConnection, config: RolloutConfig) -> None:
-    database, = connection.execute("SELECT current_database()", ())[0]
+    database, = connection.execute("SELECT current_database()", ()).fetchone()
     if database != config.raw["database"]:
         raise RolloutError("database conectado diverge da configuracao")
     relation_rows = connection.execute(
         "SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = %s", (config.raw["schema"],)
-    )
+    ).fetchall()
     relation_types = dict(relation_rows)
     missing = [name for name in config.raw["relations"] if relation_types.get(name) not in config.raw["relation_types"]]
     if missing:
@@ -217,13 +219,13 @@ def validate_database(connection: DbConnection, config: RolloutConfig) -> None:
         "WHERE n.nspname=%s AND c.relname = ANY(%s) AND (has_table_privilege('public', c.oid, 'INSERT') "
         "OR has_table_privilege('public', c.oid, 'UPDATE') OR has_table_privilege('public', c.oid, 'DELETE') "
         "OR has_table_privilege('public', c.oid, 'TRUNCATE'))", (config.raw["schema"], config.raw["relations"])
-    )
+    ).fetchall()
     if public_dml:
         raise RolloutError("PUBLIC possui DML em relacao do contrato")
     definer = connection.execute(
         "SELECT p.oid::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
         "WHERE n.nspname=%s AND p.prosecdef AND has_function_privilege('public', p.oid, 'EXECUTE')", (config.raw["schema"],)
-    )
+    ).fetchall()
     if definer:
         raise RolloutError("SECURITY DEFINER acessivel por PUBLIC no schema do contrato")
 
@@ -244,19 +246,19 @@ def assert_role_effective_permissions(connection: DbConnection, config: RolloutC
     memberships = connection.execute(
         "SELECT 1 FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member "
         "WHERE member.rolname=%s", (role,)
-    )
+    ).fetchall()
     if memberships:
         raise RolloutError("role recebeu membership inesperado")
     sequence_access = connection.execute(
         "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
         "WHERE c.relkind='S' AND has_sequence_privilege(%s, c.oid, 'USAGE,SELECT,UPDATE') LIMIT 1", (role,)
-    )
+    ).fetchall()
     if sequence_access:
         raise RolloutError("role recebeu privilegio em sequence")
     external_schema = connection.execute(
         "SELECT 1 FROM pg_namespace n WHERE n.nspname NOT IN ('pg_catalog','information_schema',%s) "
         "AND n.nspname NOT LIKE 'pg_toast%%' AND has_schema_privilege(%s, n.oid, 'USAGE,CREATE') LIMIT 1", (config.raw["schema"], role)
-    )
+    ).fetchall()
     if external_schema:
         raise RolloutError("role recebeu acesso a schema externo")
 
@@ -280,7 +282,7 @@ def provision_role(connection: DbConnection, config: RolloutConfig, password: st
     role = quote_ident(config.raw["role_name"])
     database = quote_ident(config.raw["database"])
     schema = quote_ident(config.raw["schema"])
-    exists = connection.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (config.raw["role_name"],))
+    exists = connection.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (config.raw["role_name"],)).fetchone()
     if exists:
         raise RolloutError("role de rollout ja existe")
     verifier = scram_verifier(password).replace("'", "''")
@@ -295,7 +297,7 @@ def provision_role(connection: DbConnection, config: RolloutConfig, password: st
 
 
 def verify_role(connection: DbConnection, config: RolloutConfig) -> None:
-    current_user, read_only = connection.execute("SELECT current_user, current_setting('transaction_read_only')", ())[0]
+    current_user, read_only = connection.execute("SELECT current_user, current_setting('transaction_read_only')", ()).fetchone()
     if current_user != config.raw["role_name"] or str(read_only).lower() not in {"on", "true"}:
         raise RolloutError("nova conexao nao confirmou identidade/read-only")
     schema = quote_ident(config.raw["schema"])
@@ -305,7 +307,7 @@ def verify_role(connection: DbConnection, config: RolloutConfig) -> None:
     prohibited = connection.execute(
         "SELECT has_database_privilege(current_user, current_database(), 'CREATE') OR "
         "has_schema_privilege(current_user, %s, 'CREATE')", (config.raw["schema"],)
-    )[0][0]
+    ).fetchone()[0]
     if prohibited:
         raise RolloutError("role recebeu privilegio de criacao")
 
@@ -386,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
         admin = psycopg.connect(dsn, autocommit=True)
         try:
             validate_database(admin, config)
-            if admin.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (config.raw["role_name"],)):
+            if admin.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (config.raw["role_name"],)).fetchone():
                 raise RolloutError("role de rollout ja existe")
         finally:
             admin.close()

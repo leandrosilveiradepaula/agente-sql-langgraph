@@ -87,10 +87,14 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
             def __init__(self, relations, dml=(), definer=()):
                 self.relations, self.dml, self.definer = relations, dml, definer
             def execute(self, query, params=()):
-                if "current_database" in query: return [("database",)]
-                if "information_schema.tables" in query: return self.relations
-                if "has_table_privilege('public'" in query: return [(item,) for item in self.dml]
-                if "prosecdef" in query: return [(item,) for item in self.definer]
+                class Cursor:
+                    def __init__(self, rows): self.rows = rows
+                    def fetchone(self): return self.rows[0] if self.rows else None
+                    def fetchall(self): return self.rows
+                if "current_database" in query: return Cursor([("database",)])
+                if "information_schema.tables" in query: return Cursor(self.relations)
+                if "has_table_privilege('public'" in query: return Cursor([(item,) for item in self.dml])
+                if "prosecdef" in query: return Cursor([(item,) for item in self.definer])
                 raise AssertionError(query)
         relations = [(name, "BASE TABLE") for name in self.config.raw["relations"]]
         rollout.validate_database(FakeDb(relations), self.config)
