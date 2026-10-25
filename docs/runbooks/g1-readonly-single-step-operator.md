@@ -4,7 +4,17 @@ Este runbook é executado **somente na VPS autorizada**, depois da aprovação d
 
 ```bash
 git pull --ff-only
-python3 scripts/operations/g1_readonly_rollout.py --apply \
+export PGSSLROOTCERT=/root/.local/share/agente-sql-langgraph/supabase-ca.crt
+.venv/bin/python scripts/operations/g1_readonly_rollout.py --dry-run \
+  --n8n-url https://<n8n-autorizado> --project-ref <referencia-do-projeto>
+```
+
+**Não iniciar com `--apply`.** Somente depois de todos os gates, da
+remediação autorizada de privilégios globais (se necessária) e da
+revisão de rollback, executar:
+
+```bash
+.venv/bin/python scripts/operations/g1_readonly_rollout.py --apply \
   --n8n-url https://<n8n-autorizado> --project-ref <referencia-do-projeto>
 ```
 
@@ -67,10 +77,10 @@ de tabelas temporárias pelos serviços.
 ## Verificação e rollback
 
 ```bash
-python3 scripts/operations/g1_readonly_rollout.py --verify \
+.venv/bin/python scripts/operations/g1_readonly_rollout.py --verify \
   --n8n-url https://<n8n-autorizado> --project-ref <referencia-do-projeto>
 
-python3 scripts/operations/g1_readonly_rollout.py --rollback \
+.venv/bin/python scripts/operations/g1_readonly_rollout.py --rollback \
   --n8n-url https://<n8n-autorizado> --project-ref <referencia-do-projeto>
 ```
 
