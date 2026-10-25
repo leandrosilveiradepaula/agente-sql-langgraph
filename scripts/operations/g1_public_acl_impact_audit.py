@@ -37,8 +37,9 @@ LEFT JOIN LATERAL aclexplode(
 WHERE d.datname=current_database()
 """
 ROLE_ACTIVITY_SQL = """
-SELECT (SELECT COUNT(*) FROM pg_roles r WHERE r.rolcanlogin
-        AND has_database_privilege(r.oid,current_database(),'CONNECT')),
+SELECT (SELECT COUNT(*) FROM pg_roles r
+        JOIN pg_database d ON d.datname=current_database()
+        WHERE r.rolcanlogin AND has_database_privilege(r.oid,d.oid,'CONNECT')),
        (SELECT COUNT(*) FROM pg_stat_activity a
         WHERE a.datname=current_database() AND a.pid<>pg_backend_pid()),
        (SELECT COUNT(*) FROM pg_stat_activity a
