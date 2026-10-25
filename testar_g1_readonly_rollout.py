@@ -90,14 +90,21 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
 
     def test_database_preflight_rejects_missing_relation_public_dml_and_definer(self) -> None:
         class FakeDb:
-            def __init__(self, relations, dml=(), definer=()):
+            def __init__(self, relations, dml=(), definer=(),
+                         public_temp=False, public_create=False, public_acl_missing=False):
                 self.relations, self.dml, self.definer = relations, dml, definer
+                self.public_temp, self.public_create = public_temp, public_create
+                self.public_acl_missing = public_acl_missing
             def execute(self, query, params=()):
                 class Cursor:
                     def __init__(self, rows): self.rows = rows
                     def fetchone(self): return self.rows[0] if self.rows else None
                     def fetchall(self): return self.rows
                 if "current_database" in query: return Cursor([("database",)])
+                if "FROM pg_database d" in query:
+                    assert params == ("database",)
+                    return Cursor([] if self.public_acl_missing else
+                                  [(self.public_temp, self.public_create)])
                 if "information_schema.tables" in query: return Cursor(self.relations)
                 if "aclexplode" in query and "pg_class" in query: return Cursor([(item,) for item in self.dml])
                 if "prosecdef" in query: return Cursor([(item,) for item in self.definer])
@@ -110,6 +117,14 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
             rollout.validate_database(FakeDb(relations, dml=("relation_0",)), self.config)
         with self.assertRaises(rollout.RolloutError):
             rollout.validate_database(FakeDb(relations, definer=("123",)), self.config)
+        with self.assertRaisesRegex(rollout.RolloutError, "PUBLIC tem TEMPORARY"):
+            rollout.validate_database(FakeDb(relations, public_temp=True), self.config)
+        with self.assertRaisesRegex(rollout.RolloutError, "PUBLIC tem CREATE"):
+            rollout.validate_database(FakeDb(relations, public_create=True), self.config)
+        with self.assertRaisesRegex(rollout.RolloutError, "PUBLIC tem TEMPORARY"):
+            rollout.validate_database(FakeDb(relations, public_temp=True, public_create=True), self.config)
+        with self.assertRaisesRegex(rollout.RolloutError, "nao verificavel"):
+            rollout.validate_database(FakeDb(relations, public_acl_missing=True), self.config)
 
     def test_pooler_connection_never_reuses_old_user_and_requires_tls_template(self) -> None:
         template = {"host": "aws-0-us-west-2.pooler.supabase.com", "port": 6543, "database": "database", "ssl": "require"}
@@ -156,7 +171,10 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
         project_ref = "fakeprojectid1234"
         admin_dsn = ("postgresql://postgres." + project_ref + ":secret"
                      "@aws-0-us-west-2.pooler.supabase.com:5432/database?sslmode=verify-full")
-        cfg, state = self.config, {"role": False, "writes": [], "api_payload": None}
+        cfg, state = self.config, {
+            "role": False, "writes": [], "api_payload": None,
+            "public_temp": False, "public_create": False,
+        }
         class Cursor:
             def __init__(self, rows=()): self.rows = list(rows)
             def fetchone(self): return self.rows[0] if self.rows else None
@@ -167,6 +185,8 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
                 if query.startswith("SELECT current_database"): return Cursor([("database",)])
                 if "information_schema.tables" in query:
                     return Cursor((name, "BASE TABLE") for name in cfg.raw["relations"])
+                if "FROM pg_database d" in query:
+                    return Cursor([(state["public_temp"], state["public_create"])])
                 if "aclexplode" in query: return Cursor()
                 if "FROM pg_roles WHERE rolname" in query and "SELECT 1" in query:
                     return Cursor([(1,)] if state["role"] else [])
@@ -246,6 +266,18 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
                  mock.patch.object(rollout.getpass, "getpass", side_effect=secret_input), \
                  mock.patch.object(rollout, "confirm"), \
                  mock.patch.dict(sys.modules, {"psycopg": psycopg_stub}):
+                # A real Supabase PUBLIC TEMP grant must stop even dry-run,
+                # and --apply must never reach CREATE ROLE or n8n POST.
+                state["public_temp"] = True
+                with self.assertRaisesRegex(rollout.RolloutError, "PUBLIC tem TEMPORARY"):
+                    run("--dry-run", path)
+                with self.assertRaisesRegex(rollout.RolloutError, "PUBLIC tem TEMPORARY"):
+                    run("--apply", path)
+                self.assertFalse(state["role"])
+                self.assertEqual(state["writes"], [])
+                self.assertIsNone(state["api_payload"])
+                state["public_temp"] = False
+
                 self.assertEqual(run("--dry-run", path), 0)
                 self.assertFalse(state["role"])
                 self.assertEqual(run("--apply", path), 0)
