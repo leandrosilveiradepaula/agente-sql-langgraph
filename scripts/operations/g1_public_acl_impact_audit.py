@@ -26,29 +26,16 @@ from g1_readonly_rollout import (
 # Exclude built-in namespaces; all other schemas (including extensions) are
 # counted without client-specific names or schema assumptions.
 DATABASE_ACL_SQL = """
-SELECT COALESCE(bool_or(a.privilege_type='CONNECT'), false),
-       COALESCE(bool_or(a.privilege_type='TEMPORARY'), false),
-       COALESCE(bool_or(a.privilege_type='CREATE'), false),
+SELECT COALESCE(bool_or(a.privilege_type='CONNECT' AND a.grantee=0), false),
+       COALESCE(bool_or(a.privilege_type='TEMPORARY' AND a.grantee=0), false),
+       COALESCE(bool_or(a.privilege_type='CREATE' AND a.grantee=0), false),
        COUNT(DISTINCT a.grantee) FILTER (
            WHERE a.privilege_type='TEMPORARY' AND a.grantee<>0)
 FROM pg_database d
 LEFT JOIN LATERAL aclexplode(
     COALESCE(d.datacl, acldefault('d',d.datdba))) a ON true
-WHERE d.datname=current_database() AND (a.grantee=0 OR a.grantee<>0)
+WHERE d.datname=current_database()
 """
-# The database ACL above intentionally collects PUBLIC and role grants in
-# one query. Filter the three PUBLIC booleans within aggregates, not WHERE.
-DATABASE_ACL_SQL = DATABASE_ACL_SQL.replace(
-    "a.privilege_type='CONNECT'),",
-    "a.privilege_type='CONNECT' AND a.grantee=0),"
-).replace(
-    "a.privilege_type='TEMPORARY'),",
-    "a.privilege_type='TEMPORARY' AND a.grantee=0),"
-).replace(
-    "a.privilege_type='CREATE'),",
-    "a.privilege_type='CREATE' AND a.grantee=0),"
-)
-
 ROLE_ACTIVITY_SQL = """
 SELECT (SELECT COUNT(*) FROM pg_roles r WHERE r.rolcanlogin
         AND has_database_privilege(r.oid,current_database(),'CONNECT')),
@@ -91,8 +78,8 @@ SELECT COUNT(DISTINCT c.oid) FILTER (
 FROM pg_class c JOIN public_schemas s ON s.oid=c.relnamespace
 CROSS JOIN LATERAL aclexplode(
    COALESCE(c.relacl,
-      acldefault(CASE WHEN c.relkind='S' THEN 'S' ELSE 'r' END,
-                 c.relowner))) a
+      acldefault(CASE WHEN c.relkind='S' THEN 'S'::"char"
+                      ELSE 'r'::"char" END, c.relowner))) a
 WHERE c.relkind IN ('r','v','m','p','f','S') AND a.grantee=0
 """
 
