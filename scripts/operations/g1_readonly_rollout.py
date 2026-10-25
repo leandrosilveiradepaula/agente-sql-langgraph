@@ -97,14 +97,19 @@ def quote_ident(value: str) -> str:
 
 def require_verified_tls_dsn(dsn: str, expected_database: str, project_ref: str) -> None:
     parsed = urlparse(dsn)
-    if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
-        raise RolloutError("DSN PostgreSQL invalido")
-    if parsed.path.lstrip("/") != expected_database:
-        raise RolloutError("database no DSN diverge da configuracao")
-    if parse_qs(parsed.query).get("sslmode") != ["verify-full"]:
+    if parsed.scheme not in ("postgres", "postgresql") or not parsed.hostname or parsed.password is None:
+        raise RolloutError("DSN admin invalido")
+    if parsed.path != "/" + expected_database:
+        raise RolloutError("DSN admin aponta para outro database")
+    if parse_qs(parsed.query, keep_blank_values=True).get("sslmode") != ["verify-full"]:
         raise RolloutError("TLS verify-full e obrigatorio")
-    if project_ref not in (parsed.username or "") and project_ref not in parsed.hostname:
-        raise RolloutError("identidade do projeto nao confere no DSN")
+    if parsed.hostname.endswith(".pooler.supabase.com"):
+        if parsed.username != f"postgres.{project_ref}" or parsed.port not in (5432, 6543):
+            raise RolloutError("DSN Supavisor nao confirma projeto/identidade")
+    else:
+        # Only an unambiguous direct Supabase administrative endpoint is acceptable.
+        if parsed.hostname != f"db.{project_ref}.supabase.co" or parsed.username != "postgres":
+            raise RolloutError("DSN admin nao pertence ao projeto esperado")
 
 
 # Public API PUT contract comes from the n8n 2.4.8 schema already audited by
@@ -244,9 +249,16 @@ def assert_only_two_rebindings(before: Mapping[str, Any], after: Mapping[str, An
             a["credentials"]["postgres"] = b["credentials"]["postgres"]
         if a != b:
             raise RolloutError("alteracao indevida nos parametros de um no")
-    for key in ("name", "connections", "settings", "staticData", "pinData", "meta", "tags"):
-        if before.get(key) != after.get(key):
-            raise RolloutError("drift no workflow fora dos dois bindings")
+    is_put_payload = "id" not in after and "active" not in after
+    if is_put_payload:
+        expected = workflow_projection(before)
+        for key in ("name", "connections", "settings", "staticData"):
+            if expected.get(key) != after.get(key):
+                raise RolloutError("payload PUT n8n com alteracao fora do contrato")
+    else:
+        for key in ("name", "connections", "settings", "staticData", "pinData", "meta", "tags"):
+            if before.get(key) != after.get(key):
+                raise RolloutError("drift na versao publicada fora dos bindings")
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -288,13 +300,81 @@ class N8nApi:
 
 
 def validate_credential_schema(schema: Mapping[str, Any], config: RolloutConfig) -> None:
-    n8n = config.n8n
-    if schema.get("name") not in {None, n8n["credential_type"]} and schema.get("type") != n8n["credential_type"]:
-        raise RolloutError("schema de credencial postgres inesperado")
-    serialized = canonical_json(schema)
-    for field in n8n["connection_fields"].values():
-        if field not in serialized:
-            raise RolloutError("schema n8n nao comprova o campo de credencial necessario")
+    """Validate actual n8n JSON-schema, never substring-match serialized JSON."""
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        raise RolloutError("n8n nao retornou schema JSON de credenciais valido")
+    required = set(config.n8n["connection_fields"].values())
+    if not required.issubset(properties):
+        raise RolloutError("schema postgres n8n nao apresenta campos exigidos")
+    ssl_field = properties[config.n8n["connection_fields"]["ssl"]]
+    if not isinstance(ssl_field, dict):
+        raise RolloutError("campo SSL sem contrato")
+    # n8n uses an enum containing 'require', not a boolean 'true' for SSL.
+    ssl_options = ssl_field.get("enum", ())
+    if isinstance(ssl_options, (list, tuple)) and ssl_options and "require" not in ssl_options:
+        raise RolloutError("schema postgres n8n nao oferece SSL require")
+    if "ignoreSSLIssues" not in properties:
+        raise RolloutError("schema n8n nao suporta verificacao de certificado")
+
+
+def read_n8n_runtime_version(config: RolloutConfig, container: str = "") -> None:
+    """Trust dockerized n8n CLI, not an imaginary workflow.n8nVersion field."""
+    if container and not re.fullmatch(r"[A-Za-z0-9_.-]{1,180}", container):
+        raise RolloutError("nome de container invalido")
+    if not container:
+        try:
+            p = subprocess.run(["docker", "ps", "--format", "{{.Names}} {{.Image}}"],
+                               text=True, capture_output=True, timeout=10, check=True)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RolloutError("nao foi possivel identificar n8n na VPS") from exc
+        candidates = [line.split()[0] for line in p.stdout.splitlines()
+                      if re.search(r"(^|/)n8n([:@]|$)", " ".join(line.split()[1:]).lower())]
+        if len(candidates) != 1:
+            raise RolloutError("container n8n inexistente ou ambiguo")
+        container = candidates[0]
+    try:
+        p = subprocess.run(["docker", "exec", "-u", "node", container, "n8n", "--version"],
+                           text=True, capture_output=True, timeout=20, check=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RolloutError("versao n8n nao pode ser confirmada") from exc
+    if p.stdout.strip() != config.n8n["expected_n8n_version"]:
+        raise RolloutError("n8n fora da versao homologada")
+
+
+def list_n8n_credential_ids(api: N8nApi) -> set[str]:
+    ids: set[str] = set()
+    cursor = None
+    for _ in range(30):
+        path = "/api/v1/credentials?limit=100"
+        if cursor is not None:
+            path += "&cursor=" + quote(cursor, safe="")
+        response = api.request("GET", path)
+        rows = response.get("data") if isinstance(response, dict) else None
+        if not isinstance(rows, list):
+            raise RolloutError("API n8n nao devolveu lista segura de credenciais")
+        ids.update(x["id"] for x in rows if isinstance(x, dict) and isinstance(x.get("id"), str))
+        next_cursor = response.get("nextCursor")
+        if not next_cursor:
+            return ids
+        if not isinstance(next_cursor, str) or next_cursor == cursor:
+            raise RolloutError("paginacao de credenciais n8n invalida")
+        cursor = next_cursor
+    raise RolloutError("limite de paginacao de credenciais excedido")
+
+
+def require_old_credential_visible(api: N8nApi, config: RolloutConfig) -> None:
+    if config.n8n["old_credential_id"] not in list_n8n_credential_ids(api):
+        raise RolloutError("credencial n8n antiga nao visivel para API key")
+
+
+def assert_binding_id(workflow: Mapping[str, Any], config: RolloutConfig,
+                      wanted_id: str) -> None:
+    target_ids = set(config.n8n["binding_node_ids"])
+    for node in workflow["nodes"]:
+        if node["id"] in target_ids and \
+                node.get("credentials", {}).get("postgres", {}).get("id") != wanted_id:
+            raise RolloutError("credencial vinculada diverge da identidade esperada")
 
 
 def validate_database(connection: DbConnection, config: RolloutConfig) -> None:
