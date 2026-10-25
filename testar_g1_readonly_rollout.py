@@ -31,7 +31,9 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
                 "workflow_id": "workflow", "workflow_name": "workflow name", "expected_node_count": 68,
                 "expected_n8n_version": "2.4.8", "webhook_path": "webhook", "credential_type": "postgres",
                 "old_credential_id": "old", "binding_node_ids": ["one", "two"],
-                "connection_fields": {"host": "host", "port": "port", "database": "database", "ssl": "ssl", "user": "user", "password": "password"}
+                "connection_fields": {"host": "host", "port": "port", "database": "database",
+                    "ssl": "ssl", "user": "user", "password": "password",
+                    "allow_unauthorized_certs": "allowUnauthorizedCerts"}
             }
         })
         self.workflow = {
@@ -110,7 +112,7 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
             rollout.validate_database(FakeDb(relations, definer=("123",)), self.config)
 
     def test_pooler_connection_never_reuses_old_user_and_requires_tls_template(self) -> None:
-        template = {"host": "aws-0-us-west-2.pooler.supabase.com", "port": 6543, "database": "database", "ssl": "require", "ignoreSSLIssues": False}
+        template = {"host": "aws-0-us-west-2.pooler.supabase.com", "port": 6543, "database": "database", "ssl": "require"}
         dsn = rollout.build_pooler_dsn(template, self.config, "project", "private")
         self.assertIn("readonly_role.project", dsn)
         self.assertIn("sslmode=verify-full", dsn)
@@ -199,7 +201,6 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
         class FakeApi:
             def __init__(self, workflow):
                 self.workflow = json.loads(json.dumps(workflow))
-                self.credential_ids = {"old"}
                 self.new_credential = None
             def request(self, method, path, body=None):
                 if method == "GET" and path == "/api/v1/workflows/workflow":
@@ -208,16 +209,13 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
                     return {"properties": {
                         "host": {}, "port": {}, "database": {}, "user": {},
                         "password": {}, "ssl": {"enum": ["disable", "allow", "require"]},
-                        "ignoreSSLIssues": {"type": "boolean"},
+                        "allowUnauthorizedCerts": {"type": "boolean"},
                     }}
-                if method == "GET" and path == "/api/v1/credentials?limit=100":
-                    return {"data": [{"id": x} for x in sorted(self.credential_ids)]}
+                # Exact n8n@2.4.8 public credential API: POST and schema GET
+                # only. Credential list and ID GET endpoints do not exist.
                 if method == "POST" and path == "/api/v1/credentials":
                     state["api_payload"] = json.loads(json.dumps(body))
-                    self.credential_ids.add("new")
                     return {"id": "new", "name": body["name"], "type": "postgres"}
-                if method == "GET" and path.startswith("/api/v1/credentials/"):
-                    return {"id": path.rsplit("/", 1)[-1]}
                 if method == "PUT" and path == "/api/v1/workflows/workflow":
                     assert "pinData" not in body and "meta" not in body
                     updated = json.loads(json.dumps(self.workflow))
@@ -255,6 +253,8 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
                 self.assertEqual(state["api_payload"]["data"]["user"],
                                  "readonly_role." + project_ref)
                 self.assertEqual(state["api_payload"]["data"]["ssl"], "require")
+                self.assertIs(state["api_payload"]["data"]["allowUnauthorizedCerts"], False)
+                self.assertNotIn("ignoreSSLIssues", state["api_payload"]["data"])
                 self.assertTrue(path.exists())
                 rollout.assert_binding_id(api.workflow, cfg, "new")
                 self.assertEqual(run("--verify", path), 0)
@@ -267,6 +267,40 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
                 rollout.assert_binding_id(api.workflow, cfg, "old")
                 with self.assertRaises(rollout.RolloutError):
                     run("--verify", path)
+
+    def test_credential_schema_is_exactly_n8n_248_postgres(self) -> None:
+        schema = {"properties": {
+            "host": {"type": "string"}, "port": {"type": "number"},
+            "database": {"type": "string"}, "user": {"type": "string"},
+            "password": {"type": "string"},
+            "ssl": {"type": "string", "enum": ["allow", "disable", "require"]},
+            "allowUnauthorizedCerts": {"type": "boolean"},
+        }}
+        rollout.validate_credential_schema(schema, self.config)
+        legacy = json.loads(json.dumps(schema))
+        legacy["properties"]["ignoreSSLIssues"] = legacy["properties"].pop("allowUnauthorizedCerts")
+        with self.assertRaises(rollout.RolloutError):
+            rollout.validate_credential_schema(legacy, self.config)
+        not_boolean = json.loads(json.dumps(schema))
+        not_boolean["properties"]["allowUnauthorizedCerts"]["type"] = "string"
+        with self.assertRaises(rollout.RolloutError):
+            rollout.validate_credential_schema(not_boolean, self.config)
+
+    def test_post_create_credential_metadata_required_without_get(self) -> None:
+        valid = {"id": "created-credential", "name": "safe-name", "type": "postgres"}
+        self.assertEqual(
+            rollout.validate_created_credential_response(valid, self.config, "safe-name"),
+            "created-credential",
+        )
+        for bad in (
+            {"id": "created-credential", "name": "wrong-name", "type": "postgres"},
+            {"id": "created-credential", "name": "safe-name", "type": "other"},
+            {"id": "old", "name": "safe-name", "type": "postgres"},
+            {"name": "safe-name", "type": "postgres"},
+            {"id": "../creds", "name": "safe-name", "type": "postgres"},
+        ):
+            with self.assertRaises(rollout.RolloutError):
+                rollout.validate_created_credential_response(bad, self.config, "safe-name")
 
     def test_published_workflow_version_and_webhook_are_required(self) -> None:
         invalid = json.loads(json.dumps(self.workflow))

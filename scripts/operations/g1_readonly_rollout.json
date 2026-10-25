@@ -3,7 +3,10 @@
   "database": "postgres",
   "role_name": "finance_g1_readonly",
   "schema": "rivatti_demo_masked",
-  "relation_types": ["BASE TABLE", "VIEW"],
+  "relation_types": [
+    "BASE TABLE",
+    "VIEW"
+  ],
   "relations": [
     "gold_lancamentos_contabeis",
     "gold_rateios_lancamentos_contabeis",
@@ -33,7 +36,8 @@
       "database": "database",
       "ssl": "ssl",
       "user": "user",
-      "password": "password"
+      "password": "password",
+      "allow_unauthorized_certs": "allowUnauthorizedCerts"
     }
   }
 }

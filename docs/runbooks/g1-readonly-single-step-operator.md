@@ -29,6 +29,29 @@ O rollback pede `ROLLBACK-G1`, compara o workflow vigente com o snapshot e resta
 Sem acesso autorizado à VPS, n8n e Supabase, não execute modos mutáveis. A PR contém somente código, testes offline e rollback controlado; não comprova rollout nem execução G1 correlacionada.
 
 
+## Correção n8n 2.4.8 — API de credenciais
+
+A versão **exata** `n8n@2.4.8` tem `POST /api/v1/credentials` e
+`GET /api/v1/credentials/schema/postgres`, mas **não** oferece
+`GET /api/v1/credentials` nem `GET /api/v1/credentials/{id}`.
+O procedimento valida a identidade antiga nos dois nós da versão publicada,
+confirma `id`/`name`/`type` na resposta ao **POST** da nova credencial e
+verifica os novos vínculos pelo **GET do workflow publicado** depois do PUT.
+Não lê nem tenta descriptografar credenciais existentes.
+
+O campo nativo de segurança TLS do Postgres no n8n 2.4.8 é
+`allowUnauthorizedCerts=false` (e `ssl=require`), **não**
+`ignoreSSLIssues`. A configuração do rollout fixa o nome físico correto.
+Se o schema de credencial retornado pelo n8n divergir, o procedimento
+**interrompe antes de criar a role ou alterar o fluxo**.
+
+A criação da credencial pelo endpoint público vincula a credencial ao projeto
+pessoal do usuário dono da chave API. Se a credencial não puder ser utilizada
+pelo projeto do workflow, a publicação/validação deve falhar sem declarar o
+rollout concluído; não contornar por alteração de permissões de terceiros.
+A equivalência financeira G1 permanece bloqueada até uma validação
+operacional do executor real.
+
 ## Notas obrigatórias da revisão de segurança
 
 - A origem dos parâmetros não secretos da nova conexão é o DSN administrativo digitado privadamente na VPS, que precisa apontar para o pooler Supavisor do projeto DEMO correto, com `sslmode=verify-full`. A API pública do n8n não expõe `data` da credencial antiga; o programa não tenta recuperá-lo.
