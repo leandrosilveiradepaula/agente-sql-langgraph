@@ -63,6 +63,41 @@ Outra arquitetura de isolamento exige desenho, autorização e homologação
 próprios. ACL catalogal mostra **permissões**, não comprova o uso real
 de tabelas temporárias pelos serviços.
 
+### Inventário de impacto read-only antes de qualquer mudança global
+
+O utilitário de plataforma `scripts/operations/g1_public_acl_impact_audit.py`
+opera **somente com SELECTs em catálogos PostgreSQL** e define
+`SET TRANSACTION READ ONLY` antes de lê-los. Solicita o DSN administrativo
+sem eco, valida identidade do projeto, exige `sslmode=verify-full` e não
+utiliza credenciais n8n, Gemini, tabelas financeiras ou benchmark. Emite
+**apenas contagens e flags**, sem nomes de roles, objetos ou segredos.
+
+```bash
+cd /docker/agente-sql-langgraph-repo
+export PGSSLROOTCERT=/root/.local/share/agente-sql-langgraph/supabase-ca.crt
+.venv/bin/python scripts/operations/g1_public_acl_impact_audit.py \
+  --project-ref cenhadslwxgykqtuobgc
+```
+
+No caso DEMO, compartilhe somente as linhas `G1_*`. O relatório cobre:
+`PUBLIC` no banco (`CONNECT`, `TEMPORARY`, `CREATE`), número de
+destinatários explícitos de `TEMPORARY`, quantidade de roles com login
+e acesso ao database, sessões ativas, schemas não-sistêmicos com
+`PUBLIC USAGE`, relações com `PUBLIC SELECT`/DML, sequences,
+funções `SECURITY DEFINER` executáveis por `PUBLIC` e presença da
+role alvo. Os grupos são **genéricos e multicliente**, não codificam
+tabelas ou regras de negócio.
+
+**Limitação essencial:** contagens e grants do catálogo **não provam**
+que um workload precisa ou não criar tabelas temporárias, nem demonstram
+a segurança efetiva de uma role futura. A saída sempre será
+`G1_AUDIT_RESULT=REVIEW_REQUIRED`; não constitui aprovação automática
+de `REVOKE`, `GRANT`, G1 ou cutover. O inventário de dependências dos
+serviços e o plano de rollback deverão ser concluídos antes de decidir
+entre mudança de ACL global ou separação do banco/serviço de leitura.
+Se existirem grants de extensão não revogáveis pelo administrador do
+Supabase, não criar exceções nos gates para contorná-los.
+
 ### Reexecutar diagnóstico seguro após uma remediação autorizada
 
 1. Preservar o arquivo CA oficial em caminho privado da VPS. Para
