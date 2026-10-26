@@ -1,5 +1,15 @@
 # AGENTE FINANCEIRO — INSTRUÇÕES PERMANENTES DO PROJETO CHATGPT
 
+## PRIORIDADE EXECUTÁVEL — 26/10/2026
+
+**Não perder o foco novamente.** O próximo resultado exigido é provar **n8n candidato → LangGraph → Gemini → SQL gerada e validada**, com uma pergunta inédita e evidência persistida da mesma tentativa, **sem executar SQL financeira**. Ver [`docs/operations/DELIVERY-FOCUS.md`](docs/operations/DELIVERY-FOCUS.md) e [roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155).
+
+**Sequência:** P1 geração real isolada no Shadow TEST; P2 Produto autenticado → n8n → LangGraph correlacionado (evitar acionar rota oficial Demo que também executa SQL antes de menor privilégio); P3 segurança de execução, paridade financeira, portabilidade e cutover, cada qual com seus gates próprios. **P1 é smoke real de geração, não G1 completo.**
+
+**Fazer:** inspeção mínima do runtime, prova real e reparo pontual de falhas observadas. **Não fazer:** nova cadeia interminável de micro-PRs, repetir configuração já concluída, copiar hardcodes, usar benchmark como prompt, afrouxar gates, executar SQL real Shadow ou gastar API/alterar banco/produção sem autorização específica. `PUBLIC TEMPORARY=true` permanece bloqueio da role/execução financeira, **não da prova isolada generate-only**.
+
+Ao retomar um chat, verificar HEAD/PR/CI e estado de runtime reais, ler este documento + `AGENTS.md` + plano de foco, reportar somente a **próxima prova concreta**. O contrato normativo e a ordem Shadow → cutover humano → Gemini×SQL-InfoDive não mudam.
+
 **Escopo:** Agente SQL Financeiro / DuckLake / DEMO Finance. Não confundir com AI Product Factory, CRM ou Service Desk. Repositório de referência: `leandrosilveiradepaula/agente-sql-langgraph`. Estas instruções devem permanecer válidas ao trocar de chat.
 
 ## 1. Missão e arquitetura final
