@@ -41,16 +41,18 @@ class FakeDatabase:
         ]
         self.public_temp = True
         self.direct_temp = {10, 13}
+        self.direct_connect = set()
         self.create_grants = {10}
         self.executed = []
         self.inject_role_drift = False
 
     def state(self):
         return deepcopy((self.roles, self.public_temp, self.direct_temp,
-                         self.create_grants))
+                         self.direct_connect, self.create_grants))
 
     def restore(self, state):
-        (self.roles, self.public_temp, self.direct_temp, self.create_grants) = deepcopy(state)
+        (self.roles, self.public_temp, self.direct_temp,
+         self.direct_connect, self.create_grants) = deepcopy(state)
 
     def transaction(self):
         db = self
@@ -81,6 +83,7 @@ class FakeDatabase:
             if self.public_temp:
                 grants.append((0, "TEMPORARY"))
             grants.extend((oid, "TEMPORARY") for oid in self.direct_temp)
+            grants.extend((oid, "CONNECT") for oid in self.direct_connect)
             return Result(sorted(grants))
         if statement.startswith("SET LOCAL "):
             return Result([])
@@ -182,6 +185,7 @@ class PreserveTempTests(unittest.TestCase):
         with db.transaction():
             compensated = acl.preserve_existing_roles(db, before, db.database, "finance_reader")
         db.roles.append((30, "finance_reader", False))
+        db.direct_connect.add(30)
         record = {"version": acl.VERSION, "database": db.database,
                   "role_name": "finance_reader", "before": before,
                   "compensated": compensated}
