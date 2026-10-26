@@ -1,3 +1,19 @@
+# STATUS EXECUTIVO / PRIORIDADE IMEDIATA — 26/10/2026
+
+**Única entrega ativa: P1 = prova real de geração no caminho n8n candidato → LangGraph → Gemini, sem execução SQL financeira.** O passo seguinte é P2 (correlação Produto autenticado); a execução financeira read-only/role G1 é P3. [Plano operacional e regra anti-desvio](docs/operations/DELIVERY-FOCUS.md); [roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155).
+
+**Fatos confirmados:** GitHub `main@e7ccff858506097e02c3e5d89ecb0016a9180664`, PR #172 mergeada; auditoria real na VPS sob `HEAD=e7ccff8`: `G1_PUBLIC_TEMPORARY=TRUE`, `G1_PUBLIC_CREATE=FALSE`, `G1_TARGET_ROLE_EXISTS=FALSE`, `G1_AUDIT_RESULT=REVIEW_REQUIRED`; nenhum banco alterado pela auditoria. Produto Demo Vercel último deployment Production consultado em `READY` no commit `7d784ec14568599049f039532805905036c52705` (PR #31). **Não foi feita nova verificação n8n/LangGraph vivo nesta atualização**; a condição publicada/healthy permanece último relato, a confirmar antes do teste.
+
+**O que ainda NÃO foi provado:** geração real com Gemini via n8n candidato e LangGraph; execução completa Produto→n8n→LangGraph com `agent_run_id/run_id/shadow_record_id`; paridade financeira ou multicliente real. `G1_CORRELATED_EXECUTION=NOT_TESTED`. Shadow Production segue desabilitado segundo último diagnóstico autenticado; nenhuma nova leitura autenticada do valor da flag nesta atualização.
+
+**Decisão de foco:** não usar `/api/generate-sql` da Demo para o teste P1, pois o fluxo oficial gera **e pode executar** SQL. O problema de `PUBLIC TEMPORARY` não será ignorado nem resolvido por revogação global sem aprovação: é bloqueador para rollout read-only e execução P3, **não para P1 em modo generate-only isolado**. Antes de P1 com Gemini real, confirmar ambiente e obter autorização de custo/chamada; `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false` permanece obrigatório. Não realizar benchmark 63, SQL financeira, deploy, migração ou alteração de permissões por efeito deste documento.
+
+**Próximo bloco:** pré-verificar candidato n8n e runtime LangGraph TEST, confirmar rota de geração isolada e evidência, e executar **uma** pergunta inédita via Gemini quando autorizada; registrar o erro real encontrado e corrigi-lo até obter SQL validada e evidência correlacionada. Arquivos/ensaios offline não fecham P1/G1.
+
+> As seções datadas abaixo são **histórico**, não substituem esta prioridade. Não reabrir etapas concluídas sem evidência nova.
+
+---
+
 ## Gate G1 — preflight real no Supabase DEMO: PUBLIC TEMPORARY bloqueia criação (25/10/2026)
 
 - **Evidência real fornecida pelo operador** em `main@76b9e70`: VPS PostgreSQL com `psycopg[binary]==3.3.4` e CA oficial Supabase Root 2021 válida; `--dry-run` (sem escrita) passou `G1_ROLE=NOT_APPLIED`, `G1_N8N_BINDINGS=PREFLIGHT:0eee554daf77`, `G1_ROLLBACK=READY`.
