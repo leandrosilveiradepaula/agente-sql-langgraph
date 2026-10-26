@@ -505,16 +505,32 @@ def assert_role_effective_permissions(connection: DbConnection, config: RolloutC
     ).fetchone()
     if unapproved_read:
         raise RolloutError("role le objetos fora do catalogo permitido")
+    # PostgreSQL system view pg_catalog.pg_settings has UPDATE granted to
+    # PUBLIC by design. UPDATE on this one view is equivalent to session SET,
+    # not a modification of persisted application data (PostgreSQL 17, 52.24).
+    # Exempt ONLY its intrinsic PUBLIC UPDATE, and only if the view really has
+    # that grant and this role was not explicitly given UPDATE on the view.
+    # All other DML (even in pg_catalog) still fails. Do NOT broaden this
+    # into a pg_catalog/schema exclusion: that would hide genuine privileges.
     writable = connection.execute(
         "SELECT c.oid::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
         "WHERE c.relkind IN ('r','v','m','p','f') AND "
         "(has_table_privilege(%s,c.oid,'INSERT') OR "
-        "has_table_privilege(%s,c.oid,'UPDATE') OR "
+        "(has_table_privilege(%s,c.oid,'UPDATE') AND NOT ("
+        "n.nspname='pg_catalog' AND c.relname='pg_settings' AND c.relkind='v' "
+        "AND EXISTS (SELECT 1 FROM aclexplode(COALESCE("
+        "c.relacl, acldefault('r',c.relowner))) acl_public "
+        "WHERE acl_public.grantee=0 AND acl_public.privilege_type='UPDATE') "
+        "AND NOT EXISTS (SELECT 1 FROM aclexplode(COALESCE("
+        "c.relacl, acldefault('r',c.relowner))) acl_direct "
+        "JOIN pg_roles role_direct ON role_direct.oid=acl_direct.grantee "
+        "WHERE role_direct.rolname=%s AND acl_direct.privilege_type='UPDATE')"
+        ")) OR "
         "has_table_privilege(%s,c.oid,'DELETE') OR "
         "has_table_privilege(%s,c.oid,'TRUNCATE') OR "
         "has_table_privilege(%s,c.oid,'REFERENCES') OR "
         "has_table_privilege(%s,c.oid,'TRIGGER')) LIMIT 1",
-        (role, role, role, role, role, role),
+        (role, role, role, role, role, role, role),
     ).fetchone()
     if writable:
         raise RolloutError("role pode modificar uma relacao")
