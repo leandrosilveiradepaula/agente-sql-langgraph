@@ -99,17 +99,22 @@ def validate_after(
     original = _role_map(before)
     current = _role_map(after)
     extra = set(current) - set(original)
+    extra_grants: set[tuple[int, str]] = set()
     if extra:
         if len(extra) != 1 or allow_target_name is None:
             raise RolloutError("novas roles inesperadas; revisao necessaria")
-        added = current[next(iter(extra))]
+        oid = next(iter(extra))
+        added = current[oid]
         if added[1] != allow_target_name or added[2] or added[4]:
             raise RolloutError("role G1 nao esta isolada")
+        # The previously authorized rollout explicitly GRANTs CONNECT to its
+        # new reader. No other database-level grant is permitted.
+        extra_grants.add((oid, "CONNECT"))
     if not all(current.get(oid) == row for oid, row in original.items()):
         raise RolloutError("privilegios existentes mudaram; ROLLBACK automatico da transacao")
     expected = (_acl_set(before) - {(0, "TEMPORARY")}) | {
         (oid, "TEMPORARY") for oid in compensated_ids
-    }
+    } | extra_grants
     if _acl_set(after) != expected:
         raise RolloutError("mudancas na ACL alem das compensacoes previstas")
     if (0, "TEMPORARY") in _acl_set(after):
