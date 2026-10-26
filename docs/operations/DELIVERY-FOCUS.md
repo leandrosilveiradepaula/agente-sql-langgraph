@@ -19,7 +19,7 @@ O requisito imediato é provar que **uma pergunta inédita** recebida pelo **n8n
 3. **Verificar a mesma tentativa:** preservar identificadores `agent_run_id`, `run_id` e `shadow_record_id`; provider/model, `SEMANTIC_AGENT_VERSION`, fingerprint, status, SQL gerada (somente no ambiente autorizado), gates, erros, tempo, consumo de tokens, recibo HTTP e evidência persistida. HTTP 202, CI verde ou resposta de stub **não** bastam.
 4. **Falha real:** registrar o primeiro componente que falhou (n8n envelope/auth/transporte; LangGraph contexto/planejamento/geração/gate; persistência/leitura), corrigir a **causa raiz mínima**, repetir exatamente a prova. Evitar PRs de testes genéricos enquanto não existir erro reproduzido que impeça P1.
 
-**Aceite P1:** uma execução real Gemini com SQL inédita gerada, julgada pelos gates existentes, e identificadores/evidências correlacionados n8n↔LangGraph; ausência comprovada de execução SQL financeira. Registrar commit efetivamente implantado e limites da evidência. A SQL pode ser aprovada ou rejeitada por gates; rejeição fundamentada exige correção de contexto/capacidade, nunca relaxamento do gate. A mera chamada a Gemini não é aceite.
+**Aceite P1:** uma execução real Gemini com status de sucesso, SQL dinâmica de pergunta inédita **aprovada pelos gates existentes**, identificadores/evidências correlacionados n8n↔LangGraph e ausência comprovada de execução SQL financeira. Registrar commit efetivamente implantado e limites da evidência. SQL rejeitada é diagnóstico, **não P1 concluído**: corrigir contexto ou capacidade sem relaxar o gate. A mera chamada a Gemini não é aceite.
 
 **P1 não é G1:** ainda faltará a correlação completa com o Produto autenticado, paridade e execução financeira sob permissões controladas.
 
