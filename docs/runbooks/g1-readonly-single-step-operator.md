@@ -1,10 +1,30 @@
-> **P3, 26/10/2026:** a concessão `PUBLIC TEMPORARY` bloqueia o
-> rollout desta role. O caminho candidato de remediação, com preservação dos
-> privilégios das roles existentes em transação atômica, está descrito em
+> **P3/G1 — estado real em 26/10/2026:** a compensação de
+> `PUBLIC TEMPORARY` foi **aplicada e verificada** no Supabase financeiro
+> DEMO, com 35 roles preservadas e 32 compensadas. O preflight G1 passou.
+> O primeiro `--apply` confirmado foi revertido ao detectar um privilégio
+> de modificação; auditoria catalogal real comprovou um único caso:
+> **`pg_catalog.pg_settings` — view de configuração de sessão com `UPDATE`
+> recebido de `PUBLIC`**. A role G1 e seu snapshot não existem, e não
+> houve rebind n8n. Não repetir `--apply` com o código antigo.
+>
+> O gate corrigido diferencia exclusivamente o `UPDATE` **intrínseco**
+> concedido por `PUBLIC` à view de sistema (equivalente a `SET` na sessão);
+> qualquer outro DML, inclusive em outros objetos de `pg_catalog`, ou
+> grants diretos adicionais para a role, continua proibido. Prova obrigatória
+> em PostgreSQL descartável, sem uso de Supabase/LLM. A permissão nativa de
+> ajuste da sessão **não equivale a credencial fisicamente incapaz de
+> executar UPDATE**: execução financeira requer, separadamente, SQL SELECT
+> aprovada, limites, allowlist e transação `READ ONLY` configurada pelo
+> executor. Esta PR não autoriza execução de SQL financeira ou cutover.
+>
+> Após CI verde, merge humano e sincronização da VPS, reconfirmar
+> `--dry-run` antes de reexecutar o G1 já autorizado. Se houver falha após
+> criação de role, **não** repetir `--apply`: reconciliar role, credencial,
+> bindings e snapshot privado. A remediação global anterior tem runbook
 > [p3-public-temp-atomic-compensation.md](p3-public-temp-atomic-compensation.md).
-> Este runbook **não autoriza** alteração global, e o `--apply` G1 permanece
-> bloqueado até validação/autorizações próprias. P1/P2 já foram comprovadas;
-> não refazer testes Gemini para reparar ACL.
+>
+> Referência PostgreSQL 17:
+> [52.24 `pg_settings`](https://www.postgresql.org/docs/17/view-pg-settings.html).
 
 # G1 — operação única de credencial PostgreSQL somente leitura
 
