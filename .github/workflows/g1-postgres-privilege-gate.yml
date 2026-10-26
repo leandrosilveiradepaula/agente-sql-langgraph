@@ -1,0 +1,55 @@
+name: G1 PostgreSQL intrinsic privilege gate
+
+on:
+  pull_request:
+    paths:
+      - "scripts/operations/g1_readonly_rollout.py"
+      - "scripts/validation/test_g1_pg_settings_gate_postgres.py"
+      - ".github/workflows/g1-postgres-privilege-gate.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/operations/g1_readonly_rollout.py"
+      - "scripts/validation/test_g1_pg_settings_gate_postgres.py"
+      - ".github/workflows/g1-postgres-privilege-gate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  g1-postgres-privilege-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: disposable_admin
+          POSTGRES_PASSWORD: local_fixture_only
+          POSTGRES_DB: g1_disposable_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U disposable_admin -d g1_disposable_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: disposable_admin
+      PGPASSWORD: local_fixture_only
+      PGDATABASE: g1_disposable_ci
+      G1_DISPOSABLE_POSTGRES_TEST: "true"
+      LANGGRAPH_ALLOW_REAL_SQL_EXECUTION: "false"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install pinned PostgreSQL driver
+        run: python -m pip install "psycopg[binary]==3.3.4"
+      - name: Verify intrinsic pg_settings privilege exception fail-closed
+        run: python scripts/validation/test_g1_pg_settings_gate_postgres.py
