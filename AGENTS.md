@@ -1,3 +1,18 @@
+# FOCO IMEDIATO — decisão operacional de 26/10/2026 (leia primeiro)
+
+**Meta única até prova real:** fazer **n8n candidato → LangGraph → Gemini** receber uma pergunta inédita, **gerar SQL dinâmica**, passar pelos gates e persistir evidências correlacionadas, **sem executar SQL financeira**. Este é o marco P1, não a conclusão de G1 ou da paridade. Ver [plano de entrega e critérios objetivos](docs/operations/DELIVERY-FOCUS.md).
+
+**Ordem obrigatória de demonstração:** P1 geração real isolada em TEST → P2 integração com Produto autenticado/Shadow correlacionado → P3 execução read-only com menor privilégio e paridade → requisitos multicliente/hardcodes, cutover humano e comparação de modelos na ordem contratada.
+
+- **Não confundir os bloqueios:** `PUBLIC TEMPORARY=true` impede o rollout da role read-only e execução financeira dependente dela, mas **não deve desviar a entrega P1 generate-only**. **Não** revogar grants globais, reduzir gates, usar a rota oficial Demo que também executa SQL ou alterar produção para obter P1.
+- **Autorização humana permanece:** chamada Gemini paga, ativação/execução em ambiente real, Vercel/n8n oficial, banco/permissões, SQL real, migrations, merge e cutover exigem seus próprios gates. `OFFICIAL=n8n+Gemini`; `SHADOW=n8n+LangGraph+Gemini`; `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`.
+- **Anti-loop:** não abrir PRs/mudar hardcodes/refazer infraestrutura apenas para produzir novos diagnósticos. Trabalhar sobre o primeiro bloqueio concreto da prova ativa e demonstrar a correção; manter benchmark só para avaliação posterior.
+- **Continuidade:** verificar GitHub/CI/runtime reais e ler o plano acima + status/roadmap antes de iniciar. Registrar ao fim de cada bloco qual P1/P2/P3 foi realmente comprovado, artefatos/SHA e a única próxima prova.
+
+O contrato de portabilidade/cutover e as instruções abaixo **continuam integrais**, sem exceções.
+
+---
+
 # Operação permanente — objetivo final (decisão de 2026-10-19)
 
 > **Leitura obrigatória antes de qualquer tarefa neste repositório.** Este bloco
