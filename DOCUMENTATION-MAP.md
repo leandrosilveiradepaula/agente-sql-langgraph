@@ -24,6 +24,10 @@ Any conflicting historical document remains preserved but subordinate.
 
 If documents conflict, use the highest-precedence current source.
 
+## Regra de foco operacional — 26/10/2026
+
+O arquivo [`docs/operations/DELIVERY-FOCUS.md`](docs/operations/DELIVERY-FOCUS.md) especifica a **próxima demonstração de funcionamento** (P1 geração real isolada; P2 integração Produto; P3 execução segura). Ele operacionaliza as decisões explícitas do operador e deve ser lido **antes de trabalhar a partir de qualquer status histórico**. Não altera contratos, políticas de segurança, a ordem das três fases ou a autoridade do operador; `PROJECT-STATUS.md` e issue #155 mantêm evidências temporais e bloqueios.
+
 ## Canonical Documents
 
 ### `ORCHESTRATION-STRATEGY.md`
