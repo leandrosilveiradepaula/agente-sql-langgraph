@@ -219,7 +219,7 @@ class PreserveTempTests(unittest.TestCase):
 
     def test_main_defaults_to_read_only_and_redacts_dsn(self):
         db = FakeDatabase()
-        dsn = "postgresql://postgres.example:s3cr3t@db.example.supabase.co/finance_db?sslmode=verify-full"
+        dsn = "synthetic-dsn-prompt-value"
         conf = types.SimpleNamespace(raw={"database": "finance_db", "role_name": "finance_reader"})
         printed = io.StringIO()
         psycopg = types.SimpleNamespace(connect=lambda *args, **kwargs: contextlib.nullcontext(db))
@@ -231,7 +231,7 @@ class PreserveTempTests(unittest.TestCase):
             rc = acl.main(["--project-ref", "syntheticproj12"])
         self.assertEqual(rc, 0)
         self.assertIn("P3_ACL_MUTATION=FALSE", printed.getvalue())
-        self.assertNotIn("s3cr3t", printed.getvalue())
+        self.assertNotIn("synthetic-dsn-prompt-value", printed.getvalue())
         self.assertNotIn("service_user", printed.getvalue())
         self.assertTrue(all(s.lstrip().startswith("SELECT") for s in db.executed))
 
