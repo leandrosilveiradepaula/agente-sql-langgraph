@@ -1,25 +1,37 @@
-# ESTADO ATUAL — 26/10/2026: P1 E P2 PASS; FOCO EXCLUSIVO P3
+# ESTADO OPERACIONAL REAL — 26/10/2026: P1/P2 PASS, P3 G1 BLOQUEADO EM VIEW DO POSTGRESQL
 
-**Não repetir P1/P2.** Foram comprovadas com evidência real de Gemini e
-correlação autenticada Produto → n8n candidato → LangGraph. P2:
-`agent_run_id=41d54ee0-b730-41ec-ba69-836d862b1780`,
+**Foco exclusivo: fechar P3, não repetir geração Gemini.** P1 comprovou
+n8n candidato → LangGraph → Gemini com SQL válida; P2 comprovou a
+correlação autenticada Produto → n8n candidato → LangGraph e evidência da
+mesma tentativa: `agent_run_id=41d54ee0-b730-41ec-ba69-836d862b1780`,
 `run_id=lg-shadow-test-run-3`,
-`shadow_record_id=shadow-07d311c493efb7383fe0f5e0fc133997`;
-SQL gerada e aprovada nos três gates, 1.985 tokens,
-`LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. Fonte viva:
-[roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155).
+`shadow_record_id=shadow-07d311c493efb7383fe0f5e0fc133997`.
+`LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false` permanece.
 
-**Próximo objetivo P3:** habilitar um executor PostgreSQL de menor privilégio
-sem reduzir gates, executar SELECT financeira **após autorização separada**
-e comparar numericamente a SQL LangGraph com a baseline n8n+Gemini.
-`PUBLIC TEMPORARY=true` foi confirmado no Supabase e bloqueia a role
-read-only existente. A correção candidata é compensar os direitos de TEMP
-das roles atuais em transação atômica, depois revogar apenas o grant a PUBLIC,
-com rollback guardado e verificação pré-COMMIT. Ver
-[runbook P3](docs/runbooks/p3-public-temp-atomic-compensation.md). **Nenhuma
-mudança global foi executada**. Qualquer `--apply`, SQL real, n8n oficial,
-migration ou cutover exige aprovação específica. Não abrir iniciativas
-paralelas nem reverter a prova funcional.
+**G1/P3 evidência real na VPS, `main@3a30e42`:** compensação
+`PUBLIC TEMPORARY` do Supabase financeiro DEMO foi aplicada, preservou
+privilégios existentes (35 roles, 32 compensadas) e foi confirmada com
+`P3_ACL_VERIFY=PASS`. `g1_readonly_rollout.py --dry-run` passou:
+`G1_N8N_BINDINGS=PREFLIGHT:0eee554daf77`,
+`G1_ROLE=NOT_APPLIED`, `G1_ROLLBACK=READY`.
+Um `--apply` autorizado parou dentro da transação ao detectar
+`ERROR=role pode modificar uma relacao`. Diagnóstico catalogal real
+read-only confirmou: **um único objeto PUBLIC DML, exclusivamente a view
+de sistema `pg_catalog.pg_settings` com `PUBLIC UPDATE`; zero relações
+com DML PUBLIC em schemas financeiros, public, net e demais; role G1
+não existe, snapshot G1 não existe.** Nenhuma credencial n8n foi criada,
+nenhum rebind ocorreu nessa tentativa; não executar SQL financeira.
+
+**Correção atual:** tratar *somente* o `UPDATE` intrínseco concedido por
+`PUBLIC` à view de configuração `pg_catalog.pg_settings`, cujo efeito
+é `SET` da própria sessão em PostgreSQL, preservando a rejeição de
+todo DML em outras relações/schemas e de privilégios adicionais,
+inclusive nessa view. Ver [runbook G1](docs/runbooks/g1-readonly-single-step-operator.md)
+e [roadmap vivo #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155).
+Homologar com PostgreSQL descartável antes de PR/merge; depois reconfirmar
+o preflight e o rollout G1 autorizado com snapshots/rollback. Não realizar
+cutover, consultas financeiras reais, migrações ou modelo SQL-InfoDive sem
+as respectivas autorizações.
 
 ---
 
