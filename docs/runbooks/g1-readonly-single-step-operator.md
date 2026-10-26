@@ -4,23 +4,118 @@ Este runbook é executado **somente na VPS autorizada**, depois da aprovação d
 
 ```bash
 git pull --ff-only
-python3 scripts/operations/g1_readonly_rollout.py --apply \
+export PGSSLROOTCERT=/root/.local/share/agente-sql-langgraph/supabase-ca.crt
+.venv/bin/python scripts/operations/g1_readonly_rollout.py --dry-run \
   --n8n-url https://<n8n-autorizado> --project-ref <referencia-do-projeto>
 ```
 
-O programa pede a chave da API n8n e o DSN administrador em terminal sem eco, somente após preflight e a confirmação `APPLY-G1`. Nunca passe segredos por argumento, arquivo, Git ou chat. O DSN requer `sslmode=verify-full`. A senha é aleatória, fica apenas na memória e entra só na nova credencial privada n8n; o DDL usa verificador SCRAM calculado localmente, não a senha.
+**Não iniciar com `--apply`.** Somente depois de todos os gates, da
+remediação autorizada de privilégios globais (se necessária) e da
+revisão de rollback, executar:
+
+```bash
+.venv/bin/python scripts/operations/g1_readonly_rollout.py --apply \
+  --n8n-url https://<n8n-autorizado> --project-ref <referencia-do-projeto>
+```
+
+O programa pede a chave da API n8n e o DSN administrador em terminal sem eco; qualquer mutação depende da confirmação `APPLY-G1`. Nunca passe segredos por argumento, arquivo, Git ou chat. O DSN requer `sslmode=verify-full`. A senha é aleatória, fica apenas na memória e entra só na nova credencial privada n8n; o DDL usa verificador SCRAM calculado localmente, não a senha.
 
 Antes de mutar, a ferramenta valida workflow publicado, 68 nós, versão homologada, webhook, referências dos dois nós, fingerprint, schema de credencial n8n, TLS, database, objetos permitidos, `PUBLIC`, funções `SECURITY DEFINER` e inexistência do papel. Depois de criar o papel, valida pelo pooler `current_user`, read-only, acesso SELECT e privilégios proibidos antes de mudar o n8n. Qualquer divergência falha fechada.
 
 O snapshot privado fica em `~/.local/state/agente-sql-langgraph/` (`0700/0600`) e nunca deve ir para GitHub. A saída só tem `G1_ROLE`, `G1_N8N_BINDINGS` e `G1_ROLLBACK`.
 
+## Preflight real: privilégio TEMPORARY herdado de PUBLIC (25/10/2026)
+
+**Evidência operacional na VPS:** o preflight da PR #171 retornou
+`G1_N8N_BINDINGS=PREFLIGHT:0eee554daf77` e `G1_ROLE=NOT_APPLIED`
+após conexão TLS verificada com a CA do Supabase. A verificação adicional,
+executada no **banco real** antes de qualquer alteração, confirmou
+`G1_PUBLIC_TEMPORARY=TRUE`, `G1_PUBLIC_DATABASE_CREATE=FALSE`,
+`G1_PUBLIC_ACL_CHECK=PASS`.
+
+**Consequência:** o `--apply` da versão anterior seria bloqueado depois de
+tentar criar a role, porque `assert_role_effective_permissions` rejeita
+`TEMPORARY`. A partir desta correção, o `--dry-run` e o `--apply`
+rejeitam `PUBLIC TEMPORARY`/**CREATE** **antes de CREATE ROLE e antes de
+POST/PUT de credenciais/workflows n8n**. Se aparecer
+`ERROR=PUBLIC tem TEMPORARY; bloquear G1 antes de criar role`,
+**não execute `--apply`**. O snapshot e os vínculos originais permanecem
+inalterados. O preflight não cria uma role simulada: a verificação de outros
+privilégios efetivos continua sendo necessária após a criação.
+
+O PostgreSQL concede privilégios de `PUBLIC` a **todas** as roles, inclusive
+roles `NOINHERIT` criadas no futuro. `REVOKE TEMPORARY ... FROM finance_g1_readonly`
+**não elimina** o grant de `PUBLIC`. Configurar
+`default_transaction_read_only=on` tampouco remove esse privilégio.
+A referência oficial explica o risco:
+[Supabase — custom role inherits privileges that were not explicitly granted](https://supabase.com/docs/guides/troubleshooting/custom-role-inherits-privileges-that-were-not-explicitly-granted-ddaa1c).
+
+**Possível remediação de privilégios (NÃO AUTORIZADA por este runbook):**
+`REVOKE TEMPORARY ON DATABASE postgres FROM PUBLIC` alteraria a
+configuração **de todo o banco Supabase**, não apenas do agente. Antes de
+considerá-la, inventariar as roles de conexão e workloads que dependem de
+tabelas temporárias, grants explícitos alternativos, dependências do Supabase,
+plano de restauração e impacto sobre outros serviços. Uma transação com
+grants compensatórios para roles justificadas pode ser proposta **somente após
+aprovação específica da alteração global**; não executar automaticamente,
+não revogar permissões de terceiros e não enfraquecer gates para passar no teste.
+Outra arquitetura de isolamento exige desenho, autorização e homologação
+próprios. ACL catalogal mostra **permissões**, não comprova o uso real
+de tabelas temporárias pelos serviços.
+
+### Inventário de impacto read-only antes de qualquer mudança global
+
+O utilitário de plataforma `scripts/operations/g1_public_acl_impact_audit.py`
+opera **somente com SELECTs em catálogos PostgreSQL** e define
+`SET TRANSACTION READ ONLY` antes de lê-los. Solicita o DSN administrativo
+sem eco, valida identidade do projeto, exige `sslmode=verify-full` e não
+utiliza credenciais n8n, Gemini, tabelas financeiras ou benchmark. Emite
+**apenas contagens e flags**, sem nomes de roles, objetos ou segredos.
+
+```bash
+cd /docker/agente-sql-langgraph-repo
+export PGSSLROOTCERT=/root/.local/share/agente-sql-langgraph/supabase-ca.crt
+.venv/bin/python scripts/operations/g1_public_acl_impact_audit.py \
+  --project-ref cenhadslwxgykqtuobgc
+```
+
+No caso DEMO, compartilhe somente as linhas `G1_*`. O relatório cobre:
+`PUBLIC` no banco (`CONNECT`, `TEMPORARY`, `CREATE`), número de
+destinatários explícitos de `TEMPORARY`, quantidade de roles com login
+e acesso ao database, sessões ativas, schemas não-sistêmicos com
+`PUBLIC USAGE`, relações com `PUBLIC SELECT`/DML, sequences,
+funções `SECURITY DEFINER` executáveis por `PUBLIC` e presença da
+role alvo. Os grupos são **genéricos e multicliente**, não codificam
+tabelas ou regras de negócio.
+
+**Limitação essencial:** contagens e grants do catálogo **não provam**
+que um workload precisa ou não criar tabelas temporárias, nem demonstram
+a segurança efetiva de uma role futura. A saída sempre será
+`G1_AUDIT_RESULT=REVIEW_REQUIRED`; não constitui aprovação automática
+de `REVOKE`, `GRANT`, G1 ou cutover. O inventário de dependências dos
+serviços e o plano de rollback deverão ser concluídos antes de decidir
+entre mudança de ACL global ou separação do banco/serviço de leitura.
+Se existirem grants de extensão não revogáveis pelo administrador do
+Supabase, não criar exceções nos gates para contorná-los.
+
+### Reexecutar diagnóstico seguro após uma remediação autorizada
+
+1. Preservar o arquivo CA oficial em caminho privado da VPS. Para
+   `sslmode=verify-full`, usar `export PGSSLROOTCERT=/root/.local/share/agente-sql-langgraph/supabase-ca.crt`
+   na sessão do operador; não desabilitar TLS ou verificação de hostname.
+2. Usar o Python isolado `.venv/bin/python` com `psycopg[binary]==3.3.4`.
+3. Executar **apenas** `--dry-run` com a mesma origem n8n, projeto e DSN
+   via `getpass`. Verificar a versão publicada e o novo fingerprint.
+4. Prosseguir ao `--apply` apenas se os gates forem positivos **e**
+   os requisitos de autorização/rollback de G1 permanecerem atendidos.
+
 ## Verificação e rollback
 
 ```bash
-python3 scripts/operations/g1_readonly_rollout.py --verify \
+.venv/bin/python scripts/operations/g1_readonly_rollout.py --verify \
   --n8n-url https://<n8n-autorizado> --project-ref <referencia-do-projeto>
 
-python3 scripts/operations/g1_readonly_rollout.py --rollback \
+.venv/bin/python scripts/operations/g1_readonly_rollout.py --rollback \
   --n8n-url https://<n8n-autorizado> --project-ref <referencia-do-projeto>
 ```
 

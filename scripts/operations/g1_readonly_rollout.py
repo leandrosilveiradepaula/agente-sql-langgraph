@@ -384,10 +384,36 @@ def assert_binding_id(workflow: Mapping[str, Any], config: RolloutConfig,
             raise RolloutError("credencial vinculada diverge da identidade esperada")
 
 
+def assert_public_database_privileges(connection: DbConnection, config: RolloutConfig) -> None:
+    """Fail before DDL if a future role would inherit CREATE/TEMP from PUBLIC.
+
+    PostgreSQL grants TEMPORARY to PUBLIC by default. NOINHERIT and a
+    role-specific REVOKE do not exclude a role from PUBLIC. This query uses
+    database ACLs, including the implicit acldefault() when datacl is NULL.
+    """
+    row = connection.execute(
+        "SELECT COALESCE(bool_or(a.privilege_type='TEMPORARY'), false), "
+        "COALESCE(bool_or(a.privilege_type='CREATE'), false) "
+        "FROM pg_database d "
+        "CROSS JOIN LATERAL aclexplode("
+        "COALESCE(d.datacl, acldefault('d', d.datdba))) a "
+        "WHERE d.datname=%s AND a.grantee=0",
+        (config.raw["database"],),
+    ).fetchone()
+    if not row or len(row) != 2 or any(type(value) is not bool for value in row):
+        raise RolloutError("ACL de PUBLIC no database nao verificavel")
+    if row[0]:
+        raise RolloutError("PUBLIC tem TEMPORARY; bloquear G1 antes de criar role")
+    if row[1]:
+        raise RolloutError("PUBLIC tem CREATE; bloquear G1 antes de criar role")
+
+
 def validate_database(connection: DbConnection, config: RolloutConfig) -> None:
     row = connection.execute("SELECT current_database()", ()).fetchone()
     if not row or row[0] != config.raw["database"]:
         raise RolloutError("database conectado diverge da configuracao")
+    # Gate before READY and before any CREATE ROLE or n8n credential POST.
+    assert_public_database_privileges(connection, config)
     relation_rows = connection.execute(
         "SELECT table_name, table_type FROM information_schema.tables WHERE table_schema=%s",
         (config.raw["schema"],),

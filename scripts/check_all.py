@@ -422,6 +422,10 @@ STEPS = [
         "testar_g1_readonly_rollout.py",
         [sys.executable, "testar_g1_readonly_rollout.py"],
     ),
+    (
+        "testar_g1_public_acl_impact_audit.py",
+        [sys.executable, "testar_g1_public_acl_impact_audit.py"],
+    ),
     ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
     ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),]
 

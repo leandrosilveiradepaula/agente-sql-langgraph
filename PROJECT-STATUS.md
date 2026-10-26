@@ -1,3 +1,13 @@
+## Gate G1 — preflight real no Supabase DEMO: PUBLIC TEMPORARY bloqueia criação (25/10/2026)
+
+- **Evidência real fornecida pelo operador** em `main@76b9e70`: VPS PostgreSQL com `psycopg[binary]==3.3.4` e CA oficial Supabase Root 2021 válida; `--dry-run` (sem escrita) passou `G1_ROLE=NOT_APPLIED`, `G1_N8N_BINDINGS=PREFLIGHT:0eee554daf77`, `G1_ROLLBACK=READY`.
+- Auditoria SQL catalogal **read-only** do projeto financeiro confirmou `G1_PUBLIC_TEMPORARY=TRUE`, `G1_PUBLIC_DATABASE_CREATE=FALSE`, `G1_PUBLIC_ACL_CHECK=PASS`. Qualquer nova role herdará `TEMPORARY` por `PUBLIC`. `NOINHERIT` ou `REVOKE ... FROM` apenas da role não resolve.
+- **Correção candidata desta PR:** `--dry-run`/ `--apply` verificam ACL efetiva `PUBLIC` no database antes de `CREATE ROLE`; falham fechado caso `TEMPORARY` ou `CREATE` esteja ativo. Testes offline simulam ACLs, bloqueio de criação, inexistência de POST n8n e fluxo positivo preservado.
+- **Não autorizado:** `REVOKE TEMPORARY ON DATABASE postgres FROM PUBLIC` ou qualquer alteração global de grants, permissões n8n ou migração. Depende de inventário de impacto, plano de rollback e decisão explícita. Nenhuma alteração de banco/n8n/Shadow executada por esta PR. `OFFICIAL=n8n`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`, `G1_CORRELATED_EXECUTION=NOT_TESTED`.
+- **Evidência e detalhes:** `docs/runbooks/g1-readonly-single-step-operator.md`; acompanhamento operacional [#155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155). Não confundir PASS de TLS/preflight antigo com homologação G1.
+
+---
+
 ## Gate G2 — inventário integral de encaminhamento (2026-10-23, snapshot do operador)
 
 - Inventário sanitizado de **68 nós** do JSON fornecido pelo operador em 20/10: `docs/audits/n8n-official-68-node-externalization-ledger.md`.
