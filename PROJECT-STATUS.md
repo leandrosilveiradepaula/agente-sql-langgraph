@@ -1,3 +1,28 @@
+# ESTADO ATUAL — 26/10/2026: P1 E P2 PASS; FOCO EXCLUSIVO P3
+
+**Não repetir P1/P2.** Foram comprovadas com evidência real de Gemini e
+correlação autenticada Produto → n8n candidato → LangGraph. P2:
+`agent_run_id=41d54ee0-b730-41ec-ba69-836d862b1780`,
+`run_id=lg-shadow-test-run-3`,
+`shadow_record_id=shadow-07d311c493efb7383fe0f5e0fc133997`;
+SQL gerada e aprovada nos três gates, 1.985 tokens,
+`LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. Fonte viva:
+[roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155).
+
+**Próximo objetivo P3:** habilitar um executor PostgreSQL de menor privilégio
+sem reduzir gates, executar SELECT financeira **após autorização separada**
+e comparar numericamente a SQL LangGraph com a baseline n8n+Gemini.
+`PUBLIC TEMPORARY=true` foi confirmado no Supabase e bloqueia a role
+read-only existente. A correção candidata é compensar os direitos de TEMP
+das roles atuais em transação atômica, depois revogar apenas o grant a PUBLIC,
+com rollback guardado e verificação pré-COMMIT. Ver
+[runbook P3](docs/runbooks/p3-public-temp-atomic-compensation.md). **Nenhuma
+mudança global foi executada**. Qualquer `--apply`, SQL real, n8n oficial,
+migration ou cutover exige aprovação específica. Não abrir iniciativas
+paralelas nem reverter a prova funcional.
+
+---
+
 # STATUS EXECUTIVO / PRIORIDADE IMEDIATA — 26/10/2026
 
 **Única entrega ativa: P1 = prova real de geração no caminho n8n candidato → LangGraph → Gemini, sem execução SQL financeira.** O passo seguinte é P2 (correlação Produto autenticado); a execução financeira read-only/role G1 é P3. [Plano operacional e regra anti-desvio](docs/operations/DELIVERY-FOCUS.md); [roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155).

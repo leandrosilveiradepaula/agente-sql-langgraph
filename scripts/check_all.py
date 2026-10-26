@@ -426,6 +426,10 @@ STEPS = [
         "testar_g1_public_acl_impact_audit.py",
         [sys.executable, "testar_g1_public_acl_impact_audit.py"],
     ),
+    (
+        "testar_g1_public_temp_preserve_roles.py",
+        [sys.executable, "testar_g1_public_temp_preserve_roles.py"],
+    ),
     ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
     ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),]
 

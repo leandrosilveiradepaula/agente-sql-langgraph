@@ -1,3 +1,11 @@
+> **P3, 26/10/2026:** a concessão `PUBLIC TEMPORARY` bloqueia o
+> rollout desta role. O caminho candidato de remediação, com preservação dos
+> privilégios das roles existentes em transação atômica, está descrito em
+> [p3-public-temp-atomic-compensation.md](p3-public-temp-atomic-compensation.md).
+> Este runbook **não autoriza** alteração global, e o `--apply` G1 permanece
+> bloqueado até validação/autorizações próprias. P1/P2 já foram comprovadas;
+> não refazer testes Gemini para reparar ACL.
+
 # G1 — operação única de credencial PostgreSQL somente leitura
 
 Este runbook é executado **somente na VPS autorizada**, depois da aprovação da PR. Ele não integra o runtime LangGraph e não altera o fluxo oficial por si só.
