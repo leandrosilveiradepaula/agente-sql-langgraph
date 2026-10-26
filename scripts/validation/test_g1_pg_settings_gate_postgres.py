@@ -120,6 +120,13 @@ def main() -> None:
         conn.execute("REVOKE UPDATE ON pg_catalog.pg_settings FROM " + quote_ident(ROLE))
         print("G1_DIRECT_SETTINGS_DML_STILL_BLOCKED=PASS")
 
+        # A DIFFERENT system view is not exempt, even though it shares
+        # pg_catalog with the builtin session-configuration view.
+        conn.execute("GRANT UPDATE ON pg_catalog.pg_stat_activity TO " + quote_ident(ROLE))
+        assert_rejected(conn, config, "other pg_catalog view UPDATE")
+        conn.execute("REVOKE UPDATE ON pg_catalog.pg_stat_activity FROM " + quote_ident(ROLE))
+        print("G1_OTHER_SYSTEM_VIEW_DML_STILL_BLOCKED=PASS")
+
         # Insert would still be prohibited even for this exact system view.
         conn.execute("GRANT INSERT ON pg_catalog.pg_settings TO " + quote_ident(ROLE))
         assert_rejected(conn, config, "pg_settings INSERT")
