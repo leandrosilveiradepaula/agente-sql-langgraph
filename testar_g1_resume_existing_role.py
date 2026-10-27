@@ -73,6 +73,7 @@ class FakeApi:
                 "host": {}, "port": {}, "database": {},
                 "ssl": {"enum": ["require"]}, "user": {},
                 "password": {}, "allowUnauthorizedCerts": {"type": "boolean"},
+                "sshTunnel": {"type": "boolean"},
             }}
         if method == "POST" and path == "/api/v1/credentials":
             self.events.append("POST_CREDENTIAL")
@@ -116,6 +117,7 @@ class ResumeG1Tests(unittest.TestCase):
                     "host": "host", "port": "port", "database": "database",
                     "ssl": "ssl", "user": "user", "password": "password",
                     "allow_unauthorized_certs": "allowUnauthorizedCerts",
+                    "ssh_tunnel": "sshTunnel",
                 },
             },
         })
@@ -202,6 +204,8 @@ class ResumeG1Tests(unittest.TestCase):
     def test_successful_recovery_only_rotates_role_after_credential_created(self):
         self.assertEqual(self.run_case(recover=True), 0)
         self.assertEqual(self.events.count("POST_CREDENTIAL"), 1)
+        self.assertIs(self.api.credential["data"]["sshTunnel"], False)
+        self.assertIs(self.api.credential["data"]["allowUnauthorizedCerts"], False)
         self.assertEqual(self.events.count("ALTER_ROLE"), 1)
         self.assertEqual(self.events.count("PUT_WORKFLOW"), 1)
         self.assertLess(self.events.index("POST_CREDENTIAL"), self.events.index("ALTER_ROLE"))

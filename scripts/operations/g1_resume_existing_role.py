@@ -26,6 +26,7 @@ from g1_readonly_rollout import (
     assert_only_two_rebindings,
     assert_role_effective_permissions,
     build_pooler_dsn,
+    build_n8n_credential_data_base,
     confirm,
     load_config,
     pooler_template_from_admin_dsn,
@@ -157,9 +158,7 @@ def main(argv: list[str] | None = None) -> int:
 
         password = secrets.token_urlsafe(32)
         connection_fields = config.n8n["connection_fields"]
-        credential_data = {connection_fields[key]: template[key]
-                           for key in ("host", "port", "database", "ssl")}
-        credential_data[connection_fields["allow_unauthorized_certs"]] = False
+        credential_data = build_n8n_credential_data_base(config, template)
         credential_data[connection_fields["user"]] = (
             config.raw["role_name"] + "." + args.project_ref
         )
