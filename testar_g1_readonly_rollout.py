@@ -33,7 +33,7 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
                 "old_credential_id": "old", "binding_node_ids": ["one", "two"],
                 "connection_fields": {"host": "host", "port": "port", "database": "database",
                     "ssl": "ssl", "user": "user", "password": "password",
-                    "allow_unauthorized_certs": "allowUnauthorizedCerts"}
+                    "allow_unauthorized_certs": "allowUnauthorizedCerts", "ssh_tunnel": "sshTunnel"}
             }
         })
         self.workflow = {
@@ -229,7 +229,7 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
                     return {"properties": {
                         "host": {}, "port": {}, "database": {}, "user": {},
                         "password": {}, "ssl": {"enum": ["disable", "allow", "require"]},
-                        "allowUnauthorizedCerts": {"type": "boolean"},
+                        "allowUnauthorizedCerts": {"type": "boolean"}, "sshTunnel": {"type": "boolean"},
                     }}
                 # Exact n8n@2.4.8 public credential API: POST and schema GET
                 # only. Credential list and ID GET endpoints do not exist.
@@ -288,6 +288,7 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
                                  "readonly_role." + project_ref)
                 self.assertEqual(state["api_payload"]["data"]["ssl"], "require")
                 self.assertIs(state["api_payload"]["data"]["allowUnauthorizedCerts"], False)
+                self.assertIs(state["api_payload"]["data"]["sshTunnel"], False)
                 self.assertNotIn("ignoreSSLIssues", state["api_payload"]["data"])
                 self.assertTrue(path.exists())
                 rollout.assert_binding_id(api.workflow, cfg, "new")
@@ -308,9 +309,13 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
             "database": {"type": "string"}, "user": {"type": "string"},
             "password": {"type": "string"},
             "ssl": {"type": "string", "enum": ["allow", "disable", "require"]},
-            "allowUnauthorizedCerts": {"type": "boolean"},
+            "allowUnauthorizedCerts": {"type": "boolean"}, "sshTunnel": {"type": "boolean"},
         }}
         rollout.validate_credential_schema(schema, self.config)
+        missing_ssh = json.loads(json.dumps(schema))
+        missing_ssh["properties"].pop("sshTunnel")
+        with self.assertRaises(rollout.RolloutError):
+            rollout.validate_credential_schema(missing_ssh, self.config)
         legacy = json.loads(json.dumps(schema))
         legacy["properties"]["ignoreSSLIssues"] = legacy["properties"].pop("allowUnauthorizedCerts")
         with self.assertRaises(rollout.RolloutError):
