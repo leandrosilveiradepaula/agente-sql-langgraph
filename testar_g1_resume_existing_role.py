@@ -62,6 +62,7 @@ class FakeApi:
         self.events = events
         self.credential = None
         self.reject_post = reject_post
+        self.persist_then_fail = False
 
     def request(self, method, path, body=None):
         if method == "GET" and path.startswith("/api/v1/workflows/"):
@@ -78,6 +79,8 @@ class FakeApi:
             if self.reject_post:
                 raise g1.RolloutError("n8n API HTTP_STATUS_403")
             self.credential = copy.deepcopy(body)
+            if self.persist_then_fail:
+                raise g1.RolloutError("n8n API HTTP_STATUS_502")
             return {"id": "credential-new", "name": body["name"], "type": "postgres"}
         if method == "PUT" and path.startswith("/api/v1/workflows/"):
             self.events.append("PUT_WORKFLOW")
@@ -221,6 +224,20 @@ class ResumeG1Tests(unittest.TestCase):
             self.run_case(recover=True)
         self.assertNotIn("POST_CREDENTIAL", self.events)
 
+
+
+    def test_ambiguous_post_result_may_persist_but_must_never_be_replayed(self):
+        self.api.persist_then_fail = True
+        with self.assertRaisesRegex(g1.RolloutError, "HTTP_STATUS_502"):
+            self.run_case(recover=True)
+        self.assertIsNotNone(self.api.credential)
+        self.assertEqual(self.events.count("POST_CREDENTIAL"), 1)
+        self.assertNotIn("ALTER_ROLE", self.events)
+        self.assertNotIn("PUT_WORKFLOW", self.events)
+        with self.assertRaisesRegex(g1.RolloutError, "credencial G1 encontrada"):
+            self.run_case(recover=True)
+        self.assertEqual(self.events.count("POST_CREDENTIAL"), 1)
+        self.assertFalse(self.snapshot.exists())
 
     def test_concurrent_credential_during_confirmation_blocks_before_post(self):
         def concurrent_create(*args):
