@@ -115,6 +115,48 @@ class G1PostPutKeylessAuditTests(unittest.TestCase):
         self.assertEqual(result["G1_FIELD_PINDATA"], "CHANGED")
         self.assertEqual(result["G1_AUDIT_RESULT"], "NONBINDING_FIELD_DRIFT_REVIEW")
 
+    def test_n8n_248_documented_default_removal_is_explicit_pass(self):
+        self.original["settings"]["timezone"] = "DEFAULT"
+        self.snapshot["workflow"]["settings"]["timezone"] = "DEFAULT"
+        self.current["settings"].pop("timezone", None)
+        result = self.assess()
+        self.assertEqual(result["G1_SETTINGS_EQUIVALENCE"], "N8N_248_DEFAULT_NORMALIZED")
+        self.assertEqual(result["G1_SETTING_TIMEZONE"], "N8N_248_DEFAULT_REMOVED")
+        self.assertEqual(result["G1_AUDIT_RESULT"], "N8N_248_NORMALIZED_PASS")
+
+    def test_execution_timeout_removal_requires_review(self):
+        self.original["settings"]["executionTimeout"] = 3600
+        self.snapshot["workflow"]["settings"]["executionTimeout"] = 3600
+        result = self.assess()
+        self.assertEqual(result["G1_AUDIT_RESULT"], "SETTINGS_DRIFT_REVIEW")
+
+    def test_changed_setting_never_forgiven_as_default(self):
+        self.current["settings"]["executionOrder"] = "v0"
+        result = self.assess()
+        self.assertEqual(result["G1_SETTINGS_REVIEW_COUNT"], "1")
+        self.assertEqual(result["G1_AUDIT_RESULT"], "SETTINGS_DRIFT_REVIEW")
+
+    def test_unknown_setting_name_not_disclosed(self):
+        verdict = audit.audit_settings_drift(
+            {"PRIVATE_KEY_NAME": "PRIVATE_VALUE"},
+            {"PRIVATE_KEY_NAME": "CHANGED"},
+            known_keys=frozenset({"executionOrder"}),
+        )
+        self.assertEqual(verdict["G1_SETTINGS_UNLISTED_CHANGE_COUNT"], "1")
+        self.assertNotIn("PRIVATE_KEY_NAME", str(verdict))
+        self.assertNotIn("PRIVATE_VALUE", str(verdict))
+        self.assertEqual(verdict["G1_SETTINGS_EQUIVALENCE"], "REVIEW_REQUIRED")
+
+    def test_unknown_and_documented_mixed_must_fail(self):
+        verdict = audit.audit_settings_drift(
+            {"timezone": "DEFAULT", "UNEXPECTED": "OLD"},
+            {"UNEXPECTED": "NEW"},
+            known_keys=frozenset({"timezone"}),
+        )
+        self.assertEqual(verdict["G1_SETTINGS_DOCUMENTED_NORMALIZATIONS"], "1")
+        self.assertEqual(verdict["G1_SETTINGS_REVIEW_COUNT"], "1")
+        self.assertEqual(verdict["G1_SETTINGS_EQUIVALENCE"], "REVIEW_REQUIRED")
+
     def test_one_unbound_node_rejects_as_partial_rollout(self):
         self.current["nodes"][1]["credentials"]["postgres"] = {
             "id": "cred-old", "name": "Old",
