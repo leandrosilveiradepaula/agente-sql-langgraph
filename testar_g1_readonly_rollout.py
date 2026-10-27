@@ -234,6 +234,8 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
                 # Exact n8n@2.4.8 public credential API: POST and schema GET
                 # only. Credential list and ID GET endpoints do not exist.
                 if method == "POST" and path == "/api/v1/credentials":
+                    self_test_state = rollout.OPERATION_STATUS["bindings"]
+                    assert self_test_state == "CREDENTIAL_POST_OUTCOME_UNKNOWN"
                     state["api_payload"] = json.loads(json.dumps(body))
                     return {"id": "new", "name": body["name"], "type": "postgres"}
                 if method == "PUT" and path == "/api/v1/workflows/workflow":
@@ -343,6 +345,26 @@ class G1ReadonlyRolloutTests(unittest.TestCase):
         invalid["nodes"][2]["parameters"]["path"] = "wrong"
         with self.assertRaises(rollout.RolloutError):
             rollout.validate_workflow(invalid, self.config)
+
+
+    def test_n8n_http_error_reports_only_numeric_status(self) -> None:
+        from urllib.error import HTTPError
+
+        class ForbiddenOpener:
+            def open(self, request, timeout=20):
+                raise HTTPError(
+                    "https://secret.invalid/path?token=SECRET", 403,
+                    "body=SECRET", None, None,
+                )
+
+        api = rollout.N8nApi(
+            "https://n8n.example", "test-api-key-0123456789",
+            opener=ForbiddenOpener(),
+        )
+        with self.assertRaisesRegex(rollout.RolloutError, "HTTP_STATUS_403") as observed:
+            api.request("POST", "/api/v1/credentials", {"secret": "NEVER_PRINT"})
+        self.assertNotIn("SECRET", str(observed.exception))
+        self.assertNotIn("NEVER_PRINT", str(observed.exception))
 
 
 
