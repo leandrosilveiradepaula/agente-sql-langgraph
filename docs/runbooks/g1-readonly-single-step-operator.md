@@ -1,3 +1,61 @@
+
+## G1 parcialmente criado: reconciliação de um POST n8n ambíguo (27/10/2026)
+
+**Caso real confirmado:** o --apply retornou G1_ROLE=CREATED,
+G1_N8N_BINDINGS=NOT_APPLIED, G1_ROLLBACK=ROLE_RETAINED_FOR_REVIEW
+e ERROR=n8n API indisponivel ou resposta inesperada.
+O código da chamada indica falha no POST /api/v1/credentials **antes**
+da confirmação da identidade da credencial. A role foi persistida, mas
+não sabemos se a credencial chegou a ser gravada no n8n. A senha gerada
+pelo processo original não deve ser inferida nem recuperada de logs.
+
+**Jamais repetir --apply neste estado.** Não executar --verify nem
+--rollback sem o snapshot aplicável. Não fazer PUT dos dois nós,
+não remover a role, não alterar senhas ou credenciais por tentativa.
+
+Após merge humano da correção, executar somente o inventário abaixo
+na VPS, dentro do checkout sincronizado:
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main
+.venv/bin/python scripts/operations/g1_partial_reconcile_readonly.py \
+  --n8n-url https://n8n.srv1319424.hstgr.cloud
+~~~
+
+O script exige **n8n 2.4.8** e lê o workflow oficial com a chave de API
+digitada sem eco. Faz ainda uma única exportação de credenciais **cifradas**
+por CLI dentro do contêiner (n8n export:credentials --all), captura a
+saída somente na memória do processo Python, extrai a **contagem** de
+credenciais Postgres com prefixo de nome controlado pelo rollout e descarta
+todos os dados, inclusive cifras. **Nunca** utilizar --decrypted,
+redirecionar o JSON bruto a disco, imprimir/exportar tokens ou arquivos
+com segredos. Se a leitura do CLI falhar ou houver formato desconhecido,
+o inventário falha fechado, sem inferir ausência de credencial.
+
+Verificações emitidas sem segredos:
+
+- G1_RECONCILE_MODE=READ_ONLY
+- G1_CREDENTIAL_MATCHES=0|1|N (contagem da instância; não garante que
+  a credencial esteja correta ou utilizável pelo workflow)
+- G1_N8N_BINDINGS=OLD_BINDINGS_CONFIRMED
+- G1_WORKFLOW_FINGERPRINT=prefixo_SHA256
+- G1_SNAPSHOT=ABSENT
+- G1_RECOVERY=... — decisão de **não aplicar** automaticamente
+
+Qualquer correspondência exige análise de credencial órfã, autoria e
+usabilidade pelo projeto n8n antes de ligação. Mesmo com
+G1_CREDENTIAL_MATCHES=0 não se autoriza repetir o POST com role já existente:
+o segredo original não é recuperável; projetar recuperação com rotação
+controlada, confirmação de ausência/duplicação, snapshot e rollback humano.
+A recuperação mutável é gate posterior ao inventário, não parte dele.
+
+A correção no transporte da API passa a preservar **somente o código HTTP**
+(por exemplo, HTTP_STATUS_403), sem corpo, cabeçalhos, URL ou segredo.
+Ela não altera a requisição nem esclarece retrospectivamente o status
+HTTP da tentativa que já falhou.
+
+
 > **P3/G1 — estado real em 26/10/2026:** a compensação de
 > `PUBLIC TEMPORARY` foi **aplicada e verificada** no Supabase financeiro
 > DEMO, com 35 roles preservadas e 32 compensadas. O preflight G1 passou.
