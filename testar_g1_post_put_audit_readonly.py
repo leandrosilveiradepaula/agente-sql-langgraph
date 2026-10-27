@@ -9,8 +9,12 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from scripts.operations import g1_post_put_audit_readonly as audit
-from scripts.operations import g1_readonly_rollout as rollout
+import sys
+
+OPERATIONS = Path(__file__).resolve().parent / "scripts" / "operations"
+sys.path.insert(0, str(OPERATIONS))
+import g1_post_put_audit_readonly as audit
+import g1_readonly_rollout as rollout
 
 
 class G1PostPutKeylessAuditTests(unittest.TestCase):
