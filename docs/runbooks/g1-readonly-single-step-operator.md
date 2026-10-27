@@ -1,3 +1,35 @@
+## 27/10/2026 — Fechamento objetivo do drift settings (sem novo PUT)
+
+Evidência da VPS após a PR #179: os dois bindings da credencial nova estão
+presentes e o único campo divergente é `settings`. A auditoria atualizada
+compara cada chave localmente e aceita *somente* as cinco remoções em que
+o valor original era literalmente `DEFAULT`, comprovadas em
+`n8n@2.4.8 WorkflowService.update()`. Qualquer mudança real de valor,
+adição, remoção inesperada, campo não homologado ou `executionTimeout`
+sem prova da configuração do servidor continua bloqueada.
+
+Após o merge humano e CI verde, na VPS executar:
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo || exit 1
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main || exit 1
+.venv/bin/python scripts/operations/g1_post_put_audit_readonly.py
+~~~
+
+Retornos possíveis:
+- `STRICT_PASS`: settings idênticos, todos os demais gates aprovados.
+- `N8N_248_NORMALIZED_PASS`: alteração limitada às remoções exatas de
+  `DEFAULT` permitidas pelo código-fonte oficial n8n@2.4.8; não é
+  aprovação de execução financeira.
+- `SETTINGS_DRIFT_REVIEW` ou outros REVIEW: investigar sem repetir a
+  recuperação nem alterar o fluxo oficial.
+
+A saída `G1_SETTINGS_*` traz apenas chaves homologadas e contagens; nenhum
+valor dos settings, SQL ou segredo é exposto. Preservar snapshot privado e
+não executar consultas financeiras até gate específico.
+
+---
+
 ## 27/10/2026 — Auditoria pós-PUT do G1 sem API key nem DSN
 
 **Situação observada:** o operador executou a recuperação com confirmação
