@@ -4,8 +4,9 @@
 Reads the private pre-PUT snapshot, encrypted credential metadata and the
 stored workflow via n8n 2.4.8 local CLI. No n8n API key, HTTP requests,
 PostgreSQL connection, export file, workflow write, or secret output.
-A STRICT_PASS confirms database-stored bindings and the current active
-version; it is not an approval to execute financial SQL.
+STRICT_PASS confirms exact preserved settings; N8N_248_NORMALIZED_PASS proves
+only the upstream-documented literal DEFAULT removals. Both still require
+separate approval for real financial SQL; no webhooks are executed here.
 """
 from __future__ import annotations
 
@@ -21,6 +22,8 @@ from typing import Any, Mapping
 from g1_partial_reconcile_readonly import find_n8n_container
 from g1_readonly_rollout import (
     RolloutError,
+    API_SETTINGS_FIELDS,
+    API_SETTINGS_RETAINED,
     _load_verified_snapshot,
     _node_for_comparison,
     load_config,
@@ -31,6 +34,73 @@ from g1_readonly_rollout import (
 FIELDS = ("name", "connections", "settings", "staticData",
           "pinData", "meta", "tags")
 MAX_EXPORT_CHARS = 18_000_000
+
+
+
+# These five process-level normalizations are taken verbatim from
+# n8n@2.4.8 WorkflowService.update() (packages/cli/src/workflows/workflow.service.ts).
+# Never generalize them to a business setting, a different n8n version, or to
+# executionTimeout (whose default is runtime-configured and not proven here).
+N8N_248_DEFAULT_PRUNED_SETTINGS = frozenset((
+    "timezone", "saveDataErrorExecution", "saveDataSuccessExecution",
+    "saveManualExecutions", "saveExecutionProgress",
+))
+
+
+def audit_settings_drift(
+    before: Mapping[str, Any], after: Mapping[str, Any],
+    *, known_keys: frozenset[str],
+) -> dict[str, str]:
+    """Prove documented server normalization, or return a review gate.
+
+    Never emit settings values; only trusted, versioned field names are
+    reported. Unknown field names are counted but never printed.
+    """
+    if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+        raise RolloutError("settings fora do contrato de comparacao")
+    if any(not isinstance(key, str) for key in (*before.keys(), *after.keys())):
+        raise RolloutError("settings com chave nao textual")
+    diff_keys = sorted(
+        key for key in set(before) | set(after)
+        if key not in before or key not in after or before[key] != after[key]
+    )
+    normalized = 0
+    reviewed = 0
+    unlisted = 0
+    report: dict[str, str] = {}
+    for key in diff_keys:
+        documented_default_removal = (
+            key in N8N_248_DEFAULT_PRUNED_SETTINGS
+            and key in before and key not in after
+            and before[key] == "DEFAULT"
+        )
+        if documented_default_removal:
+            normalized += 1
+            state = "N8N_248_DEFAULT_REMOVED"
+        else:
+            reviewed += 1
+            state = (
+                "ADDED_REVIEW" if key not in before else
+                "REMOVED_REVIEW" if key not in after else "CHANGED_REVIEW"
+            )
+        if key in known_keys:
+            report["G1_SETTING_" + key.upper()] = state
+        else:
+            unlisted += 1
+
+    classification = (
+        "EXACT" if not diff_keys else
+        "N8N_248_DEFAULT_NORMALIZED" if reviewed == 0 else
+        "REVIEW_REQUIRED"
+    )
+    return {
+        "G1_SETTINGS_EQUIVALENCE": classification,
+        "G1_SETTINGS_DIFF_COUNT": str(len(diff_keys)),
+        "G1_SETTINGS_DOCUMENTED_NORMALIZATIONS": str(normalized),
+        "G1_SETTINGS_REVIEW_COUNT": str(reviewed),
+        "G1_SETTINGS_UNLISTED_CHANGE_COUNT": str(unlisted),
+        **report,
+    }
 
 
 def parse_single_cli_export(stdout: str, *, expected_id: str, kind: str) -> dict[str, Any]:
@@ -163,8 +233,14 @@ def evaluate(snapshot: Mapping[str, Any], stored: Mapping[str, Any],
 
     field_results = {field: field_state(original, stored, field) for field in FIELDS}
     other_fields_match = all(
-        v in ("UNCHANGED", "BOTH_ABSENT") for v in field_results.values()
+        v in ("UNCHANGED", "BOTH_ABSENT")
+        for field, v in field_results.items() if field != "settings"
     )
+    settings_evidence = audit_settings_drift(
+        original.get("settings"), stored.get("settings"),
+        known_keys=API_SETTINGS_FIELDS | API_SETTINGS_RETAINED,
+    )
+    settings_equivalence = settings_evidence["G1_SETTINGS_EQUIVALENCE"]
     try:
         validate_workflow(stored, config, require_old_bindings=False)
         workflow_contract = "PASS"
@@ -191,18 +267,27 @@ def evaluate(snapshot: Mapping[str, Any], stored: Mapping[str, Any],
     }
     for field, state in field_results.items():
         result["G1_FIELD_" + field.upper()] = state
+    result.update(settings_evidence)
     if (
         workflow_contract == "PASS" and version == "ACTIVE_MATCH"
         and result["G1_NODE_ORDER"] == "UNCHANGED"
         and counts == {"NEW": 2, "OLD": 0, "OTHER": 0}
         and unauthorized_node_drift == 0 and other_fields_match
+        and settings_equivalence in ("EXACT", "N8N_248_DEFAULT_NORMALIZED")
     ):
-        result["G1_AUDIT_RESULT"] = "STRICT_PASS"
+        # STRICT_PASS is reserved for byte-for-byte preserved settings.
+        # A documented n8n normalization is a separate, explicit outcome.
+        result["G1_AUDIT_RESULT"] = (
+            "STRICT_PASS" if settings_equivalence == "EXACT"
+            else "N8N_248_NORMALIZED_PASS"
+        )
     elif counts["NEW"] != 2 or counts["OLD"] or counts["OTHER"]:
         result["G1_AUDIT_RESULT"] = "BINDINGS_REVIEW_REQUIRED"
     elif workflow_contract != "PASS" or version != "ACTIVE_MATCH" \
             or unauthorized_node_drift != 0 or result["G1_NODE_ORDER"] != "UNCHANGED":
         result["G1_AUDIT_RESULT"] = "STRUCTURAL_REVIEW_REQUIRED"
+    elif settings_equivalence == "REVIEW_REQUIRED":
+        result["G1_AUDIT_RESULT"] = "SETTINGS_DRIFT_REVIEW"
     else:
         result["G1_AUDIT_RESULT"] = "NONBINDING_FIELD_DRIFT_REVIEW"
     return result
@@ -233,7 +318,9 @@ def main(argv: list[str] | None = None) -> int:
     for key, value in result.items():
         if key != "G1_AUDIT_MODE":
             print(key + "=" + value)
-    return 0 if result["G1_AUDIT_RESULT"] == "STRICT_PASS" else 2
+    return 0 if result["G1_AUDIT_RESULT"] in (
+        "STRICT_PASS", "N8N_248_NORMALIZED_PASS"
+    ) else 2
 
 
 if __name__ == "__main__":
