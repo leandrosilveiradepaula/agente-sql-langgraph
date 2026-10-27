@@ -37,7 +37,8 @@
       "ssl": "ssl",
       "user": "user",
       "password": "password",
-      "allow_unauthorized_certs": "allowUnauthorizedCerts"
+      "allow_unauthorized_certs": "allowUnauthorizedCerts",
+      "ssh_tunnel": "sshTunnel"
     }
   }
 }
