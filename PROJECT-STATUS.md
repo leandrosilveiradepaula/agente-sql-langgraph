@@ -1,3 +1,41 @@
+# ATUALIZAÇÃO OPERACIONAL 27/10/2026 — P3/G1 pós-PUT, não repetir API nem rollout
+
+**Status real comprovado pela VPS:** P1/P2 já foram comprovados nas fases
+anteriores. No G1, o operador autorizou e executou uma recuperação após
+preflight PASS: role `finance_g1_readonly` tem login SELECT-only validado,
+credencial PostgreSQL n8n foi criada, snapshot privado foi persistido e
+PUT do workflow oficial foi **tentado**. O verificador pós-PUT retornou
+`ERROR=drift na versao publicada fora dos bindings`; portanto **não há
+prova da equivalência do workflow nem confirmação final dos dois vínculos**.
+O PUT pode ter efetivamente atualizado o workflow, portanto não presumir
+que ele esteja intacto. Última `main` antes da auditoria:
+`0b251c0e0a98ff46666506c8793a29ac03100c04` (PR #178).
+
+**Auditoria pós-rotacão independente no Supabase DEMO:** role existente,
+atributos seguros, read-only e timeouts confirmados; 8 relações financeiras
+SELECT autorizadas, nenhuma leitura fora da lista, nenhum CREATE/TEMP.
+Nenhuma consulta financeira de negócio foi executada nessa auditoria.
+
+**Bloqueio prioritário atual:** PR
+[#179](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/pull/179)
+introduz `scripts/operations/g1_post_put_audit_readonly.py` e testes.
+Após merge humano e CI PASS, rodar **uma vez na VPS** o auditor CLI local
+**sem pedir API key ou DSN**. Ele lê snapshot privado e versão n8n 2.4.8
+armazenada via CLI, sem HTTP, SQL, escrita ou logs sensíveis. Responder
+com os status G1_*; somente `G1_AUDIT_RESULT=STRICT_PASS` equivale à
+verificação de persistência e equivalência do workflow, não à paridade
+financeira. Ver `docs/runbooks/g1-readonly-single-step-operator.md`.
+
+**PROIBIDO até a reconciliação:** repetir `--apply` ou `--recover`,
+fazer `--rollback` ou `--verify` às cegas, executar webhook financeiro,
+benchmark/SQL financeira real, alterar credenciais, schema ou produção
+implicitamente. Preservar snapshot, role e credencial existente.
+`OFFICIAL=n8n`, `SHADOW=LangGraph`,
+`LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. Cutover permanece humano e
+dependente de paridade e portabilidade.
+
+---
+
 # ESTADO OPERACIONAL REAL — 26/10/2026: P1/P2 PASS, P3 G1 BLOQUEADO EM VIEW DO POSTGRESQL
 
 **Foco exclusivo: fechar P3, não repetir geração Gemini.** P1 comprovou
