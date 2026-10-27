@@ -167,7 +167,7 @@ class G1PostPutKeylessAuditTests(unittest.TestCase):
                 self.assertEqual(args[:6], [
                     "docker", "exec", "-u", "node", "n8n-test", "n8n",
                 ])
-                self.assertEqual(args[6], "export:" + kind)
+                self.assertEqual(args[6], "export:workflow" if kind == "workflow" else "export:credentials")
                 self.assertEqual(args[7], "--id=" + record["id"])
                 self.assertNotIn("--decrypted", args)
                 self.assertNotIn("--output", args)
