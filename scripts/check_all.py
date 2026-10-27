@@ -422,6 +422,9 @@ STEPS = [
         "testar_g1_readonly_rollout.py",
         [sys.executable, "testar_g1_readonly_rollout.py"],
     ),
+    ("testar_g1_partial_reconcile_readonly.py", [sys.executable, "testar_g1_partial_reconcile_readonly.py"]),
+    ("testar_g1_resume_existing_role.py", [sys.executable, "testar_g1_resume_existing_role.py"]),
+    ("testar_g1_post_put_audit_readonly.py", [sys.executable, "testar_g1_post_put_audit_readonly.py"]),
     (
         "testar_g1_public_acl_impact_audit.py",
         [sys.executable, "testar_g1_public_acl_impact_audit.py"],
