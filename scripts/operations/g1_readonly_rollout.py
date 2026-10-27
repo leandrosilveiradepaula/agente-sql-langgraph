@@ -79,7 +79,7 @@ def load_config(path: Path) -> RolloutConfig:
     fields = raw["n8n"].get("connection_fields")
     expected = {
         "host", "port", "database", "ssl", "user", "password",
-        "allow_unauthorized_certs",
+        "allow_unauthorized_certs", "ssh_tunnel",
     }
     if not isinstance(fields, dict) or set(fields) != expected \
             or any(not isinstance(v, str) or not v for v in fields.values()) \
@@ -335,6 +335,22 @@ def validate_credential_schema(schema: Mapping[str, Any], config: RolloutConfig)
     tls_field = properties[config.n8n["connection_fields"]["allow_unauthorized_certs"]]
     if not isinstance(tls_field, dict) or tls_field.get("type") != "boolean":
         raise RolloutError("schema n8n nao confirma certificado TLS verificavel")
+    # n8n 2.4.8 turns displayOptions into JSON-Schema if/then/else clauses.
+    # Absent 'sshTunnel' satisfies if/properties vacuously and may require
+    # tunnel-only fields even when no tunnel is intended. The POST must send
+    # the explicit boolean false, and the live schema must confirm the field.
+    ssh_field = properties[config.n8n["connection_fields"]["ssh_tunnel"]]
+    if not isinstance(ssh_field, dict) or ssh_field.get("type") != "boolean":
+        raise RolloutError("schema postgres n8n nao confirma sshTunnel booleano")
+
+
+def build_n8n_credential_data_base(config: RolloutConfig, template: Mapping[str, Any]) -> dict[str, Any]:
+    """Prepare only transport fields, explicitly disabling SSH and insecure TLS."""
+    fields = config.n8n["connection_fields"]
+    base = {fields[key]: template[key] for key in ("host", "port", "database", "ssl")}
+    base[fields["allow_unauthorized_certs"]] = False
+    base[fields["ssh_tunnel"]] = False
+    return base
 
 
 def read_n8n_runtime_version(config: RolloutConfig, container: str = "") -> None:
@@ -791,11 +807,7 @@ def main(argv: list[str] | None = None) -> int:
             raise RolloutError("role ja existe; recuperar operacao anterior antes de aplicar")
         # Validate new credential fields before creating the DB role.
         connection_fields = config.n8n["connection_fields"]
-        credential_data_base = {
-            connection_fields[key]: template[key]
-            for key in ("host", "port", "database", "ssl")
-        }
-        credential_data_base[connection_fields["allow_unauthorized_certs"]] = False
+        credential_data_base = build_n8n_credential_data_base(config, template)
         if not args.apply:
             print_status("NOT_APPLIED", f"PREFLIGHT:{starting_fingerprint[:12]}", "READY")
             return 0
