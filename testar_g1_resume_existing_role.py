@@ -143,7 +143,7 @@ class ResumeG1Tests(unittest.TestCase):
             "bindings": "NOT_CHECKED", "snapshot": "NOT_CREATED",
         })
 
-    def run_case(self, recover=False, drift=False):
+    def run_case(self, recover=False, drift=False, confirm_action=None):
         calls = ["--n8n-url", "https://n8n.example",
                  "--project-ref", self.ref,
                  "--snapshot", str(self.snapshot),
@@ -164,7 +164,7 @@ class ResumeG1Tests(unittest.TestCase):
             patch(resume, "validate_database", lambda *args: None)
             patch(resume, "_role_exists", lambda *args: True)
             patch(resume, "assert_role_effective_permissions", lambda *args: None)
-            patch(resume, "confirm", lambda *args: None)
+            patch(resume, "confirm", confirm_action or (lambda *args: None))
             patch(resume, "verify_role",
                   lambda *args: self.events.append("VERIFY_LOGIN"))
             patch(resume.sys, "stderr", __import__("io").StringIO())
@@ -220,6 +220,27 @@ class ResumeG1Tests(unittest.TestCase):
         with self.assertRaisesRegex(g1.RolloutError, "snapshot G1 existente"):
             self.run_case(recover=True)
         self.assertNotIn("POST_CREDENTIAL", self.events)
+
+
+    def test_concurrent_credential_during_confirmation_blocks_before_post(self):
+        def concurrent_create(*args):
+            self.api.credential = {
+                "name": "readonly_role-20261027000000", "type": "postgres"
+            }
+        with self.assertRaisesRegex(g1.RolloutError, "durante confirmacao"):
+            self.run_case(recover=True, confirm_action=concurrent_create)
+        self.assertNotIn("POST_CREDENTIAL", self.events)
+        self.assertNotIn("ALTER_ROLE", self.events)
+        self.assertFalse(self.snapshot.exists())
+
+    def test_concurrent_workflow_edit_during_confirmation_blocks_before_post(self):
+        def concurrent_edit(*args):
+            self.api.workflow["nodes"][2]["parameters"]["unrelated"] = "drift"
+        with self.assertRaisesRegex(g1.RolloutError, "durante confirmacao"):
+            self.run_case(recover=True, confirm_action=concurrent_edit)
+        self.assertNotIn("POST_CREDENTIAL", self.events)
+        self.assertNotIn("ALTER_ROLE", self.events)
+        self.assertFalse(self.snapshot.exists())
 
     def test_role_settings_require_both_timeouts_and_connection_limit(self):
         resume._role_settings_complete(FakeDb([]), self.cfg.raw["role_name"])
