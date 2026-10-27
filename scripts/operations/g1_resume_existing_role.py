@@ -145,6 +145,16 @@ def main(argv: list[str] | None = None) -> int:
             raise RolloutError("workflow mudou durante o preflight")
         confirm("RECOVER-G1")
 
+        # The operator may take time to confirm. Recheck all live gates
+        # immediately before the first external write, without a retry.
+        if inventory_credentials(container, config.raw["role_name"], config.n8n["credential_type"]):
+            raise RolloutError("credencial criada durante confirmacao")
+        latest = api.request("GET", workflow_path)
+        validate_workflow(latest, config)
+        if workflow_fingerprint(latest) != starting_fingerprint:
+            raise RolloutError("workflow mudou durante confirmacao")
+        preflight_role(admin, config)
+
         password = secrets.token_urlsafe(32)
         connection_fields = config.n8n["connection_fields"]
         credential_data = {connection_fields[key]: template[key]
