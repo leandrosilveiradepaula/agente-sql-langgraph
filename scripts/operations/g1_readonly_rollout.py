@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import parse_qs, quote, urlparse
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -305,6 +306,10 @@ class N8nApi:
                     raise RolloutError("redirect n8n bloqueado")
                 result = json.loads(response.read().decode("utf-8"))
             return result
+        except HTTPError as exc:
+            # Only the numeric HTTP status; never print response body, headers,
+            # path, credentials or the attempted request payload.
+            raise RolloutError(f"n8n API HTTP_STATUS_{exc.code}") from None
         except Exception as exc:
             # Never echo URLs, request/response JSON, exceptions or credentials.
             raise RolloutError("n8n API indisponivel ou resposta inesperada") from exc
@@ -812,6 +817,9 @@ def main(argv: list[str] | None = None) -> int:
             f"{config.raw['role_name']}.{args.project_ref}"
         )
         credential_data_base[connection_fields["password"]] = password
+        # A timed-out POST may have persisted a credential. Mark the result
+        # ambiguous BEFORE sending it; never automatically replay this POST.
+        OPERATION_STATUS["bindings"] = "CREDENTIAL_POST_OUTCOME_UNKNOWN"
         created = api.request("POST", "/api/v1/credentials", {
             "name": new_name, "type": config.n8n["credential_type"],
             "data": credential_data_base,
