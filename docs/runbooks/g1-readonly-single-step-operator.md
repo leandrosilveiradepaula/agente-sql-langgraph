@@ -1,3 +1,60 @@
+## 27/10/2026 — Auditoria pós-PUT do G1 sem API key nem DSN
+
+**Situação observada:** o operador executou a recuperação com confirmação
+RECOVER-G1. Estado sanitizado:
+
+~~~text
+G1_RESUME_ROLE=SELECT_ONLY_LOGIN_VERIFIED
+G1_RESUME_CREDENTIAL=CREATED_UNBOUND
+G1_RESUME_BINDINGS=PUT_ATTEMPTED_VERIFY_REQUIRED
+G1_RESUME_SNAPSHOT=PRIVATE_SNAPSHOT_READY
+ERROR=drift na versao publicada fora dos bindings
+~~~
+
+A nova role foi autenticada sob READ ONLY, a credencial foi criada,
+o snapshot privado foi salvo e o PUT do n8n foi tentado. O erro de
+equivalência não prova que o PUT falhou: o verificador detectou uma
+divergência entre o snapshot original e campos não vinculados à
+credencial ANTES de confirmar os IDs finais das duas referências.
+
+**Não repetir --recover/--apply e não executar --rollback ou --verify
+às cegas.** Não excluir nem rotacionar credenciais durante a
+reconciliação. O diagnóstico seguinte é SOMENTE LEITURA.
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo || exit 1
+git fetch -q origin &&
+git checkout -q main &&
+git pull --ff-only -q origin main || exit 1
+
+.venv/bin/python scripts/operations/g1_post_put_audit_readonly.py
+~~~
+
+O utilitário lê o snapshot privado e faz duas exportações locais:
+n8n export:workflow --id=ID e n8n export:credentials --id=ID.
+NÃO usa API key, DSN, HTTP, --decrypted ou --output. Captura o
+JSON apenas na memória, nunca escreve ou imprime credenciais,
+workflow bruto, SQL, parâmetros de nós, tags, pinData, tokens,
+dados de cliente ou registros do n8n.
+
+Verifica versão real do contêiner n8n 2.4.8, snapshot íntegro,
+credencial cifrada com ID e nome exatos, versão armazenada ativa e
+publicada, IDs e nomes das duas credenciais novas, ausência de drift
+em outros nós, ordem dos nós, settings, connections, pinData, meta,
+tags e outros campos fora dos dois vínculos.
+
+Saída com estados G1_* e contagens sanitizadas. Somente
+G1_AUDIT_RESULT=STRICT_PASS indica equivalência exata do estado
+armazenado. NONBINDING_FIELD_DRIFT_REVIEW não é aprovação: exige
+demonstrar a origem do campo alterado (servidor ou edição), sem
+ignorar drift financeiro/semântico. Falha do inventário é fail-closed,
+não implica ausência de credencial.
+
+A auditoria por CLI reflete o workflow armazenado e seu activeVersionId,
+sem executar webhook ou SELECT financeiro. Resultado PASS não prova
+paridade financeira, não autoriza cutover, nem altera os flags de
+execução do Shadow.
+
 ## 27/10/2026 — n8n 2.4.8: SSH desativado explicitamente no POST da credencial
 
 O código oficial do n8n 2.4.8 `Postgres.credentials.ts` inclui a propriedade
