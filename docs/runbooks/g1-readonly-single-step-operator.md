@@ -1,3 +1,77 @@
+## Recuperar G1 quando a role existe, mas o POST não criou credencial (27/10/2026)
+
+**Evidência operacional na VPS:** o script de inventário da PR #176 retornou:
+```
+G1_CREDENTIAL_MATCHES=0
+G1_N8N_BINDINGS=OLD_BINDINGS_CONFIRMED
+G1_WORKFLOW_FINGERPRINT=0eee554daf77
+G1_SNAPSHOT=ABSENT
+G1_RECOVERY=NO_CREDENTIAL_FOUND_DO_NOT_RETRY_APPLY
+```
+
+A role `finance_g1_readonly` foi criada e suas ACLs auditadas no
+Supabase DEMO. O segredo original gerado em memória foi perdido depois
+da falha no POST para n8n. **Não rodar o --apply original novamente**.
+
+No n8n 2.4.8, a rota `POST /api/v1/credentials` requer escopo
+`credential:create` se o n8n habilitou API key scopes. O mesmo token
+que faz GET workflow não prova essa capacidade. A etapa posterior de
+publicação do workflow também precisa `workflow:update` quando
+esse mecanismo de escopos está habilitado. O status HTTP da tentativa
+original não foi preservado; portanto **falta prova da causa exata**.
+O operador deve conferir os escopos da chave no n8n antes de confirmar
+a recuperação; não ampliar escopos ou criar chaves implicitamente.
+
+Após PR de recuperação aprovada/mergeada, o **preflight de recuperação
+não faz POST, PUT ou ALTER ROLE**:
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main
+export PGSSLROOTCERT=/root/.local/share/agente-sql-langgraph/supabase-ca.crt
+
+.venv/bin/python scripts/operations/g1_resume_existing_role.py \
+  --n8n-url https://n8n.srv1319424.hstgr.cloud \
+  --project-ref cenhadslwxgykqtuobgc \
+  --expected-fingerprint 0eee554daf77
+~~~
+
+Gate: `G1_EXISTING_CREDENTIAL_MATCHES=0`,
+`G1_RESUME_PREFLIGHT=PASS`, `G1_WORKFLOW_FINGERPRINT=0eee554daf77`,
+`G1_RESUME_ROLE=EXISTING_SELECT_ONLY_VERIFIED`,
+`G1_RESUME_BINDINGS=OLD_BINDINGS_CONFIRMED`,
+`G1_RESUME_MODE=DRY_RUN`. Qualquer diferença: parar.
+
+**Somente depois de aprovação operacional para rotação de senha,
+criação de credencial e rebind dos dois nós**, executar o mesmo comando
+com `--recover` e confirmação local `RECOVER-G1`.
+A ferramenta exige fingerprint do workflow e revalida versão 2.4.8,
+credenciais existentes, originalidade dos dois vínculos, ACL/read-only
+da role e ausência de snapshot. Ela **tenta o POST antes de mudar a
+senha PostgreSQL**. Se o n8n responder `HTTP_STATUS_403` ou rejeitar
+a criação por outro motivo, a role permanece com a senha anterior
+inacessível e os vínculos originais não são modificados. O resultado
+desconhecido do POST nunca é repetido automaticamente.
+
+Se o POST for confirmado, a ferramenta inventaria novamente
+credenciais cifradas em memória, exige exatamente uma correspondente,
+rotaciona **somente** a senha da role já existente com verificador
+SCRAM em transação, valida novo login/SELECT permitido, cria snapshot
+privado original, altera somente os dois bindings e verifica o
+workflow publicado. O snapshot fica privado em
+`~/.local/state/agente-sql-langgraph/g1-readonly-snapshot.json`.
+A role antiga não é recriada nem recebe privilégios novos.
+
+**Depois de recuperar:** executar o --verify tradicional (com a nova
+credencial já publicada e snapshot correspondente) e registrar os
+status G1 sem segredos. Não usar o modo de --rollback sem snapshot e
+sem provar o estado publicado. Se qualquer fase falhar depois do POST,
+parar e reconciliar: não executar novo POST ou ALTER ROLE às cegas.
+
+A recuperação da role não autoriza SQL financeira real, benchmark,
+migração, cutover, troca de LLM ou alteração do fluxo Shadow.
+
+
 
 ## G1 parcialmente criado: reconciliação de um POST n8n ambíguo (27/10/2026)
 
