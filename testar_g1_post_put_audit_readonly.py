@@ -113,7 +113,7 @@ class G1PostPutKeylessAuditTests(unittest.TestCase):
         result = self.assess()
         self.assertEqual(result["G1_FIELD_SETTINGS"], "CHANGED")
         self.assertEqual(result["G1_FIELD_PINDATA"], "CHANGED")
-        self.assertEqual(result["G1_AUDIT_RESULT"], "NONBINDING_FIELD_DRIFT_REVIEW")
+        self.assertEqual(result["G1_AUDIT_RESULT"], "SETTINGS_DRIFT_REVIEW")
 
     def test_n8n_248_documented_default_removal_is_explicit_pass(self):
         self.original["settings"]["timezone"] = "DEFAULT"
