@@ -1,3 +1,44 @@
+## 27/10/2026 — n8n 2.4.8: SSH desativado explicitamente no POST da credencial
+
+O código oficial do n8n 2.4.8 `Postgres.credentials.ts` inclui a propriedade
+`sshTunnel` (`boolean`, padrão `false`). O gerador da Public API de
+credenciais constrói regras JSON Schema condicionais `if/then/else` para
+campos exibidos quando `sshTunnel=true`. Quando `sshTunnel` é **omitido**
+do JSON, uma condição `if: {properties:{sshTunnel:{enum:[true]}}}`
+pode ser considerada verdadeira pela semântica JSON Schema (propriedade
+ausente): a API acaba exigindo campos de túnel desnecessários.
+
+Reprodução offline com o schema condicional representativo da versão
+n8n 2.4.8: payload anterior sem `sshTunnel` = INVALID (sete
+`required`); com `sshTunnel:false` = VALID. É um defeito de payload
+concreto, mas **não há evidência do código HTTP do POST que falhou
+na VPS**, portanto não afirmar que esta foi a única causa.
+
+A correção versiona o campo físico em
+`g1_readonly_rollout.json`, confirma seu tipo `boolean` no schema
+real recuperado por GET e envia `sshTunnel:false` em **ambos** os
+caminhos: rollout inicial e recuperação da role existente. A conexão
+continua com `allowUnauthorizedCerts:false` e `ssl:"require"`;
+não configura nem habilita túnel SSH. A validação não presume que o
+n8n atual seja compatível com uma versão diferente de 2.4.8.
+
+Mesmo depois dessa correção, a chave da API precisa poder criar
+credenciais (`credential:create`) e atualizar o workflow
+(`workflow:update`) quando a instalação usa escopos.
+A condição de acesso e o compartilhamento da credencial com o projeto
+do workflow devem ser comprovados; GET read-only bem-sucedido não
+autoriza assumir esses privilégios.
+
+**Procedimento:** depois de merge humano, sincronizar `main` e
+reexecutar **somente** o preflight
+`scripts/operations/g1_resume_existing_role.py` (sem `--recover`).
+Não repetir `g1_readonly_rollout.py --apply`. O modo mutável de
+recuperação permanece sujeito aos gates do runbook, à confirmação
+`RECOVER-G1` e à ausência de mudanças/credenciais concorrentes.
+Se o POST apresentar qualquer erro, **não repeti-lo**: usar inventário
+criptografado de metadados e reconciliação.
+
+
 ## Recuperar G1 quando a role existe, mas o POST não criou credencial (27/10/2026)
 
 **Evidência operacional na VPS:** o script de inventário da PR #176 retornou:
