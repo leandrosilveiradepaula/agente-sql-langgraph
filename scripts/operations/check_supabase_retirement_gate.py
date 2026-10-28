@@ -58,8 +58,10 @@ def analyze(data: object) -> tuple[str, list[str]]:
             not SAFE_TIME.fullmatch(item["verified_at"])):
             return "BLOCKED", ["UNVERIFIED_CONSUMER"]
         seen.add(name)
-        if destination != "DEMO":
-            blockers.append("CONSUMER_NOT_DEMO:" + name)
+        # OTHER is admissible only with a separate evidence attestation;
+        # it may legitimately represent an independent external warehouse.
+        if destination in ("SOURCE", "UNKNOWN"):
+            blockers.append("CONSUMER_DEPENDS_ON_SOURCE_OR_UNKNOWN:" + name)
     if seen != ALLOWED_CONSUMERS:
         return "BLOCKED", ["MISSING_CONSUMER"]
     for field in ("archive_verified", "rollback_verified", "observation_verified",
