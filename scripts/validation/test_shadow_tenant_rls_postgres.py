@@ -79,7 +79,7 @@ def prepare_roles_and_schema(dsn: str) -> None:
     with psycopg.connect(dsn) as admin:
         # Supabase's default public roles are simulated, then explicitly
         # revoked by the real migration. NOLOGIN: cannot use these over TCP.
-        for name in ("anon", "authenticated", "service_role", "finance_g1_readonly"):
+        for name in ("postgres", "anon", "authenticated", "service_role", "finance_g1_readonly"):
             admin.execute(f"CREATE ROLE {name} NOLOGIN")
         admin.execute(migration1)
         admin.execute(
