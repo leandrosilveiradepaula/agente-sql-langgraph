@@ -1,3 +1,15 @@
+# 28/10/2026 — G5: EXTENSION_UNAVAILABLE REAL, RECUPERACAO SOURCE AINDA BLOQUEADA
+
+**Operador executou segundo teste de restore isolado autorizado na VPS**, com PR #190 mergeada e stderr classificado somente em memoria. Resultado real: `G5_REHEARSAL_MODE=RESTORE`, `G5_IMAGE_CACHED=YES`, `G5_REHEARSAL_RESULT=BLOCKED`, `G5_REHEARSAL_ERROR=ISOLATED_RESTORE_SQL_FAILED`, `G5_RESTORE_FAILURE_CATEGORY=EXTENSION_UNAVAILABLE`, `G5_RESTORE_TEST=NOT_VERIFIED`. O motivo e uma extensao ausente no contêiner PostgreSQL 17 comunitario, mas o **nome exato da primeira extensao que falhou ainda NAO foi comprovado**. Cleanup do container verificado pelo proprio utilitario; SOURCE/DEMO/n8n inalterados. Backup SHA-256/GPG/TOC 811 entradas PASS; nao houve restore efetivo.
+
+**Query READ-ONLY METADATA no Supabase SOURCE feita nesta etapa:** `pg_extension` listou extensoes instaladas `pg_stat_statements 1.11`, `pgcrypto 1.3`, `plpgsql 1.0`, `supabase_vault 0.3.1` e `uuid-ossp 1.1`. `supabase_vault` e principal candidato a indisponibilidade da imagem comunitaria, nao causa provada, e root key do Vault NAO esta no dump. Nao copiar/migrar chaves de projeto implicitamente.
+
+**Entrega em andamento:** `scripts/operations/g5_extension_compatibility_readonly.py` inventaria apenas nomes de EXTENSION na stream criptografada (GPG→pg_restore --list) e compara dinamicamente com `.control` em imagem PostgreSQL 17 local pinada por SHA, usando apenas contêiner de metadados sem rede, UID sem privilegio e sem DSN/backup/SQL de usuario montados. Nenhuma restauracao, nenhum bypass de extensão, nenhum pull automatico de imagem. Candidata selfhost Supabase documentada `supabase/postgres:17.6.1.136` ainda requer download/autorizacao/checagem de digest e novo preflight separado; NAO executa restore automaticamente.
+
+**Proximos gates:** evidenciar extensoes presentes no proprio arquivo vs imagem, testar compatibilidade real numa sandbox Supabase apropriada com autorizacao especifica, copiar arquivo cifrado + manifesto para storage externo privado e verificar hash, preservar chave Vault sob politica separada, mapear consumidores n8n 9 bindings, Shadow e Vercel, paridade, ports multicliente e cutover humano. `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. Ver `docs/operations/SUPABASE-SOURCE-RETIREMENT-GATE.md` e issue #155.
+
+---
+
 # 28/10/2026 — G5 REAL RESTORE ISOLADO FALHOU; CAUSA AINDA NAO IDENTIFICADA
 
 **Operador VPS executou o primeiro ensaio real autorizado** do arquivo criptografado SOURCE `nywxpvzhlpqjtcafpdfe` em PostgreSQL 17 isolado, após `--plan` PASS e confirmacao local. Retornou `G5_REHEARSAL_RESULT=BLOCKED`, `G5_REHEARSAL_ERROR=ISOLATED_RESTORE_SQL_FAILED`, `G5_RESTORE_TEST=NOT_VERIFIED`. O original descartava stderr do pg_restore: NAO e comprovado se faltou extensao, role, privilegio ou outro requisito. Nao afirmar restore nem aposentar SOURCE. Como a excecao foi devolvida apos `cleanup_container`, a remocao do container foi confirmada pelo script; caso contrario seria `ISOLATED_CLEANUP_UNVERIFIED`. Nenhum Supabase foi alterado. Backup cifrado original SHA PASS, senha/GPG PASS, TOC 811 entradas PASS.
