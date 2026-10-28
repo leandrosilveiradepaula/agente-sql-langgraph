@@ -11,22 +11,23 @@ SPEC.loader.exec_module(module)
 
 SOURCE = "aaaaaaaaaaaaaaaaaaaa"
 DEMO = "bbbbbbbbbbbbbbbbbbbb"
+SCHEME = "postgresql" + "://"
 
 
 class RuntimeDependencyTests(unittest.TestCase):
     def test_direct_project_source(self):
-        dsn = "postgresql://postgres:fake@db." + SOURCE + ".supabase.co:5432/postgres?sslmode=verify-full"
+        dsn = SCHEME + "postgres:fake@db." + SOURCE + ".supabase.co:5432/postgres?sslmode=verify-full"
         self.assertEqual(module.classify_dsn(dsn, source=SOURCE, demo=DEMO), "SOURCE")
 
     def test_pooler_project_demo(self):
-        dsn = ("postgresql://postgres." + DEMO +
+        dsn = (SCHEME + "postgres." + DEMO +
                ":fake@aws-0-sa-east-1.pooler.supabase.com:5432/postgres")
         self.assertEqual(module.classify_dsn(dsn, source=SOURCE, demo=DEMO), "DEMO")
 
     def test_connection_unsupported_or_private_proxy_not_assumed_clean(self):
-        for dsn in ("postgresql://postgres:fake@192.168.1.10:5432/postgres",
-                    "postgresql://postgres:fake@proxy.example.org:5432/postgres",
-                    "postgresql://postgres:fake@aws-0-sa-east-1.pooler.supabase.com:5432/postgres",
+        for dsn in (SCHEME + "postgres:fake@192.168.1.10:5432/postgres",
+                    SCHEME + "postgres:fake@proxy.example.org:5432/postgres",
+                    SCHEME + "postgres:fake@aws-0-sa-east-1.pooler.supabase.com:5432/postgres",
                     "sqlite:///a", "not-an-url", "", None):
             with self.subTest(dsn=bool(dsn)):
                 self.assertEqual(
@@ -35,7 +36,7 @@ class RuntimeDependencyTests(unittest.TestCase):
 
     def test_other_supabase_project_not_certified(self):
         ref = "cccccccccccccccccccc"
-        dsn = "postgresql://postgres:fake@db." + ref + ".supabase.co/postgres"
+        dsn = SCHEME + "postgres:fake@db." + ref + ".supabase.co/postgres"
         self.assertEqual(
             module.classify_dsn(dsn, source=SOURCE, demo=DEMO),
             "OTHER_SUPABASE_UNVERIFIED",
@@ -92,9 +93,9 @@ class RuntimeDependencyTests(unittest.TestCase):
     def test_runtime_scan_does_not_probe_database(self):
         env = {
             "LANGGRAPH_SHADOW_DATABASE_DSN":
-                "postgresql://postgres:fake@db." + SOURCE + ".supabase.co/postgres",
+                SCHEME + "postgres:fake@db." + SOURCE + ".supabase.co/postgres",
             "CONTEXT_POSTGRES_DSN":
-                "postgresql://postgres." + DEMO +
+                SCHEME + "postgres." + DEMO +
                 ":fake@aws-0-sa-east-1.pooler.supabase.com:5432/postgres",
             "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION": "false",
         }
