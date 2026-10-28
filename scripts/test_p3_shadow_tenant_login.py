@@ -59,6 +59,12 @@ class ShadowLoginSafetyTests(unittest.TestCase):
         self.assertNotIn('docker compose up', source)
         self.assertNotIn('ALTER ROLE finance_g1_readonly', source)
 
+    def test_existing_secret_cannot_be_removed_on_verify_failure(self):
+        source = SCRIPT.read_text()
+        self.assertIn("secret_created_here = False", source)
+        self.assertIn("if secret_created_here and private_path is not None and not role_created:", source)
+        self.assertNotIn("if private_path is not None and not role_created:", source)
+
     def test_secret_file_is_exclusive(self):
         source = SCRIPT.read_text()
         self.assertIn('os.O_EXCL', source)
