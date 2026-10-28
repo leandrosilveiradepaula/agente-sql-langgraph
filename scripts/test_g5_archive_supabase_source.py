@@ -473,5 +473,39 @@ class ArchiveSourceSafetyTests(unittest.TestCase):
             self.assertEqual(str(error.exception), "GPG_ENCRYPTION_FAILED")
 
 
+    def test_capture_cli_verifies_integrity_before_claiming_success(self):
+        import sys
+        manifest = Path("/root/private/synthetic.dump.gpg.manifest.json")
+        args = ["g5_archive_supabase_source.py", "--capture",
+                "--source-project-ref", PROJECT]
+        with patch.object(sys, "argv", args):
+            with patch.object(m, "capture", return_value=manifest) as make:
+                with patch.object(m, "verify") as proof:
+                    self.assertEqual(m.main(), 0)
+                    make.assert_called_once()
+                    proof.assert_called_once_with(
+                        PROJECT, m.ARCHIVE_DIR, manifest
+                    )
+
+    def test_failed_post_capture_integrity_check_does_not_report_success(self):
+        import sys
+        import contextlib
+        buffer = io.StringIO()
+        manifest = Path("/root/private/synthetic.dump.gpg.manifest.json")
+        args = ["g5_archive_supabase_source.py", "--capture",
+                "--source-project-ref", PROJECT]
+        with patch.object(sys, "argv", args):
+            with patch.object(m, "capture", return_value=manifest):
+                with patch.object(m, "verify",
+                                  side_effect=m.ArchiveBlocked("ENCRYPTED_ARCHIVE_DIGEST_MISMATCH")):
+                    with contextlib.redirect_stdout(buffer):
+                        self.assertEqual(m.main(), 2)
+        text = buffer.getvalue()
+        self.assertIn("G5_ARCHIVE_RESULT=BLOCKED", text)
+        self.assertNotIn("G5_ARCHIVE_RESULT=ENCRYPTED_CAPTURED", text)
+        self.assertNotIn("G5_ARCHIVE_MANIFEST=", text)
+        self.assertIn("G5_ARCHIVE_ERROR=ENCRYPTED_ARCHIVE_DIGEST_MISMATCH", text)
+
+
 if __name__ == "__main__":
     unittest.main()
