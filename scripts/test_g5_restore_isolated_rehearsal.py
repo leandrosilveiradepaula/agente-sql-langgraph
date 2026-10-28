@@ -77,7 +77,7 @@ class G5IsolatedRehearsalTests(unittest.TestCase):
 
     def test_only_local_unix_socket_is_allowed(self):
         with patch.object(m.shutil, "which", return_value="/usr/bin/docker"):
-            with patch.object(m.DOCKER_SOCKET, "lstat") as st:
+            with patch.object(type(m.DOCKER_SOCKET), "lstat") as st:
                 st.return_value = MagicMock(st_mode=0o140600, st_uid=0)
                 self.assertEqual(m.docker_executable(), [
                     "/usr/bin/docker", "--host=unix:///var/run/docker.sock",
