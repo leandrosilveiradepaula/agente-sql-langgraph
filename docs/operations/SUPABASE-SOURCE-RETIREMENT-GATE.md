@@ -69,6 +69,25 @@ Critérios **obrigatórios** para declarar `READY_TO_RETIRE_SOURCE`:
 - [PR Produto Demo #33](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/33): tabelas de organização privadas.
 - [Roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155): rastro operacional e decisões.
 
+## 28/10/2026 — imagem Supabase PostgreSQL 17 baixada; probe de metadados bloqueado
+
+Operador da VPS executou com êxito `docker pull supabase/postgres:17.6.1.136`, sem iniciar serviços existentes. ID local informado pelo Docker (imagem em cache): `sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`. Após merge da PR #191, solicitou auditoria dos requisitos de extensão do arquivo cifrado contra `postgres:17` e `supabase/postgres:17.6.1.136`. A auditoria interrompeu antes do prompt de senha com:
+
+~~~text
+G5_EXTENSION_AUDIT_MODE=READ_ONLY
+G5_EXTENSION_AUDIT_RESULT=BLOCKED
+G5_EXTENSION_AUDIT_ERROR=IMAGE_EXTENSION_PROBE_INVALID
+G5_RESTORE_TEST=NOT_PERFORMED
+~~~
+
+**Isso não é falha de restore, falha GPG ou corrupção do backup.** A implementação anterior usava o mesmo código para stdout vazio, saída longa, nomes inesperados ou não ASCII no `*.control` da imagem. Nenhum desses submotivos foi demonstrado pelo log de campo; não diagnosticar nome ou arquivo específico sem nova evidência. A SOURCE/DEMO não foram alteradas.
+
+**Compatibilidade de formato PostgreSQL:** a documentação oficial distingue `extension.control` (arquivo de controle primário) de `extension--version.control` (controle auxiliar da versão). A implementação original listava ambos como nomes de extensões e rejeitava os auxiliares com pontos por uma regex de identificadores de extensão, produzindo falso bloqueio. A correção estrutural agora lista **somente controles primários**, ignorando arquivos auxiliares de versão sem tratá-los como dependências independentes; se houver metadados inválidos ainda **falha fechado**, com categorias sanitizadas mais precisas (`IMAGE_EXTENSION_PROBE_NO_PRIMARY_CONTROLS`, `IMAGE_EXTENSION_PROBE_OUTPUT_LIMIT`, `IMAGE_EXTENSION_PROBE_NON_ASCII`, `IMAGE_EXTENSION_PROBE_UNEXPECTED_PRIMARY_NAME`). O formato de auxiliares é validado com teste real POSIX e arquivos sintéticos. O erro de campo anterior continua **não atribuído definitivamente** até execução posterior. Fonte PostgreSQL 17: `https://www.postgresql.org/docs/17/extend-extensions.html`, seção Extension Files.
+
+Após PR/CI e merge humano, a auditoria deve ser repetida UMA VEZ contra ambas as imagens já em cache, fixando os IDs das imagens por Docker (mesmo procedimento anterior, sem novo download). Não executar `--restore` ou baixar outra imagem em função do resultado sem revisão. Mesmo `G5_IMAGE_2_MISSING_COUNT=0` indica apenas presença de `.control`, não versão, dependência nativa, efetividade de `supabase_vault`, recuperação de chaves ou restauração de dados. Nunca retirar objetos do dump para forçar resultado favorável.
+
+---
+
 ## 28/10/2026 — Extensão indisponível: diagnóstico real e preflight multicliente
 
 **Evidência do segundo ensaio autorizado na VPS**, após a PR #190 mergeada e diagnóstico sanitizado:
