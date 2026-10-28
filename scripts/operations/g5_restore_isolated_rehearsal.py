@@ -25,6 +25,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,6 +56,74 @@ CATALOG_SQL = (
     "WHERE c.relkind IN ('r','p') AND n.nspname NOT LIKE 'pg_%' "
     "AND n.nspname <> 'information_schema';"
 )
+
+# Only these operator-safe classification labels may leave process memory.
+# The raw pg_restore/Docker stderr can contain SQL, roles, identifiers and data.
+RESTORE_FAILURE_CATEGORIES = frozenset((
+    "EXTENSION_UNAVAILABLE", "EXTENSION_LIBRARY_UNAVAILABLE",
+    "ROLE_MISSING", "OBJECT_DEPENDENCY_MISSING", "PERMISSION_DENIED",
+    "OBJECT_CONFLICT", "RESOURCE_LIMIT", "SERVER_SETTING_UNSUPPORTED",
+    "ARCHIVE_INVALID", "SQL_SYNTAX_UNSUPPORTED", "UNCLASSIFIED",
+))
+
+
+class IsolatedRestoreSQLFailure(ArchiveBlocked):
+    def __init__(self, category: str) -> None:
+        self.category = (
+            category if category in RESTORE_FAILURE_CATEGORIES else "UNCLASSIFIED"
+        )
+        super().__init__("ISOLATED_RESTORE_SQL_FAILED")
+
+
+def classify_restore_stderr(fragment: bytes) -> str | None:
+    """Return a fixed category from an ephemeral error fragment, never raw text."""
+    line = fragment[:8192].lower()
+    if b"error:" not in line and b"fatal:" not in line:
+        return None
+    if (b"extension control file" in line
+            or (b"extension" in line and b"is not available" in line)):
+        return "EXTENSION_UNAVAILABLE"
+    if (b"could not access file" in line
+            or (b"shared object" in line and b"no such file" in line)):
+        return "EXTENSION_LIBRARY_UNAVAILABLE"
+    if ((b"role" in line and b"does not exist" in line)
+            or b"must be member of role" in line):
+        return "ROLE_MISSING"
+    if (b"permission denied" in line or b"must be superuser" in line
+            or b"must be owner of" in line or b"insufficient privilege" in line):
+        return "PERMISSION_DENIED"
+    if (b"does not exist" in line and any(
+            kind in line for kind in (
+                b"schema", b"function", b"type", b"relation", b"operator",
+                b"collation", b"language", b"sequence", b"table",
+            ))):
+        return "OBJECT_DEPENDENCY_MISSING"
+    if b"already exists" in line or b"duplicate key value" in line:
+        return "OBJECT_CONFLICT"
+    if (b"no space left on device" in line or b"out of memory" in line
+            or b"disk full" in line or b"could not resize shared memory" in line):
+        return "RESOURCE_LIMIT"
+    if (b"unrecognized configuration parameter" in line
+            or b"cannot change run-time parameter" in line):
+        return "SERVER_SETTING_UNSUPPORTED"
+    if (b"not a valid archive" in line
+            or b"unsupported version" in line
+            or b"could not read from input file" in line):
+        return "ARCHIVE_INVALID"
+    if b"syntax error at or near" in line:
+        return "SQL_SYNTAX_UNSUPPORTED"
+    return None
+
+
+def consume_restore_stderr(pipe, categories: list[str]) -> None:
+    """Drain all stderr on a separate thread; persist ONLY the first safe label."""
+    try:
+        for chunk in iter(lambda: pipe.readline(8192), b""):
+            category = classify_restore_stderr(chunk)
+            if category is not None and not categories:
+                categories.append(category)
+    except (OSError, ValueError):
+        return
 
 
 def isolated_docker_env() -> dict[str, str]:
@@ -170,7 +239,8 @@ def restore_stream(prefix: list[str], name: str, archive: Path, passphrase: str)
     if not gpg_binary:
         raise ArchiveBlocked("GPG_MISSING")
     secret_read = secret_write = None
-    decrypt = restore = None
+    decrypt = restore = stderr_reader = None
+    safe_categories: list[str] = []
     try:
         secret_read, secret_write = os.pipe()
         gpg_env = {k: os.environ[k] for k in (
@@ -197,16 +267,28 @@ def restore_stream(prefix: list[str], name: str, archive: Path, passphrase: str)
                 "--exit-on-error", interactive=True,
             ),
             stdin=decrypt.stdout, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, env=isolated_docker_env(),
+            stderr=subprocess.PIPE, env=isolated_docker_env(),
         )
+        assert restore.stderr is not None
+        stderr_reader = threading.Thread(
+            target=consume_restore_stderr,
+            args=(restore.stderr, safe_categories),
+            daemon=True,
+        )
+        stderr_reader.start()
         decrypt.stdout.close()
         try:
             status = restore.wait(timeout=RESTORE_TIMEOUT)
             decrypt_status = decrypt.wait(timeout=30)
         except subprocess.TimeoutExpired:
             raise ArchiveBlocked("ISOLATED_RESTORE_TIMEOUT") from None
+        stderr_reader.join(timeout=10)
+        if stderr_reader.is_alive():
+            raise ArchiveBlocked("ISOLATED_RESTORE_STDERR_DRAIN_UNVERIFIED")
         if status != 0:
-            raise ArchiveBlocked("ISOLATED_RESTORE_SQL_FAILED")
+            raise IsolatedRestoreSQLFailure(
+                safe_categories[0] if safe_categories else "UNCLASSIFIED"
+            )
         if decrypt_status != 0:
             raise ArchiveBlocked("GPG_DECRYPTION_FAILED")
     finally:
@@ -218,6 +300,10 @@ def restore_stream(prefix: list[str], name: str, archive: Path, passphrase: str)
                 if child.poll() is None:
                     child.kill()
                 child.wait(timeout=10)
+        if stderr_reader is not None:
+            stderr_reader.join(timeout=5)
+        if restore is not None and restore.stderr is not None:
+            restore.stderr.close()
 
 
 def verify_restored_tables(prefix: list[str], name: str) -> int:
@@ -336,6 +422,8 @@ def main() -> int:
         print("G5_REHEARSAL_ERROR=" + (
             str(exc) if isinstance(exc, ArchiveBlocked) else type(exc).__name__
         ))
+        if isinstance(exc, IsolatedRestoreSQLFailure):
+            print("G5_RESTORE_FAILURE_CATEGORY=" + exc.category)
         print("G5_RESTORE_TEST=NOT_VERIFIED")
         return 2
 
