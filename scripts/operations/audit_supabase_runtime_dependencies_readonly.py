@@ -190,24 +190,32 @@ def find_pg_credentials(workflow: dict) -> tuple[int, list[str]]:
 
 
 
-def find_n8n_container() -> str:
-    """Find exactly one running n8n server by its image, never guess."""
-    output = run_private_cli(
-        ["docker", "ps", "--format", "{{.Names}}\\t{{.Image}}"], timeout=20
-    )
-    candidates = []
-    for line in output.splitlines():
-        parts = line.split("\\t", 1)
-        if len(parts) != 2:
+def parse_single_n8n_container(ps_output: str) -> str:
+    """Select only one n8n image, allowing registry-qualified image names.
+
+    Mirrors the reviewed detection in g1_partial_reconcile_readonly.py.
+    Never return an arbitrary name or an ambiguous candidate.
+    """
+    candidates: list[str] = []
+    for line in ps_output.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
             continue
-        name, image = parts
-        if (image == "n8nio/n8n" or
-            image.startswith("n8nio/n8n:") or
-            image.startswith("n8nio/n8n@")) and CONTAINER_ID.fullmatch(name):
+        name, image = fields
+        if (CONTAINER_ID.fullmatch(name)
+                and re.search(r"(^|/)n8n([:@]|$)", image.lower())):
             candidates.append(name)
     if len(candidates) != 1:
         raise AuditBlocked("N8N_CONTAINER_MISSING_OR_AMBIGUOUS")
     return candidates[0]
+
+
+def find_n8n_container() -> str:
+    """Read names/images of running containers; no Docker credentials exported."""
+    output = run_private_cli(
+        ["docker", "ps", "--format", "{{.Names}} {{.Image}}"], timeout=20
+    )
+    return parse_single_n8n_container(output)
 
 
 def n8n_exec_prefix(container: str) -> list[str]:

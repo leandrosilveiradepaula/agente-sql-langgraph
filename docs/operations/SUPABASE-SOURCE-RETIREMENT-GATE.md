@@ -107,3 +107,22 @@ Para n8n **2.4.8**, o script detecta um único contêiner `n8nio/n8n` ou aceita 
 **Limite importante:** `n8n export:workflow` em n8n 2.4.8 lê o workflow armazenado e **não prova** a versão publicada/efetivamente executada. Mesmo uma classificação `DEMO` depende de reconciliação G1 com `scripts/operations/g1_post_put_audit_readonly.py`, da verificação de aprovações e dos demais consumidores. Uma conexão de outro host/proxy recebe `UNKNOWN`, não é automaticamente declarada livre do banco antigo. O veredito de aposentadoria continua bloqueado.
 
 Compartilhar somente linhas com prefixo `SUPABASE_`. O script nunca imprime DSNs, host, usuário, senha, IDs de credenciais, perguntas, SQL nem payloads financeiros; não grava arquivos nem executa SQL. Não é necessária nova credencial ou migração para executar essa auditoria.
+
+
+### Diagnóstico de descoberta Docker (28/10/2026)
+
+Na primeira execução real na VPS, a auditoria retornou
+`SUPABASE_DEPENDENCY_ERROR=N8N_CONTAINER_MISSING_OR_AMBIGUOUS`.
+A causa identificada no código foi a busca excessivamente restritiva pela
+imagem `n8nio/n8n`: ela não incluía nomes qualificados com registry como
+`docker.n8n.io/n8nio/n8n:2.4.8`. O detector agora reaproveita a expressão
+já validada em `scripts/operations/g1_partial_reconcile_readonly.py`,
+obtém `docker ps --format '{{.Names}} {{.Image}}'` e continua exigindo
+**exatamente um** contêiner. O retorno anterior ocorreu antes da leitura
+de credenciais n8n e não alterou banco nem configuração.
+
+Após merge da correção, basta repetir o comando de auditoria VPS acima,
+sem token nem DSN. Se houver *mais de uma* instância n8n em execução,
+selecionar a instância **comprovadamente oficial** usando
+`--n8n-container NOME_VALIDADO`; não escolher arbitrariamente, não
+desativar outra instância e não contornar a conferência de versão.
