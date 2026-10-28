@@ -231,5 +231,88 @@ class ArchiveSourceSafetyTests(unittest.TestCase):
             self.assertEqual(len(list(directory.iterdir())), 1)
 
 
+    def test_password_only_mode_needs_no_gpg_public_key(self):
+        with tempfile.TemporaryDirectory() as td:
+            directory = Path(td)
+            def fake_symmetric_dump(path, recipient, env, *, passphrase=None):
+                self.assertIsNone(recipient)
+                self.assertEqual(passphrase, "x" * 40)
+                self.assertEqual(env["PGPASSWORD"], "db-secret")
+                path.write_bytes(b"gpg-symmetric-test-ciphertext")
+            with patch.object(m, "private_directory"), patch.object(m, "check_private_file"):
+                with patch.object(m, "tools_available", return_value=True):
+                    with patch.object(m, "recipient_exists") as key_lookup:
+                        with patch.object(m.sys.stdin, "isatty", return_value=True):
+                            with patch("builtins.input", return_value="ARCHIVE-SOURCE-READONLY"):
+                                with patch.object(m.getpass, "getpass", side_effect=[
+                                    "x" * 40, "x" * 40, "db-admin-dsn",
+                                ]):
+                                    with patch.object(m, "pg_environment", return_value={"PGPASSWORD": "db-secret"}):
+                                        with patch.object(m, "encrypted_capture", side_effect=fake_symmetric_dump):
+                                            receipt = m.capture(PROJECT, directory)
+                        key_lookup.assert_not_called()
+                metadata = json.loads(receipt.read_text())
+                self.assertEqual(metadata["format"], "pg_dump_custom_openpgp_symmetric")
+                self.assertIs(metadata["restore_verified"], False)
+                m.verify(PROJECT, directory, receipt)
+
+    def test_password_mismatch_and_weak_password_abort_before_db(self):
+        for proposed in (
+            ("x" * 31, "x" * 31),
+            ("x" * 40, "y" * 40),
+            ("a" * 31 + "\n", "a" * 31 + "\n"),
+            ("☂" * 40, "☂" * 40),
+        ):
+            with self.subTest(proposed=proposed):
+                with patch.object(m, "private_directory"), patch.object(m, "tools_available", return_value=True):
+                    with patch.object(m.sys.stdin, "isatty", return_value=True):
+                        with patch("builtins.input", return_value="ARCHIVE-SOURCE-READONLY"):
+                            with patch.object(m.getpass, "getpass", side_effect=list(proposed)) as secret_prompt:
+                                with patch.object(m, "pg_environment") as db:
+                                    with self.assertRaises(m.ArchiveBlocked):
+                                        m.capture(PROJECT, Path("/private"))
+                                    db.assert_not_called()
+                                    self.assertLessEqual(secret_prompt.call_count, 2)
+
+    def test_symmetrical_gpg_secrets_only_in_anonymous_fd(self):
+        class FakeChild:
+            def __init__(self, argv):
+                self.stdout = io.BytesIO(b"synthetic-plaintext")
+            def wait(self, timeout=None):
+                return 0
+            def poll(self):
+                return 0
+        calls = []
+        def launch(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return FakeChild(argv)
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "encrypted.partial"
+            with patch.object(m.shutil, "which", side_effect=lambda n: "/usr/bin/" + n):
+                with patch.object(m.subprocess, "Popen", side_effect=launch):
+                    m.encrypted_capture(target, None, {"PGPASSWORD": "db-password"}, passphrase="Q" * 40)
+        self.assertTrue(target.exists())
+        self.assertEqual(len(calls), 2)
+        args, kwargs = calls[1]
+        self.assertIn("--symmetric", args)
+        self.assertIn("AES256", args)
+        self.assertIn("--s2k-digest-algo", args)
+        self.assertIn("--passphrase-fd", args)
+        self.assertNotIn("Q" * 40, str(args))
+        self.assertEqual(len(kwargs["pass_fds"]), 1)
+        self.assertNotIn("Q" * 40, str(kwargs["env"]))
+        self.assertNotIn("PGPASSWORD", kwargs["env"])
+        self.assertNotIn("db-password", str(args))
+
+    def test_unusable_encryption_mode_blocked_before_disk_write(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "should-not-exist.gpg"
+            with self.assertRaises(m.ArchiveBlocked):
+                m.encrypted_capture(path, None, {})
+            with self.assertRaises(m.ArchiveBlocked):
+                m.encrypted_capture(path, FPR, {}, passphrase="x" * 40)
+            self.assertFalse(path.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
