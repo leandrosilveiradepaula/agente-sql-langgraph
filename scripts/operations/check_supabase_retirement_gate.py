@@ -55,7 +55,9 @@ def analyze(data: object) -> tuple[str, list[str]]:
         if not isinstance(item, dict) or set(item) != ITEM_KEYS:
             return "BLOCKED", ["INVALID_CONSUMER_RECORD"]
         name, destination = item["consumer"], item["destination"]
-        if name not in ALLOWED_CONSUMERS or name in seen or destination not in ALLOWED_DESTINATIONS:
+        if (not isinstance(name, str) or not isinstance(destination, str)
+                or name not in ALLOWED_CONSUMERS or name in seen
+                or destination not in ALLOWED_DESTINATIONS):
             return "BLOCKED", ["INVALID_CONSUMER_IDENTITY_OR_DESTINATION"]
         if (not isinstance(item["probe_id"], str) or
             not SAFE_ID.fullmatch(item["probe_id"]) or
@@ -79,7 +81,7 @@ def analyze(data: object) -> tuple[str, list[str]]:
         if not isinstance(record, dict) or set(record) != GATE_KEYS:
             return "BLOCKED", ["INVALID_GATE_RECORD"]
         gate = record.get("gate")
-        if gate not in REQUIRED_GATES or gate in seen_gates:
+        if not isinstance(gate, str) or gate not in REQUIRED_GATES or gate in seen_gates:
             return "BLOCKED", ["INVALID_GATE_IDENTITY"]
         seen_gates.add(gate)
         status = record.get("status")
