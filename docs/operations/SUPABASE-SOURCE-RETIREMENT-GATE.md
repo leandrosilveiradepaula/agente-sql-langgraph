@@ -69,6 +69,41 @@ Critérios **obrigatórios** para declarar `READY_TO_RETIRE_SOURCE`:
 - [PR Produto Demo #33](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/33): tabelas de organização privadas.
 - [Roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155): rastro operacional e decisões.
 
+## Incidente G5 — primeira exportação autorizada bloqueada (28/10/2026)
+
+O operador autorizou explicitamente a **exportação somente leitura** da SOURCE `nywxpvzhlpqjtcafpdfe`, não a importação nem a exclusão. Na VPS, depois da PR #186 mergeada, o comando `--capture` chegou à solicitação de senha local do backup e DSN SOURCE; terminou com:
+
+~~~text
+G5_ARCHIVE_MODE=CAPTURE
+G5_ARCHIVE_RESULT=BLOCKED
+G5_ARCHIVE_ERROR=ENCRYPTED_DUMP_FAILED
+G5_ARCHIVE_RESTORE=NOT_VERIFIED
+~~~
+
+O cliente SSH também encerrou a sessão depois da falha; isso **não é evidência** de queda do PostgreSQL. Consulta independente somente a metadados no SOURCE confirmou que o banco seguia respondendo, versão do servidor `17.6`. O script anterior descartava stderr bruto de `pg_dump` e GPG por segurança e misturava ambos os códigos de saída, impossibilitando atribuir causa retrospectivamente. **Não presumir senha errada, TLS, bloqueio de grants ou falha GPG.** Não houve resultado `ENCRYPTED_CAPTURED`, manifesto atestado ou teste de recuperação.
+
+A correção G5 limita o diagnóstico a **códigos fixos sem detalhes sensíveis** derivados de stderr consumido somente em memória: autenticação SOURCE, TLS, cliente incompatível, pool esgotado, DNS, rede, permissões, lock, consulta, falha genérica de `pg_dump` e falha GPG. **Nenhuma linha bruta de stderr**, URL, tabela, usuário, SQL, host, senha ou dado financeiro pode ser impressa ou gravada. Se não for possível classificar, o resultado permanece genérico e seguro.
+
+O `--capture` passa ainda a fazer `--verify` do SHA-256 cifrado automaticamente antes de anunciar sucesso. Isso evita `tee`, `mktemp` e `set -Eeuo pipefail` envolvendo a captura no SSH. Em caso de falha, o arquivo parcial é removido pelo script; a remoção efetiva na VPS ainda precisa ser inspecionada antes de nova captura.
+
+**Após merge da correção e CI verde, executar uma única captura autorizada diretamente no terminal interativo**, com controle humano da senha/DSN; não enviar dados confidenciais ao chat:
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo || exit 1
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main || exit 1
+export PATH="/usr/lib/postgresql/17/bin:$PATH"
+export PGSSLROOTCERT="/root/.local/share/agente-sql-langgraph/supabase-ca.crt"
+test -r "$PGSSLROOTCERT" || exit 2
+.venv/bin/python scripts/operations/g5_archive_supabase_source.py \
+  --capture --source-project-ref nywxpvzhlpqjtcafpdfe
+~~~
+
+Prompt local: confirmação literal `ARCHIVE-SOURCE-READONLY`, mesma senha longa de backup (digitada duas vezes, sem eco) e DSN admin da SOURCE com TLS `verify-full` (sem eco). Nunca usar a string de exemplo `[YOUR-PASSWORD]`: substituir pela senha real com URL encoding para caracteres reservados, **sem enviá-la ao chat**. Usar senha guardada fora da VPS em gerenciador de senhas. O comando não altera SOURCE/DEMO, n8n, roles ou runtime, mas lê dados para o arquivo criptografado; a autorização concedida se limita a esta exportação.
+
+**Sucesso esperado:** `G5_ARCHIVE_RESULT=ENCRYPTED_CAPTURED` e `G5_ARCHIVE_INTEGRITY=ENCRYPTED_DIGEST_PASS`, com `G5_ARCHIVE_RESTORE=NOT_VERIFIED`. Digest cifrado **não** prova restauração. O arquivo deve ser copiado com segurança para custódia externa e ensaiado em PostgreSQL separado e descartável antes da aposentadoria. O banco SOURCE continua necessário para consumidores ativos (n8n e Shadow).
+
+---
+
 ## G5 atualizado — dependências reais e preparação do arquivo da origem (28/10/2026)
 
 Evidência da VPS fornecida pelo operador, duas execuções G5 coerentes:

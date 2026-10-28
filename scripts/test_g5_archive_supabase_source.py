@@ -381,5 +381,131 @@ class ArchiveSourceSafetyTests(unittest.TestCase):
                     no_credentials.assert_not_called()
 
 
+    def test_safe_postgres_errors_never_echo_connection_or_secret(self):
+        fixtures = {
+            "SOURCE_AUTHENTICATION_FAILED":
+                "pg_dump: error: password authentication failed for user postgres.private-password",
+            "SOURCE_TLS_VERIFICATION_FAILED":
+                "pg_dump: error: SSL error: certificate verify failed for hostname SECRET-HOST",
+            "SOURCE_CLIENT_VERSION_MISMATCH":
+                "pg_dump: error: aborting because of server version mismatch",
+            "SOURCE_CONNECTION_POOL_EXHAUSTED":
+                "pg_dump: error: too many clients already",
+            "SOURCE_DNS_FAILED":
+                "pg_dump: error: could not translate host name SECRET-HOST to address",
+            "SOURCE_NETWORK_FAILED":
+                "pg_dump: error: connection refused to PRIVATE-ENDPOINT",
+            "SOURCE_ACCESS_DENIED":
+                "pg_dump: error: permission denied for table PRIVATE-FINANCIAL-TABLE",
+            "SOURCE_LOCK_TIMEOUT":
+                "pg_dump: error: canceling statement due to lock timeout",
+            "SOURCE_QUERY_FAILED":
+                "pg_dump: error: query failed: SELECT * FROM SECRET-TABLE",
+        }
+        for category, secret_line in fixtures.items():
+            with self.subTest(category=category):
+                result = m.classify_pg_dump_error(secret_line.encode())
+                self.assertEqual(result, category)
+                self.assertIn(result, m.PG_DUMP_ERROR_ORDER)
+                self.assertNotIn("PRIVATE", result)
+                self.assertNotIn("SECRET", result)
+        self.assertIsNone(m.classify_pg_dump_error("unrecognized private DSN secret"))
+        observed = set()
+        m.observe_pg_dump_stderr(io.BytesIO(
+            b"pg_dump: error: permission denied for table confidential\n"
+            b"pg_dump: error: query failed: SELECT confidential\n"
+        ), observed)
+        self.assertEqual(observed, {"SOURCE_ACCESS_DENIED", "SOURCE_QUERY_FAILED"})
+
+    @unittest.skipUnless(os.name == "posix", "Linux-only actual pipeline failure proof")
+    def test_failed_pg_dump_is_sanitized_even_with_real_gpg(self):
+        """Run real GPG, simulated failing pg_dump, no database/network/secret logs."""
+        gpg_binary = m.shutil.which("gpg")
+        if not gpg_binary:
+            self.skipTest("GPG unavailable on this runner")
+        with tempfile.TemporaryDirectory() as td:
+            directory = Path(td)
+            fake = directory / "failing_pg_dump"
+            fake.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' 'pg_dump: error: password authentication failed "
+                "for user FAKE_PRIVATE_ID_AND_PASSWORD' >&2\n"
+                "exit 1\n", encoding="ascii",
+            )
+            fake.chmod(0o700)
+            homedir = directory / "gnupg"
+            homedir.mkdir(mode=0o700)
+            encrypted = directory / "incomplete.gpg"
+            with patch.dict(os.environ, {"GNUPGHOME": str(homedir)}):
+                with patch.object(m.shutil, "which", side_effect=lambda name:
+                                  str(fake) if name == "pg_dump"
+                                  else gpg_binary if name == "gpg" else None):
+                    with self.assertRaises(m.ArchiveBlocked) as error:
+                        m.encrypted_capture(
+                            encrypted, None,
+                            {"PATH": os.environ.get("PATH", ""),
+                             "PGPASSWORD": "SYNTHETIC_PASSWORD_MUST_NOT_LEAK"},
+                            passphrase="a" * 40,
+                        )
+            self.assertEqual(str(error.exception), "SOURCE_AUTHENTICATION_FAILED")
+            self.assertNotIn("FAKE_PRIVATE_ID_AND_PASSWORD", str(error.exception))
+            self.assertNotIn("SYNTHETIC_PASSWORD_MUST_NOT_LEAK", str(error.exception))
+
+    @unittest.skipUnless(os.name == "posix", "Linux-only pipeline exit code proof")
+    def test_failed_gpg_is_distinct_from_failed_pg_dump(self):
+        """No DB/GPG server: both executables are isolated fake fixtures."""
+        with tempfile.TemporaryDirectory() as td:
+            directory = Path(td)
+            fake_pg_dump = directory / "good_pg_dump"
+            fake_gpg = directory / "broken_gpg"
+            fake_pg_dump.write_text("#!/bin/sh\nprintf 'fixture-test\\n'\n", encoding="ascii")
+            fake_gpg.write_text("#!/bin/sh\nexit 2\n", encoding="ascii")
+            fake_pg_dump.chmod(0o700)
+            fake_gpg.chmod(0o700)
+            with patch.object(m.shutil, "which", side_effect=lambda name:
+                              str(fake_pg_dump) if name == "pg_dump" else str(fake_gpg)):
+                with self.assertRaises(m.ArchiveBlocked) as error:
+                    m.encrypted_capture(
+                        directory / "incomplete.gpg", None,
+                        {"PATH": os.environ.get("PATH", "")},
+                        passphrase="a" * 40,
+                    )
+            self.assertEqual(str(error.exception), "GPG_ENCRYPTION_FAILED")
+
+
+    def test_capture_cli_verifies_integrity_before_claiming_success(self):
+        import sys
+        manifest = Path("/root/private/synthetic.dump.gpg.manifest.json")
+        args = ["g5_archive_supabase_source.py", "--capture",
+                "--source-project-ref", PROJECT]
+        with patch.object(sys, "argv", args):
+            with patch.object(m, "capture", return_value=manifest) as make:
+                with patch.object(m, "verify") as proof:
+                    self.assertEqual(m.main(), 0)
+                    make.assert_called_once()
+                    proof.assert_called_once_with(
+                        PROJECT, m.ARCHIVE_DIR, manifest
+                    )
+
+    def test_failed_post_capture_integrity_check_does_not_report_success(self):
+        import sys
+        import contextlib
+        buffer = io.StringIO()
+        manifest = Path("/root/private/synthetic.dump.gpg.manifest.json")
+        args = ["g5_archive_supabase_source.py", "--capture",
+                "--source-project-ref", PROJECT]
+        with patch.object(sys, "argv", args):
+            with patch.object(m, "capture", return_value=manifest):
+                with patch.object(m, "verify",
+                                  side_effect=m.ArchiveBlocked("ENCRYPTED_ARCHIVE_DIGEST_MISMATCH")):
+                    with contextlib.redirect_stdout(buffer):
+                        self.assertEqual(m.main(), 2)
+        text = buffer.getvalue()
+        self.assertIn("G5_ARCHIVE_RESULT=BLOCKED", text)
+        self.assertNotIn("G5_ARCHIVE_RESULT=ENCRYPTED_CAPTURED", text)
+        self.assertNotIn("G5_ARCHIVE_MANIFEST=", text)
+        self.assertIn("G5_ARCHIVE_ERROR=ENCRYPTED_ARCHIVE_DIGEST_MISMATCH", text)
+
+
 if __name__ == "__main__":
     unittest.main()

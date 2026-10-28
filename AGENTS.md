@@ -1,3 +1,11 @@
+# 28/10/2026 — G5: PRIMEIRA CAPTURA AUTORIZADA FALHOU, SOURCE AINDA ATIVA
+
+Operador autorizou exportacao SOMENTE LEITURA de SOURCE `nywxpvzhlpqjtcafpdfe` para backup privado com senha. Na VPS, `--capture` retornou `G5_ARCHIVE_RESULT=BLOCKED`, `G5_ARCHIVE_ERROR=ENCRYPTED_DUMP_FAILED`, `G5_ARCHIVE_RESTORE=NOT_VERIFIED`; nenhum backup completo foi comprovado. O stderr estava descartado e o codigo antigo misturava falha pg_dump e GPG, portanto a causa real NAO e conhecida. A sessao SSH encerrou depois do erro; nao afirmar que banco caiu. Consulta independente de metadados confirmou PostgreSQL SOURCE 17.6 respondendo.
+
+**Proxima acao atual:** homologar correcao G5 que classifica stderr apenas em codigos sanitizados e verifica digest criptografado dentro de `--capture`. Apos PR/CI/merge humano, repetir uma captura de forma simples (sem pipe/tee/subshell), informar senha e DSN somente na VPS, nunca no chat. Essa exportacao esta AUTORIZADA; qualquer restore/import DEMO, mudanca de DSN/n8n/roles, cutover e exclusao SOURCE NAO esta. Prova de restauracao isolada e custodia externa do arquivo/senha permanecem obrigatorias. `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false` nao muda.
+
+---
+
 # 28/10/2026 — G5 PREPARACAO DO ARQUIVO E IDENTIDADE (PR #185, SEM MERGE)
 
 **Operador confirmou na VPS:** workflow oficial armazenado 68 nos, uma credencial SOURCE em 9 referencias e uma DEMO em 2; os 2 bindings G1 sao DEMO. Shadow n8n 7 nos sem credenciais Postgres diretas; LangGraph ainda grava evidencias SOURCE e le contexto DEMO. SQL real Shadow desativada. Dois Produtos Vercel DATABASE_URL continuam sem destino atestado. O banco SOURCE nao pode ser apagado.
