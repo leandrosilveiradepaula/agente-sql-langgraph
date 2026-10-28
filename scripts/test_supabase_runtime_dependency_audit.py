@@ -82,9 +82,9 @@ class RuntimeDependencyTests(unittest.TestCase):
 
     def test_n8n_registry_qualified_image_is_detected(self):
         output = (
-            "shadow-test myorg/langgraph-shadow:1.0\\n"
-            "n8n-main docker.n8n.io/n8nio/n8n:2.4.8\\n"
-            "postgres postgres:17\\n"
+            "shadow-test myorg/langgraph-shadow:1.0\n"
+            "n8n-main docker.n8n.io/n8nio/n8n:2.4.8\n"
+            "postgres postgres:17\n"
         )
         self.assertEqual(module.parse_single_n8n_container(output), "n8n-main")
 
@@ -99,10 +99,10 @@ class RuntimeDependencyTests(unittest.TestCase):
 
     def test_n8n_ambiguous_or_missing_blocks(self):
         for output in (
-            "server-a docker.n8n.io/n8nio/n8n:2.4.8\\n"
-            "server-b n8nio/n8n:2.4.8\\n",
-            "sidecar registry.example.org/notn8n:1\\n",
-            "invalid-line-without-image\\n",
+            "server-a docker.n8n.io/n8nio/n8n:2.4.8\n"
+            "server-b n8nio/n8n:2.4.8\n",
+            "sidecar registry.example.org/notn8n:1\n",
+            "invalid-line-without-image\n",
         ):
             with self.subTest(output=output):
                 with self.assertRaises(module.AuditBlocked) as caught:
@@ -112,7 +112,7 @@ class RuntimeDependencyTests(unittest.TestCase):
                 )
 
     def test_n8n_detection_uses_existing_reviewed_docker_format(self):
-        sample = "n8n-primary docker.n8n.io/n8nio/n8n:2.4.8\\n"
+        sample = "n8n-primary docker.n8n.io/n8nio/n8n:2.4.8\n"
         with patch.object(module, "run_private_cli", return_value=sample) as runner:
             self.assertEqual(module.find_n8n_container(), "n8n-primary")
             runner.assert_called_once_with(
