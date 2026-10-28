@@ -75,6 +75,7 @@ class G5IsolatedRehearsalTests(unittest.TestCase):
         with self.assertRaises(m.ArchiveBlocked):
             m.isolated_run_args(IMAGE, "prod")
 
+    @unittest.skipUnless(os.name == "posix", "Linux Unix-domain Docker socket only")
     def test_only_local_unix_socket_is_allowed(self):
         with patch.object(m.shutil, "which", return_value="/usr/bin/docker"):
             with patch.object(type(m.DOCKER_SOCKET), "lstat") as st:
