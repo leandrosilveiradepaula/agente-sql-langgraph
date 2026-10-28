@@ -310,6 +310,7 @@ def main() -> int:
     args = parser.parse_args()
     private_path = None
     role_created = False
+    secret_created_here = False
     try:
         if args.apply and args.verify:
             raise ProvisionBlocked("MODES_MUTUALLY_EXCLUSIVE")
@@ -351,6 +352,7 @@ def main() -> int:
             create_private_file(private_path, {
                 "role": role, "organization_id": args.organization_id, "dsn": dsn,
             })
+            secret_created_here = True
             provision_in_transaction(
                 admin, role=role, organization_id=args.organization_id, password=pwd
             )
@@ -373,7 +375,7 @@ def main() -> int:
         return 0
     except Exception as exc:
         # Driver exceptions may include credentials: NEVER render their text.
-        if private_path is not None and not role_created:
+        if secret_created_here and private_path is not None and not role_created:
             try:
                 private_path.unlink(missing_ok=True)
             except OSError:
