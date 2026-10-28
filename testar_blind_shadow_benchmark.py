@@ -201,8 +201,16 @@ def test_ambiguity_identity_tenant_and_question_all_fail_closed() -> None:
     ):
         tampered_base = deepcopy(base)
         tampered_base["cases"][0][field] = incorrect
-        res = evaluate(tampered_base, [match])["cases"][0]
-        assert res["status"] in {"inconclusivo", "sem_evidencia"}
+        if field == "agent_run_id":
+            try:
+                evaluate(tampered_base, [match])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("unexpected Shadow run was accepted")
+        else:
+            res = evaluate(tampered_base, [match])["cases"][0]
+            assert res["status"] in {"inconclusivo", "sem_evidencia"}
 
     wrong_tenant = deepcopy(base)
     wrong_tenant["cases"][0]["organization_id"] = "tenant-B"
