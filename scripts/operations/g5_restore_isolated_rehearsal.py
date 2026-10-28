@@ -107,6 +107,7 @@ def classify_restore_stderr(fragment: bytes) -> str | None:
             or b"cannot change run-time parameter" in line):
         return "SERVER_SETTING_UNSUPPORTED"
     if (b"not a valid archive" in line
+            or b"does not appear to be a valid archive" in line
             or b"unsupported version" in line
             or b"could not read from input file" in line):
         return "ARCHIVE_INVALID"
