@@ -69,6 +69,32 @@ Critérios **obrigatórios** para declarar `READY_TO_RETIRE_SOURCE`:
 - [PR Produto Demo #33](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/33): tabelas de organização privadas.
 - [Roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155): rastro operacional e decisões.
 
+## 28/10/2026 — Primeiro ensaio G5 de restauração isolada: SQL bloqueada
+
+**Evidência real na VPS do operador**, após a PR #189 e `--plan` PASS, imagem Docker PostgreSQL 17 já em cache, confirmação digitada `RESTORE-G5-ISOLATED` e senha local do backup:
+
+~~~text
+G5_REHEARSAL_MODE=RESTORE
+G5_IMAGE_CACHED=YES
+G5_REHEARSAL_RESULT=BLOCKED
+G5_REHEARSAL_ERROR=ISOLATED_RESTORE_SQL_FAILED
+G5_RESTORE_TEST=NOT_VERIFIED
+~~~
+
+**Conclusão correta:** o comando `docker exec pg_restore --single-transaction --exit-on-error` terminou com código não-zero. O script original descartava stderr para não revelar SQL, tabelas, senhas, usuários e funções, portanto **a causa exata da falha não ficou observável**. Ausência de extensões, roles, privilégios ou recursos no PostgreSQL comunitário são hipóteses e NÃO diagnósticos comprovados. O código só devolve essa classe de erro quando a limpeza do contêiner foi verificada; se não fosse, teria retornado `ISOLATED_CLEANUP_UNVERIFIED`. SOURCE, DEMO, n8n, credenciais e LLM não foram alterados; o backup cifrado não foi sobrescrito. O ensaio falhou e **NÃO** representa restore efetivo.
+
+### Correção segura de observabilidade, sem omitir SQL/objetos
+
+O utilitário G5 recebe captura do stderr do `pg_restore` **somente em memória**, com thread que drena o pipe concorrente (evita travamento de buffer). A thread **NUNCA** imprime, transmite, armazena, ecoa ou inclui stderr bruto nas exceções. Apenas o primeiro **código estrutural fixo** de erro pode atravessar a fronteira, por exemplo `EXTENSION_UNAVAILABLE`, `EXTENSION_LIBRARY_UNAVAILABLE`, `ROLE_MISSING`, `OBJECT_DEPENDENCY_MISSING`, `PERMISSION_DENIED`, `OBJECT_CONFLICT`, `RESOURCE_LIMIT`, `SERVER_SETTING_UNSUPPORTED`, `ARCHIVE_INVALID`, `SQL_SYNTAX_UNSUPPORTED` ou `UNCLASSIFIED`. Todos esses nomes são genéricos; não há nomes de negócio ou mapeamentos de cliente. Falhas desconhecidas permanecem `UNCLASSIFIED`; não transformar hipótese em fato.
+
+**Sem regressão de gate:** para retorno não-zero do PostgreSQL, permanece `G5_REHEARSAL_RESULT=BLOCKED`, `G5_REHEARSAL_ERROR=ISOLATED_RESTORE_SQL_FAILED`, `G5_RESTORE_TEST=NOT_VERIFIED`. Adiciona-se somente `G5_RESTORE_FAILURE_CATEGORY=<CATEGORIA_FIXA>`. O contêiner continua descartável sem rede, portas ou volumes, com transação única, `--exit-on-error`, identidade sem privilégio, nenhuma escrita no Supabase, limpeza verificada, senha via FD anônimo e **nenhuma autorização para contornar falhas**.
+
+Depois do merge humano e CI verde da correção, o operador poderá fazer **uma tentativa diagnóstica autorizada do mesmo ensaio isolado** usando o comando original `--restore` com confirmação local e senha fora do chat, sem modificar parâmetros nem repetir o download da imagem. Fornecer ao assistente **somente as linhas `G5_`**, nunca stderr bruto do PostgreSQL, tabelas/SQL/DSN/senha. Essa classificação depende do próximo ensaio; não temos a mensagem do ensaio anterior.
+
+**Proibido** ocultar ou excluir extensões, funções, tabelas, triggers ou erros para obter PASS. Se o erro depender de objetos Supabase gerenciados, será necessário um contrato de recuperação compatível e governado, sem tratar PostgreSQL comunitário como equivalente a Supabase. O banco SOURCE continua INELEGÍVEL à aposentadoria; cópia cifrada fora da VPS e restauração integral permanecem pendentes.
+
+---
+
 ## G5 — Inspeção real concluída e restauração isolada preparada (28/10/2026)
 
 **Comprovado na VPS pelo operador, após merge da PR #188:** o arquivo criptografado já gerado com manifesto privado `source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg.manifest.json` foi inspecionado sem contato com DB. Resultado: `G5_ARCHIVE_DECRYPTION=PASS`, `G5_PG_RESTORE_TOC=PASS`, `G5_PG_RESTORE_TOC_ENTRIES=811`, `G5_DECRYPTED_ARCHIVE_BYTES=25905751`, `G5_RESTORE_TEST=NOT_PERFORMED`. Foi uma leitura integral da stream GPG, não execução dos 811 itens; banco SOURCE/DEMO intocados.
