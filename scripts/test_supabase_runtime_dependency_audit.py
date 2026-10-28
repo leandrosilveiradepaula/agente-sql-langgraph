@@ -73,6 +73,13 @@ class RuntimeDependencyTests(unittest.TestCase):
         with self.assertRaises(module.AuditBlocked):
             module.find_pg_credentials({"nodes": [{"credentials": {"postgres": {"name": "no id"}}}]})
 
+    def test_n8n_decrypted_export_is_forced_to_stdout_only(self):
+        command = module.n8n_exec_prefix("n8n-sample")
+        self.assertEqual(command[:4], ["docker", "exec", "-u", "node"])
+        self.assertIn("N8N_LOG_OUTPUT=console", command)
+        self.assertIn("N8N_LOG_LEVEL=info", command)
+        self.assertEqual(command[-2:], ["n8n-sample", "n8n"])
+
     def test_n8n_version_drift_blocks_without_decrypted_export(self):
         with patch.object(module, "run_private_cli", return_value="2.5.0") as runner:
             with self.assertRaises(module.AuditBlocked):
