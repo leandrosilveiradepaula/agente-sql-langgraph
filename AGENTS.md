@@ -1,3 +1,13 @@
+# 28/10/2026 — G5 PREPARACAO DO ARQUIVO E IDENTIDADE (PR #185, SEM MERGE)
+
+**Operador confirmou na VPS:** workflow oficial armazenado 68 nos, uma credencial SOURCE em 9 referencias e uma DEMO em 2; os 2 bindings G1 sao DEMO. Shadow n8n 7 nos sem credenciais Postgres diretas; LangGraph ainda grava evidencias SOURCE e le contexto DEMO. SQL real Shadow desativada. Dois Produtos Vercel DATABASE_URL continuam sem destino atestado. O banco SOURCE nao pode ser apagado.
+
+**Entrega proposta:** [PR #185](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/pull/185) cria ferramenta de arquivo **criptografado e read-only** com captura interativa especificamente autorizada (nenhuma captura realizada), testes de recibo SHA-256 e gate de login Shadow que requer organizacao UUID ativa + membership ativa do Produto. DEMO tem zero organizacoes/memberships: P3 continua bloqueado ate autorizacao/cadastro real.
+
+**NUNCA** confundir backup logico com restauro provado, nem autorizar restore no DEMO. Nao executar SQL financeira, alterar n8n, DSNs, banco, roles ou Vercel sem aprovacao independente; nao ativar cutover nem apagar SOURCE implicitamente. Manter OFFICIAL=n8n, SHADOW=LangGraph e LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false. O merge desta PR nao autoriza executar --capture.
+
+---
+
 # ATUALIZACAO OPERACIONAL 28/10/2026 — G5 APOSENTADORIA DO SUPABASE ANTIGO (PR #183)
 
 **Decisao mais recente do operador:** objetivo imediato e consolidar a operacao
