@@ -275,36 +275,76 @@ class ArchiveSourceSafetyTests(unittest.TestCase):
                                     db.assert_not_called()
                                     self.assertLessEqual(secret_prompt.call_count, 2)
 
-    @unittest.skipUnless(os.name == "posix", "Descriptor inheritance requires Linux/POSIX")
+    @unittest.skipUnless(os.name == "posix", "POSIX-only encrypted stream smoke")
     def test_symmetrical_gpg_secrets_only_in_anonymous_fd(self):
-        class FakeChild:
-            def __init__(self, argv):
-                self.stdout = io.BytesIO(b"synthetic-plaintext")
-            def wait(self, timeout=None):
-                return 0
-            def poll(self):
-                return 0
-        calls = []
-        def launch(argv, **kwargs):
-            calls.append((argv, kwargs))
-            return FakeChild(argv)
+        """Real GPG roundtrip with synthetic bytes and a fake pg_dump binary."""
+        gpg_binary = m.shutil.which("gpg")
+        if not gpg_binary:
+            self.skipTest("GPG unavailable on this runner")
+        phrase = "Q" * 40  # Synthetic fixture, not a real backup password
+        expected = b"OFFLINE_SYNTHETIC_TEST_DATA_ONLY\n"
+        real_popen = m.subprocess.Popen
+        gpg_invocations = []
+
         with tempfile.TemporaryDirectory() as td:
-            target = Path(td) / "encrypted.partial"
-            with patch.object(m.shutil, "which", side_effect=lambda n: "/usr/bin/" + n):
-                with patch.object(m.subprocess, "Popen", side_effect=launch):
-                    m.encrypted_capture(target, None, {"PGPASSWORD": "db-password"}, passphrase="Q" * 40)
-        self.assertTrue(target.exists())
-        self.assertEqual(len(calls), 2)
-        args, kwargs = calls[1]
-        self.assertIn("--symmetric", args)
-        self.assertIn("AES256", args)
-        self.assertIn("--s2k-digest-algo", args)
-        self.assertIn("--passphrase-fd", args)
-        self.assertNotIn("Q" * 40, str(args))
-        self.assertEqual(len(kwargs["pass_fds"]), 1)
-        self.assertNotIn("Q" * 40, str(kwargs["env"]))
-        self.assertNotIn("PGPASSWORD", kwargs["env"])
-        self.assertNotIn("db-password", str(args))
+            directory = Path(td)
+            pg_dump = directory / "fake_pg_dump"
+            pg_dump.write_text(
+                "#!/bin/sh\nprintf 'OFFLINE_SYNTHETIC_TEST_DATA_ONLY\\n'\n",
+                encoding="ascii",
+            )
+            pg_dump.chmod(0o700)
+            homedir = directory / "gnupg"
+            homedir.mkdir(mode=0o700)
+            output = directory / "synthetic.gpg"
+            def observer(argv, **kwargs):
+                if argv[0] == gpg_binary:
+                    gpg_invocations.append((argv, kwargs))
+                return real_popen(argv, **kwargs)
+            with patch.dict(os.environ, {"GNUPGHOME": str(homedir)}):
+                with patch.object(m.shutil, "which", side_effect=lambda n:
+                                  str(pg_dump) if n == "pg_dump" else gpg_binary if n == "gpg" else None):
+                    with patch.object(m.subprocess, "Popen", side_effect=observer):
+                        m.encrypted_capture(
+                            output, None,
+                            {"PATH": os.environ.get("PATH", ""), "PGPASSWORD": "fake-sql-password"},
+                            passphrase=phrase,
+                        )
+                self.assertNotEqual(output.read_bytes(), expected)
+                self.assertEqual(len(gpg_invocations), 1)
+                args, options = gpg_invocations[0]
+                self.assertIn("--symmetric", args)
+                self.assertIn("--passphrase-fd", args)
+                self.assertIn("AES256", args)
+                self.assertEqual(len(options["pass_fds"]), 1)
+                self.assertNotIn(phrase, str(args))
+                self.assertNotIn(phrase, str(options["env"]))
+                self.assertNotIn("PGPASSWORD", options["env"])
+                # Decrypt fixture in a separate process with an anonymous FD.
+                reader, writer = os.pipe()
+                try:
+                    decrypt = real_popen(
+                        [gpg_binary, "--batch", "--no-tty", "--pinentry-mode",
+                         "loopback", "--no-symkey-cache", "--passphrase-fd",
+                         str(reader), "--decrypt", str(output)],
+                        stdout=m.subprocess.PIPE, stderr=m.subprocess.DEVNULL,
+                        pass_fds=(reader,),
+                        env={k: os.environ[k] for k in
+                             ("HOME", "PATH", "GNUPGHOME") if k in os.environ},
+                    )
+                    os.close(reader)
+                    reader = None
+                    os.write(writer, phrase.encode("ascii") + b"\n")
+                    os.close(writer)
+                    writer = None
+                    clear, _ = decrypt.communicate(timeout=30)
+                    self.assertEqual(decrypt.returncode, 0)
+                    self.assertEqual(clear, expected)
+                finally:
+                    if reader is not None:
+                        os.close(reader)
+                    if writer is not None:
+                        os.close(writer)
 
     def test_unusable_encryption_mode_blocked_before_disk_write(self):
         with tempfile.TemporaryDirectory() as td:
