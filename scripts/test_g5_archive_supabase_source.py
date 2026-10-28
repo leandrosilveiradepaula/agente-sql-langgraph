@@ -148,5 +148,61 @@ class ArchiveSourceSafetyTests(unittest.TestCase):
         self.assertNotIn("DROP DATABASE", source)
 
 
+    def test_plan_never_reads_dsn_or_captures(self):
+        import sys
+        with patch.object(sys, "argv", [
+            "g5_archive_supabase_source.py", "--plan", "--source-project-ref", PROJECT,
+        ]):
+            with patch.object(m, "tools_available", return_value=True):
+                with patch.object(m.getpass, "getpass") as credentials:
+                    with patch.object(m, "encrypted_capture") as dump:
+                        self.assertEqual(m.main(), 0)
+                        credentials.assert_not_called()
+                        dump.assert_not_called()
+
+    def test_capture_writes_only_encrypted_artifact_and_integrity_receipt(self):
+        dsn = ("postgresql://postgres." + PROJECT +
+               ":secret@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
+               "?sslmode=verify-full")
+        with tempfile.TemporaryDirectory() as td:
+            directory = Path(td)
+            def fake_encrypted_capture(path, recipient, env):
+                self.assertEqual(recipient, FPR)
+                self.assertEqual(env["PGPASSWORD"], "secret")
+                path.write_bytes(b"simulated-encrypted-bytes")
+            with patch.object(m, "private_directory"), patch.object(m, "check_private_file"):
+                with patch.object(m, "tools_available", return_value=True):
+                    with patch.object(m, "recipient_exists", return_value=True):
+                        with patch.object(m.sys.stdin, "isatty", return_value=True):
+                            with patch("builtins.input", return_value="ARCHIVE-SOURCE-READONLY"):
+                                with patch.object(m.getpass, "getpass", return_value=dsn):
+                                    with patch.object(m, "encrypted_capture", side_effect=fake_encrypted_capture):
+                                        receipt = m.capture(PROJECT, directory, FPR)
+                data = json.loads(receipt.read_text())
+                self.assertEqual(data["project_ref"], PROJECT)
+                self.assertEqual(data["format"], "pg_dump_custom_openpgp")
+                self.assertIs(data["restore_verified"], False)
+                self.assertFalse(list(directory.glob("*.partial")))
+                self.assertEqual((directory / data["archive_name"]).read_bytes(), b"simulated-encrypted-bytes")
+                m.verify(PROJECT, directory, receipt)
+
+    def test_failed_capture_never_leaves_a_final_archive(self):
+        with tempfile.TemporaryDirectory() as td:
+            directory = Path(td)
+            def fail_after_partial(path, *args):
+                path.write_bytes(b"partial-ciphertext")
+                raise m.ArchiveBlocked("ENCRYPTED_DUMP_FAILED")
+            with patch.object(m, "private_directory"), patch.object(m, "tools_available", return_value=True):
+                with patch.object(m, "recipient_exists", return_value=True):
+                    with patch.object(m.sys.stdin, "isatty", return_value=True):
+                        with patch("builtins.input", return_value="ARCHIVE-SOURCE-READONLY"):
+                            with patch.object(m.getpass, "getpass", return_value="fake-dsn"):
+                                with patch.object(m, "pg_environment", return_value={"PGPASSWORD": "secret"}):
+                                    with patch.object(m, "encrypted_capture", side_effect=fail_after_partial):
+                                        with self.assertRaises(m.ArchiveBlocked):
+                                            m.capture(PROJECT, directory, FPR)
+            self.assertEqual(list(directory.iterdir()), [])
+
+
 if __name__ == "__main__":
     unittest.main()
