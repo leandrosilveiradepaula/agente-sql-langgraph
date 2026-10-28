@@ -69,6 +69,59 @@ Critérios **obrigatórios** para declarar `READY_TO_RETIRE_SOURCE`:
 - [PR Produto Demo #33](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/33): tabelas de organização privadas.
 - [Roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155): rastro operacional e decisões.
 
+## 28/10/2026 — Extensão indisponível: diagnóstico real e preflight multicliente
+
+**Evidência do segundo ensaio autorizado na VPS**, após a PR #190 mergeada e diagnóstico sanitizado:
+
+~~~text
+G5_REHEARSAL_MODE=RESTORE
+G5_IMAGE_CACHED=YES
+G5_REHEARSAL_RESULT=BLOCKED
+G5_REHEARSAL_ERROR=ISOLATED_RESTORE_SQL_FAILED
+G5_RESTORE_FAILURE_CATEGORY=EXTENSION_UNAVAILABLE
+G5_RESTORE_TEST=NOT_VERIFIED
+~~~
+
+**Comprovado:** pelo menos uma instrução relacionada a extensão não pôde ser restaurada no contêiner `postgres:17` padrão. Isso não torna o backup inválido. **Não comprovado:** qual extensão específica e se há outras incompatibilidades posteriores. O contêiner foi removido conforme o gate de limpeza; o backup e os Supabases permanecem intactos.
+
+Foi executada **somente uma consulta de catálogo SELECT**, fora do benchmark, no PostgreSQL da SOURCE `nywxpvzhlpqjtcafpdfe`: `pg_catalog.pg_extension` + `pg_catalog.pg_available_extensions`. Extensões efetivamente instaladas, com versões:
+
+| Extensão SOURCE | Versão | Esquema |
+|---|---|---|
+| `pg_stat_statements` | `1.11` | `extensions` |
+| `pgcrypto` | `1.3` | `extensions` |
+| `plpgsql` | `1.0` | `pg_catalog` |
+| `supabase_vault` | `0.3.1` | `vault` |
+| `uuid-ossp` | `1.1` | `extensions` |
+
+**Hipótese prioritária:** `supabase_vault` não vem na imagem oficial comunitária `postgres:17`. Isso só se tornará um gap comprovado quando as extensões que o **arquivo** realmente contém forem comparadas com os arquivos `.control` instalados no contêiner de destino. A SOURCE pode ter uma extensão instalada mas não incluída no dump `pg_dump` por configurações de esquema/objeto; por isso a lista de catálogo não substitui a leitura do arquivo.
+
+### Novo preflight seguro, sem tentar outra restauração
+
+A auditoria genérica `scripts/operations/g5_extension_compatibility_readonly.py` executa quatro mecanismos, sem conhecer cliente/esquema de negócio: (1) verifica SHA, manifesto e arquivos root-only já gerados; (2) confirma que cada imagem PostgreSQL 17 permitida está **previamente no cache** e fixa seu SHA; (3) em contêiner efêmero com `--network=none`, `--read-only`, usuário sem privilégio, sem binds, sem dados nem banco, enumera exclusivamente nomes de `*.control` da imagem, sem usar DSN ou senha; (4) solicita uma única vez a senha do backup na VPS e usa o pipeline GPG → `pg_restore --list` já homologado, retendo apenas identificadores sintaticamente seguros de extensões (nunca o resto do TOC).
+
+O relatório compara os dois conjuntos dinamicamente, imprime `G5_IMAGE_N_MISSING` apenas com os nomes das extensões ausentes, e mantém **`G5_RESTORE_TEST=NOT_PERFORMED`**. Mesmo `FILES_PRESENT_NOT_RESTORE_PROOF` confirma somente a presença de arquivos de controle. Não atesta versão binária, dependências de bibliotecas, execução segura, papel superuser, chave Vault, restauração ou paridade. Erros ou metadados estranhos falham com códigos fixos, sem imprimir SQL/tabelas/DSNs/segredos.
+
+**Supabase PostgreSQL 17 para futura comparação:** as instruções públicas atuais de self-hosting demonstram a tag `supabase/postgres:17.6.1.136`. Essa imagem é **candidata**, não substituta aprovada do `postgres:17`. A auditoria não faz `docker pull` automaticamente nem altera a imagem de restauração. Se a imagem candidata não estiver no cache, retorna `POSTGRES17_IMAGE_NOT_CACHED`, antes de solicitar senha. Documentação oficial: `https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore`, `https://supabase.com/docs/guides/database/vault`, `https://supabase.com/docs/guides/self-hosting/custom-postgres-extensions`.
+
+**Comando inicial para comparar com a imagem comunitária já existente**, somente depois de PR aprovada/mergeada na main:
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo || exit 1
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main || exit 1
+PATH="/usr/lib/postgresql/17/bin:$PATH" \
+.venv/bin/python scripts/operations/g5_extension_compatibility_readonly.py \
+  --source-project-ref nywxpvzhlpqjtcafpdfe \
+  --manifest /root/.local/share/agente-sql-langgraph/source-archives/source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg.manifest.json \
+  --image-ref postgres:17
+~~~
+
+Futuramente, depois de autorizar/baixar a imagem Supabase específica e confirmar seu digest e escopo, executar a mesma auditoria com duas opções `--image-ref`, para comparar ambas **com uma única senha**. Não executar `--restore` por causa de um resultado de preflight; antes será necessário validar runtime da nova imagem, porta/volumes/UID, extensions e aprovação específica. Não baixar imagem pela aplicação nem abrir conexão externa do contêiner.
+
+**Atenção especial ao Vault:** o root key de criptografia não está no dump; não copiar, revelar ou alterar chave entre projetos por implicação. O processo atual de exportação `pg_dump --no-owner --no-acl` tampouco comprova recuperação de roles, Auth, Storage, Edge e outros componentes gerenciados. Não aposentar SOURCE enquanto persistirem dependências n8n/Shadow/Produto e gates não homologados.
+
+---
+
 ## 28/10/2026 — Primeiro ensaio G5 de restauração isolada: SQL bloqueada
 
 **Evidência real na VPS do operador**, após a PR #189 e `--plan` PASS, imagem Docker PostgreSQL 17 já em cache, confirmação digitada `RESTORE-G5-ISOLATED` e senha local do backup:
