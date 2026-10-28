@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -274,6 +275,7 @@ class ArchiveSourceSafetyTests(unittest.TestCase):
                                     db.assert_not_called()
                                     self.assertLessEqual(secret_prompt.call_count, 2)
 
+    @unittest.skipUnless(os.name == "posix", "Descriptor inheritance requires Linux/POSIX")
     def test_symmetrical_gpg_secrets_only_in_anonymous_fd(self):
         class FakeChild:
             def __init__(self, argv):
