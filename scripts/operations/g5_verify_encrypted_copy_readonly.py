@@ -93,8 +93,9 @@ def inspect_copy(
         or not ARCHIVE_NAME.fullmatch(filename)
         or not isinstance(captured, str)
         or not CAPTURED_TIME.fullmatch(captured)
-        or filename != "source-" + project_ref + "-" + captured + "-" +
-            filename.rsplit("-", 1)[-1]
+        or not filename.startswith(
+            "source-" + project_ref + "-" + captured + "-"
+        )
         or manifest.name != filename + ".manifest.json"
         or metadata.get("format") not in FORMAT_ALLOWLIST
         or metadata.get("restore_verified") is not False
