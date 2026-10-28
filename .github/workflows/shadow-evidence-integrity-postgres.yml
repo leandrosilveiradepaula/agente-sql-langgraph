@@ -7,6 +7,8 @@ on:
       - "app/application/internal_sql_agent_v1_shared.py"
       - "app/adapters/testing/fake_shadow_evidence_repository.py"
       - "scripts/migrations/001_create_langgraph_shadow_runs.sql"
+      - "scripts/migrations/002_shadow_tenant_bound_evidence_access.sql"
+      - "scripts/validation/test_shadow_tenant_rls_postgres.py"
       - "scripts/validation/test_shadow_evidence_integrity_postgres.py"
       - "scripts/validation/test_n8n_langgraph_shadow_bridge_postgres.py"
       - "scripts/validation/test_j2_real_postgres_portability.py"
@@ -75,6 +77,10 @@ jobs:
           node-version: "22"
       - name: Verify synthetic evidence persistence, isolation and collision guards
         run: python scripts/validation/test_shadow_evidence_integrity_postgres.py
+      - name: Prove tenant-bound RLS and actual adapter CRUD on disposable PostgreSQL
+        env:
+          SHADOW_TENANT_RLS_DISPOSABLE_TEST: "true"
+        run: python scripts/validation/test_shadow_tenant_rls_postgres.py
       - name: Verify n8n Code to S2S ASGI to persisted evidence and comparison
         run: python scripts/validation/test_n8n_langgraph_shadow_bridge_postgres.py
       - name: Prove distinct physical catalogs and tenant SELECT-only context readers
