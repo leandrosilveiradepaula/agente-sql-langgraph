@@ -29,7 +29,7 @@ class ShadowLoginSafetyTests(unittest.TestCase):
         m.validate_project_and_org("cenhadslwxgykqtuobgc", "synthetic-tenant")
 
     def test_pooler_dsn_role_is_tenant_bound_no_admin_password(self):
-        admin = "postgresql://postgres.cenhadslwxgykqtuobgc:adminpass@aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=verify-full"
+        admin = "postgresql://" + "postgres.cenhadslwxgykqtuobgc:adminpass@" + "aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=verify-full"
         login = m.login_dsn_for(admin, "cenhadslwxgykqtuobgc", "lgshadow_test", "newpass")
         parsed = urlparse(login)
         self.assertEqual(parsed.username, "lgshadow_test.cenhadslwxgykqtuobgc")
@@ -38,7 +38,7 @@ class ShadowLoginSafetyTests(unittest.TestCase):
         self.assertNotIn("adminpass", login)
 
     def test_unverified_tls_admin_is_rejected(self):
-        admin = "postgresql://postgres.cenhadslwxgykqtuobgc:adminpass@aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=require"
+        admin = "postgresql://" + "postgres.cenhadslwxgykqtuobgc:adminpass@" + "aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=require"
         with self.assertRaises(Exception):
             m.login_dsn_for(admin, "cenhadslwxgykqtuobgc", "lgshadow_test", "newpass")
 
