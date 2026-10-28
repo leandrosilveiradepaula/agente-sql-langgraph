@@ -284,5 +284,155 @@ class G5IsolatedRehearsalTests(unittest.TestCase):
                 self.assertEqual(str(err.exception), "GPG_DECRYPTION_FAILED")
 
 
+    def test_restore_failure_categories_are_structural_and_never_echo_identifiers(self):
+        examples = {
+            "EXTENSION_UNAVAILABLE": (
+                "pg_restore: error: could not execute query: ERROR: "
+                "extension 'private_extension' is not available"
+            ),
+            "EXTENSION_LIBRARY_UNAVAILABLE": (
+                "pg_restore: error: could not execute query: ERROR: "
+                "could not access file '$libdir/private_library'"
+            ),
+            "ROLE_MISSING": (
+                "pg_restore: error: could not execute query: ERROR: "
+                "role 'customer_account' does not exist"
+            ),
+            "OBJECT_DEPENDENCY_MISSING": (
+                "pg_restore: error: could not execute query: ERROR: "
+                "function private_schema.private_function does not exist"
+            ),
+            "PERMISSION_DENIED": (
+                "pg_restore: error: could not execute query: ERROR: "
+                "permission denied for schema private_data"
+            ),
+            "OBJECT_CONFLICT": (
+                "pg_restore: error: could not execute query: ERROR: "
+                "relation 'private_table' already exists"
+            ),
+            "RESOURCE_LIMIT": (
+                "pg_restore: error: could not execute query: ERROR: "
+                "could not extend file private_file: No space left on device"
+            ),
+            "SERVER_SETTING_UNSUPPORTED": (
+                "pg_restore: error: could not execute query: ERROR: "
+                "unrecognized configuration parameter 'private_setting'"
+            ),
+            "ARCHIVE_INVALID": (
+                "pg_restore: error: input file does not appear to be a valid archive"
+            ),
+            "SQL_SYNTAX_UNSUPPORTED": (
+                "pg_restore: error: could not execute query: ERROR: "
+                "syntax error at or near 'PRIVATE_STATEMENT'"
+            ),
+        }
+        for category, message in examples.items():
+            with self.subTest(category=category):
+                result = m.classify_restore_stderr(message.encode("utf-8"))
+                self.assertEqual(result, category)
+                self.assertIn(result, m.RESTORE_FAILURE_CATEGORIES)
+                self.assertNotIn("private", result.lower())
+                self.assertNotIn("customer", result.lower())
+        self.assertIsNone(m.classify_restore_stderr(
+            b"pg_restore: error: Command was: SELECT 'private_password';"
+        ))
+        self.assertIsNone(m.classify_restore_stderr(
+            b"pg_restore: context: COPY top_secret_table, line 3"
+        ))
+        self.assertEqual(m.IsolatedRestoreSQLFailure("INJECT_PRIVATE_VALUE").category,
+                         "UNCLASSIFIED")
+
+    def test_restore_failure_labels_are_bounded_and_no_raw_errors_persist(self):
+        raw = io.BytesIO(
+            b"pg_restore: error: could not execute query: ERROR: "
+            b"extension 'PRIVATE_EXT' is not available\n"
+            b"pg_restore: error: Command was: CREATE EXTENSION PRIVATE_EXT\n"
+            b"pg_restore: error: ERROR: role PRIVATE_ROLE does not exist\n"
+        )
+        categories = []
+        m.consume_restore_stderr(raw, categories)
+        self.assertEqual(categories, ["EXTENSION_UNAVAILABLE"])
+        self.assertNotIn("PRIVATE", repr(categories))
+        self.assertEqual(str(m.IsolatedRestoreSQLFailure(categories[0])),
+                         "ISOLATED_RESTORE_SQL_FAILED")
+
+    def test_cli_emits_safe_sql_category_without_object_or_sql_content(self):
+        import sys
+        argv = ["g5_restore_isolated_rehearsal.py", "--restore",
+                "--manifest", "/private/archive.json",
+                "--source-project-ref", SOURCE]
+        with patch.object(sys, "argv", argv):
+            with patch.object(m, "validated_archive", return_value=Path("/encrypted.gpg")):
+                with patch.object(m, "docker_executable", return_value=["/usr/bin/docker"]):
+                    with patch.object(m, "image_id", return_value=IMAGE):
+                        with patch.object(m.sys.stdin, "isatty", return_value=True):
+                            with patch("builtins.input", return_value="RESTORE-G5-ISOLATED"):
+                                with patch.object(m.getpass, "getpass", return_value=PASSWORD):
+                                    with patch.object(m, "rehearsed_restore",
+                                                      side_effect=m.IsolatedRestoreSQLFailure(
+                                                          "ROLE_MISSING")):
+                                        with contextlib.redirect_stdout(io.StringIO()) as output:
+                                            self.assertEqual(m.main(), 2)
+        content = output.getvalue()
+        self.assertIn("G5_REHEARSAL_ERROR=ISOLATED_RESTORE_SQL_FAILED", content)
+        self.assertIn("G5_RESTORE_FAILURE_CATEGORY=ROLE_MISSING", content)
+        self.assertIn("G5_RESTORE_TEST=NOT_VERIFIED", content)
+        self.assertNotIn("G5_RESTORE_TEST=PASS", content)
+        self.assertNotIn(PASSWORD, content)
+        self.assertNotIn("/encrypted.gpg", content)
+
+    @unittest.skipUnless(os.name == "posix" and shutil.which("gpg"), "POSIX/GPG required")
+    def test_actual_gpg_stream_fake_pg_restore_error_reports_only_category(self):
+        """A simulated Docker failure is classified without leaking raw stderr."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            encrypted = root / "fake_captured.gpg"
+            reader, writer = os.pipe()
+            try:
+                gpg = subprocess.Popen(
+                    [shutil.which("gpg"), "--batch", "--no-tty",
+                     "--pinentry-mode", "loopback", "--no-symkey-cache",
+                     "--passphrase-fd", str(reader), "--symmetric",
+                     "--output", str(encrypted)],
+                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, pass_fds=(reader,),
+                )
+                os.close(reader)
+                reader = None
+                os.write(writer, PASSWORD.encode("ascii") + b"\n")
+                os.close(writer)
+                writer = None
+                gpg.communicate(b"PGDMP" + b"OFFLINE_SYNTHETIC_ONLY" * 12000,
+                                timeout=30)
+                self.assertEqual(gpg.returncode, 0)
+            finally:
+                for fd in (reader, writer):
+                    if fd is not None:
+                        os.close(fd)
+            fake_docker = root / "fake-docker"
+            fake_docker.write_text(
+                "#!/bin/sh\n"
+                "cat >/dev/null\n"
+                "echo 'pg_restore: error: could not execute query: "
+                "ERROR: extension SECRET_PRIVATE_EXT is not available' >&2\n"
+                "echo 'pg_restore: error: Command was: "
+                "CREATE EXTENSION SECRET_PRIVATE_EXT' >&2\n"
+                "exit 1\n", encoding="ascii",
+            )
+            fake_docker.chmod(0o700)
+            with patch.dict(os.environ, {"GNUPGHOME": str(root / "gnupg")}):
+                (root / "gnupg").mkdir(mode=0o700)
+                with contextlib.redirect_stdout(io.StringIO()) as captured:
+                    with self.assertRaises(m.IsolatedRestoreSQLFailure) as error:
+                        m.restore_stream(
+                            [str(fake_docker), "--host=unix:///var/run/docker.sock"],
+                            "g5-restore-1234567890abcdef", encrypted, PASSWORD,
+                        )
+            self.assertEqual(error.exception.category, "EXTENSION_UNAVAILABLE")
+            self.assertEqual(str(error.exception), "ISOLATED_RESTORE_SQL_FAILED")
+            self.assertEqual(captured.getvalue(), "")
+            self.assertNotIn("SECRET_PRIVATE_EXT", repr(error.exception.__dict__))
+
+
 if __name__ == "__main__":
     unittest.main()
