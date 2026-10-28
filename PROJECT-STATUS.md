@@ -1,3 +1,34 @@
+# ATUALIZACAO OPERACIONAL 28/10/2026 — G5 APOSENTADORIA DO SUPABASE ANTIGO (PR #183)
+
+**Decisao mais recente do operador:** objetivo imediato e consolidar a operacao
+do Agente Financeiro, preservar o historico necessario e poder eliminar a
+origem Supabase `nywxpvzhlpqjtcafpdfe`. Manter destino DEMO
+`cenhadslwxgykqtuobgc`. O projeto nao esta pronto para exclusao.
+**Nao confundir a migracao P3 de 200 evidencias com a consolidacao do banco.**
+
+Auditoria 28/10: 200/200 evidencias Shadow com checksum identico, mas existem
+47 tabelas public na origem vs 10 no DEMO, 238 vs 42 runs Produto, 10 vs 1
+usuario, e contextos diferentes (11 versoes legadas em public vs 10 versoes
+DEMO em semantic_context). Nao misturar conhecimentos, benchmarks, SQL ou
+DRE de clientes diferentes. Dois Produtos Vercel Production READY possuem
+DATABASE_URL protegido cujo destino real nao foi certificado. O n8n oficial
+usa credenciais proprias e o ultimo PUT publicado teve drift nao reconciliado.
+Shadow tem DSNs separados para persistencia e contexto.
+
+**Entrega ativa:** PR [#183](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/pull/183)
+unifica inventario, verificacao offline e auditoria local da VPS/n8n sem
+exibir segredos. A auditoria viva so conta depois de executada na VPS:
+nao substituir evidencia por CI verde. Procedimento e bloqueios:
+[docs/operations/SUPABASE-SOURCE-RETIREMENT-GATE.md](docs/operations/SUPABASE-SOURCE-RETIREMENT-GATE.md).
+
+**Proibido por efeito desta etapa:** deletar/desativar qualquer Supabase,
+executar SQL financeira, modificar n8n, Vercel, DSN, credenciais, roles,
+deploy, cutover ou ativar flags. Offical continua n8n+Gemini, Shadow continua
+n8n+LangGraph+Gemini, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`.
+Merge e delete de banco permanecem gates humanos independentes.
+
+---
+
 # ATUALIZAÇÃO OPERACIONAL 27/10/2026 — P3/G1 pós-PUT, não repetir API nem rollout
 
 **Status real comprovado pela VPS:** P1/P2 já foram comprovados nas fases
