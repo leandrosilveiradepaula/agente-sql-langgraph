@@ -204,5 +204,32 @@ class ArchiveSourceSafetyTests(unittest.TestCase):
             self.assertEqual(list(directory.iterdir()), [])
 
 
+    def test_collision_never_deletes_a_preexisting_archive(self):
+        with tempfile.TemporaryDirectory() as td:
+            directory = Path(td)
+            prior = []
+            def collide(src, dst, *, follow_symlinks=False):
+                existing = Path(dst)
+                existing.write_bytes(b"previous-archive-must-survive")
+                prior.append(existing)
+                raise FileExistsError("simulated filename collision")
+            def fake_dump(path, *args):
+                path.write_bytes(b"encrypted-new-contents")
+            with patch.object(m, "private_directory"), patch.object(m, "check_private_file"):
+                with patch.object(m, "tools_available", return_value=True):
+                    with patch.object(m, "recipient_exists", return_value=True):
+                        with patch.object(m.sys.stdin, "isatty", return_value=True):
+                            with patch("builtins.input", return_value="ARCHIVE-SOURCE-READONLY"):
+                                with patch.object(m.getpass, "getpass", return_value="not-used"):
+                                    with patch.object(m, "pg_environment", return_value={}):
+                                        with patch.object(m, "encrypted_capture", side_effect=fake_dump):
+                                            with patch.object(m.os, "link", side_effect=collide):
+                                                with self.assertRaises(FileExistsError):
+                                                    m.capture(PROJECT, directory, FPR)
+            self.assertEqual(len(prior), 1)
+            self.assertEqual(prior[0].read_bytes(), b"previous-archive-must-survive")
+            self.assertEqual(len(list(directory.iterdir())), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
