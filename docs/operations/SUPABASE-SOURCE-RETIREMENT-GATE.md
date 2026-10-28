@@ -79,6 +79,28 @@ Evidência da VPS fornecida pelo operador, duas execuções G5 coerentes:
 - Consulta somente ao catálogo: `public.sql_generation_cache`, `public.ai_agent_data_source_config` e `public.ai_ducklake_agent_rules` existem na SOURCE e **não** no DEMO. O DEMO tem semântica versionada distinta em `semantic_context`. Rebinding indiscriminado dos 9 nós quebraria SQL e arriscaria contaminação de conhecimento entre clientes.
 - O inventário de 68 nós (`docs/audits/n8n-official-68-node-externalization-ledger.md`) marca historicamente 6 nós PostgreSQL legados alcançáveis e 3 inalcançáveis, **sem atestar a topologia publicada atual**.
 
+### Caminho simplificado G5: backup criptografado com senha, sem chave GPG
+
+A pedido do operador (28/10/2026), o script G5 suporta também **criptografia simétrica OpenPGP com senha forte**, sem Kleopatra, sem gerar par de chaves e sem importar arquivo público. Isso **não substitui** a proteção do histórico nem muda a política de consentimento.
+
+- Modo simples: `--capture` sem `--recipient-fingerprint` pede confirmação literal `ARCHIVE-SOURCE-READONLY`, senha de backup gerada em gerenciador de senhas (mínimo 32 caracteres imprimíveis ASCII, máximo 256, sem espaços, duas entradas sem eco) e DSN administrativo da SOURCE (sem eco). A senha do backup **não é** a senha da base de dados e **nunca** deve ser escrita em chat, logs, scripts, argumentos de shell, variável ambiente ou no arquivo de manifesto.
+- Criptografia: `pg_dump` com transação read-only envia os bytes diretamente para `gpg --symmetric` com AES256, S2K SHA512 iterado e passagem da senha por **file descriptor anônimo**, sem texto puro em arquivo intermediário. A senha não é cacheada pelo GPG. O manifesto indica `pg_dump_custom_openpgp_symmetric` e `restore_verified=false` até um ensaio real de restauração independente.
+- **Recuperação exige guardar a senha no gerenciador de senhas fora da VPS** e uma segunda cópia de recuperação controlada. Se a senha for perdida, o backup criptografado não poderá ser restaurado; se a VPS for comprometida antes de copiar o arquivo para um local seguro, a proteção pode ser comprometida. Retirar a cópia criptografada da VPS e testar decriptação/restauração em instância isolada antes de qualquer aposentadoria.
+- O modo antigo com `--recipient-fingerprint <FPR>` continua suportado para quem prefere chave pública GPG e custódia externa da chave privada.
+- O script mantém gates separados: merge de PR **não** autoriza `--capture`, e `--verify` só testa integridade de arquivo criptografado, **não restauração**.
+
+**Depois do merge da implementação**, o operador pode verificar requisitos sem acessar a SOURCE:
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo &&
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main &&
+PATH="/usr/lib/postgresql/17/bin:$PATH" .venv/bin/python \
+  scripts/operations/g5_archive_supabase_source.py \
+  --plan --source-project-ref nywxpvzhlpqjtcafpdfe
+~~~
+
+A captura real só poderá ser orientada/executada após autorização específica de leitura/exportação dos dados legados, com proteção de credenciais e destino externo seguro. **Não** executar `--capture` apenas por causa deste documento.
+
 ### Captura criptografada (gated, não ativada)
 
 O utilitário `scripts/operations/g5_archive_supabase_source.py` tem três modos:
