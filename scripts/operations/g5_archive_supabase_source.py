@@ -3,6 +3,8 @@
 
 Default --plan never connects to a database. --capture is explicit, local,
 requires typed approval, and streams pg_dump directly into OpenPGP encryption.
+By default, use a strong locally typed passphrase instead of managing GPG keys.
+Optionally, --recipient-fingerprint keeps public-key encryption available.
 No plaintext dump, credential, password, host, or SQL is written to disk/logs.
 The archive MUST be test-restored in a separate isolated environment before
 retirement; checksum verification alone does not qualify as restore evidence.
@@ -104,6 +106,22 @@ def recipient_exists(fingerprint: str) -> bool:
     )
 
 
+def validate_archive_passphrase(value: str) -> None:
+    """Strong one-time password supplied locally, never in argv, env or files."""
+    if (not isinstance(value, str) or not 32 <= len(value) <= 256
+            or any(not 33 <= ord(ch) <= 126 for ch in value)):
+        raise ArchiveBlocked("ARCHIVE_PASSPHRASE_INVALID")
+
+
+def prompt_archive_passphrase() -> str:
+    first = getpass.getpass("Senha forte do backup (minimo 32 caracteres; sem eco): ")
+    validate_archive_passphrase(first)
+    confirmation = getpass.getpass("Repita a senha do backup (sem eco): ")
+    if not secrets.compare_digest(first, confirmation):
+        raise ArchiveBlocked("ARCHIVE_PASSPHRASE_MISMATCH")
+    return first
+
+
 def pg_environment(dsn: str, project_ref: str) -> dict[str, str]:
     """No DSN/password in argv; libpq receives narrowly scoped environment."""
     require_verified_tls_dsn(dsn, "postgres", project_ref)
@@ -140,8 +158,13 @@ def pg_environment(dsn: str, project_ref: str) -> dict[str, str]:
     return env
 
 
-def encrypted_capture(path: Path, recipient: str, pg_env: dict[str, str]) -> None:
-    """Two child processes and a pipe: no plaintext intermediate file."""
+def encrypted_capture(path: Path, recipient: str | None,
+                      pg_env: dict[str, str], *, passphrase: str | None = None) -> None:
+    """PG dump -> GPG stream. Secret never enters command line or environment."""
+    if (recipient is None) == (passphrase is None):
+        raise ArchiveBlocked("ARCHIVE_ENCRYPTION_MODE_INVALID")
+    if passphrase is not None:
+        validate_archive_passphrase(passphrase)
     pg_dump = shutil.which("pg_dump")
     gpg = shutil.which("gpg")
     if not pg_dump or not gpg:
@@ -149,6 +172,7 @@ def encrypted_capture(path: Path, recipient: str, pg_env: dict[str, str]) -> Non
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY |
                  getattr(os, "O_NOFOLLOW", 0), 0o600)
     producer = consumer = None
+    secret_read_fd = secret_write_fd = None
     try:
         with os.fdopen(fd, "wb") as output:
             producer = subprocess.Popen(
@@ -161,12 +185,33 @@ def encrypted_capture(path: Path, recipient: str, pg_env: dict[str, str]) -> Non
             gpg_env = {k: os.environ[k] for k in (
                 "HOME", "PATH", "LANG", "GNUPGHOME",
             ) if k in os.environ}
+            if passphrase is None:
+                gpg_command = [
+                    gpg, "--batch", "--no-tty", "--trust-model", "always",
+                    "--recipient", recipient, "--encrypt",
+                ]
+                inherited_fds: tuple[int, ...] = ()
+            else:
+                secret_read_fd, secret_write_fd = os.pipe()
+                gpg_command = [
+                    gpg, "--batch", "--no-tty", "--pinentry-mode", "loopback",
+                    "--no-symkey-cache", "--passphrase-fd", str(secret_read_fd),
+                    "--cipher-algo", "AES256", "--s2k-mode", "3",
+                    "--s2k-digest-algo", "SHA512", "--s2k-count", "65011712",
+                    "--symmetric",
+                ]
+                inherited_fds = (secret_read_fd,)
             consumer = subprocess.Popen(
-                [gpg, "--batch", "--no-tty", "--trust-model", "always",
-                 "--recipient", recipient, "--encrypt"],
-                stdin=producer.stdout, stdout=output,
-                stderr=subprocess.DEVNULL, env=gpg_env,
+                gpg_command, stdin=producer.stdout, stdout=output,
+                stderr=subprocess.DEVNULL, env=gpg_env, pass_fds=inherited_fds,
             )
+            if secret_read_fd is not None:
+                os.close(secret_read_fd)
+                secret_read_fd = None
+            if secret_write_fd is not None:
+                with os.fdopen(secret_write_fd, "wb") as secret_pipe:
+                    secret_write_fd = None
+                    secret_pipe.write(passphrase.encode("ascii") + b"\n")
             assert producer.stdout is not None
             producer.stdout.close()
             try:
@@ -179,25 +224,29 @@ def encrypted_capture(path: Path, recipient: str, pg_env: dict[str, str]) -> Non
             output.flush()
             os.fsync(output.fileno())
     finally:
+        for secret_fd in (secret_read_fd, secret_write_fd):
+            if secret_fd is not None:
+                os.close(secret_fd)
         for child in (consumer, producer):
             if child is not None and child.poll() is None:
                 child.kill()
                 child.wait(timeout=15)
 
 
-def capture(project_ref: str, directory: Path, recipient: str) -> Path:
+def capture(project_ref: str, directory: Path, recipient: str | None = None) -> Path:
     if not PROJECT.fullmatch(project_ref):
         raise ArchiveBlocked("SOURCE_PROJECT_REF_INVALID")
     private_directory(directory, create=True)
     if not tools_available():
         raise ArchiveBlocked("TOOLS_MISSING")
-    if not recipient_exists(recipient):
+    if recipient is not None and not recipient_exists(recipient):
         raise ArchiveBlocked("GPG_RECIPIENT_NOT_FOUND")
     if not sys.stdin.isatty():
         raise ArchiveBlocked("LOCAL_TTY_REQUIRED")
     answer = input("Digite ARCHIVE-SOURCE-READONLY para autorizar backup criptografado: ")
     if answer != "ARCHIVE-SOURCE-READONLY":
         raise ArchiveBlocked("CAPTURE_NOT_AUTHORIZED")
+    passphrase = prompt_archive_passphrase() if recipient is None else None
     dsn = getpass.getpass("DSN admin SOURCE (sem eco): ")
     try:
         env = pg_environment(dsn, project_ref)
@@ -214,7 +263,10 @@ def capture(project_ref: str, directory: Path, recipient: str) -> Path:
     committed = False
     final_created = False
     try:
-        encrypted_capture(temporary, recipient.upper(), env)
+        if passphrase is None:
+            encrypted_capture(temporary, recipient.upper(), env)
+        else:
+            encrypted_capture(temporary, None, env, passphrase=passphrase)
         size, sha = digest_file(temporary)
         if size == 0:
             raise ArchiveBlocked("EMPTY_ARCHIVE")
@@ -231,7 +283,10 @@ def capture(project_ref: str, directory: Path, recipient: str) -> Path:
             "archive_name": filename,
             "encrypted_sha256": sha,
             "encrypted_bytes": size,
-            "format": "pg_dump_custom_openpgp",
+            "format": (
+                "pg_dump_custom_openpgp_symmetric" if passphrase is not None
+                else "pg_dump_custom_openpgp"
+            ),
             "restore_verified": False,
         }
         write_exclusive(
@@ -266,7 +321,9 @@ def verify(project_ref: str, directory: Path, manifest: Path) -> None:
             or not isinstance(name, str) or not ARCHIVE_NAME.fullmatch(name)
             or manifest.name != name + ".manifest.json"
             or not name.startswith("source-" + project_ref + "-" + data["captured_at"] + "-")
-            or data["format"] != "pg_dump_custom_openpgp"
+            or data["format"] not in (
+                "pg_dump_custom_openpgp", "pg_dump_custom_openpgp_symmetric",
+            )
             or data["restore_verified"] is not False
             or not isinstance(data["encrypted_sha256"], str)
             or not re.fullmatch(r"[0-9a-f]{64}", data["encrypted_sha256"])
@@ -284,10 +341,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--plan", action="store_true")
-    mode.add_argument("--capture", action="store_true")
+    mode.add_argument("--capture", action="store_true", help="Backup criptografado com senha forte (padrao), ou chave publica quando informada")
     mode.add_argument("--verify", type=Path, metavar="MANIFEST_PATH")
     parser.add_argument("--source-project-ref", required=True)
-    parser.add_argument("--recipient-fingerprint", default=None)
+    parser.add_argument("--recipient-fingerprint", default=None, help="Opcional: usar chave publica GPG em vez de senha forte")
     parser.add_argument("--archive-dir", type=Path, default=ARCHIVE_DIR)
     args = parser.parse_args()
     print("G5_ARCHIVE_MODE=" + (
@@ -302,8 +359,6 @@ def main() -> int:
             print("G5_RESTORE_TEST=NOT_PERFORMED")
             return 0 if tools_available() else 2
         if args.capture:
-            if not args.recipient_fingerprint:
-                raise ArchiveBlocked("GPG_FINGERPRINT_REQUIRED")
             manifest = capture(
                 args.source_project_ref, args.archive_dir, args.recipient_fingerprint,
             )
