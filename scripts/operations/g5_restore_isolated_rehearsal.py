@@ -211,6 +211,7 @@ def supabase_image_user(prefix: list[str], image_sha: str) -> str:
         "--security-opt=no-new-privileges", "--pids-limit=24",
         "--memory=128m", "--cpus=0.25", "--log-driver=none",
         "--entrypoint=/bin/sh", image_sha, "-ceu",
+        "command -v initdb >/dev/null; command -v postgres >/dev/null; "
         "id -u postgres; id -g postgres",
     ])
     if result.returncode != 0:
@@ -307,6 +308,32 @@ def check_container_isolation(prefix: list[str], name: str, image: str,
                     (info.get("NetworkSettings", {}).get("Ports") or {}).values())
             and all(m.get("Type") == "tmpfs" for m in mounts)
         )
+        if test and runtime_user is not None:
+            # The Supabase image must not sneak its default entrypoint,
+            # init migrations, host logging, or a persisted PGDATA volume
+            # into the scratch-only test. All database files are anonymous.
+            uid, gid = [int(x) for x in runtime_user.split(":")]
+            expected_tmpfs = {
+                t.split(":", 1)[0] for t in supabase_tmpfs(uid, gid)
+            }
+            tmpfs = host.get("Tmpfs") or {}
+            test = (
+                config.get("Entrypoint") == ["/bin/sh"]
+                and config.get("Cmd") == ["-ceu", SUPABASE_POSTGRES_BOOT]
+                and (host.get("LogConfig") or {}).get("Type") == "none"
+                and isinstance(tmpfs, dict)
+                and set(tmpfs) == expected_tmpfs
+                and all(
+                    "uid=" + str(uid) in tmpfs.get(mount, "")
+                    and "gid=" + str(gid) in tmpfs.get(mount, "")
+                    for mount in (
+                        "/var/lib/postgresql/data",
+                        "/var/run/postgresql",
+                    )
+                )
+                and not host.get("VolumesFrom")
+                and not host.get("IpcMode") == "host"
+            )
     except (TypeError, ValueError, KeyError, AttributeError):
         test = False
     if not test:
