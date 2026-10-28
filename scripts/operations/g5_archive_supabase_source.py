@@ -46,7 +46,19 @@ class ArchiveBlocked(RuntimeError):
 
 
 def tools_available() -> bool:
-    return bool(shutil.which("pg_dump") and shutil.which("gpg"))
+    """A PostgreSQL 17+ client is required by the current source database."""
+    dump_binary = shutil.which("pg_dump")
+    if not dump_binary or not shutil.which("gpg"):
+        return False
+    try:
+        result = subprocess.run(
+            [dump_binary, "--version"], capture_output=True,
+            check=False, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    match = re.search(r"pg_dump \\(PostgreSQL\\)\\s+(\\d+)", result.stdout)
+    return result.returncode == 0 and match is not None and int(match.group(1)) >= 17
 
 
 def private_directory(directory: Path, *, create: bool) -> None:
