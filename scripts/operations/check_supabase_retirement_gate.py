@@ -20,22 +20,32 @@ ALLOWED_CONSUMERS = frozenset((
 SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,90}$")
 SAFE_SHA = re.compile(r"^[0-9a-f]{40}$")
 SAFE_TIME = re.compile(r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
-TOP_KEYS = frozenset(("schema_version", "consumers", "archive_verified",
-                       "rollback_verified", "observation_verified",
-                       "retirement_explicitly_approved"))
+# V2 deliberately rejects legacy V1 'archive_verified=True': a restore can
+# succeed without durable off-host custody, tenant isolation or complete
+# managed-platform recovery. Gate labels describe PLATFORM PROCESS only, never
+# client-specific tables, aliases, financial metrics or semantic mappings.
+TOP_KEYS = frozenset(("schema_version", "consumers", "gates"))
 ITEM_KEYS = frozenset(("consumer", "destination", "verified_at",
                         "evidence_sha", "probe_id"))
+GATE_KEYS = frozenset(("gate", "status", "verified_at",
+                       "evidence_sha", "probe_id"))
+REQUIRED_GATES = frozenset((
+    "isolated_archive_restore", "offsite_ciphertext_custody",
+    "managed_platform_scope", "identity_and_access",
+    "tenant_isolation", "semantic_portability",
+    "functional_financial_parity", "final_data_synchronization",
+    "rollback", "observation", "human_retirement_approval",
+))
+SAFE_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 def analyze(data: object) -> tuple[str, list[str]]:
     """Fail closed, including when attestations are missing or malformed."""
-    if not isinstance(data, dict) or set(data) != TOP_KEYS:
+    if not isinstance(data, dict):
         return "BLOCKED", ["INVALID_MANIFEST"]
-    if data.get("schema_version") != 1:
+    if data.get("schema_version") != 2 or type(data.get("schema_version")) is not int:
         return "BLOCKED", ["INVALID_VERSION"]
-    for field in ("archive_verified", "rollback_verified",
-                  "observation_verified", "retirement_explicitly_approved"):
-        if type(data.get(field)) is not bool:
-            return "BLOCKED", ["INVALID_ATTESTATION"]
+    if set(data) != TOP_KEYS:
+        return "BLOCKED", ["INVALID_MANIFEST"]
     consumers = data.get("consumers")
     if not isinstance(consumers, list) or len(consumers) != len(ALLOWED_CONSUMERS):
         return "BLOCKED", ["INCOMPLETE_CONSUMERS"]
@@ -45,7 +55,9 @@ def analyze(data: object) -> tuple[str, list[str]]:
         if not isinstance(item, dict) or set(item) != ITEM_KEYS:
             return "BLOCKED", ["INVALID_CONSUMER_RECORD"]
         name, destination = item["consumer"], item["destination"]
-        if name not in ALLOWED_CONSUMERS or name in seen or destination not in ALLOWED_DESTINATIONS:
+        if (not isinstance(name, str) or not isinstance(destination, str)
+                or name not in ALLOWED_CONSUMERS or name in seen
+                or destination not in ALLOWED_DESTINATIONS):
             return "BLOCKED", ["INVALID_CONSUMER_IDENTITY_OR_DESTINATION"]
         if (not isinstance(item["probe_id"], str) or
             not SAFE_ID.fullmatch(item["probe_id"]) or
@@ -61,10 +73,38 @@ def analyze(data: object) -> tuple[str, list[str]]:
             blockers.append("CONSUMER_DEPENDS_ON_SOURCE_OR_UNKNOWN:" + name)
     if seen != ALLOWED_CONSUMERS:
         return "BLOCKED", ["MISSING_CONSUMER"]
-    for field in ("archive_verified", "rollback_verified", "observation_verified",
-                  "retirement_explicitly_approved"):
-        if data[field] is not True:
-            blockers.append("GATE_NOT_ATTESTED:" + field)
+    gates = data.get("gates")
+    if not isinstance(gates, list) or len(gates) != len(REQUIRED_GATES):
+        return "BLOCKED", ["INCOMPLETE_GATES"]
+    seen_gates: set[str] = set()
+    for record in gates:
+        if not isinstance(record, dict) or set(record) != GATE_KEYS:
+            return "BLOCKED", ["INVALID_GATE_RECORD"]
+        gate = record.get("gate")
+        if not isinstance(gate, str) or gate not in REQUIRED_GATES or gate in seen_gates:
+            return "BLOCKED", ["INVALID_GATE_IDENTITY"]
+        seen_gates.add(gate)
+        status = record.get("status")
+        if status == "PENDING":
+            if any(record[k] is not None for k in (
+                "verified_at", "evidence_sha", "probe_id",
+            )):
+                return "BLOCKED", ["INVALID_PENDING_GATE"]
+            blockers.append("GATE_NOT_ATTESTED:" + gate)
+        elif status == "PASS":
+            if (not isinstance(record.get("verified_at"), str)
+                    or not SAFE_TIME.fullmatch(record["verified_at"])
+                    or not isinstance(record.get("evidence_sha"), str)
+                    or not SAFE_SHA256.fullmatch(record["evidence_sha"])
+                    or not isinstance(record.get("probe_id"), str)
+                    or not SAFE_ID.fullmatch(record["probe_id"])):
+                return "BLOCKED", ["UNVERIFIED_GATE_EVIDENCE:" + gate]
+        else:
+            return "BLOCKED", ["INVALID_GATE_STATUS"]
+    if seen_gates != REQUIRED_GATES:
+        return "BLOCKED", ["MISSING_GATE"]
+    # A real human approval is STILL required before retirement. A manifest
+    # claiming this field without proof is not an operational authorization.
     return ("READY" if not blockers else "BLOCKED"), sorted(blockers)
 
 

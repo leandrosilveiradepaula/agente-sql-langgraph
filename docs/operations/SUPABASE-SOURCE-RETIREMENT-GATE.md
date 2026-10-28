@@ -2,6 +2,78 @@
 
 **Revisão 28/10/2026.** Este documento é um inventário READ-ONLY, não uma migração nem autorização para desativar bancos. Contrato de operação: `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`.
 
+## 28/10/2026 18:24 UTC — G5 restauração real do arquivo SOURCE: PASS, recuperação da plataforma ainda não atestada
+
+**EVIDÊNCIA REAL EXECUTADA na VPS após PR #193 mergeada**, sob autorização humana separada de `--restore`, sem modificar SOURCE/DEMO/n8n:
+
+~~~text
+G5_REHEARSAL_MODE=RESTORE
+G5_IMAGE_CACHED=YES
+G5_IMAGE_ID=sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00
+G5_RESTORED_TABLES=86
+G5_ISOLATED_CONTAINER_CLEANUP=PASS
+G5_RESTORE_TEST=PASS
+G5_SUPABASE_FULL_RECOVERY=NOT_ATTESTED
+~~~
+
+`scripts/operations/g5_restore_isolated_rehearsal.py` validou a origem do backup cifrado, SHA/manifesto, usou GPG→`pg_restore --single-transaction --exit-on-error --no-owner --no-acl` na imagem imutável `supabase/postgres:17.6.1.136`, em contêiner Linux rootless, sem rede, porta ou volumes/binds de host, filesystem RO com `tmpfs` anônimo; e confirmou a remoção do contêiner antes de declarar PASS. **Não provar restauração da plataforma Supabase inteira nem paridade dos dados por causa do status PASS**. O backup foi capturado aproximadamente às 14:50 UTC; a fonte pode mudar após o snapshot. Não houve SQL do arquivo executada sobre a SOURCE ou DEMO.
+
+### Auditoria adicional dos dois Supabases — somente catálogos e contagens agregadas
+
+Consultas SQL SELECT/pg_catalog isoladas nos projetos reais em 28/10/2026, sem retornar linhas financeiras, DSNs, usuários, chaves ou nomes privados:
+
+| Esquema (tabelas regulares ou particionadas) | SOURCE | DEMO |
+|---|---:|---:|
+| `public` | 47 | 10 |
+| `auth` | 27 | 27 |
+| `storage` | 8 | 8 |
+| `vault` | 1 | 1 |
+| Outros não sistema | 3 | 26 |
+| **Total** | **86** | **75** |
+
+**Precisão:** o total de 86 tabelas atualmente catalogadas na SOURCE coincide com o contador `G5_RESTORED_TABLES=86` (a consulta após restauração contou todas as tabelas não sistema, não só `public`). Isso reforça a **cobertura estrutural**. Não demonstra igualdade de contagens de registros, hashes de conteúdo, versão de snapshot ou permissões.
+
+Contagens de dados de serviços gerenciados em **ambos** os projetos: `auth.users=0`, `storage.buckets=0`, `storage.objects=0` e `vault.secrets=0`. Isso reduz o trabalho de **migração de registros** desses serviços, mas não substitui configurações de Auth/JWT, chaves de projeto, funções Edge, RLS, policies nem contratos de acesso. O uso de credenciais por aplicações externas permanece sujeito a auditoria.
+
+Inventário `public`:
+- SOURCE: 47 tabelas, **zero** RLS habilitada, zero policies, 2 funções e 1 trigger não interno; 16 roles PostgreSQL não sistema, 10 com login.
+- DEMO: 10 tabelas, **3** RLS habilitadas, 3 policies, zero funções e triggers em public; 21 roles não sistema, 12 com login.
+
+**Risco obrigatório:** não mover as 47 tabelas públicas legadas e os respectivos grants para o DEMO indiscriminadamente. O contrato de tenant, perfis RBAC e exposição à Data API requer inventário e migração seletiva de SQL/roles. O fato de todas as tabelas `public` SOURCE estarem sem RLS não comprova, sozinho, exposição pública, mas impede supor isolamento por RLS. Também não migrar o conhecimento/benchmarks da SOURCE para o novo gerador sem aprovação; contexto de negócio versionado e portabilidade têm contratos próprios.
+
+### Custódia do arquivo criptografado — próximo gate independente
+
+O arquivo `source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg` e seu manifesto ainda só têm **custódia comprovada na VPS**, não num domínio de falha independente. **Não excluir SOURCE nem considerar G5 concluído para recuperação em desastre enquanto essa custódia externa não for demonstrada**. A senha GPG não deve entrar no chat, num commit, em arquivo público ou seguir junto com o arquivo cifrado.
+
+A ferramenta genérica `scripts/operations/g5_verify_encrypted_copy_readonly.py` valida uma cópia **já transferida por canal aprovado** e os nomes/metadados do manifesto. Exige hash SHA-256 **independente do manifesto original**, aferido na VPS antes da transferência; compara também tamanho/SHA do ciphertext. Só lê arquivos: sem upload, senha, rede, banco, SQL ou restore. No host de origem, obtenha o SHA confiável do manifesto:
+
+~~~bash
+sha256sum /root/.local/share/agente-sql-langgraph/source-archives/source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg.manifest.json
+~~~
+
+**Quando houver um computador/host externo independente, custódia aprovada e arquivos recebidos com acesso privado**, executar nele (exemplos: caminhos da máquina externa; não executar na VPS e fingir backup offsite):
+
+~~~bash
+python3 scripts/operations/g5_verify_encrypted_copy_readonly.py \
+  --source-project-ref nywxpvzhlpqjtcafpdfe \
+  --manifest /CAMINHO-EXTERNO-PRIVADO/source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg.manifest.json \
+  --trusted-manifest-sha256 SHA256_OBTIDO_INDEPENDENTEMENTE_DA_VPS
+~~~
+
+A ferramenta responde `G5_COPY_VERIFICATION=PASS` e `G5_OFFSITE_CUSTODY=NOT_ATTESTED` quando os arquivos conferem, porque **hash não demonstra que são offsite**, nem retenção, disponibilidade de chave e controle de acesso. O operador deverá atestar separadamente o outro domínio de falha, acessos privados, retenção e recuperação da senha antes de marcar o gate como PASS.
+
+### Gate de aposentadoria v2: não confundir restore com cutover
+
+`scripts/operations/check_supabase_retirement_gate.py` passa a requerer manifesto **schema_version 2** com provas separadas e fingerprints de evidência para cada requisito estrutural, além dos seis consumidores monitorados. V1 com `archive_verified=True` isolado é **bloqueado com INVALID_VERSION**, pois não separava recuperação do banco, custódia e plataforma.
+
+Os onze gates v2 são `isolated_archive_restore`, `offsite_ciphertext_custody`, `managed_platform_scope`, `identity_and_access`, `tenant_isolation`, `semantic_portability`, `functional_financial_parity`, `final_data_synchronization`, `rollback`, `observation` e `human_retirement_approval`. Cada um usa status `PASS` ou `PENDING` com SHA-256 e metadados quando PASS; PENDING sempre bloqueia. Uma flag de aprovação em JSON não é autorização humana por si só: deve referir evidência verificável e ainda requerer gate operacional real.
+
+**Hoje apenas `isolated_archive_restore` tem prova de êxito; as demais seguem PENDING ou NÃO ATTESTADAS.** Todos os consumidores Product/n8n/Shadow também precisam provar destino efetivo `DEMO` ou destino externo aprovado. Nenhum valor `SOURCE`/`UNKNOWN` pode resultar READY. A captura G5 é pontual; haverá sincronização final, validação de dados e aprovação de cutover separadas.
+
+Fontes de contrato: https://supabase.com/docs/guides/self-hosting/restore-from-platform (Supabase diferencia roles/schema/data e o raw `pg_dump`), https://supabase.com/docs/guides/database/vault (chave externa) e `docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md`. A PR deste gate **não** faz migração, restauração adicional, alteração de consumidores, n8n, produção ou exclusão.
+
+---
+
 ## Identidades exatas
 
 - Origem (candidata futura à aposentadoria): Supabase **Agente Financeiro**, `nywxpvzhlpqjtcafpdfe`.
