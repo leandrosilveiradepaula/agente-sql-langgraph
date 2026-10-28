@@ -81,3 +81,29 @@ python scripts/operations/check_supabase_retirement_gate.py /caminho/privado/ate
 ```
 
 Não executar um arquivo de exemplo alegando ambiente liberado: um manifesto de CI pode passar estruturalmente, mas isso **não é evidência real da VPS/Vercel/n8n**. `READY` significa atestados declarados completos, não autorização independente para deletar o projeto. A deleção continua sempre manual.
+
+## Auditoria operacional da VPS: classificação sem revelar DSNs
+
+Após merge desta PR e sem modificar qualquer runtime:
+
+```bash
+cd /docker/agente-sql-langgraph-repo
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+
+.venv/bin/python scripts/operations/audit_supabase_runtime_dependencies_readonly.py \
+  --source-project-ref nywxpvzhlpqjtcafpdfe \
+  --demo-project-ref cenhadslwxgykqtuobgc \
+  --shadow-container agente-sql-langgraph-shadow-test-langgraph-shadow-test-1 \
+  --official-workflow-id 2E6mbYg8CEJhGhqs \
+  --inspect-n8n-credentials
+```
+
+A inspeção usa `docker inspect` do **contêiner Shadow realmente em execução**, distingue `LANGGRAPH_SHADOW_DATABASE_DSN` e `CONTEXT_POSTGRES_DSN`, verifica que `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false` e classifica host/usuário do projeto Supabase em `SOURCE`, `DEMO`, `OTHER_SUPABASE_UNVERIFIED` ou `UNKNOWN`.
+
+Para n8n **2.4.8**, o script detecta um único contêiner `n8nio/n8n` ou aceita `--n8n-container` explícito, exporta em memória o workflow informado e extrai **somente IDs das credenciais PostgreSQL referenciadas**. A opção `--inspect-n8n-credentials` exige terminal local interativo e confirmação literal `AUDIT-N8N-LOCAL`: então consulta **apenas** essas credenciais pelo comando CLI `n8n export:credentials --id=... --decrypted`, capturando stdout/stderr em memória sem imprimi-los ou criar arquivos. A extração temporária inclui material sensível em RAM: executar **apenas localmente na VPS confiável**, nunca enviar saída bruta do comando n8n a chats, arquivos, CI ou sistemas de logging. Sem essa opção, não ocorre decriptação e o resultado n8n é `NOT_AUDITED`. Não se solicita API key, token ou senha ao operador.
+
+**Limite importante:** `n8n export:workflow` em n8n 2.4.8 lê o workflow armazenado e **não prova** a versão publicada/efetivamente executada. Mesmo uma classificação `DEMO` depende de reconciliação G1 com `scripts/operations/g1_post_put_audit_readonly.py`, da verificação de aprovações e dos demais consumidores. Uma conexão de outro host/proxy recebe `UNKNOWN`, não é automaticamente declarada livre do banco antigo. O veredito de aposentadoria continua bloqueado.
+
+Compartilhar somente linhas com prefixo `SUPABASE_`. O script nunca imprime DSNs, host, usuário, senha, IDs de credenciais, perguntas, SQL nem payloads financeiros; não grava arquivos nem executa SQL. Não é necessária nova credencial ou migração para executar essa auditoria.
