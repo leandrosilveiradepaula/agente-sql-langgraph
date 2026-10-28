@@ -38,6 +38,11 @@ sharedir="$(pg_config --sharedir)"
 case "$sharedir" in /*) ;; *) exit 2 ;; esac
 for file in "$sharedir"/extension/*.control; do
   [ -f "$file" ] || continue
+  # PostgreSQL has both primary foo.control and secondary foo--version.control.
+  # Only primary files establish the presence of an installable extension.
+  # Version-specific controls may include dots and must not be counted as
+  # separate extension names (PostgreSQL 17 extension packaging contract).
+  case "$file" in *--*.control) continue ;; esac
   basename "$file" .control
 done
 """
@@ -77,14 +82,20 @@ def available_control_files(prefix: list[str], image_sha: str) -> set[str]:
         raise ArchiveBlocked("IMAGE_EXTENSION_PROBE_FAILED") from None
     if result.returncode != 0 or not isinstance(payload, bytes):
         raise ArchiveBlocked("IMAGE_EXTENSION_PROBE_FAILED")
-    if not payload or len(payload) > MAX_OUTPUT_BYTES:
-        raise ArchiveBlocked("IMAGE_EXTENSION_PROBE_INVALID")
+    # Fixed, non-sensitive codes allow diagnosing image layout without
+    # copying raw control filenames, stderr, or paths into operator logs.
+    if not payload:
+        raise ArchiveBlocked("IMAGE_EXTENSION_PROBE_NO_PRIMARY_CONTROLS")
+    if len(payload) > MAX_OUTPUT_BYTES:
+        raise ArchiveBlocked("IMAGE_EXTENSION_PROBE_OUTPUT_LIMIT")
     try:
         names = [x for x in payload.decode("ascii").splitlines() if x]
     except UnicodeError:
-        raise ArchiveBlocked("IMAGE_EXTENSION_PROBE_INVALID") from None
-    if not names or any(not CONTROL_NAME.fullmatch(name) for name in names):
-        raise ArchiveBlocked("IMAGE_EXTENSION_PROBE_INVALID")
+        raise ArchiveBlocked("IMAGE_EXTENSION_PROBE_NON_ASCII") from None
+    if not names:
+        raise ArchiveBlocked("IMAGE_EXTENSION_PROBE_NO_PRIMARY_CONTROLS")
+    if any(not CONTROL_NAME.fullmatch(name) for name in names):
+        raise ArchiveBlocked("IMAGE_EXTENSION_PROBE_UNEXPECTED_PRIMARY_NAME")
     return set(names)
 
 

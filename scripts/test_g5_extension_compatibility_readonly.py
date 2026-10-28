@@ -93,23 +93,86 @@ class ExtensionAuditTests(unittest.TestCase):
         self.assertNotIn("PGPASSWORD", str(argv))
         self.assertNotIn("/root/.local/share", str(argv))
 
-    def test_invalid_control_file_output_fails_without_echoing_names(self):
-        for out in (
-            b"", b"pgcrypto\n PRIVATE_DSN\n",
-            b"pgcrypto\nsecret;id\n",
-            b"pgcrypto\nsome.file\n",
-            b"p" * 32769,
-            b"pgcrypto\n\xff\n",
-        ):
-            with self.subTest(output_length=len(out)):
+    def test_invalid_control_file_output_fails_with_only_safe_codes(self):
+        fixture_errors = (
+            (b"", "IMAGE_EXTENSION_PROBE_NO_PRIMARY_CONTROLS"),
+            (b"pgcrypto\n PRIVATE_DSN\n", "IMAGE_EXTENSION_PROBE_UNEXPECTED_PRIMARY_NAME"),
+            (b"pgcrypto\nsecret;id\n", "IMAGE_EXTENSION_PROBE_UNEXPECTED_PRIMARY_NAME"),
+            (b"pgcrypto\nsome.file\n", "IMAGE_EXTENSION_PROBE_UNEXPECTED_PRIMARY_NAME"),
+            (b"p" * 32769, "IMAGE_EXTENSION_PROBE_OUTPUT_LIMIT"),
+            (b"pgcrypto\n\xff\n", "IMAGE_EXTENSION_PROBE_NON_ASCII"),
+        )
+        for output, expected_code in fixture_errors:
+            with self.subTest(code=expected_code):
                 with patch.object(m, "docker_query", return_value=MagicMock(
-                    returncode=0, stdout=out,
+                    returncode=0, stdout=output,
                 )):
                     with self.assertRaises(m.ArchiveBlocked) as error:
                         m.available_control_files(["docker"], SHA)
-                    self.assertEqual(str(error.exception),
-                                     "IMAGE_EXTENSION_PROBE_INVALID")
+                    self.assertEqual(str(error.exception), expected_code)
                     self.assertNotIn("PRIVATE_DSN", str(error.exception))
+                    self.assertNotIn("secret;id", str(error.exception))
+
+    @unittest.skipUnless(os.name == "posix" and shutil.which("sh"),
+                         "Linux POSIX shell probe only")
+    def test_real_shell_probe_skips_version_specific_extension_control_files(self):
+        """Postgres supports foo--version.control; they are not extension names."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            bindir = root / "bin"
+            bindir.mkdir()
+            fake_pg_config = bindir / "pg_config"
+            fake_pg_config.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = \"--sharedir\" ]; then\n"
+                "  printf '%s\\n' \"$G5_SYNTHETIC_SHARE_DIR\"\n"
+                "else\n"
+                "  exit 2\n"
+                "fi\n",
+                encoding="ascii",
+            )
+            fake_pg_config.chmod(0o700)
+            extension_dir = root / "extension"
+            extension_dir.mkdir()
+            for name in (
+                "pgcrypto.control",
+                "supabase_vault.control",
+                "uuid-ossp.control",
+                "postgis.control",
+                "postgis--3.4.2.control",
+                "postgis--3.4.2-devel.control",
+            ):
+                (extension_dir / name).write_text(
+                    "# synthetic metadata only\n", encoding="ascii",
+                )
+            env = dict(os.environ)
+            env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+            env["G5_SYNTHETIC_SHARE_DIR"] = str(root)
+            probe = subprocess.run(
+                ["sh", "-c", m.CONTROL_PROBE], env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                check=False, timeout=10,
+            )
+            self.assertEqual(probe.returncode, 0)
+            lines = set(probe.stdout.decode("ascii").splitlines())
+            self.assertEqual(lines, {
+                "pgcrypto", "supabase_vault", "uuid-ossp", "postgis",
+            })
+            self.assertFalse(any("--" in name or "." in name for name in lines))
+            with patch.object(m, "docker_query", return_value=MagicMock(
+                returncode=0, stdout=probe.stdout,
+            )):
+                self.assertEqual(m.available_control_files(["docker"], SHA), lines)
+
+    def test_image_probe_fails_closed_if_no_primary_control_files_remain(self):
+        with patch.object(m, "docker_query", return_value=MagicMock(
+            returncode=0, stdout=b"",
+        )):
+            with self.assertRaises(m.ArchiveBlocked) as error:
+                m.available_control_files(["docker"], SHA)
+            self.assertEqual(
+                str(error.exception), "IMAGE_EXTENSION_PROBE_NO_PRIMARY_CONTROLS",
+            )
 
     def test_missing_extensions_is_generic_not_business_hardcode(self):
         requirements = {"supabase_vault", "pgcrypto", "uuid-ossp"}
