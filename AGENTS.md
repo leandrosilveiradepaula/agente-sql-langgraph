@@ -1,3 +1,13 @@
+# 28/10/2026 — G5 SOURCE BACKUP CRIPTOGRAFADO REAL CAPTURADO, RESTORE AINDA NAO VERIFICADO
+
+**Evidencia VPS confirmada pelo operador:** G5 exportou PostgreSQL SOURCE `nywxpvzhlpqjtcafpdfe` com autorizacao read-only, `G5_ARCHIVE_RESULT=ENCRYPTED_CAPTURED`, `G5_ARCHIVE_INTEGRITY=ENCRYPTED_DIGEST_PASS`; manifesto em caminho root-only `/root/.local/share/agente-sql-langgraph/source-archives/source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg.manifest.json`. **NAO declarar recuperacao provada:** `G5_ARCHIVE_RESTORE=NOT_VERIFIED`; senha armazenada pelo operador fora do chat. Nunca copiar arquivo cifrado para GitHub.
+
+**Nova entrega proposta:** fluxo offline de inspecao com senha (decriptacao GPG em pipe anonimo e `pg_restore --list` somente em stdin, sem banco, gravacao de plaintext, DSN ou log de nomes). Objetivo e atestar senha de recuperacao e legibilidade do TOC; NAO equivale a restauracao integral. A prova de restore isolado precisa de autorizacao propria. Preservar copia cifrada fora da VPS, SHA-256, manifesto e senha sob custodia separada.
+
+**Bloqueios SOURCE ainda reais:** nove referencias PostgreSQL legadas no n8n oficial, persistencia Shadow LangGraph apontando SOURCE, Vercel DATABASE_URL dos dois Produtos ainda sem destino confirmado, identidade tenant/membership real indisponivel, hardcodes legados nao externalizados, paridade financeira/cutover nao atestados. NAO alterar n8n, DEMO, SOURCE, roles, credenciais, DSNs, Vercel, producao ou SQL financeira em Shadow por causa do backup. `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. Ver docs/operations/SUPABASE-SOURCE-RETIREMENT-GATE.md e issue #155.
+
+---
+
 # 28/10/2026 — G5: PRIMEIRA CAPTURA AUTORIZADA FALHOU, SOURCE AINDA ATIVA
 
 Operador autorizou exportacao SOMENTE LEITURA de SOURCE `nywxpvzhlpqjtcafpdfe` para backup privado com senha. Na VPS, `--capture` retornou `G5_ARCHIVE_RESULT=BLOCKED`, `G5_ARCHIVE_ERROR=ENCRYPTED_DUMP_FAILED`, `G5_ARCHIVE_RESTORE=NOT_VERIFIED`; nenhum backup completo foi comprovado. O stderr estava descartado e o codigo antigo misturava falha pg_dump e GPG, portanto a causa real NAO e conhecida. A sessao SSH encerrou depois do erro; nao afirmar que banco caiu. Consulta independente de metadados confirmou PostgreSQL SOURCE 17.6 respondendo.
