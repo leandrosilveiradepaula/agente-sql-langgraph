@@ -212,6 +212,7 @@ def capture(project_ref: str, directory: Path, recipient: str) -> Path:
     temporary = directory / (filename + ".partial")
     manifest = directory / (filename + ".manifest.json")
     committed = False
+    final_created = False
     try:
         encrypted_capture(temporary, recipient.upper(), env)
         size, sha = digest_file(temporary)
@@ -220,6 +221,7 @@ def capture(project_ref: str, directory: Path, recipient: str) -> Path:
         # Hard link fails if the final path exists, even in the unlikely event
         # of a name collision; no overwrite of previous retention evidence.
         os.link(temporary, final, follow_symlinks=False)
+        final_created = True
         temporary.unlink()
         check_private_file(final)
         receipt = {
@@ -240,7 +242,7 @@ def capture(project_ref: str, directory: Path, recipient: str) -> Path:
         return manifest
     finally:
         temporary.unlink(missing_ok=True)
-        if not committed:
+        if not committed and final_created:
             final.unlink(missing_ok=True)
 
 
@@ -263,6 +265,7 @@ def verify(project_ref: str, directory: Path, manifest: Path) -> None:
     if (data["version"] != 1 or data["project_ref"] != project_ref
             or not isinstance(name, str) or not ARCHIVE_NAME.fullmatch(name)
             or manifest.name != name + ".manifest.json"
+            or not name.startswith("source-" + project_ref + "-" + data["captured_at"] + "-")
             or data["format"] != "pg_dump_custom_openpgp"
             or data["restore_verified"] is not False
             or not isinstance(data["encrypted_sha256"], str)
