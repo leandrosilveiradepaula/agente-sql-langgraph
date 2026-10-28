@@ -69,6 +69,41 @@ Critérios **obrigatórios** para declarar `READY_TO_RETIRE_SOURCE`:
 - [PR Produto Demo #33](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/33): tabelas de organização privadas.
 - [Roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155): rastro operacional e decisões.
 
+## G5 atualizado — dependências reais e preparação do arquivo da origem (28/10/2026)
+
+Evidência da VPS fornecida pelo operador, duas execuções G5 coerentes:
+
+- Workflow oficial armazenado: **68 nós, duas credenciais PostgreSQL**. A credencial SOURCE aparece em **9 nós não desabilitados**; a DEMO aparece em **2 nós**. Os dois bindings G1 são DEMO; não repetir PUT/recover.
+- O Shadow n8n contém 7 nós e **zero credenciais PostgreSQL diretas**; porém o runtime LangGraph foi atestado com `LANGGRAPH_SHADOW_DATABASE_DSN=SOURCE`, `CONTEXT_POSTGRES_DSN=DEMO` e flag de execução SQL real desligada.
+- O G5 não prova publicação sozinho. G1 atestou `activeVersionId` compatível, 2 vínculos G1 novos, zero drift nos nós, mas `settings.callerPolicy` adicionado ainda aparece como `SETTINGS_DRIFT_REVIEW` literal. A equivalência efetiva foi verificada em auditoria G1 separada, conforme issue #155. Não declarar `STRICT_PASS` textual.
+- Consulta somente ao catálogo: `public.sql_generation_cache`, `public.ai_agent_data_source_config` e `public.ai_ducklake_agent_rules` existem na SOURCE e **não** no DEMO. O DEMO tem semântica versionada distinta em `semantic_context`. Rebinding indiscriminado dos 9 nós quebraria SQL e arriscaria contaminação de conhecimento entre clientes.
+- O inventário de 68 nós (`docs/audits/n8n-official-68-node-externalization-ledger.md`) marca historicamente 6 nós PostgreSQL legados alcançáveis e 3 inalcançáveis, **sem atestar a topologia publicada atual**.
+
+### Captura criptografada (gated, não ativada)
+
+O utilitário `scripts/operations/g5_archive_supabase_source.py` tem três modos:
+
+- `--plan`: apenas disponibilidade local de `pg_dump` e `gpg`, **sem conexão**.
+- `--capture`: exige autorização **separada** do operador, TTY, confirmação `ARCHIVE-SOURCE-READONLY`, DSN admin SOURCE por `getpass`, identidade de projeto estrita e TLS `verify-full`. `pg_dump` executa com `default_transaction_read_only=on`; os bytes viajam em pipe diretamente ao `gpg` com destinatário OpenPGP de fingerprint completo, sem arquivo de dump plaintext. Guarda somente `.dump.gpg` e manifesto SHA-256 em diretório root-only 0700/0600.
+- `--verify`: verifica integridade dos bytes **criptografados** e a estrutura do recibo; **não descriptografa nem atesta restauro**. O manifesto marca `restore_verified=false`.
+
+Após merge da PR, testar **somente o planejamento**, sem expor credenciais:
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo &&
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main &&
+.venv/bin/python scripts/operations/g5_archive_supabase_source.py \
+  --plan --source-project-ref nywxpvzhlpqjtcafpdfe
+~~~
+
+O `--capture` **não é autorizado pelo merge**. Antes dele, operador deve aprovar a exportação de dados históricos e definir custodiante, fingerprint de chave pública, espaço, destino externo seguro e retenção. O manifesto e o dump criptografado **nunca** vão para o GitHub/chat. Fazer ensaio de restauro em banco **isolado/descartável** e validar dados/roles, antes de considerar a origem removível. **Nunca restaurar diretamente no DEMO**, porque esquemas e tenants diferem. Um `pg_dump` lógico não captura objetos físicos do Storage, Edge Functions, segredos, credenciais, configurações de Auth e todas as roles; inventariar também esses recursos e sua custódia.
+
+### P3 — identidade autorizada antes de criar login Shadow
+
+O `p3_shadow_tenant_login.py` passa a exigir no preflight: `organization_id` como UUID canônico, organização ativa em `public.ai_agent_organizations` e pelo menos uma associação ativa em `public.ai_agent_user_organizations` com usuário ativo em `public.ai_agent_users`. É contrato **estrutural de identidade do Produto**, sem qualquer regra financeira. Um UUID arbitrário não pode criar role/binding de banco; o script não cria organizações, memberships, usuários, contexts ou privilégios automaticamente e não faz cutover de DSN.
+
+**Prova viva 28/10:** DEMO tem **zero organizações e zero memberships**. Preflight P3 deve bloquear até uma organização real ser autorizada/cadastrada no Produto; não inferir tenant de registros históricos. Após isso, confirmar isolamento RLS e autenticação real com o login antes de qualquer mudança de `LANGGRAPH_SHADOW_DATABASE_DSN`. A mudança de DSN, a SQL financeira real e a exclusão da SOURCE ainda exigem gates humanos próprios.
+
 ## Gate automatizado sem contato com infraestrutura
 
 `scripts/operations/check_supabase_retirement_gate.py` avalia apenas **atestações sanitizadas**. Cada registro de consumidor requer `consumer`, `destination` (`DEMO`, `OTHER`, `SOURCE`, `UNKNOWN`), `verified_at` (UTC), `probe_id` genérico e `evidence_sha` SHA-1 hexadecimal de 40 caracteres do recibo técnico (não senha/DSN). São obrigatórios os seis consumidores conhecidos: `product_primary`, `product_demo`, `n8n_official`, `n8n_shadow`, `langgraph_shadow_evidence`, `langgraph_semantic_context`.
