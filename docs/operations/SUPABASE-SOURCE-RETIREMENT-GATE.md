@@ -69,6 +69,37 @@ Critérios **obrigatórios** para declarar `READY_TO_RETIRE_SOURCE`:
 - [PR Produto Demo #33](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/33): tabelas de organização privadas.
 - [Roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155): rastro operacional e decisões.
 
+## 28/10/2026 — backup SOURCE capturado e etapa de leitura de recuperação
+
+**Evidência operacional na VPS fornecida pelo operador:** após a correção da PR #187 e autorização expressa para exportação read-only, o G5 concluiu a captura da origem `nywxpvzhlpqjtcafpdfe`. Resultado **real**: `G5_ARCHIVE_RESULT=ENCRYPTED_CAPTURED`, `G5_ARCHIVE_INTEGRITY=ENCRYPTED_DIGEST_PASS`, `G5_ARCHIVE_RESTORE=NOT_VERIFIED`. Manifesto privado (NÃO enviar arquivo ao GitHub):
+
+`/root/.local/share/agente-sql-langgraph/source-archives/source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg.manifest.json`
+
+**Isso prova apenas:** a captura criptografada retornou sucesso e o SHA-256 cifrado bateu com o recibo. **Não prova:** que a senha recupera os dados, que `pg_restore` reconhece o arquivo, que houve restore real, que roles/ACL, Storage/Edge/Auth/secrets estejam recuperáveis, que os consumidores saíram da SOURCE ou que a SOURCE possa ser apagada. Não alterar `restore_verified=false` no manifesto original.
+
+### Leitura da cópia criptografada, sem restauração ou acesso a banco
+
+`scripts/operations/g5_inspect_encrypted_source.py` adiciona etapa **somente leitura e local**, sem qualquer DSN nem conexão PostgreSQL. Primeiro verifica o SHA-256, projeto e manifesto root-only. Solicita a senha fora do eco de terminal, descriptografa via GPG a partir do arquivo já existente e envia o fluxo por **pipes anônimos** ao `pg_restore --list` (cliente major >=17) para contar itens do TOC, sem listar nomes de objetos nem gravar dump plaintext. Consome todo o fluxo GPG para verificar conclusão da decriptação, mesmo se o `pg_restore -l` parar após o TOC. GPG e pg_restore são chamados sem credenciais PG e sem `--dbname`; todas as mensagens stderr são suprimidas e não logadas. Executar depois de merge humano e CI verde:
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo || exit 1
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main || exit 1
+PATH="/usr/lib/postgresql/17/bin:$PATH" \
+  .venv/bin/python scripts/operations/g5_inspect_encrypted_source.py \
+  --source-project-ref nywxpvzhlpqjtcafpdfe \
+  --manifest /root/.local/share/agente-sql-langgraph/source-archives/source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg.manifest.json
+~~~
+
+Solicita **somente a senha do backup**, guardada pelo operador (não o DSN). Saída esperada: `G5_ARCHIVE_DECRYPTION=PASS`, `G5_PG_RESTORE_TOC=PASS`, contagem agregada e `G5_RESTORE_TEST=NOT_PERFORMED`. Não executar `pg_restore -d`, `gpg --output` para plaintext ou `docker run` com a cópia real por implicação. O ensaio efetivo de restauração de dados financeiros históricos em PostgreSQL descartável, isolado, precisa de autorização operacional própria, condições de segurança, revisão de funções/triggers `SECURITY DEFINER` do backup e confirmação de não conexão ao DEMO/SOURCE.
+
+### Cópia externa, custódia e limites do G5
+
+A captura ainda está somente na VPS: **fazer cópia cifrada externa usando canal SFTP seguro** (por exemplo WinSCP) de ambos o `.dump.gpg` e o `.dump.gpg.manifest.json` para armazenamento privado separado da VPS, e verificar SHA-256 da cópia. Senha de backup em gerenciador de segredos **fora da VPS** e recuperação custodiada separadamente. Não copiar dump descriptografado nem colocar os arquivos no repositório, n8n, Vercel, Supabase Storage público, CI, chat ou logs. Esta etapa ainda não atesta que a cópia externa foi feita.
+
+A archive `pg_dump --no-owner --no-acl` não contém todos os metadados, roles e grants do projeto Supabase e não inclui outros componentes externos; uma prova TOC é **necessária, porém insuficiente** para desligar SOURCE. Portabilidade e hardcodes dos nove nós PostgreSQL legados n8n e migração da persistência LangGraph/Produto continuam gates independentes, sem SQL financeira executada.
+
+---
+
 ## Incidente G5 — primeira exportação autorizada bloqueada (28/10/2026)
 
 O operador autorizou explicitamente a **exportação somente leitura** da SOURCE `nywxpvzhlpqjtcafpdfe`, não a importação nem a exclusão. Na VPS, depois da PR #186 mergeada, o comando `--capture` chegou à solicitação de senha local do backup e DSN SOURCE; terminou com:
