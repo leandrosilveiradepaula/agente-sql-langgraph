@@ -1,3 +1,13 @@
+# 28/10/2026 — G5: BACKUP REAL LEGIVEL, RESTAURACAO ISOLADA AINDA NAO EXECUTADA
+
+**Ultima evidencia operador VPS:** `G5_ARCHIVE_DECRYPTION=PASS`, `G5_PG_RESTORE_TOC=PASS`, `G5_PG_RESTORE_TOC_ENTRIES=811`, `G5_DECRYPTED_ARCHIVE_BYTES=25905751`, `G5_RESTORE_TEST=NOT_PERFORMED` no arquivo criptografado SOURCE `nywxpvzhlpqjtcafpdfe` capturado e SHA-256 PASS. O teste confirmou a senha e leitura integral do catalogo, mas **NENHUMA SQL do arquivo foi restaurada em qualquer PostgreSQL**. PR #188 mergeada no GitHub, SHA `4f189574a92816d9693a4a3c4557eb0a60beb643`.
+
+**Proxima entrega em codigo (sem executar restauracao):** `scripts/operations/g5_restore_isolated_rehearsal.py` usa Docker PostgreSQL 17 ja em cache, sem rede/portas, sem bind/volumes de host, rootfs read-only, tmpfs, menor privilegio e limite de recursos. `--plan` verifica apenas readiness. `--restore` exige **nova autorizacao explicita do operador** e confirmacao tipada, senha offline e destrucao verificada do container; falhar em qualquer extensao/grant/DDL interrompe e NUNCA declara restauro concluido. Ver `docs/operations/SUPABASE-SOURCE-RETIREMENT-GATE.md`. O script nunca aponta para SOURCE/DEMO ou executa SQL financeira real fora da sandbox.
+
+**Persistem como bloqueios:** copia segura do arquivo cifrado fora da VPS ainda nao atestada, recuperacao logica integral/roles/Auth/Storage/Edge ainda nao homologada, 9 referencias SOURCE no n8n oficial, Shadow LangGraph DSN SOURCE, Vercel databases nao atestados, tenant real sem membership e cutover/hardcodes ainda nao certificados. **Nao** realizar restore, mudanca n8n/Supabase/DSN/roles, SQL financeira em Shadow, cutover ou remocao SOURCE implicitamente. `OFFICIAL=n8n`, `SHADOW=LangGraph` e `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`.
+
+---
+
 # 28/10/2026 — G5 SOURCE BACKUP CRIPTOGRAFADO REAL CAPTURADO, RESTORE AINDA NAO VERIFICADO
 
 **Evidencia VPS confirmada pelo operador:** G5 exportou PostgreSQL SOURCE `nywxpvzhlpqjtcafpdfe` com autorizacao read-only, `G5_ARCHIVE_RESULT=ENCRYPTED_CAPTURED`, `G5_ARCHIVE_INTEGRITY=ENCRYPTED_DIGEST_PASS`; manifesto em caminho root-only `/root/.local/share/agente-sql-langgraph/source-archives/source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg.manifest.json`. **NAO declarar recuperacao provada:** `G5_ARCHIVE_RESTORE=NOT_VERIFIED`; senha armazenada pelo operador fora do chat. Nunca copiar arquivo cifrado para GitHub.

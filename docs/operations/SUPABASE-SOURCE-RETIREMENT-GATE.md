@@ -69,6 +69,41 @@ Critérios **obrigatórios** para declarar `READY_TO_RETIRE_SOURCE`:
 - [PR Produto Demo #33](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/33): tabelas de organização privadas.
 - [Roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155): rastro operacional e decisões.
 
+## G5 — Inspeção real concluída e restauração isolada preparada (28/10/2026)
+
+**Comprovado na VPS pelo operador, após merge da PR #188:** o arquivo criptografado já gerado com manifesto privado `source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg.manifest.json` foi inspecionado sem contato com DB. Resultado: `G5_ARCHIVE_DECRYPTION=PASS`, `G5_PG_RESTORE_TOC=PASS`, `G5_PG_RESTORE_TOC_ENTRIES=811`, `G5_DECRYPTED_ARCHIVE_BYTES=25905751`, `G5_RESTORE_TEST=NOT_PERFORMED`. Foi uma leitura integral da stream GPG, não execução dos 811 itens; banco SOURCE/DEMO intocados.
+
+### Novo contrato de ensaio de restauração (ainda não executado)
+
+`scripts/operations/g5_restore_isolated_rehearsal.py` prepara um **ensaio real e explicitamente autorizado**, importando a stream descriptografada em uma instância PostgreSQL 17 **temporária, dentro de Docker local**. O código não tem acesso a DSNs/credenciais de SOURCE ou DEMO, não altera n8n e não faz cutover. Ele **não é ativado pelo merge** e tem novo gate humano `RESTORE-G5-ISOLATED`.
+
+**Segurança estrutural, fail closed:**
+- `--plan`: valida SHA-256/manifesto root-only, verifica socket Docker local e que a imagem oficial PostgreSQL 17 **já está no cache**; retorna código de readiness sem iniciar contêiner, sem pedir senha e sem conectar banco. Não faz `docker pull` automático.
+- `--restore`: apenas depois de aprovação específica, solicita no terminal confirmação literal e senha já custodiada pelo operador. É executado com root local porque o socket Docker tem privilégios; o contêiner roda sob UID 999:999 e tem `--network=none`, sem portas publicadas, `--cap-drop=ALL`, `--security-opt=no-new-privileges`, filesystem raiz read-only, PGDATA/socket/tmp em `tmpfs`, limites de CPU/memória/processos e **nenhum mount do host, volume persistente, credencial, senha ou DSN**. O comando verifica via `docker inspect` todas essas condições antes da importação e fixa o identificador SHA256 da imagem.
+- Fluxo: `gpg --decrypt` (senha via FD anônimo) → pipe somente em memória → `docker exec -i ... pg_restore -d postgres --single-transaction --exit-on-error --no-owner --no-acl` em conexão local dentro do contêiner. **Não restaura no Supabase.** stderr de ambos é descartado (jamais enviar SQL/nomes/valores para chat/CI). Erro em qualquer item interrompe, retorna `ISOLATED_RESTORE_SQL_FAILED`; não há regras de omissão ou desativação casuística de validação.
+- Se todas as instruções forem importadas com código zero, consulta apenas agregação de quantidade de tabelas do catálogo na instância descartável; em seguida força exclusão do contêiner, valida a limpeza e **só então** reporta `G5_RESTORE_TEST=PASS`. Não publica resultados financeiros.
+- O arquivo real e manifesto permanecem na VPS; nenhuma cópia plaintext é gravada. A restrição `--log-driver=none` desativa logs Docker do contêiner, e o cliente não imprime SQL, DSN, nomes de tabela ou dados da importação.
+- Pode falhar no PostgreSQL padrão, principalmente se o backup exigir extensões/roles gerenciadas do Supabase, tipos ou serviços ausentes. **Nesse caso deve continuar bloqueado**: sucesso parcial nunca equivale a restauração certificada. Mesmo `PASS` em PostgreSQL padrão prova apenas restauração lógica nesse contêiner, não recuperação de Auth/Storage/Edge Functions/roles/ACL nem paridade financeira.
+
+### Comando de plano, após CI e merge da implementação
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo || exit 1
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main || exit 1
+.venv/bin/python scripts/operations/g5_restore_isolated_rehearsal.py \
+  --plan \
+  --source-project-ref nywxpvzhlpqjtcafpdfe \
+  --manifest /root/.local/share/agente-sql-langgraph/source-archives/source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg.manifest.json
+~~~
+
+O plano **não pede senha** e pode devolver `POSTGRES17_IMAGE_NOT_CACHED`. Nesse caso o operador deve decidir se autoriza obter a imagem oficial após conferência de versão/digest; o script não baixa imagem sozinho. **Não executar `--restore` sem autorização específica posterior à leitura dos riscos.** O simples `--plan` e qualquer resultado de CI não significam que o teste real de restauração tenha ocorrido.
+
+### Cópia externa ainda obrigatória
+
+Copiar `.dump.gpg` e `.manifest.json` através de SFTP privado para repositório de backups fora da VPS, verificar hash SHA-256 na cópia e manter a senha em custódia separada. **Ainda não há prova dessa cópia.** O snapshot lógico `pg_dump --no-owner --no-acl` não substitui exportação integral de grants, roles, objetos Storage, Auth e configurações Supabase. O fechamento do G5 exige comprovante de restauração isolada **e** inventário de componentes não cobertos. Nunca aposentar SOURCE antes de comprovar consumidores independentes, rollback, isolamento e aprovação humana própria.
+
+---
+
 ## 28/10/2026 — backup SOURCE capturado e etapa de leitura de recuperação
 
 **Evidência operacional na VPS fornecida pelo operador:** após a correção da PR #187 e autorização expressa para exportação read-only, o G5 concluiu a captura da origem `nywxpvzhlpqjtcafpdfe`. Resultado **real**: `G5_ARCHIVE_RESULT=ENCRYPTED_CAPTURED`, `G5_ARCHIVE_INTEGRITY=ENCRYPTED_DIGEST_PASS`, `G5_ARCHIVE_RESTORE=NOT_VERIFIED`. Manifesto privado (NÃO enviar arquivo ao GitHub):

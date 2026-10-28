@@ -48,6 +48,7 @@ jobs:
           scripts.test_supabase_runtime_dependency_audit
           scripts.test_g5_archive_supabase_source
           scripts.test_g5_inspect_encrypted_source
+          scripts.test_g5_restore_isolated_rehearsal
           scripts.test_p3_shadow_tenant_login
           -v
 
@@ -104,7 +105,7 @@ jobs:
           bash -n scripts/n8n/probe_parallel_shadow_prerequisites_readonly.sh
           bash -n scripts/n8n/audit_shadow_evidence_read_bindings_readonly.sh
       - name: Verify G5 passphrase file-descriptor handling on Linux (offline)
-        run: python3 -m unittest scripts.test_g5_archive_supabase_source scripts.test_g5_inspect_encrypted_source -v
+        run: python3 -m unittest scripts.test_g5_archive_supabase_source scripts.test_g5_inspect_encrypted_source scripts.test_g5_restore_isolated_rehearsal -v
       - name: Reproduce restrictive checkout permissions
         run: |
           chmod 700 app/test_runtime
