@@ -152,7 +152,7 @@ class G5IsolatedRehearsalTests(unittest.TestCase):
             if args[:2] == ["container", "inspect"]:
                 return MagicMock(returncode=1, stdout=b"")
             return response
-        with patch.object(m.os, "geteuid", return_value=0):
+        with patch.object(m.os, "geteuid", return_value=0, create=True):
             with patch.object(m, "docker_query", side_effect=docker_fake):
                 with patch.object(m, "check_container_isolation"):
                     with patch.object(m, "restore_stream"):
@@ -171,7 +171,7 @@ class G5IsolatedRehearsalTests(unittest.TestCase):
                                 self.assertEqual(str(err.exception), "ISOLATED_CLEANUP_UNVERIFIED")
 
     def test_sql_restore_failure_is_not_concealed_or_retried(self):
-        with patch.object(m.os, "geteuid", return_value=0):
+        with patch.object(m.os, "geteuid", return_value=0, create=True):
             with patch.object(m, "docker_query", return_value=MagicMock(
                     returncode=0, stdout=b"postgres (PostgreSQL) 17.11")):
                 with patch.object(m, "check_container_isolation"):
