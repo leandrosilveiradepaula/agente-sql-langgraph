@@ -524,9 +524,17 @@ class G5IsolatedRehearsalTests(unittest.TestCase):
                     "UsernsMode": "", "PidMode": "",
                     "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges"],
                     "Binds": None, "Devices": [], "PortBindings": {},
+                    "LogConfig": {"Type": "none"},
+                    "Tmpfs": {
+                        "/var/lib/postgresql/data": "rw,nosuid,nodev,size=768m,uid=70,gid=71,mode=0700",
+                        "/var/run/postgresql": "rw,nosuid,nodev,size=16m,uid=70,gid=71,mode=0770",
+                        "/tmp": "rw,nosuid,nodev,noexec,size=64m,mode=1777",
+                    },
                 },
                 "Config": {
                     "User": user,
+                    "Entrypoint": ["/bin/sh"],
+                    "Cmd": ["-ceu", m.SUPABASE_POSTGRES_BOOT],
                     "Labels": {"agente-sql-langgraph.g5": "isolated-rehearsal"},
                 },
                 "Mounts": [
@@ -542,6 +550,15 @@ class G5IsolatedRehearsalTests(unittest.TestCase):
                 ["docker"], "g5-restore-1234567890abcdef", IMAGE,
                 runtime_user="70:71",
             ))
+        with self.assertRaises(m.ArchiveBlocked):
+            bad = snapshot()
+            bad["HostConfig"]["LogConfig"]["Type"] = "json-file"
+            with patch.object(m, "docker_query", return_value=MagicMock(
+                    returncode=0, stdout=json.dumps(bad).encode())):
+                m.check_container_isolation(
+                    ["docker"], "g5-restore-1234567890abcdef", IMAGE,
+                    runtime_user="70:71",
+                )
         for bad in (snapshot(user="root"), snapshot(network="bridge")):
             with patch.object(m, "docker_query", return_value=MagicMock(
                     returncode=0, stdout=json.dumps(bad).encode())):
