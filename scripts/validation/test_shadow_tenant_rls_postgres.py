@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 
 import psycopg
 from psycopg.conninfo import make_conninfo
+from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from app.infrastructure.persistence.postgres_shadow_evidence_repository import (
@@ -104,7 +105,7 @@ def prepare_roles_and_schema(dsn: str) -> None:
         for role, password in (
             (ROLE_A, PASS_A), (ROLE_B, PASS_B), (ROLE_UNKNOWN, PASS_UNKNOWN)
         ):
-            admin.execute(f"CREATE ROLE {role} LOGIN INHERIT PASSWORD %s", (password,))
+            admin.execute(sql.SQL("CREATE ROLE {} LOGIN INHERIT PASSWORD {}").format(sql.Identifier(role), sql.Literal(password)))
             admin.execute(f"GRANT langgraph_shadow TO {role} WITH INHERIT TRUE, SET FALSE")
         admin.execute(
             "INSERT INTO langgraph_internal.shadow_role_tenants "
