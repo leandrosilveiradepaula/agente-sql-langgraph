@@ -79,12 +79,34 @@ Evidência da VPS fornecida pelo operador, duas execuções G5 coerentes:
 - Consulta somente ao catálogo: `public.sql_generation_cache`, `public.ai_agent_data_source_config` e `public.ai_ducklake_agent_rules` existem na SOURCE e **não** no DEMO. O DEMO tem semântica versionada distinta em `semantic_context`. Rebinding indiscriminado dos 9 nós quebraria SQL e arriscaria contaminação de conhecimento entre clientes.
 - O inventário de 68 nós (`docs/audits/n8n-official-68-node-externalization-ledger.md`) marca historicamente 6 nós PostgreSQL legados alcançáveis e 3 inalcançáveis, **sem atestar a topologia publicada atual**.
 
+### Caminho simplificado G5: backup criptografado com senha, sem chave GPG
+
+A pedido do operador (28/10/2026), o script G5 suporta também **criptografia simétrica OpenPGP com senha forte**, sem Kleopatra, sem gerar par de chaves e sem importar arquivo público. Isso **não substitui** a proteção do histórico nem muda a política de consentimento.
+
+- Modo simples: `--capture` sem `--recipient-fingerprint` pede confirmação literal `ARCHIVE-SOURCE-READONLY`, senha de backup gerada em gerenciador de senhas (mínimo 32 caracteres imprimíveis ASCII, máximo 256, sem espaços, duas entradas sem eco) e DSN administrativo da SOURCE (sem eco). A senha do backup **não é** a senha da base de dados e **nunca** deve ser escrita em chat, logs, scripts, argumentos de shell, variável ambiente ou no arquivo de manifesto.
+- Criptografia: `pg_dump` com transação read-only envia os bytes diretamente para `gpg --symmetric` com AES256, S2K SHA512 iterado e passagem da senha por **file descriptor anônimo**, sem texto puro em arquivo intermediário. A senha não é cacheada pelo GPG. O manifesto indica `pg_dump_custom_openpgp_symmetric` e `restore_verified=false` até um ensaio real de restauração independente.
+- **Recuperação exige guardar a senha no gerenciador de senhas fora da VPS** e uma segunda cópia de recuperação controlada. Se a senha for perdida, o backup criptografado não poderá ser restaurado; se a VPS for comprometida antes de copiar o arquivo para um local seguro, a proteção pode ser comprometida. Retirar a cópia criptografada da VPS e testar decriptação/restauração em instância isolada antes de qualquer aposentadoria.
+- O modo antigo com `--recipient-fingerprint <FPR>` continua suportado para quem prefere chave pública GPG e custódia externa da chave privada.
+- O script mantém gates separados: merge de PR **não** autoriza `--capture`, e `--verify` só testa integridade de arquivo criptografado, **não restauração**.
+
+**Depois do merge da implementação**, o operador pode verificar requisitos sem acessar a SOURCE:
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo &&
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main &&
+PATH="/usr/lib/postgresql/17/bin:$PATH" .venv/bin/python \
+  scripts/operations/g5_archive_supabase_source.py \
+  --plan --source-project-ref nywxpvzhlpqjtcafpdfe
+~~~
+
+A captura real só poderá ser orientada/executada após autorização específica de leitura/exportação dos dados legados, com proteção de credenciais e destino externo seguro. **Não** executar `--capture` apenas por causa deste documento.
+
 ### Captura criptografada (gated, não ativada)
 
 O utilitário `scripts/operations/g5_archive_supabase_source.py` tem três modos:
 
-- `--plan`: apenas disponibilidade local de `pg_dump` e `gpg`, **sem conexão**.
-- `--capture`: exige autorização **separada** do operador, TTY, confirmação `ARCHIVE-SOURCE-READONLY`, DSN admin SOURCE por `getpass`, identidade de projeto estrita e TLS `verify-full`. `pg_dump` executa com `default_transaction_read_only=on`; os bytes viajam em pipe diretamente ao `gpg` com destinatário OpenPGP de fingerprint completo, sem arquivo de dump plaintext. Guarda somente `.dump.gpg` e manifesto SHA-256 em diretório root-only 0700/0600.
+- `--plan`: disponibilidade de `gpg` e de `pg_dump` major 17 ou superior, **sem conexão**.
+- `--capture`: exige autorização **separada** do operador, TTY, confirmação `ARCHIVE-SOURCE-READONLY`, DSN admin SOURCE por `getpass`, identidade de projeto estrita e TLS `verify-full`. `pg_dump` executa com `default_transaction_read_only=on`; os bytes viajam em pipe diretamente ao `gpg` protegido por senha forte digitada localmente (padrão), ou por destinatário OpenPGP quando `--recipient-fingerprint` é especificado; nunca há arquivo de dump em texto puro. Guarda somente `.dump.gpg` e manifesto SHA-256 em diretório root-only 0700/0600.
 - `--verify`: verifica integridade dos bytes **criptografados** e a estrutura do recibo; **não descriptografa nem atesta restauro**. O manifesto marca `restore_verified=false`.
 
 Após merge da PR, testar **somente o planejamento**, sem expor credenciais:
@@ -92,11 +114,12 @@ Após merge da PR, testar **somente o planejamento**, sem expor credenciais:
 ~~~bash
 cd /docker/agente-sql-langgraph-repo &&
 git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main &&
-.venv/bin/python scripts/operations/g5_archive_supabase_source.py \
+PATH="/usr/lib/postgresql/17/bin:$PATH" .venv/bin/python \
+  scripts/operations/g5_archive_supabase_source.py \
   --plan --source-project-ref nywxpvzhlpqjtcafpdfe
 ~~~
 
-O `--capture` **não é autorizado pelo merge**. Antes dele, operador deve aprovar a exportação de dados históricos e definir custodiante, fingerprint de chave pública, espaço, destino externo seguro e retenção. O manifesto e o dump criptografado **nunca** vão para o GitHub/chat. Fazer ensaio de restauro em banco **isolado/descartável** e validar dados/roles, antes de considerar a origem removível. **Nunca restaurar diretamente no DEMO**, porque esquemas e tenants diferem. Um `pg_dump` lógico não captura objetos físicos do Storage, Edge Functions, segredos, credenciais, configurações de Auth e todas as roles; inventariar também esses recursos e sua custódia.
+O `--capture` **não é autorizado pelo merge**. Antes dele, operador deve aprovar a exportação de dados históricos e definir custódia externa da senha forte (ou da chave privada, no modo alternativo), espaço, destino externo seguro e retenção. O manifesto e o dump criptografado **nunca** vão para o GitHub/chat. Fazer ensaio de restauro em banco **isolado/descartável** e validar dados/roles, antes de considerar a origem removível. **Nunca restaurar diretamente no DEMO**, porque esquemas e tenants diferem. Um `pg_dump` lógico não captura objetos físicos do Storage, Edge Functions, segredos, credenciais, configurações de Auth e todas as roles; inventariar também esses recursos e sua custódia.
 
 ### P3 — identidade autorizada antes de criar login Shadow
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -229,6 +230,155 @@ class ArchiveSourceSafetyTests(unittest.TestCase):
             self.assertEqual(len(prior), 1)
             self.assertEqual(prior[0].read_bytes(), b"previous-archive-must-survive")
             self.assertEqual(len(list(directory.iterdir())), 1)
+
+
+    def test_password_only_mode_needs_no_gpg_public_key(self):
+        with tempfile.TemporaryDirectory() as td:
+            directory = Path(td)
+            def fake_symmetric_dump(path, recipient, env, *, passphrase=None):
+                self.assertIsNone(recipient)
+                self.assertEqual(passphrase, "x" * 40)
+                self.assertEqual(env["PGPASSWORD"], "db-secret")
+                path.write_bytes(b"gpg-symmetric-test-ciphertext")
+            with patch.object(m, "private_directory"), patch.object(m, "check_private_file"):
+                with patch.object(m, "tools_available", return_value=True):
+                    with patch.object(m, "recipient_exists") as key_lookup:
+                        with patch.object(m.sys.stdin, "isatty", return_value=True):
+                            with patch("builtins.input", return_value="ARCHIVE-SOURCE-READONLY"):
+                                with patch.object(m.getpass, "getpass", side_effect=[
+                                    "x" * 40, "x" * 40, "db-admin-dsn",
+                                ]):
+                                    with patch.object(m, "pg_environment", return_value={"PGPASSWORD": "db-secret"}):
+                                        with patch.object(m, "encrypted_capture", side_effect=fake_symmetric_dump):
+                                            receipt = m.capture(PROJECT, directory)
+                        key_lookup.assert_not_called()
+                metadata = json.loads(receipt.read_text())
+                self.assertEqual(metadata["format"], "pg_dump_custom_openpgp_symmetric")
+                self.assertIs(metadata["restore_verified"], False)
+                m.verify(PROJECT, directory, receipt)
+
+    def test_password_mismatch_and_weak_password_abort_before_db(self):
+        for proposed in (
+            ("x" * 31, "x" * 31),
+            ("x" * 40, "y" * 40),
+            ("a" * 31 + "\n", "a" * 31 + "\n"),
+            ("☂" * 40, "☂" * 40),
+        ):
+            with self.subTest(proposed=proposed):
+                with patch.object(m, "private_directory"), patch.object(m, "tools_available", return_value=True):
+                    with patch.object(m.sys.stdin, "isatty", return_value=True):
+                        with patch("builtins.input", return_value="ARCHIVE-SOURCE-READONLY"):
+                            with patch.object(m.getpass, "getpass", side_effect=list(proposed)) as secret_prompt:
+                                with patch.object(m, "pg_environment") as db:
+                                    with self.assertRaises(m.ArchiveBlocked):
+                                        m.capture(PROJECT, Path("/private"))
+                                    db.assert_not_called()
+                                    self.assertLessEqual(secret_prompt.call_count, 2)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX-only encrypted stream smoke")
+    def test_symmetrical_gpg_secrets_only_in_anonymous_fd(self):
+        """Real GPG roundtrip with synthetic bytes and a fake pg_dump binary."""
+        gpg_binary = m.shutil.which("gpg")
+        if not gpg_binary:
+            self.skipTest("GPG unavailable on this runner")
+        phrase = "Q" * 40  # Synthetic fixture, not a real backup password
+        expected = b"OFFLINE_SYNTHETIC_TEST_DATA_ONLY\n"
+        real_popen = m.subprocess.Popen
+        gpg_invocations = []
+
+        with tempfile.TemporaryDirectory() as td:
+            directory = Path(td)
+            pg_dump = directory / "fake_pg_dump"
+            pg_dump.write_text(
+                "#!/bin/sh\nprintf 'OFFLINE_SYNTHETIC_TEST_DATA_ONLY\\n'\n",
+                encoding="ascii",
+            )
+            pg_dump.chmod(0o700)
+            homedir = directory / "gnupg"
+            homedir.mkdir(mode=0o700)
+            output = directory / "synthetic.gpg"
+            def observer(argv, **kwargs):
+                if argv[0] == gpg_binary:
+                    gpg_invocations.append((argv, kwargs))
+                return real_popen(argv, **kwargs)
+            with patch.dict(os.environ, {"GNUPGHOME": str(homedir)}):
+                with patch.object(m.shutil, "which", side_effect=lambda n:
+                                  str(pg_dump) if n == "pg_dump" else gpg_binary if n == "gpg" else None):
+                    with patch.object(m.subprocess, "Popen", side_effect=observer):
+                        m.encrypted_capture(
+                            output, None,
+                            {"PATH": os.environ.get("PATH", ""), "PGPASSWORD": "fake-sql-password"},
+                            passphrase=phrase,
+                        )
+                self.assertNotEqual(output.read_bytes(), expected)
+                self.assertEqual(len(gpg_invocations), 1)
+                args, options = gpg_invocations[0]
+                self.assertIn("--symmetric", args)
+                self.assertIn("--passphrase-fd", args)
+                self.assertIn("AES256", args)
+                self.assertEqual(len(options["pass_fds"]), 1)
+                self.assertNotIn(phrase, str(args))
+                self.assertNotIn(phrase, str(options["env"]))
+                self.assertNotIn("PGPASSWORD", options["env"])
+                # Decrypt fixture in a separate process with an anonymous FD.
+                reader, writer = os.pipe()
+                try:
+                    decrypt = real_popen(
+                        [gpg_binary, "--batch", "--no-tty", "--pinentry-mode",
+                         "loopback", "--no-symkey-cache", "--passphrase-fd",
+                         str(reader), "--decrypt", str(output)],
+                        stdout=m.subprocess.PIPE, stderr=m.subprocess.DEVNULL,
+                        pass_fds=(reader,),
+                        env={k: os.environ[k] for k in
+                             ("HOME", "PATH", "GNUPGHOME") if k in os.environ},
+                    )
+                    os.close(reader)
+                    reader = None
+                    os.write(writer, phrase.encode("ascii") + b"\n")
+                    os.close(writer)
+                    writer = None
+                    clear, _ = decrypt.communicate(timeout=30)
+                    self.assertEqual(decrypt.returncode, 0)
+                    self.assertEqual(clear, expected)
+                finally:
+                    if reader is not None:
+                        os.close(reader)
+                    if writer is not None:
+                        os.close(writer)
+
+    def test_unusable_encryption_mode_blocked_before_disk_write(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "should-not-exist.gpg"
+            with self.assertRaises(m.ArchiveBlocked):
+                m.encrypted_capture(path, None, {})
+            with self.assertRaises(m.ArchiveBlocked):
+                m.encrypted_capture(path, FPR, {}, passphrase="x" * 40)
+            self.assertFalse(path.exists())
+
+
+    def test_pg_dump_version_probe_blocks_16_and_accepts_17(self):
+        with patch.object(m.shutil, "which", side_effect=lambda n: "/usr/bin/" + n):
+            with patch.object(m.subprocess, "run") as proc:
+                proc.return_value = MagicMock(
+                    returncode=0, stdout="pg_dump (PostgreSQL) 16.15\n"
+                )
+                self.assertFalse(m.tools_available())
+                proc.return_value = MagicMock(
+                    returncode=0, stdout="pg_dump (PostgreSQL) 17.11 (Ubuntu)\n"
+                )
+                self.assertTrue(m.tools_available())
+                proc.return_value = MagicMock(returncode=1, stdout="")
+                self.assertFalse(m.tools_available())
+
+    def test_plan_reports_missing_incompatible_pg_dump(self):
+        import sys
+        with patch.object(sys, "argv", [
+            "g5_archive_supabase_source.py", "--plan", "--source-project-ref", PROJECT,
+        ]):
+            with patch.object(m, "tools_available", return_value=False):
+                with patch.object(m.getpass, "getpass") as no_credentials:
+                    self.assertEqual(m.main(), 2)
+                    no_credentials.assert_not_called()
 
 
 if __name__ == "__main__":
