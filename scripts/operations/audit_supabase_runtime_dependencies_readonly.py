@@ -189,6 +189,27 @@ def find_pg_credentials(workflow: dict) -> tuple[int, list[str]]:
     return len(nodes), sorted(ids)
 
 
+
+def find_n8n_container() -> str:
+    """Find exactly one running n8n server by its image, never guess."""
+    output = run_private_cli(
+        ["docker", "ps", "--format", "{{.Names}}\\t{{.Image}}"], timeout=20
+    )
+    candidates = []
+    for line in output.splitlines():
+        parts = line.split("\\t", 1)
+        if len(parts) != 2:
+            continue
+        name, image = parts
+        if (image == "n8nio/n8n" or
+            image.startswith("n8nio/n8n:") or
+            image.startswith("n8nio/n8n@")) and CONTAINER_ID.fullmatch(name):
+            candidates.append(name)
+    if len(candidates) != 1:
+        raise AuditBlocked("N8N_CONTAINER_MISSING_OR_AMBIGUOUS")
+    return candidates[0]
+
+
 def n8n_credentials_targets(
     container: str, workflow_id: str, *, source: str, demo: str,
 ) -> tuple[int, int, str]:
@@ -252,8 +273,9 @@ def audit(*, source: str, demo: str, shadow_container: str,
         "N8N_PUBLISHED_VERSION": "NOT_ATTESTED",
     }
     if inspect_n8n:
-        if not n8n_container or not workflow_id:
-            raise AuditBlocked("N8N_AUDIT_IDENTIFIERS_REQUIRED")
+        if not workflow_id:
+            raise AuditBlocked("N8N_WORKFLOW_ID_REQUIRED")
+        n8n_container = n8n_container or find_n8n_container()
         if not sys.stdin.isatty():
             raise AuditBlocked("LOCAL_TTY_CONFIRMATION_REQUIRED")
         answer = input("Auditar localmente credenciais n8n em memoria? Digite AUDIT-N8N-LOCAL: ")
