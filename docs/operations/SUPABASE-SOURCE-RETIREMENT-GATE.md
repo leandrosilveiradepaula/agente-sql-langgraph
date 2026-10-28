@@ -69,6 +69,50 @@ Critérios **obrigatórios** para declarar `READY_TO_RETIRE_SOURCE`:
 - [PR Produto Demo #33](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/33): tabelas de organização privadas.
 - [Roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155): rastro operacional e decisões.
 
+## 28/10/2026 — auditoria do backup × imagem Supabase PASS; próxima prova: boot rootless isolado
+
+**Evidência real VPS após merge da PR #192:** a mesma cópia SOURCE criptografada SHA/GPG PASS e catálogo `pg_restore --list` de 811 itens foi auditada contra duas imagens cached sem executar uma única instrução de restauração. As 4 extensões exigidas **pelo arquivo** são `pg_stat_statements`, `pgcrypto`, `supabase_vault` e `uuid-ossp`.
+
+| Imagem | Docker image ID | Arquivos .control primários | Ausências para o backup |
+|---|---|---:|---|
+| `postgres:17` | `sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f` | 45 | 1: `supabase_vault` |
+| `supabase/postgres:17.6.1.136` | `sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00` | 78 | **0** |
+
+Estado registrado: `G5_IMAGE_2_EXTENSION_COVERAGE=FILES_PRESENT_NOT_RESTORE_PROOF`, `G5_EXTENSION_AUDIT_RESULT=RECORDED`, `G5_RESTORE_TEST=NOT_PERFORMED`. **Apenas controle de extensões foi homologado, não execução binária, nem identidade de usuário, instalação/ativação de extensão, restauração ou recuperação do Vault.**
+
+### Novo adaptador operacional genérico para imagem Supabase PG17
+
+`scripts/operations/g5_restore_isolated_rehearsal.py` preserva o caminho histórico `postgres:17` e adiciona o adaptador estrutural para a família de imagens PostgreSQL 17 do Supabase (sem regras por cliente/tenant, sem mudar LangGraph ou n8n). Respeita o mesmo contexto G5 de recuperação offline. A imagem exata deve estar previamente em cache, e `--expected-image-sha` é **obrigatório** para imagens não padrão; tag diferente ou drift SHA retornam BLOQUEADO. O script nunca faz pull.
+
+O novo `--boot-test` **não restaura nem lê dados do dump**: verifica assinatura/manifesto/ciphertext SHA do backup, obtém a identidade postgres **não-root** dentro da imagem via inspeção efêmera e desconectada, inicia um PostgreSQL 17 **sintético** com `initdb` sem executar o entrypoint/migrações Supabase padrão, aguarda `pg_isready`, verifica a versão e elimina o contêiner com confirmação do Docker. Não se acessam DB SOURCE/DEMO, DNS, serviço remoto, credenciais reais, benchmark, tabelas financeiras ou chave do Vault. O shell de inicialização é **estático**, não interpolado com dados de negócio.
+
+O contêiner temporário usa ID de imagem por SHA, `--network=none`, sem portas publicadas, sem mounts/binds/volumes do host, `--read-only`, UID/GID descobertos na imagem, `--cap-drop=ALL`, `--security-opt=no-new-privileges`, limites CPU/memória/PIDs, sem Docker logs, `--memory-swap=1g` junto de `--memory=1g` para proibir swap, e diretórios `PGDATA`, socket e `/tmp` em `tmpfs` anônimo com propriedade do UID real do postgres. Confere via `docker inspect` o isolamento, o usuário, o SHA, o entrypoint estático, o destino dos tmpfs e a ausência de logs **antes** de declarar o servidor apto.
+
+**Comando de próxima prova (sem senha e sem restore), após CI e merge humano da implementação:**
+
+~~~bash
+cd /docker/agente-sql-langgraph-repo || exit 1
+git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main || exit 1
+.venv/bin/python scripts/operations/g5_restore_isolated_rehearsal.py \
+  --boot-test \
+  --image-ref supabase/postgres:17.6.1.136 \
+  --expected-image-sha sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00 \
+  --source-project-ref nywxpvzhlpqjtcafpdfe \
+  --manifest /root/.local/share/agente-sql-langgraph/source-archives/source-nywxpvzhlpqjtcafpdfe-20261028T145054Z-1557baa82308af9b.dump.gpg.manifest.json
+~~~
+
+Resultado positivo exige `G5_BOOT_TEST=PASS` e `G5_ISOLATED_CONTAINER_CLEANUP=PASS`, **sempre** `G5_RESTORE_TEST=NOT_PERFORMED`. Falha de inicialização/capacidade/UID/SHA/container é bloqueio técnico; nunca reduzir cap-drop, adicionar rede/bind, ignorar initdb ou executar a restauração como atalho. A prova não inicializa serviços Supabase, Auth, Storage ou a própria extensão Vault: somente verifica viabilidade do PostgreSQL em sandbox.
+
+### Restauração real em imagem Supabase: gate separado
+
+O caminho `--restore --image-ref supabase/postgres:17.x... --expected-image-sha ...` reutiliza fluxo cifrado GPG→`pg_restore --single-transaction --exit-on-error`, mas tem confirmação local **DISTINTA** `RESTORE-G5-SUPABASE-ISOLATED` e requer **nova autorização operacional explícita**, posterior ao boot-test. Não será executado automaticamente após merge ou boot PASS. SQL do backup pode conter extensões, funções, gatilhos e objetos do Supabase gerenciado que o PostgreSQL sintético não possui ou não conseguirá restaurar; **falhas devem permanecer bloqueadas, não usar ``--exclude`, não omitir tabelas/triggers nem suprimir erros**.
+
+Mesmo uma eventual restauração sintética PASS não homologa serviços Supabase, roles, grants, RLS, Storage, Auth nem os objetos do Vault com a chave de produção (a chave de criptografia externa não está no backup). A recomendação oficial de recuperação de banco Supabase gerenciado utiliza dumps separados (roles/schema/data) com filtragem própria; a exportação G5 raw `pg_dump --no-owner --no-acl` tem contrato diferente e não pode ser tratada como prova de portabilidade completa.
+
+Sem arquivo seguro off-VPS e prova de recuperação, com nove referências de conexão SOURCE no n8n e consumidores Shadow/Produto ainda não migrados, **SOURCE permanece ativa e inelegível para retirada**. `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`.
+
+---
+
 ## 28/10/2026 — imagem Supabase PostgreSQL 17 baixada; probe de metadados bloqueado
 
 Operador da VPS executou com êxito `docker pull supabase/postgres:17.6.1.136`, sem iniciar serviços existentes. ID local informado pelo Docker (imagem em cache): `sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`. Após merge da PR #191, solicitou auditoria dos requisitos de extensão do arquivo cifrado contra `postgres:17` e `supabase/postgres:17.6.1.136`. A auditoria interrompeu antes do prompt de senha com:
