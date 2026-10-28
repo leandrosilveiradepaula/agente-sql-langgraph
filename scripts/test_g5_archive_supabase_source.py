@@ -314,5 +314,30 @@ class ArchiveSourceSafetyTests(unittest.TestCase):
             self.assertFalse(path.exists())
 
 
+    def test_pg_dump_version_probe_blocks_16_and_accepts_17(self):
+        with patch.object(m.shutil, "which", side_effect=lambda n: "/usr/bin/" + n):
+            with patch.object(m.subprocess, "run") as proc:
+                proc.return_value = MagicMock(
+                    returncode=0, stdout="pg_dump (PostgreSQL) 16.15\n"
+                )
+                self.assertFalse(m.tools_available())
+                proc.return_value = MagicMock(
+                    returncode=0, stdout="pg_dump (PostgreSQL) 17.11 (Ubuntu)\n"
+                )
+                self.assertTrue(m.tools_available())
+                proc.return_value = MagicMock(returncode=1, stdout="")
+                self.assertFalse(m.tools_available())
+
+    def test_plan_reports_missing_incompatible_pg_dump(self):
+        import sys
+        with patch.object(sys, "argv", [
+            "g5_archive_supabase_source.py", "--plan", "--source-project-ref", PROJECT,
+        ]):
+            with patch.object(m, "tools_available", return_value=False):
+                with patch.object(m.getpass, "getpass") as no_credentials:
+                    self.assertEqual(m.main(), 2)
+                    no_credentials.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
