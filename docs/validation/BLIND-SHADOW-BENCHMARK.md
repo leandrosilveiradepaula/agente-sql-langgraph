@@ -75,7 +75,8 @@ Em clone de trabalho autorizado, usar diretório `benchmark-private/`
 ```bash
 python -m scripts.blind_shadow_benchmark prepare \
   --baseline benchmark-private/official-baseline.json \
-  --output benchmark-private/questions-only.json
+  --output benchmark-private/questions-only.json \
+  --receipt-output benchmark-private/freeze-receipt.json
 
 # Separadamente, submeter SOMENTE questions-only.json ao fluxo n8n/Shadow,
 # quando esse caminho estiver autorizado; capturar depois os records assinados.
@@ -84,6 +85,7 @@ python -m scripts.blind_shadow_benchmark evaluate \
   --baseline benchmark-private/official-baseline.json \
   --manifest benchmark-private/questions-only.json \
   --evidence benchmark-private/shadow-records.json \
+  --receipt benchmark-private/freeze-receipt.json \
   --output benchmark-private/evaluation.json
 ```
 
@@ -93,10 +95,9 @@ reavaliar, usar outro nome versionado. CLI imprime somente códigos de
 status sanitizados; o relatório não devolve SQL, pergunta, nome de
 tabela, coluna, literal, principal nem conteúdo bruto de erro.
 
-**Status por caso**: `corresponde` (apenas SQL normalizada),
+**Congelamento reforçado:** o `prepare` gera um segundo arquivo privado (`freeze-receipt.json`) com fingerprints da baseline e do manifesto, sem SQL ou respostas. O `evaluate` exige esse recibo e falha se qualquer campo da baseline for alterado. Manter o recibo em custódia separada **antes da geração**; recibo produzido no mesmo computador **não comprova data de congelamento nem autenticidade da fonte**. O relatório registra essas duas ressalvas e não as converte automaticamente em PASS. Arquivos privados de entrada (baseline, recibo, evidência) precisam de permissões POSIX 0600, e todos os outputs são criados sem overwrite (0600 no POSIX). Nunca subir baseline, evidências ou recibo privado ao GitHub. Runs oficiais duplicadas entre casos e registros Shadow fora da lista de runs autorizadas bloqueiam a avaliação inteira.\n\n**Status por caso**: `corresponde` (apenas SQL normalizada **com identidade de tenant, provedor/modelo, fingerprint de contexto e intenção atestados**),
 `diverge` (diferença estrutural/intent), `inconclusivo`
-(correlação ambígua, query não analisável, fonte de provedor
-incompatível, reparo sem aprovação), `sem_evidencia` (ausência de
+(correlação ambígua, query não analisável, fonte/modelo/contexto/intenção\nnão atestados ou incompatíveis, reparo sem aprovação), `sem_evidencia` (ausência de
 record/correlação/SQL oficial). Cada caso carrega
 `financial_result_status=nao_autorizado_executar`.
 Nenhum resultado comprova paridade financeira. Diferentes SQLs
@@ -125,7 +126,7 @@ separada.
 - Testar `python testar_blind_shadow_benchmark.py` ou
   `python scripts/check_all.py` offline, sem 63-case benchmark pago.
 
-## O que falta para homologar
+## Auditoria de disponibilidade de baseline na DEMO — 28/10/2026\n\nConsulta exclusivamente agregada à `public.ai_agent_runs` da DEMO ativa, sem retornar perguntas, SQL, usuários, metadados brutos ou dados financeiros: **42 registros**, **39** com SQL gerada, **42** com pergunta, `run_id` e `user_id`, **0** com `organization_id`, **0** com par `llm_provider`/`llm_model` nos campos próprios. Fonte `interface`, executor `postgres_demo`: 38 registros, todos com SQL gerada e intenção; outros três `interface` sem executor e uma tentativa `shadow_p2_generate_only` (esta sem SQL no campo gerado). Histórico de 04/09/2026 a 26/10/2026. **Nenhuma dessas 42 linhas constitui por si só uma baseline Gemini+Gemini homogênea e versionada**; não presumir provedor pelo nome do fluxo, tenant pelo ambiente ou paridade por SQL textual. A SOURCE antiga encontra-se temporariamente pausada para liberar a quota do CRM.\n\n**J1 gate honesto:** instrumento e controles offline passam por CI, mas a Jornada 1 **não estará homologada** até congelamento anterior à geração, origem/provedor validado, perguntas inéditas independentes e execução Shadow autenticada. Não executar 63 perguntas sem autorização; nunca injetar SQL histórica no gerador.\n\n## O que falta para homologar
 
 O runner prepara e avalia **evidências já existentes**. Não substitui
 Jornada 2 (portabilidade em bancos/clientes), Jornada 3 (Shadow
