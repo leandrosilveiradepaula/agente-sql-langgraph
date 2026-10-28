@@ -57,7 +57,7 @@ def tools_available() -> bool:
         )
     except (OSError, subprocess.SubprocessError):
         return False
-    match = re.search(r"pg_dump \\(PostgreSQL\\)\\s+(\\d+)", result.stdout)
+    match = re.search(r"pg_dump \(PostgreSQL\)\s+(\d+)", result.stdout)
     return result.returncode == 0 and match is not None and int(match.group(1)) >= 17
 
 
