@@ -434,5 +434,239 @@ class G5IsolatedRehearsalTests(unittest.TestCase):
             self.assertNotIn("SECRET_PRIVATE_EXT", repr(error.exception.__dict__))
 
 
+    def test_supabase_images_require_allowlisted_ref_and_sha_fingerprint(self):
+        docker = ["/usr/bin/docker", "--host=unix:///var/run/docker.sock"]
+        image_ref = "supabase/postgres:17.6.1.136"
+        with patch.object(m, "docker_query", return_value=MagicMock(
+                returncode=0, stdout=(IMAGE + "\n").encode())) as metadata:
+            self.assertEqual(m.image_id(docker, image_ref), IMAGE)
+            metadata.assert_called_once_with(
+                docker, ["image", "inspect", "--format", "{{.Id}}", image_ref]
+            )
+        for malicious in (
+            "postgres:latest", "supabase/postgres:15.9.1.1",
+            "supabase/postgres:17.6.1.136;sh", "evilregistry/postgres:17",
+            "supabase/postgres:17.6.1.136\n", "postgres:17 --privileged",
+        ):
+            with self.subTest(malicious=malicious):
+                with patch.object(m, "docker_query") as called:
+                    with self.assertRaises(m.ArchiveBlocked) as blocked:
+                        m.image_id(docker, malicious)
+                    self.assertEqual(str(blocked.exception),
+                                     "ISOLATED_IMAGE_REF_INVALID")
+                    called.assert_not_called()
+
+    def test_probe_supabase_image_uid_is_rootless_from_image_not_hardcoded(self):
+        prefix = ["/usr/bin/docker", "--host=unix:///var/run/docker.sock"]
+        with patch.object(m, "docker_query", return_value=MagicMock(
+                returncode=0, stdout=b"70\n71\n")) as query:
+            self.assertEqual(m.supabase_image_user(prefix, IMAGE), "70:71")
+            argv = query.call_args.args[1]
+            for required in (
+                "--network=none", "--pull=never", "--read-only",
+                "--user=65534:65534", "--cap-drop=ALL",
+                "--security-opt=no-new-privileges", "--entrypoint=/bin/sh", IMAGE,
+            ):
+                self.assertIn(required, argv)
+            self.assertNotIn("--privileged", argv)
+            self.assertNotIn("--mount", argv)
+            self.assertNotIn("-v", argv)
+            self.assertNotIn("-p", argv)
+        for invalid in (
+            b"0\n70\n", b"70\n0\n", b"not-a-number\n71\n",
+            b"700000\n71\n", b"70\n71\nextra\n", b"",
+        ):
+            with self.subTest(payload=invalid):
+                with patch.object(m, "docker_query", return_value=MagicMock(
+                        returncode=0, stdout=invalid)):
+                    with self.assertRaises(m.ArchiveBlocked):
+                        m.supabase_image_user(prefix, IMAGE)
+
+    def test_supabase_rootless_boot_uses_tmpfs_and_bypasses_dangerous_init(self):
+        argv = m.isolated_run_args(
+            IMAGE, "g5-restore-1234567890abcdef", runtime_user="70:71",
+        )
+        joined = " ".join(argv)
+        for required in (
+            "--network=none", "--read-only", "--user=70:71",
+            "--cap-drop=ALL", "--security-opt=no-new-privileges",
+            "--pull=never", "--rm", "--log-driver=none",
+            "--entrypoint=/bin/sh", IMAGE, "initdb",
+            "listen_addresses=", "unix_socket_directories=/var/run/postgresql",
+            "--auth-local=trust", "--auth-host=reject",
+        ):
+            self.assertIn(required, joined)
+        self.assertEqual(sum(x.startswith("--tmpfs=") for x in argv), 3)
+        self.assertTrue(any("uid=70,gid=71" in x for x in argv))
+        self.assertNotIn("docker-entrypoint.sh", joined)
+        self.assertNotIn("migrations", joined)
+        self.assertNotIn("POSTGRES_HOST_AUTH_METHOD=trust", joined)
+        self.assertNotIn("POSTGRES_PASSWORD", joined)
+        self.assertNotIn("DSN", joined)
+        self.assertNotIn("--privileged", argv)
+        self.assertNotIn("--publish", argv)
+        for bad_uid in ("0:0", "700000:70", "70", "70:0", "root:70", "70:70;sh"):
+            with self.subTest(runtime_uid=bad_uid):
+                with self.assertRaises(m.ArchiveBlocked):
+                    m.isolated_run_args(
+                        IMAGE, "g5-restore-1234567890abcdef",
+                        runtime_user=bad_uid,
+                    )
+
+    def test_supabase_inspect_requires_exact_sandbox_uid_and_no_network(self):
+        def snapshot(user="70:71", network="none"):
+            return {
+                "Image": IMAGE,
+                "HostConfig": {
+                    "NetworkMode": network,
+                    "ReadonlyRootfs": True,
+                    "Privileged": False, "AutoRemove": True,
+                    "UsernsMode": "", "PidMode": "",
+                    "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges"],
+                    "Binds": None, "Devices": [], "PortBindings": {},
+                },
+                "Config": {
+                    "User": user,
+                    "Labels": {"agente-sql-langgraph.g5": "isolated-rehearsal"},
+                },
+                "Mounts": [
+                    {"Type": "tmpfs", "Destination": "/var/lib/postgresql/data"},
+                    {"Type": "tmpfs", "Destination": "/var/run/postgresql"},
+                    {"Type": "tmpfs", "Destination": "/tmp"},
+                ],
+                "NetworkSettings": {"Ports": {"5432/tcp": None}},
+            }
+        with patch.object(m, "docker_query", return_value=MagicMock(
+                returncode=0, stdout=json.dumps(snapshot()).encode())):
+            self.assertIsNone(m.check_container_isolation(
+                ["docker"], "g5-restore-1234567890abcdef", IMAGE,
+                runtime_user="70:71",
+            ))
+        for bad in (snapshot(user="root"), snapshot(network="bridge")):
+            with patch.object(m, "docker_query", return_value=MagicMock(
+                    returncode=0, stdout=json.dumps(bad).encode())):
+                with self.assertRaises(m.ArchiveBlocked):
+                    m.check_container_isolation(
+                        ["docker"], "g5-restore-1234567890abcdef", IMAGE,
+                        runtime_user="70:71",
+                    )
+
+    def test_boot_only_never_uses_archive_password_gpg_or_restored_sql(self):
+        response = MagicMock(returncode=0, stdout=b"postgres (PostgreSQL) 17.6\n")
+        def docker_fake(prefix, args):
+            return response
+        with patch.object(m.os, "geteuid", return_value=0, create=True):
+            with patch.object(m, "docker_query", side_effect=docker_fake):
+                with patch.object(m, "check_container_isolation"):
+                    with patch.object(m, "cleanup_container", return_value=True):
+                        with patch.object(m, "restore_stream") as restoration:
+                            with patch.object(m, "verify_restored_tables") as data:
+                                self.assertEqual(m.rehearsed_restore(
+                                    Path("/private/never_read.dump.gpg"), "", ["docker"],
+                                    IMAGE, runtime_user="70:71", boot_only=True,
+                                ), 0)
+                                restoration.assert_not_called()
+                                data.assert_not_called()
+
+    def test_supabase_plan_does_not_run_container_or_request_backup_password(self):
+        import sys
+        argv = [
+            "g5_restore_isolated_rehearsal", "--plan",
+            "--manifest", "/private/fixture.manifest.json",
+            "--source-project-ref", SOURCE,
+            "--image-ref", "supabase/postgres:17.6.1.136",
+            "--expected-image-sha", IMAGE,
+        ]
+        with patch.object(sys, "argv", argv):
+            with patch.object(m, "validated_archive", return_value=Path("/fixture.gpg")):
+                with patch.object(m, "docker_executable", return_value=["docker"]):
+                    with patch.object(m, "image_id", return_value=IMAGE):
+                        with patch.object(m, "supabase_image_user", return_value="70:71"):
+                            with patch.object(m.getpass, "getpass") as secret:
+                                with patch.object(m, "rehearsed_restore") as boot:
+                                    with contextlib.redirect_stdout(io.StringIO()) as out:
+                                        self.assertEqual(m.main(), 0)
+                                    secret.assert_not_called()
+                                    boot.assert_not_called()
+                                    self.assertIn("G5_RESTORE_TEST=NOT_PERFORMED",
+                                                  out.getvalue())
+
+    def test_new_image_requires_explicit_sha_before_even_boot_test(self):
+        import sys
+        argv = [
+            "g5_restore_isolated_rehearsal", "--boot-test",
+            "--manifest", "/private/fixture.manifest.json",
+            "--source-project-ref", SOURCE,
+            "--image-ref", "supabase/postgres:17.6.1.136",
+        ]
+        with patch.object(sys, "argv", argv):
+            with patch.object(m, "validated_archive", return_value=Path("/fixture.gpg")):
+                with patch.object(m, "docker_executable", return_value=["docker"]):
+                    with patch.object(m, "image_id", return_value=IMAGE):
+                        with patch.object(m, "supabase_image_user") as probe:
+                            with patch.object(m, "rehearsed_restore") as boot:
+                                with contextlib.redirect_stdout(io.StringIO()) as out:
+                                    self.assertEqual(m.main(), 2)
+                                probe.assert_not_called()
+                                boot.assert_not_called()
+                                self.assertIn("G5_REHEARSAL_ERROR=ISOLATED_IMAGE_SHA_NOT_ATTESTED",
+                                              out.getvalue())
+                                self.assertIn("G5_RESTORE_TEST=NOT_PERFORMED",
+                                              out.getvalue())
+
+    def test_boot_test_only_starts_disposable_cluster_not_restore(self):
+        import sys
+        argv = [
+            "g5_restore_isolated_rehearsal", "--boot-test",
+            "--manifest", "/private/fixture.manifest.json",
+            "--source-project-ref", SOURCE,
+            "--image-ref", "supabase/postgres:17.6.1.136",
+            "--expected-image-sha", IMAGE,
+        ]
+        with patch.object(sys, "argv", argv):
+            with patch.object(m, "validated_archive", return_value=Path("/fixture.gpg")):
+                with patch.object(m, "docker_executable", return_value=["docker"]):
+                    with patch.object(m, "image_id", return_value=IMAGE):
+                        with patch.object(m, "supabase_image_user", return_value="70:71"):
+                            with patch.object(m, "rehearsed_restore", return_value=0) as boot:
+                                with patch.object(m.getpass, "getpass") as password:
+                                    with contextlib.redirect_stdout(io.StringIO()) as out:
+                                        self.assertEqual(m.main(), 0)
+                                password.assert_not_called()
+                                self.assertIn("G5_BOOT_TEST=PASS", out.getvalue())
+                                self.assertIn("G5_RESTORE_TEST=NOT_PERFORMED", out.getvalue())
+                                boot.assert_called_once_with(
+                                    Path("/fixture.gpg"), "", ["docker"], IMAGE,
+                                    runtime_user="70:71", boot_only=True,
+                                )
+
+    def test_supabase_real_restore_requires_distinct_confirmation_token(self):
+        import sys
+        argv = [
+            "g5_restore_isolated_rehearsal", "--restore",
+            "--manifest", "/private/fixture.manifest.json",
+            "--source-project-ref", SOURCE,
+            "--image-ref", "supabase/postgres:17.6.1.136",
+            "--expected-image-sha", IMAGE,
+        ]
+        with patch.object(sys, "argv", argv):
+            with patch.object(m, "validated_archive", return_value=Path("/fixture.gpg")):
+                with patch.object(m, "docker_executable", return_value=["docker"]):
+                    with patch.object(m, "image_id", return_value=IMAGE):
+                        with patch.object(m, "supabase_image_user", return_value="70:71"):
+                            with patch.object(m.sys.stdin, "isatty", return_value=True):
+                                with patch("builtins.input", return_value="RESTORE-G5-ISOLATED"):
+                                    with patch.object(m.getpass, "getpass") as passphrase:
+                                        with patch.object(m, "rehearsed_restore") as restore:
+                                            with contextlib.redirect_stdout(io.StringIO()) as out:
+                                                self.assertEqual(m.main(), 2)
+                                            passphrase.assert_not_called()
+                                            restore.assert_not_called()
+                                            self.assertIn("ISOLATED_RESTORE_NOT_AUTHORIZED",
+                                                          out.getvalue())
+                                            self.assertIn("G5_RESTORE_TEST=NOT_VERIFIED",
+                                                          out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
