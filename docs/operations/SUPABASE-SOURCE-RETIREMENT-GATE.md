@@ -68,3 +68,16 @@ Critérios **obrigatórios** para declarar `READY_TO_RETIRE_SOURCE`:
 - [PR LangGraph #182](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/pull/182): utilitário de login com gate.
 - [PR Produto Demo #33](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/33): tabelas de organização privadas.
 - [Roadmap #155](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/issues/155): rastro operacional e decisões.
+
+## Gate automatizado sem contato com infraestrutura
+
+`scripts/operations/check_supabase_retirement_gate.py` avalia apenas **atestações sanitizadas**. Cada registro de consumidor requer `consumer`, `destination` (`DEMO`, `OTHER`, `SOURCE`, `UNKNOWN`), `verified_at` (UTC), `probe_id` genérico e `evidence_sha` SHA-1 hexadecimal de 40 caracteres do recibo técnico (não senha/DSN). São obrigatórios os seis consumidores conhecidos: `product_primary`, `product_demo`, `n8n_official`, `n8n_shadow`, `langgraph_shadow_evidence`, `langgraph_semantic_context`.
+
+A classificação `OTHER` admite um warehouse externo **desde que haja prova de independência do banco de origem**. `SOURCE` ou `UNKNOWN` bloqueiam a remoção. Outros campos como `dsn`, `url`, `password`, `host`, `token` são rejeitados por whitelist estrita. Os quatro booleanos de arquivo/restauração, rollback, observação e **aprovação explícita de aposentadoria** devem ser verdadeiros. A aprovação de migração, merge ou snapshot **não** satisfaz a aprovação de exclusão. A ferramenta não verifica autenticidade dos recibos; exige que a prova real seja coletada em operação separada e auditada.
+
+```bash
+python -m unittest scripts.test_supabase_retirement_gate -v
+python scripts/operations/check_supabase_retirement_gate.py /caminho/privado/atestado-sanitizado.json
+```
+
+Não executar um arquivo de exemplo alegando ambiente liberado: um manifesto de CI pode passar estruturalmente, mas isso **não é evidência real da VPS/Vercel/n8n**. `READY` significa atestados declarados completos, não autorização independente para deletar o projeto. A deleção continua sempre manual.
