@@ -467,7 +467,11 @@ def main() -> int:
             manifest = capture(
                 args.source_project_ref, args.archive_dir, args.recipient_fingerprint,
             )
+            # Verify the encrypted digest within the same command; avoid a
+            # shell pipe or an additional operator step for basic integrity.
+            verify(args.source_project_ref, args.archive_dir, manifest)
             print("G5_ARCHIVE_RESULT=ENCRYPTED_CAPTURED")
+            print("G5_ARCHIVE_INTEGRITY=ENCRYPTED_DIGEST_PASS")
             print("G5_ARCHIVE_MANIFEST=" + str(manifest))
             print("G5_ARCHIVE_RESTORE=NOT_VERIFIED")
             return 0
