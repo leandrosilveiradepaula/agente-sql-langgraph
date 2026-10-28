@@ -24,6 +24,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -170,6 +171,78 @@ def pg_environment(dsn: str, project_ref: str) -> dict[str, str]:
     return env
 
 
+# Fixed diagnostic categories only: neither stderr nor connection details
+# may be copied to the terminal, GitHub, or a diagnostic file.
+PG_DUMP_ERROR_SIGNATURES = (
+    ("SOURCE_AUTHENTICATION_FAILED", (
+        "password authentication failed", "no password supplied",
+        "authentication failed", "fe_sendauth", "invalid password",
+    )),
+    ("SOURCE_TLS_VERIFICATION_FAILED", (
+        "certificate verify failed", "root certificate file",
+        "server certificate", "ssl error", "sslmode",
+        "self-signed certificate", "ssl certificate", "certificate chain",
+    )),
+    ("SOURCE_CLIENT_VERSION_MISMATCH", (
+        "server version mismatch", "aborting because of server version",
+        "server version:", "pg_dump version:",
+    )),
+    ("SOURCE_CONNECTION_POOL_EXHAUSTED", (
+        "too many clients", "remaining connection slots",
+        "too many connections", "max client connections reached",
+    )),
+    ("SOURCE_DNS_FAILED", (
+        "could not translate host name", "name or service not known",
+        "temporary failure in name resolution", "nodename nor servname",
+    )),
+    ("SOURCE_NETWORK_FAILED", (
+        "connection refused", "connection timed out",
+        "timeout expired", "network is unreachable",
+        "server closed the connection", "could not receive data from server",
+        "connection reset by peer",
+    )),
+    ("SOURCE_ACCESS_DENIED", (
+        "permission denied", "must be owner", "no pg_hba.conf entry",
+        "not permitted", "insufficient privilege",
+    )),
+    ("SOURCE_LOCK_TIMEOUT", (
+        "canceling statement due to lock timeout",
+        "lock timeout", "could not obtain lock",
+    )),
+    ("SOURCE_QUERY_FAILED", (
+        "query failed", "query returned", "could not execute query",
+    )),
+)
+PG_DUMP_ERROR_ORDER = tuple(code for code, _ in PG_DUMP_ERROR_SIGNATURES)
+
+
+def classify_pg_dump_error(segment: bytes | str) -> str | None:
+    """Scan a bounded excerpt; return only a fixed non-sensitive status."""
+    if isinstance(segment, bytes):
+        piece = segment.decode("utf-8", "ignore").lower()
+    else:
+        piece = segment.lower()
+    for code, markers in PG_DUMP_ERROR_SIGNATURES:
+        if any(marker in piece for marker in markers):
+            return code
+    return None
+
+
+def observe_pg_dump_stderr(stream, observed: set[str]) -> None:
+    """Drain stderr concurrently to prevent pipe deadlocks, never persist it."""
+    try:
+        while True:
+            fragment = stream.readline(4096)
+            if not fragment:
+                break
+            category = classify_pg_dump_error(fragment)
+            if category is not None:
+                observed.add(category)
+    except (OSError, ValueError):
+        # Classification is best-effort; a failure still returns a safe stage.
+        return
+
+
 def encrypted_capture(path: Path, recipient: str | None,
                       pg_env: dict[str, str], *, passphrase: str | None = None) -> None:
     """PG dump -> GPG stream. Secret never enters command line or environment."""
@@ -185,14 +258,24 @@ def encrypted_capture(path: Path, recipient: str | None,
                  getattr(os, "O_NOFOLLOW", 0), 0o600)
     producer = consumer = None
     secret_read_fd = secret_write_fd = None
+    error_reader = None
+    pg_errors: set[str] = set()
     try:
         with os.fdopen(fd, "wb") as output:
             producer = subprocess.Popen(
                 [pg_dump, "--format=custom", "--no-owner", "--no-acl",
                  "--lock-wait-timeout=5s"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 env=pg_env,
             )
+            # Drain pg_dump stderr without displaying or writing raw errors.
+            if getattr(producer, "stderr", None) is not None:
+                error_reader = threading.Thread(
+                    target=observe_pg_dump_stderr,
+                    args=(producer.stderr, pg_errors),
+                    daemon=True,
+                )
+                error_reader.start()
             # Intentionally do not inherit PGPASSWORD into the GPG process.
             gpg_env = {k: os.environ[k] for k in (
                 "HOME", "PATH", "LANG", "GNUPGHOME",
@@ -231,8 +314,16 @@ def encrypted_capture(path: Path, recipient: str | None,
                 pg_rc = producer.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 raise ArchiveBlocked("ARCHIVE_TIMEOUT") from None
-            if pg_rc != 0 or gpg_rc != 0:
-                raise ArchiveBlocked("ENCRYPTED_DUMP_FAILED")
+            if error_reader is not None:
+                error_reader.join(timeout=5)
+            if pg_rc != 0 and pg_errors:
+                for reason in PG_DUMP_ERROR_ORDER:
+                    if reason in pg_errors:
+                        raise ArchiveBlocked(reason)
+            if gpg_rc != 0:
+                raise ArchiveBlocked("GPG_ENCRYPTION_FAILED")
+            if pg_rc != 0:
+                raise ArchiveBlocked("SOURCE_PG_DUMP_FAILED_UNKNOWN")
             output.flush()
             os.fsync(output.fileno())
     finally:
@@ -243,6 +334,8 @@ def encrypted_capture(path: Path, recipient: str | None,
             if child is not None and child.poll() is None:
                 child.kill()
                 child.wait(timeout=15)
+        if error_reader is not None:
+            error_reader.join(timeout=5)
 
 
 def capture(project_ref: str, directory: Path, recipient: str | None = None) -> Path:
