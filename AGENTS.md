@@ -1,3 +1,13 @@
+# 28/10/2026 — G5 IMAGE PROBE BLOCKED ON SUPABASE PG17; RESTORE STILL NOT VERIFIED
+
+**Operador executou preflight read-only** depois de PR #191 mergeada e baixou `supabase/postgres:17.6.1.136`; imagem local ID `sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`. Auditoria em `postgres:17` e `supabase/postgres:17.6.1.136` interrompeu com `G5_EXTENSION_AUDIT_ERROR=IMAGE_EXTENSION_PROBE_INVALID`, `G5_RESTORE_TEST=NOT_PERFORMED`, **antes de pedir senha ou restaurar SQL**. A causa exata desse erro agrupado nao consta no log: nao atribuir a imagem vazia, nome invalido ou qualquer extensao sem teste.
+
+**Correcao estrutural da auditoria:** de acordo com PostgreSQL 17, distinguir `extensao.control` (primario) de `extensao--versao.control` (secundario); arquivos auxiliares de versao nao sao extensoes adicionais, podendo conter pontos que a regex de nome primario rejeitava. Filtrar auxiliares antes da validacao dos primarios (sem ignora-los para fins de restore) e retornar erros separados, exclusivamente codigos fixos, se nao houver controls ou houver saida inesperada. Testes Linux POSIX simulam pg_config e primarios/secundarios; CI Windows/Linux. Proxima acao apos PR/CI/merge: REEXECUTAR somente a auditoria read-only contra as duas imagens em cache e enviar linhas `G5_`. Nao repetir `--restore`/alterar bancos/baixar mais imagens antes da evidencia.
+
+**Ja comprovado:** arquivo SOURCE cifrado SHA PASS, GPG/decrypt PASS, TOC 811; quatro extensoes `pg_stat_statements`, `pgcrypto`, `supabase_vault`, `uuid-ossp`; imagem comunitaria `postgres:17` SEM `supabase_vault` e bloqueio real `EXTENSION_UNAVAILABLE`. A segunda imagem Supabase ainda nao tem coverage comprovada. SOURCE/DEMO/n8n/Shadow inalterados. G5 restore integral, copia off-VPS, Vault key e dependencias/cutover permanecem pendentes. `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. Ver `docs/operations/SUPABASE-SOURCE-RETIREMENT-GATE.md`, issue #155.
+
+---
+
 # 28/10/2026 — G5: EXTENSION_UNAVAILABLE REAL, RECUPERACAO SOURCE AINDA BLOQUEADA
 
 **Operador executou segundo teste de restore isolado autorizado na VPS**, com PR #190 mergeada e stderr classificado somente em memoria. Resultado real: `G5_REHEARSAL_MODE=RESTORE`, `G5_IMAGE_CACHED=YES`, `G5_REHEARSAL_RESULT=BLOCKED`, `G5_REHEARSAL_ERROR=ISOLATED_RESTORE_SQL_FAILED`, `G5_RESTORE_FAILURE_CATEGORY=EXTENSION_UNAVAILABLE`, `G5_RESTORE_TEST=NOT_VERIFIED`. O motivo e uma extensao ausente no contêiner PostgreSQL 17 comunitario, mas o **nome exato da primeira extensao que falhou ainda NAO foi comprovado**. Cleanup do container verificado pelo proprio utilitario; SOURCE/DEMO/n8n inalterados. Backup SHA-256/GPG/TOC 811 entradas PASS; nao houve restore efetivo.
