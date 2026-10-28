@@ -244,14 +244,17 @@ def isolated_run_args(image: str, name: str, runtime_user: str | None = None) ->
         "--network=none", "--read-only",
         "--user=" + user,
         "--cap-drop=ALL", "--security-opt=no-new-privileges",
-        "--pids-limit=128", "--memory=1g", "--cpus=1",
-        "--log-driver=none",
+        "--pids-limit=128", "--memory=1g", "--memory-swap=1g",
+        "--cpus=1", "--log-driver=none",
         *("--tmpfs=" + target for target in tmpfs),
     ]
     if runtime_user is not None:
         # Bypass Supabase's managed initialization/migrations on the image.
         # Init a synthetic scratch cluster only; no project roles/keys are used.
-        return cmd + ["--entrypoint=/bin/sh", image, "-ceu", SUPABASE_POSTGRES_BOOT]
+        return cmd + [
+            "--env=HOME=/tmp",
+            "--entrypoint=/bin/sh", image, "-ceu", SUPABASE_POSTGRES_BOOT,
+        ]
     return cmd + [
         "--env=POSTGRES_HOST_AUTH_METHOD=trust", image,
         "postgres", "-c", "listen_addresses=",
