@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import re
+import stat
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
@@ -64,6 +65,7 @@ def load_baseline(raw: Any) -> dict[str, Any]:
     if not isinstance(cases, list) or not 1 <= len(cases) <= MAX_CASES:
         raise ValueError("benchmark_case_count_invalid")
     seen_cases: set[str] = set()
+    seen_runs: set[str] = set()
     normalized = []
     for item in cases:
         if not isinstance(item, Mapping) or not {
@@ -88,6 +90,11 @@ def load_baseline(raw: Any) -> dict[str, Any]:
             item["official_sql"], maximum=MAX_SQL_LENGTH
         ):
             raise ValueError("benchmark_official_sql_invalid")
+        correlated_run = item.get("agent_run_id")
+        if correlated_run is not None:
+            if correlated_run in seen_runs:
+                raise ValueError("benchmark_agent_run_reused")
+            seen_runs.add(correlated_run)
         seen_cases.add(case_id)
         normalized.append(dict(item))
     return {
@@ -124,10 +131,46 @@ def verify_blind_manifest(
         raise ValueError("blind_manifest_does_not_match_frozen_baseline")
 
 
-def _load_json(path: str, *, max_bytes: int) -> Any:
+def create_freeze_receipt(
+    baseline: Mapping[str, Any], manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    """A separate digest receipt; never put it in the generator's manifest.
+
+    A matching receipt attests integrity only. The operator must establish
+    independent, pre-generation custody/timestamp before calling it frozen.
+    """
+    valid = load_baseline(baseline)
+    verify_blind_manifest(valid, manifest)
+    return {
+        "contract_version": CONTRACT_VERSION,
+        "suite": valid["suite"],
+        "case_count": len(valid["cases"]),
+        "baseline_fingerprint": stable_fingerprint(valid),
+        "manifest_fingerprint": stable_fingerprint(manifest),
+    }
+
+
+def verify_freeze_receipt(
+    baseline: Mapping[str, Any], manifest: Mapping[str, Any], receipt: Any,
+) -> None:
+    if not isinstance(receipt, Mapping) or dict(receipt) != create_freeze_receipt(
+        baseline, manifest
+    ):
+        raise ValueError("benchmark_freeze_receipt_mismatch")
+
+
+def _load_json(
+    path: str, *, max_bytes: int, require_private: bool = False,
+) -> Any:
     source = Path(path)
-    if not source.is_file() or source.stat().st_size > max_bytes:
+    try:
+        info = source.lstat()
+    except OSError:
+        raise ValueError("benchmark_input_invalid") from None
+    if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= max_bytes:
         raise ValueError("benchmark_input_invalid")
+    if require_private and os.name == "posix" and (info.st_mode & 0o077):
+        raise ValueError("benchmark_private_input_required")
     return json.loads(source.read_text(encoding="utf-8"))
 
 
@@ -280,10 +323,19 @@ def _score_case(
     ):
         result.update(status="diverge", reason="structural_or_intent_difference")
     elif result["sql_verdict"] == "normalized_sql_match":
-        # Matching SQL shape is only a structural outcome. Mismatched
-        # provider/repair provenance or unapproved repair remains inconclusive.
-        if result["requires_reapproval"] or result["provider_status"] == "mismatched":
-            result.update(status="inconclusivo", reason="provenance_or_reapproval")
+        # Do not present a structural SQL match as a qualified comparison
+        # when the historical run lacks tenant, model, context or intent
+        # provenance. Never infer these values from a configured default.
+        if result["requires_reapproval"]:
+            result.update(status="inconclusivo", reason="repair_requires_reapproval")
+        elif not result["tenant_identity_attested"]:
+            result.update(status="inconclusivo", reason="tenant_identity_unattested")
+        elif result["provider_status"] != "matched":
+            result.update(status="inconclusivo", reason="provider_provenance_unattested_or_mismatch")
+        elif result["context_status"] != "matched":
+            result.update(status="inconclusivo", reason="context_provenance_unattested_or_mismatch")
+        elif result["intent_status"] != "identifiers_matched":
+            result.update(status="inconclusivo", reason="intent_provenance_unattested")
         else:
             result.update(status="corresponde", reason="sql_structural_match_only")
     else:
@@ -295,11 +347,19 @@ def evaluate_blind_benchmark(
     baseline: Mapping[str, Any],
     manifest: Mapping[str, Any],
     evidence_export: Mapping[str, Any],
+    receipt: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Evaluation occurs after generation. Nothing calls a SQL executor/LLM."""
+    """Evaluate only after checking the separately retained freeze receipt."""
     validated = load_baseline(baseline)
     verify_blind_manifest(validated, manifest)
+    verify_freeze_receipt(validated, manifest, receipt)
     records = _validate_evidence(evidence_export)
+    authorized_runs = {
+        case["agent_run_id"] for case in validated["cases"]
+        if _identifier(case.get("agent_run_id"))
+    }
+    if any(record.get("agent_run_id") not in authorized_runs for record in records):
+        raise ValueError("shadow_evidence_unrequested_run")
     fake = FakeShadowEvidenceRepository()
     for record in records:
         if fake.create(record)["status"] != "created":
@@ -319,6 +379,10 @@ def evaluate_blind_benchmark(
         "suite": validated["suite"],
         "benchmark_fingerprint": stable_fingerprint(validated),
         "manifest_fingerprint": stable_fingerprint(manifest),
+        "freeze_receipt_fingerprint": stable_fingerprint(receipt),
+        "freeze_receipt_consistent": True,
+        "freeze_pre_generation_custody_attested": False,
+        "historical_source_authenticity_attested": False,
         "evidence_fingerprint": stable_fingerprint([
             record["evidence_fingerprint"] for record in records
         ]),
@@ -341,7 +405,12 @@ def _write_exclusive(path: str, document: Mapping[str, Any]) -> None:
     output = Path(path)
     if not output.parent.is_dir() or output.exists():
         raise ValueError("benchmark_output_invalid_or_already_exists")
-    with output.open("x", encoding="utf-8") as stream:
+    # Explicit 0600 on POSIX regardless of caller umask; never overwrite.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(output, flags, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         json.dump(document, stream, indent=2, ensure_ascii=False, sort_keys=True)
         stream.write("\n")
 
@@ -352,10 +421,12 @@ def main() -> int:
     prepare = sub.add_parser("prepare", help="Strip gold/baseline fields into a questions-only manifest")
     prepare.add_argument("--baseline", required=True)
     prepare.add_argument("--output", required=True)
+    prepare.add_argument("--receipt-output", required=True)
     score = sub.add_parser("evaluate", help="Compare only AFTER independent Shadow evidence exists")
     score.add_argument("--baseline", required=True)
     score.add_argument("--manifest", required=True)
     score.add_argument("--evidence", required=True)
+    score.add_argument("--receipt", required=True)
     score.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -366,14 +437,27 @@ def main() -> int:
         print("BLIND_BENCHMARK_BLOCKED: live_execution_flags_present")
         return 3
     try:
-        baseline = load_baseline(_load_json(args.baseline, max_bytes=MAX_BASELINE_BYTES))
+        baseline = load_baseline(_load_json(
+            args.baseline, max_bytes=MAX_BASELINE_BYTES, require_private=True
+        ))
         if args.command == "prepare":
-            _write_exclusive(args.output, create_blind_manifest(baseline))
+            if Path(args.output).resolve() == Path(args.receipt_output).resolve():
+                raise ValueError("benchmark_output_paths_must_differ")
+            if Path(args.output).exists() or Path(args.receipt_output).exists():
+                raise ValueError("benchmark_output_invalid_or_already_exists")
+            manifest = create_blind_manifest(baseline)
+            receipt = create_freeze_receipt(baseline, manifest)
+            _write_exclusive(args.output, manifest)
+            _write_exclusive(args.receipt_output, receipt)
             print("BLIND_MANIFEST_CREATED: questions_only")
+            print("BLIND_FREEZE_RECEIPT_CREATED: integrity_only")
             return 0
         manifest = _load_json(args.manifest, max_bytes=MAX_BASELINE_BYTES)
-        evidence = _load_json(args.evidence, max_bytes=MAX_EVIDENCE_BYTES)
-        report = evaluate_blind_benchmark(baseline, manifest, evidence)
+        receipt = _load_json(args.receipt, max_bytes=4096, require_private=True)
+        evidence = _load_json(
+            args.evidence, max_bytes=MAX_EVIDENCE_BYTES, require_private=True
+        )
+        report = evaluate_blind_benchmark(baseline, manifest, evidence, receipt)
         _write_exclusive(args.output, report)
         print("BLIND_EVALUATION_WRITTEN: " + report["status"])
         return 0 if all(
