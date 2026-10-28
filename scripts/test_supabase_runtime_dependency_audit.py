@@ -80,6 +80,46 @@ class RuntimeDependencyTests(unittest.TestCase):
         self.assertIn("N8N_LOG_LEVEL=info", command)
         self.assertEqual(command[-2:], ["n8n-sample", "n8n"])
 
+    def test_n8n_registry_qualified_image_is_detected(self):
+        output = (
+            "shadow-test myorg/langgraph-shadow:1.0\\n"
+            "n8n-main docker.n8n.io/n8nio/n8n:2.4.8\\n"
+            "postgres postgres:17\\n"
+        )
+        self.assertEqual(module.parse_single_n8n_container(output), "n8n-main")
+
+    def test_n8n_bare_image_is_detected(self):
+        for image in ("n8nio/n8n:2.4.8", "n8n:2.4.8",
+                      "registry.example.org/n8nio/n8n@sha256:abc"):
+            with self.subTest(image=image):
+                self.assertEqual(
+                    module.parse_single_n8n_container("server " + image),
+                    "server",
+                )
+
+    def test_n8n_ambiguous_or_missing_blocks(self):
+        for output in (
+            "server-a docker.n8n.io/n8nio/n8n:2.4.8\\n"
+            "server-b n8nio/n8n:2.4.8\\n",
+            "sidecar registry.example.org/notn8n:1\\n",
+            "invalid-line-without-image\\n",
+        ):
+            with self.subTest(output=output):
+                with self.assertRaises(module.AuditBlocked) as caught:
+                    module.parse_single_n8n_container(output)
+                self.assertEqual(
+                    str(caught.exception), "N8N_CONTAINER_MISSING_OR_AMBIGUOUS"
+                )
+
+    def test_n8n_detection_uses_existing_reviewed_docker_format(self):
+        sample = "n8n-primary docker.n8n.io/n8nio/n8n:2.4.8\\n"
+        with patch.object(module, "run_private_cli", return_value=sample) as runner:
+            self.assertEqual(module.find_n8n_container(), "n8n-primary")
+            runner.assert_called_once_with(
+                ["docker", "ps", "--format", "{{.Names}} {{.Image}}"],
+                timeout=20,
+            )
+
     def test_n8n_version_drift_blocks_without_decrypted_export(self):
         with patch.object(module, "run_private_cli", return_value="2.5.0") as runner:
             with self.assertRaises(module.AuditBlocked):
