@@ -105,8 +105,8 @@ A captura real só poderá ser orientada/executada após autorização específi
 
 O utilitário `scripts/operations/g5_archive_supabase_source.py` tem três modos:
 
-- `--plan`: apenas disponibilidade local de `pg_dump` e `gpg`, **sem conexão**.
-- `--capture`: exige autorização **separada** do operador, TTY, confirmação `ARCHIVE-SOURCE-READONLY`, DSN admin SOURCE por `getpass`, identidade de projeto estrita e TLS `verify-full`. `pg_dump` executa com `default_transaction_read_only=on`; os bytes viajam em pipe diretamente ao `gpg` com destinatário OpenPGP de fingerprint completo, sem arquivo de dump plaintext. Guarda somente `.dump.gpg` e manifesto SHA-256 em diretório root-only 0700/0600.
+- `--plan`: disponibilidade de `gpg` e de `pg_dump` major 17 ou superior, **sem conexão**.
+- `--capture`: exige autorização **separada** do operador, TTY, confirmação `ARCHIVE-SOURCE-READONLY`, DSN admin SOURCE por `getpass`, identidade de projeto estrita e TLS `verify-full`. `pg_dump` executa com `default_transaction_read_only=on`; os bytes viajam em pipe diretamente ao `gpg` protegido por senha forte digitada localmente (padrão), ou por destinatário OpenPGP quando `--recipient-fingerprint` é especificado; nunca há arquivo de dump em texto puro. Guarda somente `.dump.gpg` e manifesto SHA-256 em diretório root-only 0700/0600.
 - `--verify`: verifica integridade dos bytes **criptografados** e a estrutura do recibo; **não descriptografa nem atesta restauro**. O manifesto marca `restore_verified=false`.
 
 Após merge da PR, testar **somente o planejamento**, sem expor credenciais:
@@ -114,11 +114,12 @@ Após merge da PR, testar **somente o planejamento**, sem expor credenciais:
 ~~~bash
 cd /docker/agente-sql-langgraph-repo &&
 git fetch -q origin && git checkout -q main && git pull --ff-only -q origin main &&
-.venv/bin/python scripts/operations/g5_archive_supabase_source.py \
+PATH="/usr/lib/postgresql/17/bin:$PATH" .venv/bin/python \
+  scripts/operations/g5_archive_supabase_source.py \
   --plan --source-project-ref nywxpvzhlpqjtcafpdfe
 ~~~
 
-O `--capture` **não é autorizado pelo merge**. Antes dele, operador deve aprovar a exportação de dados históricos e definir custodiante, fingerprint de chave pública, espaço, destino externo seguro e retenção. O manifesto e o dump criptografado **nunca** vão para o GitHub/chat. Fazer ensaio de restauro em banco **isolado/descartável** e validar dados/roles, antes de considerar a origem removível. **Nunca restaurar diretamente no DEMO**, porque esquemas e tenants diferem. Um `pg_dump` lógico não captura objetos físicos do Storage, Edge Functions, segredos, credenciais, configurações de Auth e todas as roles; inventariar também esses recursos e sua custódia.
+O `--capture` **não é autorizado pelo merge**. Antes dele, operador deve aprovar a exportação de dados históricos e definir custódia externa da senha forte (ou da chave privada, no modo alternativo), espaço, destino externo seguro e retenção. O manifesto e o dump criptografado **nunca** vão para o GitHub/chat. Fazer ensaio de restauro em banco **isolado/descartável** e validar dados/roles, antes de considerar a origem removível. **Nunca restaurar diretamente no DEMO**, porque esquemas e tenants diferem. Um `pg_dump` lógico não captura objetos físicos do Storage, Edge Functions, segredos, credenciais, configurações de Auth e todas as roles; inventariar também esses recursos e sua custódia.
 
 ### P3 — identidade autorizada antes de criar login Shadow
 
