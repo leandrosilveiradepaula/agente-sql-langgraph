@@ -8,9 +8,16 @@ container. The encrypted archive never mounts into Docker: GPG -> docker exec
 pg_restore via anonymous pipes. No raw SQL, schema names, logs or credentials
 appear on stdout or in a file.
 
-A PASS here demonstrates that pg_restore completed successfully in this
-isolated stock PostgreSQL container; it does NOT validate Supabase extensions,
-auth, policies, permissions, Storage, external services or financial parity.
+--boot-test for an explicitly SHA-pinned Supabase Postgres 17 image performs
+only rootless initdb, pg_isready and cleanup in anonymous tmpfs; it never reads
+or restores the real encrypted backup. The Supabase image default entrypoint
+and bundled init migrations are intentionally bypassed: they are not needed
+to attest an isolated PostgreSQL engine, and may demand external secrets.
+A full restore (with a fresh human gate) may still fail because the raw
+pg_dump contains Supabase-managed internal objects/roles or Vault secrets.
+
+A PASS for a future isolated restore does NOT validate Supabase Auth, Vault
+key continuity, Storage, external services, tenant parity or retirement.
 """
 from __future__ import annotations
 
@@ -38,8 +45,12 @@ from scripts.operations.g5_inspect_encrypted_source import (  # noqa: E402
 )
 
 DOCKER_SOCKET = Path("/var/run/docker.sock")
-IMAGE_TAG = "postgres:17"                 # Structural tool version, never a tenant value.
+IMAGE_TAG = "postgres:17"                 # Legacy community image.
 IMAGE_SHA = re.compile(r"^sha256:[0-9a-f]{64}$")
+IMAGE_REF = re.compile(
+    r"^(?:postgres:17|supabase/postgres:17\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,4})$"
+)
+POSTGRES_UID = re.compile(rb"^[1-9][0-9]{0,5}$")
 NAME_PATTERN = re.compile(r"^g5-restore-[0-9a-f]{16}$")
 CONTAINER_UID = "999:999"                 # Official PostgreSQL 17 Debian image.
 CONTAINER_TMPFS = (
@@ -47,6 +58,29 @@ CONTAINER_TMPFS = (
     "/var/run/postgresql:rw,nosuid,nodev,size=16m,uid=999,gid=999,mode=0770",
     "/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777",
 )
+# Runtime boot is deliberately not a full Supabase initialization. All paths
+# are memory-backed, and shell statements below are static structural logic.
+SUPABASE_POSTGRES_BOOT = (
+    "set -eu; "
+    "initdb -D /var/lib/postgresql/data --username=postgres "
+    "--auth-local=trust --auth-host=reject --no-instructions "
+    ">/dev/null 2>&1; "
+    "exec postgres -D /var/lib/postgresql/data "
+    "-c listen_addresses= "
+    "-c unix_socket_directories=/var/run/postgresql "
+    "-c ssl=off"
+)
+
+def supabase_tmpfs(uid: int, gid: int) -> tuple[str, ...]:
+    if not (1 <= uid <= 65534 and 1 <= gid <= 65534):
+        raise ArchiveBlocked("ISOLATED_IMAGE_UID_INVALID")
+    return (
+        "/var/lib/postgresql/data:rw,nosuid,nodev,size=768m,"
+        + f"uid={uid},gid={gid},mode=0700",
+        "/var/run/postgresql:rw,nosuid,nodev,size=16m,"
+        + f"uid={uid},gid={gid},mode=0770",
+        "/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777",
+    )
 RESTORE_TIMEOUT = 3600
 DOCKER_TIMEOUT = 30
 READY_ATTEMPTS = 40
@@ -156,45 +190,89 @@ def docker_query(prefix: list[str], args: list[str]) -> subprocess.CompletedProc
         raise ArchiveBlocked("LOCAL_DOCKER_UNAVAILABLE") from None
 
 
-def image_id(prefix: list[str]) -> str:
-    """Never pull an image implicitly or run a tag that changed after preflight."""
-    p = docker_query(prefix, ["image", "inspect", "--format", "{{.Id}}", IMAGE_TAG])
+def image_id(prefix: list[str], image_ref: str = IMAGE_TAG) -> str:
+    """Only cached allowlisted images; pin to immutable SHA before use."""
+    if not IMAGE_REF.fullmatch(image_ref):
+        raise ArchiveBlocked("ISOLATED_IMAGE_REF_INVALID")
+    p = docker_query(prefix, ["image", "inspect", "--format", "{{.Id}}", image_ref])
     value = p.stdout.decode("ascii", "ignore").strip()
     if p.returncode != 0 or not IMAGE_SHA.fullmatch(value):
         raise ArchiveBlocked("POSTGRES17_IMAGE_NOT_CACHED")
     return value
 
 
-def isolated_run_args(image: str, name: str) -> list[str]:
+def supabase_image_user(prefix: list[str], image_sha: str) -> str:
+    """Read image's real postgres UID/GID, no root or fixed Debian UID assumptions."""
+    if not IMAGE_SHA.fullmatch(image_sha):
+        raise ArchiveBlocked("ISOLATED_IMAGE_ID_INVALID")
+    result = docker_query(prefix, [
+        "run", "--rm", "--pull=never", "--network=none", "--read-only",
+        "--user=65534:65534", "--cap-drop=ALL",
+        "--security-opt=no-new-privileges", "--pids-limit=24",
+        "--memory=128m", "--cpus=0.25", "--log-driver=none",
+        "--entrypoint=/bin/sh", image_sha, "-ceu",
+        "id -u postgres; id -g postgres",
+    ])
+    if result.returncode != 0:
+        raise ArchiveBlocked("ISOLATED_IMAGE_UID_PROBE_FAILED")
+    parts = result.stdout.splitlines()
+    if len(parts) != 2 or any(POSTGRES_UID.fullmatch(v) is None for v in parts):
+        raise ArchiveBlocked("ISOLATED_IMAGE_UID_INVALID")
+    uid, gid = (int(part) for part in parts)
+    supabase_tmpfs(uid, gid)  # Validate supported non-root numeric identity.
+    return f"{uid}:{gid}"
+
+
+def isolated_run_args(image: str, name: str, runtime_user: str | None = None) -> list[str]:
     if not IMAGE_SHA.fullmatch(image) or not NAME_PATTERN.fullmatch(name):
         raise ArchiveBlocked("ISOLATED_CONTAINER_INPUT_INVALID")
+    if runtime_user is None:
+        user = CONTAINER_UID
+        tmpfs = CONTAINER_TMPFS
+    else:
+        if not re.fullmatch(r"[1-9][0-9]{0,5}:[1-9][0-9]{0,5}", runtime_user):
+            raise ArchiveBlocked("ISOLATED_IMAGE_UID_INVALID")
+        uid, gid = [int(x) for x in runtime_user.split(":")]
+        user = runtime_user
+        tmpfs = supabase_tmpfs(uid, gid)
     # No -p/-P, -v/--volume, --mount, --privileged or network connection.
-    return [
+    cmd = [
         "run", "--detach", "--rm", "--pull=never",
         "--name=" + name,
         "--label=agente-sql-langgraph.g5=isolated-rehearsal",
         "--network=none", "--read-only",
-        "--user=" + CONTAINER_UID,
+        "--user=" + user,
         "--cap-drop=ALL", "--security-opt=no-new-privileges",
         "--pids-limit=128", "--memory=1g", "--cpus=1",
         "--log-driver=none",
-        *("--tmpfs=" + target for target in CONTAINER_TMPFS),
-        "--env=POSTGRES_HOST_AUTH_METHOD=trust",
-        image,
+        *("--tmpfs=" + target for target in tmpfs),
+    ]
+    if runtime_user is not None:
+        # Bypass Supabase's managed initialization/migrations on the image.
+        # Init a synthetic scratch cluster only; no project roles/keys are used.
+        return cmd + ["--entrypoint=/bin/sh", image, "-ceu", SUPABASE_POSTGRES_BOOT]
+    return cmd + [
+        "--env=POSTGRES_HOST_AUTH_METHOD=trust", image,
         "postgres", "-c", "listen_addresses=",
     ]
 
 
-def isolated_exec_args(name: str, program: str, *args: str, interactive: bool = False) -> list[str]:
+def isolated_exec_args(name: str, program: str, *args: str,
+                       interactive: bool = False,
+                       runtime_user: str | None = None) -> list[str]:
     if not NAME_PATTERN.fullmatch(name) or program not in (
         "pg_isready", "postgres", "pg_restore", "psql",
     ):
         raise ArchiveBlocked("ISOLATED_COMMAND_NOT_ALLOWED")
+    user = runtime_user if runtime_user is not None else CONTAINER_UID
+    if not re.fullmatch(r"[1-9][0-9]{0,5}:[1-9][0-9]{0,5}", user):
+        raise ArchiveBlocked("ISOLATED_IMAGE_UID_INVALID")
     return ["exec", *(["--interactive"] if interactive else []),
-            "--user=" + CONTAINER_UID, name, program, *args]
+            "--user=" + user, name, program, *args]
 
 
-def check_container_isolation(prefix: list[str], name: str, image: str) -> None:
+def check_container_isolation(prefix: list[str], name: str, image: str,
+                              runtime_user: str | None = None) -> None:
     """Fail closed if Docker created volumes, host binds, network, or privileges."""
     response = docker_query(prefix, ["inspect", "--format", "{{json .}}", name])
     if response.returncode != 0 or len(response.stdout) > 150_000:
@@ -216,7 +294,9 @@ def check_container_isolation(prefix: list[str], name: str, image: str) -> None:
             and host.get("PidMode") not in ("host",)
             and "ALL" in cap_drop
             and "no-new-privileges" in security
-            and config.get("User") == CONTAINER_UID
+            and config.get("User") == (
+                runtime_user if runtime_user is not None else CONTAINER_UID
+            )
             and config.get("Labels", {}).get(
                 "agente-sql-langgraph.g5") == "isolated-rehearsal"
             and not host.get("Binds")
@@ -233,7 +313,8 @@ def check_container_isolation(prefix: list[str], name: str, image: str) -> None:
         raise ArchiveBlocked("CONTAINER_ISOLATION_UNVERIFIED")
 
 
-def restore_stream(prefix: list[str], name: str, archive: Path, passphrase: str) -> None:
+def restore_stream(prefix: list[str], name: str, archive: Path, passphrase: str,
+                   runtime_user: str | None = None) -> None:
     """Stream the encrypted source through isolated Docker stdin, never a file."""
     validate_archive_passphrase(passphrase)
     gpg_binary = shutil.which("gpg")
@@ -266,6 +347,7 @@ def restore_stream(prefix: list[str], name: str, archive: Path, passphrase: str)
                 "--username=postgres", "--dbname=postgres",
                 "--no-owner", "--no-acl", "--single-transaction",
                 "--exit-on-error", interactive=True,
+                runtime_user=runtime_user,
             ),
             stdin=decrypt.stdout, stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE, env=isolated_docker_env(),
@@ -307,12 +389,14 @@ def restore_stream(prefix: list[str], name: str, archive: Path, passphrase: str)
             restore.stderr.close()
 
 
-def verify_restored_tables(prefix: list[str], name: str) -> int:
+def verify_restored_tables(prefix: list[str], name: str,
+                           runtime_user: str | None = None) -> int:
     output = docker_query(
         prefix, isolated_exec_args(
             name, "psql", "-X", "--no-psqlrc", "-q", "-t", "-A",
             "-v", "ON_ERROR_STOP=1", "-h", "/var/run/postgresql",
             "-U", "postgres", "-d", "postgres", "-c", CATALOG_SQL,
+            runtime_user=runtime_user,
         ),
     )
     count = output.stdout.decode("ascii", "ignore").strip()
@@ -334,36 +418,53 @@ def cleanup_container(prefix: list[str], name: str) -> bool:
 
 
 def rehearsed_restore(archive: Path, password: str, prefix: list[str],
-                      pinned_image: str) -> int:
+                      pinned_image: str, runtime_user: str | None = None,
+                      boot_only: bool = False) -> int:
     if os.geteuid() != 0:
         raise ArchiveBlocked("ROOT_REQUIRED_FOR_ISOLATED_RESTORE")
-    validate_archive_passphrase(password)
+    if not boot_only:
+        validate_archive_passphrase(password)
     name = "g5-restore-" + secrets.token_hex(8)
     started = False
     tables = 0
     failure = None
     cleanup_ok = False
     try:
-        args = isolated_run_args(pinned_image, name)
+        args = isolated_run_args(pinned_image, name, runtime_user=runtime_user)
         # If the run process fails, do not remove an unrelated existing container.
         result = docker_query(prefix, args)
         if result.returncode != 0:
             raise ArchiveBlocked("ISOLATED_CONTAINER_START_FAILED")
         started = True
-        check_container_isolation(prefix, name, pinned_image)
+        check_container_isolation(
+            prefix, name, pinned_image, runtime_user=runtime_user
+        )
         for _ in range(READY_ATTEMPTS):
             if docker_query(prefix, isolated_exec_args(
                 name, "pg_isready", "-h", "/var/run/postgresql", "-U", "postgres",
+                runtime_user=runtime_user,
             )).returncode == 0:
                 break
             time.sleep(1)
         else:
             raise ArchiveBlocked("ISOLATED_POSTGRES_NOT_READY")
-        ver = docker_query(prefix, isolated_exec_args(name, "postgres", "--version"))
+        ver = docker_query(prefix, isolated_exec_args(
+            name, "postgres", "--version", runtime_user=runtime_user,
+        ))
         if ver.returncode != 0 or not re.search(rb"PostgreSQL\)\s+17\.", ver.stdout):
             raise ArchiveBlocked("ISOLATED_POSTGRES_VERSION_INVALID")
-        restore_stream(prefix, name, archive, password)
-        tables = verify_restored_tables(prefix, name)
+        if not boot_only:
+            if runtime_user is None:
+                # Preserve tested community-image call contract.
+                restore_stream(prefix, name, archive, password)
+                tables = verify_restored_tables(prefix, name)
+            else:
+                restore_stream(
+                    prefix, name, archive, password, runtime_user=runtime_user,
+                )
+                tables = verify_restored_tables(
+                    prefix, name, runtime_user=runtime_user,
+                )
     except Exception as exc:
         failure = exc
     finally:
@@ -388,31 +489,69 @@ def main() -> int:
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--plan", action="store_true")
     action.add_argument("--restore", action="store_true")
+    action.add_argument("--boot-test", action="store_true",
+                        help="scratch PostgreSQL bootstrap and cleanup only; no dump")
+    parser.add_argument("--image-ref", default=IMAGE_TAG,
+                        help="allowlisted, cached PostgreSQL 17 image")
+    parser.add_argument("--expected-image-sha",
+                        help="mandatory immutable image ID for non-default images")
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--source-project-ref", required=True)
     parser.add_argument("--archive-dir", type=Path, default=ARCHIVE_DIR)
     args = parser.parse_args()
-    print("G5_REHEARSAL_MODE=" + ("PLAN" if args.plan else "RESTORE"))
+    mode = "PLAN" if args.plan else "BOOT_TEST" if args.boot_test else "RESTORE"
+    print("G5_REHEARSAL_MODE=" + mode)
     try:
         archive = validated_archive(
             args.manifest, args.source_project_ref, args.archive_dir,
         )
+        if not IMAGE_REF.fullmatch(args.image_ref):
+            raise ArchiveBlocked("ISOLATED_IMAGE_REF_INVALID")
         prefix = docker_executable()
-        pinned = image_id(prefix)
+        pinned = image_id(prefix, args.image_ref)
+        if args.image_ref != IMAGE_TAG:
+            if (not args.expected_image_sha or
+                    args.expected_image_sha != pinned):
+                raise ArchiveBlocked("ISOLATED_IMAGE_SHA_NOT_ATTESTED")
+        elif args.expected_image_sha and args.expected_image_sha != pinned:
+            raise ArchiveBlocked("ISOLATED_IMAGE_SHA_NOT_ATTESTED")
+        runtime_user = (
+            supabase_image_user(prefix, pinned)
+            if args.image_ref != IMAGE_TAG else None
+        )
         print("G5_IMAGE_CACHED=YES")
+        print("G5_IMAGE_ID=" + pinned)
         if args.plan:
             print("G5_REHEARSAL_READY=YES")
             print("G5_RESTORE_TEST=NOT_PERFORMED")
             return 0
+        if args.boot_test:
+            rehearsed_restore(
+                archive, "", prefix, pinned,
+                runtime_user=runtime_user, boot_only=True,
+            )
+            print("G5_BOOT_TEST=PASS")
+            print("G5_ISOLATED_CONTAINER_CLEANUP=PASS")
+            print("G5_RESTORE_TEST=NOT_PERFORMED")
+            return 0
         if not sys.stdin.isatty():
             raise ArchiveBlocked("LOCAL_TTY_REQUIRED")
-        confirmation = input(
-            "Digite RESTORE-G5-ISOLATED para iniciar ensaio em Docker sem rede: "
+        token = (
+            "RESTORE-G5-SUPABASE-ISOLATED"
+            if runtime_user is not None else "RESTORE-G5-ISOLATED"
         )
-        if confirmation != "RESTORE-G5-ISOLATED":
+        confirmation = input(
+            "Digite " + token + " para restaurar apenas em Docker sem rede: "
+        )
+        if confirmation != token:
             raise ArchiveBlocked("ISOLATED_RESTORE_NOT_AUTHORIZED")
         passphrase = getpass.getpass("Senha do backup criptografado (sem eco): ")
-        tables = rehearsed_restore(archive, passphrase, prefix, pinned)
+        if runtime_user is None:
+            tables = rehearsed_restore(archive, passphrase, prefix, pinned)
+        else:
+            tables = rehearsed_restore(
+                archive, passphrase, prefix, pinned, runtime_user=runtime_user,
+            )
         print("G5_RESTORED_TABLES=" + str(tables))
         print("G5_ISOLATED_CONTAINER_CLEANUP=PASS")
         print("G5_RESTORE_TEST=PASS")
@@ -425,7 +564,9 @@ def main() -> int:
         ))
         if isinstance(exc, IsolatedRestoreSQLFailure):
             print("G5_RESTORE_FAILURE_CATEGORY=" + exc.category)
-        print("G5_RESTORE_TEST=NOT_VERIFIED")
+        print("G5_RESTORE_TEST=" + (
+            "NOT_PERFORMED" if args.plan or args.boot_test else "NOT_VERIFIED"
+        ))
         return 2
 
 
