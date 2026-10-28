@@ -185,7 +185,7 @@ def prove_rls(dsn: str) -> None:
         assert conn.execute("SELECT count(*) FROM public.langgraph_shadow_runs").fetchone() == (0,)
     with psycopg.connect(dsn) as admin:
         final_ids = {row[0] for row in admin.execute("SELECT shadow_record_id FROM public.langgraph_shadow_runs")}
-        expected_ids = {"ci-old-unscoped", "ci-old-tenant-a", "ci-old-tenant-b", "ci-runtime-tenant-a"}
+        expected_ids = {"ci-old-unscoped", "ci-old-tenant-a", "ci-old-tenant-b", "ci-runtime-tenant-a", "shadow-synthetic-a", "shadow-synthetic-b"}
         assert final_ids == expected_ids, (len(final_ids), len(expected_ids), sorted(final_ids ^ expected_ids))
 
 
