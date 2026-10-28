@@ -210,6 +210,16 @@ def find_n8n_container() -> str:
     return candidates[0]
 
 
+def n8n_exec_prefix(container: str) -> list[str]:
+    """Force stdout-only CLI logging, never export plaintext into n8n log files."""
+    return [
+        "docker", "exec", "-u", "node",
+        "-e", "N8N_LOG_OUTPUT=console",
+        "-e", "N8N_LOG_LEVEL=info",
+        container, "n8n",
+    ]
+
+
 def n8n_credentials_targets(
     container: str, workflow_id: str, *, source: str, demo: str,
 ) -> tuple[int, int, str]:
@@ -217,14 +227,13 @@ def n8n_credentials_targets(
         raise AuditBlocked("N8N_IDENTIFIER_INVALID")
     # n8n v2.4.8 CLI was source-verified for this procedure. Fail on drift.
     version = run_private_cli(
-        ["docker", "exec", "-u", "node", container, "n8n", "--version"],
+        n8n_exec_prefix(container) + ["--version"],
         timeout=40,
     ).strip()
     if version != "2.4.8":
         raise AuditBlocked("N8N_VERSION_UNSUPPORTED")
     exported = run_private_cli(
-        ["docker", "exec", "-u", "node", container, "n8n",
-         "export:workflow", "--id=" + workflow_id],
+        n8n_exec_prefix(container) + ["export:workflow", "--id=" + workflow_id],
     )
     workflow = parse_n8n_one(exported, workflow_id, decrypted=False)
     n_nodes, ids = find_pg_credentials(workflow)
@@ -236,8 +245,7 @@ def n8n_credentials_targets(
         # Locally decrypted only in an ephemeral process pipe, never in
         # stdout/stderr from this script or in an on-disk export file.
         raw = run_private_cli(
-            ["docker", "exec", "-u", "node", container, "n8n",
-             "export:credentials", "--id=" + credential_id, "--decrypted"],
+            n8n_exec_prefix(container) + ["export:credentials", "--id=" + credential_id, "--decrypted"],
         )
         credential = parse_n8n_one(raw, credential_id, decrypted=True)
         targets.append(classify_pg_credential(credential["data"], source=source, demo=demo))
