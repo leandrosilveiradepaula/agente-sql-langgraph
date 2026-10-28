@@ -22,7 +22,6 @@ from pathlib import Path
 import re
 import secrets
 import shutil
-import socket
 import stat
 import subprocess
 import sys
@@ -153,35 +152,15 @@ def check_container_isolation(prefix: list[str], name: str, image: str) -> None:
             and not host.get("Binds")
             and not host.get("Devices")
             and not host.get("PortBindings")
-            and not info.get("NetworkSettings", {}).get("Ports")
+            # Docker may advertise EXPOSE 5432/tcp with a null binding.
+            and all(v in (None, []) for v in
+                    (info.get("NetworkSettings", {}).get("Ports") or {}).values())
             and all(m.get("Type") == "tmpfs" for m in mounts)
         )
     except (TypeError, ValueError, KeyError, AttributeError):
         test = False
     if not test:
         raise ArchiveBlocked("CONTAINER_ISOLATION_UNVERIFIED")
-
-
-def start_container(prefix: list[str], image: str, name: str) -> None:
-    if docker_query(prefix, isolated_run_args(image, name)).returncode != 0:
-        raise ArchiveBlocked("ISOLATED_CONTAINER_START_FAILED")
-    check_container_isolation(prefix, name, image)
-    for _ in range(READY_ATTEMPTS):
-        ready = docker_query(
-            prefix, isolated_exec_args(
-                name, "pg_isready", "-h", "/var/run/postgresql", "-U", "postgres",
-            ),
-        )
-        if ready.returncode == 0:
-            break
-        time.sleep(1)
-    else:
-        raise ArchiveBlocked("ISOLATED_POSTGRES_NOT_READY")
-    ver = docker_query(prefix, isolated_exec_args(name, "postgres", "--version"))
-    if ver.returncode != 0 or not re.search(rb"PostgreSQL\)\s+17\.", ver.stdout):
-        # Some official images output "postgres (PostgreSQL) 17.11".
-        if ver.returncode != 0 or not re.search(rb"PostgreSQL\)\s+17\.", ver.stdout):
-            raise ArchiveBlocked("ISOLATED_POSTGRES_VERSION_INVALID")
 
 
 def restore_stream(prefix: list[str], name: str, archive: Path, passphrase: str) -> None:
@@ -261,6 +240,9 @@ def verify_restored_tables(prefix: list[str], name: str) -> int:
 def cleanup_container(prefix: list[str], name: str) -> bool:
     """Only the random name successfully started by this invocation."""
     docker_query(prefix, ["rm", "--force", name])
+    # A disconnected daemon cannot be mistaken for a cleaned-up container.
+    if docker_query(prefix, ["version", "--format", "{{.Server.Version}}"]).returncode != 0:
+        return False
     return docker_query(prefix, ["container", "inspect", name]).returncode != 0
 
 
@@ -268,6 +250,7 @@ def rehearsed_restore(archive: Path, password: str, prefix: list[str],
                       pinned_image: str) -> int:
     if os.geteuid() != 0:
         raise ArchiveBlocked("ROOT_REQUIRED_FOR_ISOLATED_RESTORE")
+    validate_archive_passphrase(password)
     name = "g5-restore-" + secrets.token_hex(8)
     started = False
     tables = 0
