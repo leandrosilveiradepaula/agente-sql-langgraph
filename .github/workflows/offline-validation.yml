@@ -39,6 +39,9 @@ jobs:
       - name: Full offline checks
         run: python scripts/check_all.py
 
+      - name: Verify Supabase retirement gate fails closed
+        run: python -m unittest scripts.test_supabase_retirement_gate -v
+
       - name: Hardcode scan
         run: python scripts/check_hardcodes.py
 
