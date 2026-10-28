@@ -1,3 +1,13 @@
+# 28/10/2026 — G5: EXTENSION CONTROLS EM SUPABASE PG17 4/4; BOOT-TEST ISOLADO EM PREPARACAO
+
+**Evidencia REAL da VPS (apos PR #192):** a auditoria read-only do backup cifrado SOURCE `nywxpvzhlpqjtcafpdfe` teve `G5_ARCHIVE_TOC_ENTRIES=811`, `G5_ARCHIVE_EXTENSION_COUNT=4`, nomes `pg_stat_statements,pgcrypto,supabase_vault,uuid-ossp`. A imagem comunitaria `postgres:17` (SHA `31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f`) faltou `supabase_vault`; a imagem `supabase/postgres:17.6.1.136` (SHA `f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`) tem **todos os quatro controles de extensao** presentes, `G5_IMAGE_2_MISSING_COUNT=0`, `G5_IMAGE_2_EXTENSION_COVERAGE=FILES_PRESENT_NOT_RESTORE_PROOF`, `G5_RESTORE_TEST=NOT_PERFORMED`. **NAO afirmar restauracao concluida nem compatibilidade de roles, dados, funcoes ou chave Vault.**
+
+**Entrega atual:** adaptador de teste G5 para imagem Supabase PostgreSQL 17 previamente cached e SHA pinada (sem if por cliente). Novo `--boot-test` deve somente confirmar initdb PostgreSQL 17 em container temporario, nonroot UID/GID descoberto na imagem, network=none, read-only, sem bind/volume/ports, PGDATA/socket/tmp em tmpfs e swap desativado, execucao de initdb estatico sem Supabase migrations nem chave Vault; limpeza verificada antes de PASS. Nao decrypt/restaurar SQL neste teste. `--restore` na nova imagem so depois de **nova autorizacao separada** e token `RESTORE-G5-SUPABASE-ISOLATED`. SQL raw do dump inclui objetos gerenciados Supabase, diferente do processo de export oficial schema+roles+data; se falhar, BLOQUEAR sem remover extensoes/tabelas nem baixar thresholds. Contrato de backup externo/off-VPS segue pendente.
+
+**Arquitetura invariavel:** `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`; SOURCE e DEMO inalterados, n8n preservado, sem migracao de banco, roles, DSN, permissoes ou cutover. A SOURCE continua necessaria para dependencias legadas; ver `docs/operations/SUPABASE-SOURCE-RETIREMENT-GATE.md` e issue #155.
+
+---
+
 # 28/10/2026 — G5 IMAGE PROBE BLOCKED ON SUPABASE PG17; RESTORE STILL NOT VERIFIED
 
 **Operador executou preflight read-only** depois de PR #191 mergeada e baixou `supabase/postgres:17.6.1.136`; imagem local ID `sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`. Auditoria em `postgres:17` e `supabase/postgres:17.6.1.136` interrompeu com `G5_EXTENSION_AUDIT_ERROR=IMAGE_EXTENSION_PROBE_INVALID`, `G5_RESTORE_TEST=NOT_PERFORMED`, **antes de pedir senha ou restaurar SQL**. A causa exata desse erro agrupado nao consta no log: nao atribuir a imagem vazia, nome invalido ou qualquer extensao sem teste.
