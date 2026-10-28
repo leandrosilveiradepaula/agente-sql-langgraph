@@ -1,0 +1,37 @@
+name: G5 Supabase PG17 synthetic boot isolation
+
+on:
+  pull_request:
+    paths:
+      - "scripts/operations/g5_restore_isolated_rehearsal.py"
+      - "scripts/test_g5_restore_isolated_rehearsal.py"
+      - "scripts/validation/g5_supabase_pg17_scratch_boot_smoke.py"
+      - ".github/workflows/g5-supabase-scratch-boot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  g5-supabase-pg17-scratch-boot:
+    name: Real networkless scratch boot (no archive, no data)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Pull exact official Supabase PG17 image only for CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull supabase/postgres:17.6.1.136
+          test "$(docker image inspect --format '{{.Id}}' \
+            supabase/postgres:17.6.1.136)" = \
+            "sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00"
+      - name: Boot isolated synthetic PostgreSQL and attest cleanup
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          sudo -E python3 -m scripts.validation.g5_supabase_pg17_scratch_boot_smoke
