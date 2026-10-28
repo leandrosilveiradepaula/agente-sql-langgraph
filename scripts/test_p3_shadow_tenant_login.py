@@ -73,5 +73,45 @@ class ShadowLoginSafetyTests(unittest.TestCase):
         self.assertIn('lstat()', source)
 
 
+    def test_product_identity_rejects_free_form_or_noncanonical_uuid_without_sql(self):
+        admin = MagicMock()
+        for ident in ("tenant.example", "not-a-uuid", "", "123e4567-e89b-12d3-a456-426614174000".upper()):
+            with self.subTest(ident=ident), self.assertRaises(m.ProvisionBlocked) as exc:
+                m.require_authorized_product_tenant(admin, ident)
+            self.assertEqual(str(exc.exception), "PRODUCT_ORGANIZATION_UUID_REQUIRED")
+        admin.execute.assert_not_called()
+
+    def test_shadow_login_requires_active_product_membership(self):
+        admin = MagicMock()
+        ident = "123e4567-e89b-12d3-a456-426614174000"
+        for evidence in ((False, False), (True, False), (False, True), None):
+            admin.execute.return_value.fetchone.return_value = evidence
+            with self.subTest(evidence=evidence), self.assertRaises(m.ProvisionBlocked) as exc:
+                m.require_authorized_product_tenant(admin, ident)
+            self.assertEqual(
+                str(exc.exception), "PRODUCT_ORGANIZATION_MEMBERSHIP_NOT_AUTHORIZED"
+            )
+        admin.execute.return_value.fetchone.return_value = (True, True)
+        m.require_authorized_product_tenant(admin, ident)
+        executed_query, executed_params = admin.execute.call_args.args
+        self.assertIn("ai_agent_organizations", executed_query)
+        self.assertIn("ai_agent_user_organizations", executed_query)
+        self.assertIn("ai_agent_users", executed_query)
+        self.assertEqual(executed_params, (ident, ident))
+
+    def test_preflight_blocks_unregistered_product_tenant_before_privilege_queries(self):
+        admin = MagicMock()
+        admin.execute.return_value.fetchone.side_effect = [
+            ("postgres", "postgres"), (False, False)
+        ]
+        ident = "123e4567-e89b-12d3-a456-426614174000"
+        with self.assertRaises(m.ProvisionBlocked) as exc:
+            m.preflight(admin, organization_id=ident, role=m.login_role_for(ident))
+        self.assertEqual(
+            str(exc.exception), "PRODUCT_ORGANIZATION_MEMBERSHIP_NOT_AUTHORIZED"
+        )
+        self.assertEqual(admin.execute.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -39,10 +39,16 @@ jobs:
       - name: Full offline checks
         run: python scripts/check_all.py
 
-      - name: Verify Supabase retirement gate and VPS dependency audits offline
+      - name: Verify Supabase retirement, source archive and Shadow tenant preflight offline
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python -m unittest scripts.test_supabase_retirement_gate scripts.test_supabase_runtime_dependency_audit -v
+        run: >-
+          python -m unittest
+          scripts.test_supabase_retirement_gate
+          scripts.test_supabase_runtime_dependency_audit
+          scripts.test_g5_archive_supabase_source
+          scripts.test_p3_shadow_tenant_login
+          -v
 
       - name: Hardcode scan
         run: python scripts/check_hardcodes.py

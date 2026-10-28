@@ -80,12 +80,44 @@ def login_dsn_for(admin_dsn: str, project_ref: str, role: str, password: str) ->
     return urlunparse((parsed.scheme, netloc, "/postgres", "", parsed.query, ""))
 
 
+def require_authorized_product_tenant(
+    admin: psycopg.Connection, organization_id: str,
+) -> None:
+    """The Shadow role must belong to an existing, active Product tenant.
+
+    This is an identity authorization check, never a source of business rules.
+    A free-form tenant name or unregistered UUID must not mint a database role.
+    """
+    try:
+        canonical = str(uuid.UUID(organization_id))
+    except (ValueError, AttributeError, TypeError):
+        raise ProvisionBlocked("PRODUCT_ORGANIZATION_UUID_REQUIRED") from None
+    if canonical != organization_id:
+        raise ProvisionBlocked("PRODUCT_ORGANIZATION_UUID_REQUIRED")
+    identity = admin.execute("""
+        SELECT
+          EXISTS(
+            SELECT 1 FROM public.ai_agent_organizations o
+            WHERE o.id = %s::uuid AND o.is_active = true
+          ),
+          EXISTS(
+            SELECT 1 FROM public.ai_agent_user_organizations m
+            JOIN public.ai_agent_users u ON u.id = m.user_id
+            WHERE m.organization_id = %s::uuid
+              AND m.is_active = true AND u.is_active = true
+          )
+    """, (organization_id, organization_id)).fetchone()
+    if identity != (True, True):
+        raise ProvisionBlocked("PRODUCT_ORGANIZATION_MEMBERSHIP_NOT_AUTHORIZED")
+
+
 def preflight(admin: psycopg.Connection, *, organization_id: str, role: str,
               require_absent: bool = True) -> tuple[int, str]:
     # Authenticated administrative identity and exact structural contract.
     identity = admin.execute("SELECT current_user,current_database()").fetchone()
     if identity != ("postgres", "postgres"):
         raise ProvisionBlocked("WRONG_DATABASE_OR_ADMIN_ROLE")
+    require_authorized_product_tenant(admin, organization_id)
     group = admin.execute("""
         SELECT rolcanlogin,rolsuper,rolcreatedb,rolcreaterole,rolbypassrls
         FROM pg_roles WHERE rolname='langgraph_shadow'
