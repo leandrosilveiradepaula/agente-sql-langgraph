@@ -1,3 +1,13 @@
+# 28/10/2026 — G5 REAL RESTORE ISOLADO FALHOU; CAUSA AINDA NAO IDENTIFICADA
+
+**Operador VPS executou o primeiro ensaio real autorizado** do arquivo criptografado SOURCE `nywxpvzhlpqjtcafpdfe` em PostgreSQL 17 isolado, após `--plan` PASS e confirmacao local. Retornou `G5_REHEARSAL_RESULT=BLOCKED`, `G5_REHEARSAL_ERROR=ISOLATED_RESTORE_SQL_FAILED`, `G5_RESTORE_TEST=NOT_VERIFIED`. O original descartava stderr do pg_restore: NAO e comprovado se faltou extensao, role, privilegio ou outro requisito. Nao afirmar restore nem aposentar SOURCE. Como a excecao foi devolvida apos `cleanup_container`, a remocao do container foi confirmada pelo script; caso contrario seria `ISOLATED_CLEANUP_UNVERIFIED`. Nenhum Supabase foi alterado. Backup cifrado original SHA PASS, senha/GPG PASS, TOC 811 entradas PASS.
+
+**Correcao em andamento:** `scripts/operations/g5_restore_isolated_rehearsal.py` deve drenar stderr do pg_restore SOMENTE em memoria e expor apenas uma categoria sanitizada fixa (extensao, role, dependencia, permissao, conflito, recurso etc.). Mantem `G5_RESTORE_TEST=NOT_VERIFIED` e erro bloqueado; **nunca imprimir SQL, objeto, DSN, erro bruto, senha ou dados**. Ensaiar nos testes offline e CI antes de qualquer nova tentativa. Um ensaio diagnostico posterior continua em container isolado com confirmacao typed; nunca autorizar importar no DEMO/SOURCE, desativar n8n, alterar roles/DSN ou pular objetos para tornar testes verdes.
+
+**Permanecem pendentes:** restauração integral real aprovada, cópia cifrada fora da VPS comprovada e custódia, inventario das dependencias SOURCE (n8n oficial com 9 bindings, Shadow persistence, Vercel), portabilidade, hardcodes n8n, paridade e cutover humano. `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. Evidencias e limites em `docs/operations/SUPABASE-SOURCE-RETIREMENT-GATE.md`, issue #155.
+
+---
+
 # 28/10/2026 — G5: BACKUP REAL LEGIVEL, RESTAURACAO ISOLADA AINDA NAO EXECUTADA
 
 **Ultima evidencia operador VPS:** `G5_ARCHIVE_DECRYPTION=PASS`, `G5_PG_RESTORE_TOC=PASS`, `G5_PG_RESTORE_TOC_ENTRIES=811`, `G5_DECRYPTED_ARCHIVE_BYTES=25905751`, `G5_RESTORE_TEST=NOT_PERFORMED` no arquivo criptografado SOURCE `nywxpvzhlpqjtcafpdfe` capturado e SHA-256 PASS. O teste confirmou a senha e leitura integral do catalogo, mas **NENHUMA SQL do arquivo foi restaurada em qualquer PostgreSQL**. PR #188 mergeada no GitHub, SHA `4f189574a92816d9693a4a3c4557eb0a60beb643`.
