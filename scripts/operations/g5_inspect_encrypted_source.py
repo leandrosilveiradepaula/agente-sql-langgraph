@@ -33,6 +33,16 @@ from scripts.operations.g5_archive_supabase_source import (  # noqa: E402
 )
 
 TOC_RECORD = re.compile(rb"^\d{1,12};\s")
+# Only PostgreSQL extension identifier tokens are retained for a separate
+# read-only compatibility audit. Table names, SQL and other TOC records
+# are never retained or displayed.
+TOC_EXTENSION_RECORD = re.compile(
+    rb'^\d{1,12};\s+\d+\s+\d+\s+EXTENSION\s+-\s+'
+    rb'(?P<name>[A-Za-z][A-Za-z0-9_-]{0,62})(?:\s|$)'
+)
+TOC_EXTENSION_CANDIDATE = re.compile(
+    rb'^\d{1,12};\s+\d+\s+\d+\s+EXTENSION(?:\s|$)'
+)
 READ_CHUNK = 64 * 1024
 TIMEOUT = 120
 
@@ -63,18 +73,30 @@ def validated_archive(manifest: Path, project_ref: str, directory: Path) -> Path
     return directory / receipt["archive_name"]
 
 
-def read_toc_counts(pipe, counts: list[int]) -> None:
-    """Drain the pg_restore listing and count entries without storing names."""
+def read_toc_counts(pipe, counts: list[int],
+                    extensions: set[str] | None = None,
+                    invalid_extension: list[bool] | None = None) -> None:
+    """Drain TOC; optionally keep ONLY validated extension identifiers."""
     try:
         for line in iter(lambda: pipe.readline(8192), b""):
             if TOC_RECORD.match(line):
                 counts[0] += 1
+                if extensions is not None and TOC_EXTENSION_CANDIDATE.match(line):
+                    match = TOC_EXTENSION_RECORD.match(line)
+                    if match is None:
+                        if invalid_extension is not None:
+                            invalid_extension[0] = True
+                    else:
+                        extensions.add(match.group("name").decode("ascii"))
     except (OSError, ValueError):
+        if invalid_extension is not None:
+            invalid_extension[0] = True
         return
 
 
-def decrypt_and_check_toc(archive: Path, password: str, restore_bin: str) -> tuple[int, int]:
-    """GPG stream -> pg_restore -l; no files or connections; no raw output."""
+def decrypt_and_check_toc(archive: Path, password: str, restore_bin: str,
+                          extensions: set[str] | None = None) -> tuple[int, int]:
+    """GPG stream -> pg_restore -l; optional safe-only extension inventory."""
     validate_archive_passphrase(password)
     if os.name != "posix" or not hasattr(subprocess, "Popen"):
         raise ArchiveBlocked("POSIX_LOCAL_RUNTIME_REQUIRED")
@@ -84,6 +106,7 @@ def decrypt_and_check_toc(archive: Path, password: str, restore_bin: str) -> tup
     gpg = restore = counter = None
     secret_read = secret_write = None
     listing = [0]
+    invalid_extension = [False]
     plain_bytes = 0
     header = b""
     try:
@@ -114,7 +137,9 @@ def decrypt_and_check_toc(archive: Path, password: str, restore_bin: str) -> tup
         )
         assert restore.stdout is not None and restore.stdin is not None
         counter = threading.Thread(
-            target=read_toc_counts, args=(restore.stdout, listing), daemon=True,
+            target=read_toc_counts,
+            args=(restore.stdout, listing, extensions, invalid_extension),
+            daemon=True,
         )
         counter.start()
         assert gpg.stdout is not None
@@ -147,6 +172,8 @@ def decrypt_and_check_toc(archive: Path, password: str, restore_bin: str) -> tup
             raise ArchiveBlocked("PG_DUMP_FORMAT_INVALID")
         if restore_code != 0 or counter.is_alive() or listing[0] == 0:
             raise ArchiveBlocked("PG_RESTORE_TOC_INVALID")
+        if invalid_extension[0]:
+            raise ArchiveBlocked("ARCHIVE_EXTENSION_METADATA_INVALID")
         return plain_bytes, listing[0]
     finally:
         for fd in (secret_read, secret_write):
