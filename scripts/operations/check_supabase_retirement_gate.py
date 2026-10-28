@@ -25,9 +25,6 @@ TOP_KEYS = frozenset(("schema_version", "consumers", "archive_verified",
                        "retirement_explicitly_approved"))
 ITEM_KEYS = frozenset(("consumer", "destination", "verified_at",
                         "evidence_sha", "probe_id"))
-SOURCE_REF = "nywxpvzhlpqjtcafpdfe"
-DEST_REF = "cenhadslwxgykqtuobgc"
-
 
 def analyze(data: object) -> tuple[str, list[str]]:
     """Fail closed, including when attestations are missing or malformed."""
