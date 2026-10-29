@@ -146,6 +146,7 @@ def create_generate_sql_node(
                 details={
                     "exception_type": type(error).__name__,
                     "provider_reason": error.reason,
+                    "provider_http_status": error.http_status,
                 },
             )
             return _error_state(

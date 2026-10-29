@@ -197,6 +197,17 @@ def test_provider_reason_sanitizado_entra_no_diagnostico() -> None:
     assert result["errors"][0]["code"] == "SQL_GENERATION_PROVIDER_FAILED"
 
 
+def test_provider_http_status_nao_vaza_detalhes() -> None:
+    generator = FakeSqlGenerator(raises=SqlGenerationProviderError(
+        "upstream secret=hidden", reason="http_error", http_status=404,
+    ))
+    state = create_generate_sql_node(generator)(_state())
+    details = state["errors"][0]["details"]
+    assert details["provider_reason"] == "http_error"
+    assert details["provider_http_status"] == 404
+    assert "upstream secret=hidden" not in repr(state)
+
+
 def test_query_plan_ausente_gera_erro_de_contrato() -> None:
     generator = FakeSqlGenerator()
     node = create_generate_sql_node(generator)
@@ -358,6 +369,14 @@ def main() -> None:
         (
             "falha provider para infra",
             test_falha_provider_vai_para_infra_sem_vazar_resposta,
+        ),
+        (
+            "provider reason sanitizado",
+            test_provider_reason_sanitizado_entra_no_diagnostico,
+        ),
+        (
+            "provider http sanitized",
+            test_provider_http_status_nao_vaza_detalhes,
         ),
         (
             "query plan ausente",

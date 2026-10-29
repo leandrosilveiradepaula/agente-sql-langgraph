@@ -42,8 +42,15 @@ class GoogleGeminiSqlGeneratorAdapter:
                 "Google Gemini retornou resultado invalido."
             )
         if result.get("status") != "success":
+            diagnostics = result.get("diagnostics")
+            http_status = (
+                diagnostics.get("http_status")
+                if isinstance(diagnostics, Mapping) else None
+            )
             raise SqlGenerationProviderError(
-                "Google Gemini falhou de forma sanitizada."
+                "Google Gemini falhou de forma sanitizada.",
+                reason=result.get("status") if isinstance(result.get("status"), str) else "provider_failed",
+                http_status=http_status,
             )
         output_text = result.get("output_text")
         if not isinstance(output_text, str):
