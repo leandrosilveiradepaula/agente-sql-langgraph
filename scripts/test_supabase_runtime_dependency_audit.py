@@ -15,6 +15,107 @@ SCHEME = "postgresql" + "://"
 
 
 class RuntimeDependencyTests(unittest.TestCase):
+    def test_execution_login_attestation_is_separate_from_project_classification(self):
+        data = {
+            "host": "aws-0-sa-east-1.pooler.supabase.com",
+            "port": 5432, "database": "postgres",
+            "user": "finance_reader." + DEMO,
+            "ssl": "require", "allowUnauthorizedCerts": False,
+        }
+        self.assertEqual(module.classify_pg_credential(data, source=SOURCE, demo=DEMO), "DEMO")
+        self.assertTrue(module.attests_n8n_execution_login(
+            data, role="finance_reader", database="postgres", project=DEMO
+        ))
+        for changed in (
+            {"user": "postgres." + DEMO},
+            {"user": "finance_reader." + SOURCE},
+            {"database": "other"},
+            {"ssl": "disable"},
+            {"allowUnauthorizedCerts": True},
+            {"connectionString": SCHEME + "postgres:fake@db." + DEMO + ".supabase.co/postgres"},
+        ):
+            with self.subTest(changed=list(changed)):
+                self.assertFalse(module.attests_n8n_execution_login(
+                    {**data, **changed}, role="finance_reader",
+                    database="postgres", project=DEMO
+                ))
+        direct = dict(data, host="db." + DEMO + ".supabase.co", user="finance_reader")
+        self.assertTrue(module.attests_n8n_execution_login(
+            direct, role="finance_reader", database="postgres", project=DEMO
+        ))
+        self.assertFalse(module.attests_n8n_execution_login(
+            dict(direct, user="postgres"), role="finance_reader", database="postgres", project=DEMO
+        ))
+
+    def test_execution_binding_ids_reject_invalid_or_other_node_bindings(self):
+        flow = {"nodes": [
+            {"id": "target-1", "type": "n8n-nodes-base.postgres",
+             "credentials": {"postgres": {"id": "cred-a"}}},
+            {"id": "target-2", "type": "n8n-nodes-base.postgres",
+             "credentials": {"postgres": {"id": "cred-a"}}},
+            {"id": "other", "type": "n8n-nodes-base.postgres",
+             "credentials": {"postgres": {"id": "cred-b"}}},
+        ]}
+        self.assertEqual(module.execution_binding_credentials(
+            flow, ("target-1", "target-2")
+        ), ["cred-a"])
+        for targets in (("target-1","missing"), ("target-1","target-1"), ("invalid;",)):
+            with self.subTest(targets=targets):
+                with self.assertRaises(module.AuditBlocked):
+                    module.execution_binding_credentials(flow, targets)
+        flow["nodes"][0]["type"] = "n8n-nodes-base.code"
+        with self.assertRaises(module.AuditBlocked):
+            module.execution_binding_credentials(flow, ("target-1","target-2"))
+
+    def test_bound_reader_is_attested_even_with_unrelated_nonreader_credential(self):
+        import json
+        flow = {"id": "workflow-1", "nodes": [
+            {"id": "target-1", "type": "n8n-nodes-base.postgres",
+             "credentials": {"postgres": {"id": "cred-a"}}},
+            {"id": "target-2", "type": "n8n-nodes-base.postgres",
+             "credentials": {"postgres": {"id": "cred-a"}}},
+            {"id": "other", "type": "n8n-nodes-base.postgres",
+             "credentials": {"postgres": {"id": "cred-b"}}},
+        ]}
+        good = {"host": "aws-0-sa-east-1.pooler.supabase.com",
+                "user": "finance_reader." + DEMO, "database": "postgres",
+                "ssl": "require", "password": "never-display"}
+        other = {**good, "user": "postgres." + DEMO}
+        def output(cmd, **kwargs):
+            if cmd[-1] == "--version":
+                return "2.4.8"
+            if "export:workflow" in cmd:
+                return json.dumps([flow])
+            if "export:credentials" in cmd:
+                credential_id = cmd[-2].split("=", 1)[1]
+                data = good if credential_id == "cred-a" else other
+                return json.dumps([{"id": credential_id, "type": "postgres", "data": data}])
+            raise AssertionError("unexpected command")
+        with patch.object(module, "run_private_cli", side_effect=output):
+            nodes, count, target, attested = module.n8n_credentials_targets(
+                "n8n-test", "workflow-1", source=SOURCE, demo=DEMO,
+                execution_role="finance_reader", database="postgres",
+                binding_ids=("target-1","target-2")
+            )
+        self.assertEqual((nodes,count,target,attested),(3,2,"DEMO","PASS"))
+        good["user"] = "postgres." + DEMO
+        with patch.object(module, "run_private_cli", side_effect=output):
+            self.assertEqual(module.n8n_credentials_targets(
+                "n8n-test", "workflow-1", source=SOURCE, demo=DEMO,
+                execution_role="finance_reader", database="postgres",
+                binding_ids=("target-1","target-2")
+            )[-1],"BLOCKED")
+
+    def test_expected_execution_login_requires_local_tty_audit(self):
+        with patch.object(module, "running_docker_environment") as runner:
+            with self.assertRaises(module.AuditBlocked):
+                module.audit(source=SOURCE,demo=DEMO,
+                    shadow_container="shadow-local",n8n_container="n8n-local",
+                    workflow_id="workflow-1",inspect_n8n=False,
+                    execution_role="finance_reader",database="postgres",
+                    binding_ids=("target-1",))
+            runner.assert_not_called()
+
     def test_direct_project_source(self):
         dsn = SCHEME + "postgres:fake@db." + SOURCE + ".supabase.co:5432/postgres?sslmode=verify-full"
         self.assertEqual(module.classify_dsn(dsn, source=SOURCE, demo=DEMO), "SOURCE")
