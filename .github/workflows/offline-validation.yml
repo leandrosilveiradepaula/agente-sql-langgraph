@@ -53,6 +53,7 @@ jobs:
           scripts.test_g5_restore_isolated_rehearsal
           scripts.test_p3_shadow_tenant_login
           scripts.test_p3_numeric_parity_readonly
+          scripts.test_p3_source_alignment_readonly
           -v
 
       - name: Hardcode scan
@@ -100,6 +101,10 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - name: Verify P3 source alignment, private files and read-only shell contract (offline)
+        run: |
+          python3 -m unittest scripts.test_p3_source_alignment_readonly -v
+          bash -n scripts/operations/p3_source_alignment_one_shot.sh
       - name: Verify P3 protected files and financial comparison contract on Linux (offline)
         run: python3 -m unittest scripts.test_p3_numeric_parity_readonly -v
       - name: Verify POSIX-only candidate backup/upgrade path, offline
