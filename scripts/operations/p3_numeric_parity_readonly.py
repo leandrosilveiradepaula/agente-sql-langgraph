@@ -74,7 +74,11 @@ def _integer(value: object, minimum: int, maximum: int) -> bool:
 
 def _private_json(path: Path) -> tuple[dict[str, Any], str]:
     # Protect local SQL manifests and policy from symlinks, group/world access.
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    # File ownership and 0600 protections are POSIX-only. Never read or
+    # execute a private SQL manifest on an unverified permission model.
+    if os.name != "posix" or not hasattr(os, "geteuid") or not hasattr(os, "O_NOFOLLOW"):
+        _fail("PRIVATE_FILES_POSIX_REQUIRED")
+    flags = os.O_RDONLY | os.O_NOFOLLOW
     try:
         fd = os.open(path, flags)
         try:
