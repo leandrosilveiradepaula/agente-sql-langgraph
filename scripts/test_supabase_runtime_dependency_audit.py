@@ -101,7 +101,8 @@ class RuntimeDependencyTests(unittest.TestCase):
                 binding_ids=("target-1","target-2")
             )
         self.assertEqual((nodes,count,target,attested),(4,2,"DEMO","PASS"))
-        self.assertEqual(reachable["DEMO"],2)
+        # Three reachable Postgres nodes share two credential IDs.
+        self.assertEqual(reachable["DEMO"],3)
         self.assertEqual(reachable["SOURCE"],0)
         good["user"] = "postgres." + DEMO
         with patch.object(module, "run_private_cli", side_effect=output):
