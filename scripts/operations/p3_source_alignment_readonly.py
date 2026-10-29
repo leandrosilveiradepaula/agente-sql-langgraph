@@ -114,7 +114,7 @@ def verify_published(g1: Mapping[str, str] | None,
             or g1.get("G1_UNAUTHORIZED_NODE_DRIFT") != "0"):
         blockers.append("N8N_PUBLISHED_NOT_ATTESTED")
     if (not deps or deps.get("SUPABASE_DEPENDENCY_AUDIT") != "READ_ONLY"
-            or deps.get("SUPABASE_N8N_OFFICIAL_CREDENTIAL_TARGET") != "DEMO"
+            or deps.get("SUPABASE_N8N_EXECUTION_CREDENTIAL_TARGET") != "DEMO"
             or deps.get("SUPABASE_N8N_EXECUTION_ROLE_ATTESTED") != "PASS"
             or deps.get("SUPABASE_SHADOW_CONTEXT_TARGET") != "DEMO"
             or deps.get("SUPABASE_SHADOW_EVIDENCE_TARGET") != "DEMO"
@@ -122,6 +122,19 @@ def verify_published(g1: Mapping[str, str] | None,
             or deps.get("SUPABASE_N8N_OFFICIAL_NODE_COUNT") !=
             str(policy["n8n"]["expected_node_count"])):
         blockers.append("N8N_DATASOURCE_NOT_ATTESTED")
+    if deps:
+        # The financial executor and other reachable PostgreSQL dependencies
+        # are separate attestations. No valid canary with reachable SOURCE.
+        if (deps.get("SUPABASE_N8N_REACHABLE_SOURCE_POSTGRES_NODES") is None
+                or deps.get("SUPABASE_N8N_REACHABLE_UNKNOWN_POSTGRES_NODES") is None
+                or deps.get("SUPABASE_N8N_REACHABLE_OTHER_SUPABASE_UNVERIFIED_POSTGRES_NODES") is None):
+            blockers.append("N8N_REACHABLE_DEPENDENCIES_UNVERIFIED")
+        elif any(deps.get(key) != "0" for key in (
+            "SUPABASE_N8N_REACHABLE_SOURCE_POSTGRES_NODES",
+            "SUPABASE_N8N_REACHABLE_UNKNOWN_POSTGRES_NODES",
+            "SUPABASE_N8N_REACHABLE_OTHER_SUPABASE_UNVERIFIED_POSTGRES_NODES",
+        )):
+            blockers.append("N8N_REACHABLE_EXTERNAL_DEPENDENCIES")
     return blockers
 
 
