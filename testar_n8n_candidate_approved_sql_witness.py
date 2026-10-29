@@ -82,6 +82,8 @@ assert(!JSON.stringify(witness).includes('synthetic_table'));
 assert.throws(()=>execute('Validate Shadow Witness',{body:{...ok,
   agent_run_id:'foreign'},statusCode:200},context),/EVIDENCE_INVALID/);
 assert.throws(()=>execute('Validate Shadow Witness',{body:{...ok,
+  approved_sql_original:'SELECT unrelated'},statusCode:200},context),/SQL_PROVENANCE_INVALID/);
+assert.throws(()=>execute('Validate Shadow Witness',{body:{...ok,
   validation:{...ok.validation,preflight:{status:'approved',executed:true}}},
   statusCode:200},context),/EXECUTED_FORBIDDEN/);
 assert.throws(()=>execute('Validate Shadow Witness',{body:ok,statusCode:503},context),/HTTP_NOT_ACCEPTED/);
