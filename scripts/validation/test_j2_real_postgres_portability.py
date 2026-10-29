@@ -371,9 +371,11 @@ def _assert_database_cross_boundary(dsn: str) -> None:
         try:
             foreign_reader.load_active_context(user_profile="synthetic_ci")
         except ContextRepositoryError as error:
-            assert isinstance(
-                error.__cause__, psycopg.errors.InsufficientPrivilege,
-            ), "foreign context must fail specifically on PostgreSQL ACL"
+            # The foreign login is rejected at CONNECT, before a metadata
+            # SELECT can run. psycopg reports a connection-time error.
+            assert isinstance(error.__cause__, psycopg.OperationalError), (
+                "foreign database must reject CONNECT before a SELECT"
+            )
         else:
             raise AssertionError("reader escaped its private metadata schema")
     print("J2_CROSS_TENANT_DATABASE_CONNECT=DENIED")
