@@ -23,6 +23,10 @@ class Cursor:
         self.description = [type("Column", (), {"type_code": 1700})()]
         self.batch_used = False
 
+    def execute(self, sql, *, prepare=False):
+        if not prepare:
+            raise AssertionError("SQL must use prepared extended protocol")
+
     def fetchmany(self, count):
         if self.batch_used:
             return []
@@ -108,6 +112,7 @@ class Contract(TestCase):
                 with self.assertRaises(p3.P3Blocked):
                     p3.prepare(self.policy, pair)
 
+    @__import__("unittest").skipUnless(os.name == "posix", "POSIX-only file permission contract")
     def test_no_remote_call_without_opt_in(self):
         with tempfile.TemporaryDirectory() as root:
             policy_path = Path(root) / "policy.json"
@@ -123,6 +128,13 @@ class Contract(TestCase):
                 self.assertEqual(p3.main(["--policy", str(policy_path), "--pair", str(pair_path),
                                          "--execute-readonly"]), 3)
                 execute.assert_not_called()
+
+    @__import__("unittest").skipUnless(os.name == "posix", "POSIX-only file permission contract")
+    def test_non_posix_private_files_fail_closed(self):
+        with patch.object(p3.os, "name", "nt"):
+            with self.assertRaises(p3.P3Blocked) as caught:
+                p3._private_json(Path("unused-private-policy.json"))
+            self.assertEqual(caught.exception.code, "PRIVATE_FILES_POSIX_REQUIRED")
 
     def test_non_private_input_is_denied(self):
         with tempfile.TemporaryDirectory() as root:
