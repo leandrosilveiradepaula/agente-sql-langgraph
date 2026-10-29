@@ -130,9 +130,10 @@ class Contract(TestCase):
                 execute.assert_not_called()
 
     def test_non_posix_private_files_fail_closed(self):
+        dummy = Path("unused-private-policy.json")
         with patch.object(p3.os, "name", "nt"):
             with self.assertRaises(p3.P3Blocked) as caught:
-                p3._private_json(Path("unused-private-policy.json"))
+                p3._private_json(dummy)
             self.assertEqual(caught.exception.code, "PRIVATE_FILES_POSIX_REQUIRED")
 
     @__import__("unittest").skipUnless(os.name == "posix", "POSIX-only file permission contract")
