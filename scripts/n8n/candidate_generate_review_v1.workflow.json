@@ -1,0 +1,149 @@
+{
+  "name": "CANDIDATE - LangGraph SQL Generate for Human Review - inactive",
+  "nodes": [
+    {
+      "id": "90bfa240-6000-4000-8000-000000000001",
+      "name": "Webhook - Candidate Generate",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "langgraph-candidate-generate-v1",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "90bfa240-6000-4000-8000-000000000002",
+      "name": "Validate Candidate Envelope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const x=$input.first().json.body;const obj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);const valid=(v,n)=>typeof v==='string'&&v.trim().length>0&&v.length<=n;\nif(!obj(x)||Object.keys(x).some(k=>!['contract_version','agent_run_id','question','principal','llm_selection','correlation_metadata'].includes(k))||x.contract_version!=='1'||!valid(x.agent_run_id,128)||!valid(x.question,16000)||!obj(x.principal)||!valid(x.principal.id,256)||!valid(x.principal.profile,128))throw Error('CANDIDATE_ENVELOPE_INVALID');\nconst p=x.principal;if(Object.keys(p).some(k=>!['id','email','profile','organization_id'].includes(k)))throw Error('CANDIDATE_PRINCIPAL_INVALID');\nif(Object.prototype.hasOwnProperty.call(p,'organization_id')&&!valid(p.organization_id,128))throw Error('CANDIDATE_TENANT_INVALID');\nif(x.llm_selection!==undefined){let s=x.llm_selection;if(!obj(s)||Object.keys(s).sort().join(',')!=='config_version,model_key,provider_key'||!['provider_key','model_key','config_version'].every(k=>valid(s[k],128)))throw Error('CANDIDATE_PROVIDER_INVALID');}\nif(x.correlation_metadata!==undefined){let m=x.correlation_metadata;if(!obj(m)||Object.keys(m).some(k=>!['source','event','route','timestamp','request_id','agent_version'].includes(k))||m.source!=='nextjs_bff'||m.event!=='generate'||m.route!=='/api/generate-sql'||!valid(m.timestamp,64)||!valid(m.request_id,128))throw Error('CANDIDATE_CORRELATION_INVALID');}\nreturn [{json:{candidate_request:{contract_version:'1',agent_run_id:x.agent_run_id,question:x.question,principal:{id:p.id,profile:p.profile,...(valid(p.email,320)?{email:p.email}:{}),...(p.organization_id?{organization_id:p.organization_id}:{})},...(x.llm_selection?{llm_selection:x.llm_selection}:{}),...(x.correlation_metadata?{correlation_metadata:x.correlation_metadata}:{})}}}];"
+      }
+    },
+    {
+      "id": "90bfa240-6000-4000-8000-000000000003",
+      "name": "Call LangGraph Generate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.LANGGRAPH_SHADOW_INTERNAL_BASE_URL || '').replace(/\\/+$/, '') + '/v1/internal/sql-agent/generate' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.candidate_request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "90bfa240-6000-4000-8000-000000000004",
+      "name": "Validate Candidate Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const raw=$input.first().json;const source=$('Validate Candidate Envelope').first().json.candidate_request;\nconst obj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);if(raw.statusCode!==200)throw Error('CANDIDATE_HTTP_NOT_SUCCESS');const data=obj(raw.body)?raw.body:raw;\nif(!obj(data)||data.contract_version!=='1'||data.agent_run_id!==source.agent_run_id||typeof data.run_id!=='string'||!data.run_id||!['success','rejected','infrastructure_error'].includes(data.status)||typeof data.response_fingerprint!=='string'||!data.response_fingerprint){throw Error('CANDIDATE_RESPONSE_INVALID');}\nif(data.status==='success'&&(typeof data.sql!=='string'||!data.sql.trim()||!obj(data.gates)||!obj(data.preflight)||data.preflight.status!=='approved'||data.preflight.executed!==false)){throw Error('CANDIDATE_SQL_NOT_VALIDATED');}\nreturn [{json:{contract_version:'1',agent_run_id:data.agent_run_id,run_id:data.run_id,status:data.status,sql:data.status==='success'?data.sql:null,intent:typeof data.intent==='string'?data.intent:null,plan_status:data.plan_status||null,gates:data.gates||null,preflight:data.preflight||null,repair_attempts:data.repair_attempts||0,metadata:data.metadata||{},response_fingerprint:data.response_fingerprint,real_sql_executed:false,requires_human_approval:true}}];"
+      }
+    },
+    {
+      "id": "90bfa240-6000-4000-8000-000000000005",
+      "name": "Return Candidate SQL",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1160,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Candidate Generate": {
+      "main": [
+        [
+          {
+            "node": "Validate Candidate Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Candidate Envelope": {
+      "main": [
+        [
+          {
+            "node": "Call LangGraph Generate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call LangGraph Generate": {
+      "main": [
+        [
+          {
+            "node": "Validate Candidate Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Candidate Result": {
+      "main": [
+        [
+          {
+            "node": "Return Candidate SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false
+  },
+  "active": false,
+  "pinData": {},
+  "tags": []
+}
