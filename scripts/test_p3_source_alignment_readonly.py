@@ -177,6 +177,89 @@ class SourceGate(unittest.TestCase):
             with self.assertRaises(p3.AlignmentBlocked):
                 p3.read_private_proof(path)
 
+    def test_private_schema_draft_has_no_financial_semantics(self):
+        draft = p3.schema_draft(self.policy, self.physical)
+        self.assertFalse(draft["can_import_into_semantic_catalog"])
+        self.assertFalse(draft["can_execute_financial_sql"])
+        self.assertEqual(len(draft["tables"]), 2)
+        for row in draft["tables"]:
+            self.assertIsNone(row["approved_metrics"])
+            self.assertIsNone(row["approved_joins"])
+            self.assertIsNone(row["approved_date_semantics"])
+            self.assertIsNone(row["approved_sign_conventions"])
+            self.assertEqual(row["review"], "UNMAPPED")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX permission model")
+    def test_probe_snapshot_rejects_wrong_database_role_or_version(self):
+        raw = {
+            "contract": "p3-metadata-snapshot-v1",
+            "database": self.policy["database"],
+            "role_name": self.policy["role_name"],
+            "context_version": "fixture-v1",
+            "context": self.context,
+            "physical": self.physical,
+            "grants": self.grants,
+            "identity": self.identity,
+            "sql_executed": False,
+            "llm_calls": 0,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/"snapshot.json"
+            path.write_text(json.dumps(raw))
+            path.chmod(0o600)
+            loaded = p3.verify_probe_snapshot(p3.read_private_snapshot(path),
+                                              self.policy, "fixture-v1")
+            self.assertEqual(len(loaded), 4)
+            for field, wrong in (
+                ("database", "wrong"), ("role_name", "admin"),
+                ("context_version", "other-v1"), ("sql_executed", True),
+                ("llm_calls", 1),
+            ):
+                with self.subTest(field=field):
+                    changed = {**raw, field: wrong}
+                    path.write_text(json.dumps(changed))
+                    with self.assertRaises(p3.AlignmentBlocked):
+                        p3.verify_probe_snapshot(p3.read_private_snapshot(path),
+                                                 self.policy, "fixture-v1")
+            path.chmod(0o644)
+            with self.assertRaises(p3.AlignmentBlocked):
+                p3.read_private_snapshot(path)
+
+    def test_live_shadow_probe_denies_mismatched_context_and_execution_flag(self):
+        with patch.dict(os.environ, {
+            "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION": "false",
+            "SEMANTIC_AGENT_VERSION": "other",
+        }):
+            with self.assertRaises(p3.AlignmentBlocked) as caught:
+                p3.probe_existing_shadow("fixture-v1","semantic_context",
+                                         "ai_ducklake_table_catalog")
+            self.assertEqual(caught.exception.reason, "SHADOW_CONTEXT_VERSION_MISMATCH")
+        with patch.dict(os.environ, {
+            "LANGGRAPH_ALLOW_REAL_SQL_EXECUTION": "true",
+            "SEMANTIC_AGENT_VERSION": "fixture-v1",
+        }):
+            with self.assertRaises(p3.AlignmentBlocked) as caught:
+                p3.probe_existing_shadow("fixture-v1","semantic_context",
+                                         "ai_ducklake_table_catalog")
+            self.assertEqual(caught.exception.reason, "SHADOW_EXECUTION_FLAG_UNVERIFIED")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX permission model")
+    def test_unmapped_schema_draft_requires_private_directory_and_no_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)/"private"
+            parent.mkdir(mode=0o700)
+            destination = parent/"draft.json"
+            draft = p3.schema_draft(self.policy, self.physical)
+            p3.create_private_draft(destination, draft)
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(destination.read_text()), draft)
+            with self.assertRaises(p3.AlignmentBlocked):
+                p3.create_private_draft(destination, draft)
+            open_parent = Path(directory)/"open"
+            open_parent.mkdir(mode=0o755)
+            with self.assertRaises(p3.AlignmentBlocked):
+                p3.create_private_draft(open_parent/"draft.json",draft)
+
     def test_cli_without_dsn_never_connects(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/"policy.json"
