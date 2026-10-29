@@ -129,13 +129,13 @@ class Contract(TestCase):
                                          "--execute-readonly"]), 3)
                 execute.assert_not_called()
 
-    @__import__("unittest").skipUnless(os.name == "posix", "POSIX-only file permission contract")
     def test_non_posix_private_files_fail_closed(self):
         with patch.object(p3.os, "name", "nt"):
             with self.assertRaises(p3.P3Blocked) as caught:
                 p3._private_json(Path("unused-private-policy.json"))
             self.assertEqual(caught.exception.code, "PRIVATE_FILES_POSIX_REQUIRED")
 
+    @__import__("unittest").skipUnless(os.name == "posix", "POSIX-only file permission contract")
     def test_non_private_input_is_denied(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "policy.json"
