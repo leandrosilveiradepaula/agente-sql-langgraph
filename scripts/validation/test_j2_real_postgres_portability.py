@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""J2/G4: read two *physical* semantic catalogs via independent SELECT-only roles.
+"""J2/G4: read two independent physical PostgreSQL databases with SELECT-only roles.
 
 This runs only inside the disposable PostgreSQL 16 GitHub Actions container,
-without warehouse access, n8n activation, paid LLMs, benchmark material,
+creating two CI-only databases (not tenant/project databases), without warehouse
+access, n8n activation, paid LLMs, benchmark material,
 deployment changes or financial SQL execution.
 """
 from __future__ import annotations
@@ -41,6 +42,7 @@ from testar_shadow_test_runtime import _env, _run_asgi
 # they are never used in the application or persisted customer configuration.
 CASES = (
     {
+        "database": "synthetic_j2_alpha",
         "schema": "ci_semantic_alpha",
         "role": "ci_reader_alpha",
         "password": "fixture_alpha_only",
@@ -58,6 +60,7 @@ CASES = (
         "expected_schema": "schema_test",
     },
     {
+        "database": "synthetic_j2_beta",
         "schema": "ci_semantic_beta",
         "role": "ci_reader_beta",
         "password": "fixture_beta_only",
@@ -169,10 +172,30 @@ def _insert_rows(cursor, case: dict, raw: dict) -> None:
             cursor.execute(query, tuple(values))
 
 
+def _database_dsn(dsn: str, case: dict) -> str:
+    """Only CI-controlled database names, never selected by user questions."""
+    return make_conninfo(dsn, dbname=case["database"])
+
+
 def _setup_fixture(dsn: str) -> None:
     definitions = _template_ddl()
-    with psycopg.connect(dsn) as connection, connection.cursor() as cursor:
+    # Guarded by _require_disposable_environment() before any DDL. CREATE
+    # DATABASE must be executed outside a transaction. Each DB has its own
+    # versioned catalog, physical table names and tenant-only login.
+    with psycopg.connect(dsn, autocommit=True) as admin:
         for case in CASES:
+            admin.execute(
+                sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(
+                    sql.Identifier(case["database"])
+                )
+            )
+            admin.execute(
+                sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(
+                    sql.Identifier(case["database"])
+                )
+            )
+    for case in CASES:
+        with psycopg.connect(_database_dsn(dsn, case)) as connection, connection.cursor() as cursor:
             schema = case["schema"]
             role = case["role"]
             cursor.execute(
@@ -194,6 +217,10 @@ def _setup_fixture(dsn: str) -> None:
                 cursor.execute(statement)
             raw = case["raw"]()
             _insert_rows(cursor, case, raw)
+            # Deny even a real existing foreign metadata relation to this
+            # tenant's SELECT-only reader (not just a non-existent table).
+            cursor.execute("CREATE SCHEMA ci_private_guard")
+            cursor.execute("CREATE TABLE ci_private_guard.private_rules (id integer)")
             cursor.execute(
                 sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
                     sql.Identifier(role), sql.Literal(case["password"])
@@ -211,7 +238,7 @@ def _setup_fixture(dsn: str) -> None:
             )
             cursor.execute(
                 sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
-                    sql.Identifier("synthetic_ci"), sql.Identifier(role)
+                    sql.Identifier(case["database"]), sql.Identifier(role)
                 )
             )
 
@@ -219,7 +246,8 @@ def _setup_fixture(dsn: str) -> None:
 def _reader(case: dict, dsn: str, *, pin: str | None = None,
             schema_override: str | None = None) -> PostgresContextRepository:
     credentials = make_conninfo(
-        dsn, user=case["role"], password=case["password"],
+        _database_dsn(dsn, case),
+        user=case["role"], password=case["password"],
     )
     return PostgresContextRepository(
         dsn=credentials,
@@ -231,19 +259,30 @@ def _reader(case: dict, dsn: str, *, pin: str | None = None,
 
 
 def _assert_acl(dsn: str) -> None:
-    with psycopg.connect(dsn) as connection, connection.cursor() as cursor:
-        for index, case in enumerate(CASES):
-            foreign = CASES[1 - index]
-            for owner, allowed in ((case, True), (foreign, False)):
-                relation = (
-                    owner["schema"] + "." + owner["names"]["rules"]
-                )
+    with psycopg.connect(dsn) as admin:
+        for case in CASES:
+            for target in CASES:
+                allowed = target is case
+                check = admin.execute(
+                    "SELECT has_database_privilege(%s, %s, 'CONNECT')",
+                    (case["role"], target["database"]),
+                ).fetchone()[0]
+                assert check is allowed, "cross-database CONNECT was not isolated"
+    print("J2_POSTGRES_CROSS_DATABASE_CONNECT=SCOPED")
+
+    for case in CASES:
+        with psycopg.connect(_database_dsn(dsn, case)) as connection, connection.cursor() as cursor:
+            for schema, table, allowed in (
+                (case["schema"], case["names"]["rules"], True),
+                ("ci_private_guard", "private_rules", False),
+            ):
+                relation = schema + "." + table
                 cursor.execute(
                     "SELECT has_schema_privilege(%s, %s, 'USAGE'), "
                     "has_table_privilege(%s, %s, 'SELECT'), "
                     "has_table_privilege(%s, %s, 'INSERT')",
                     (
-                        case["role"], owner["schema"],
+                        case["role"], schema,
                         case["role"], relation,
                         case["role"], relation,
                     ),
@@ -259,7 +298,6 @@ def _assert_acl(dsn: str) -> None:
             )
             assert cursor.fetchone() == (False, False, False)
     print("J2_POSTGRES_SELECT_ONLY_ACL=PASS")
-
 
 def _run_case(case: dict, dsn: str) -> tuple[str, PostgresContextRepository]:
     initial = _reader(case, dsn)
@@ -323,7 +361,8 @@ def _assert_database_cross_boundary(dsn: str) -> None:
         # table would also fail, but would not prove an ACL boundary.
         foreign_reader = PostgresContextRepository(
             dsn=make_conninfo(
-                dsn, user=case["role"], password=case["password"],
+                _database_dsn(dsn, other),
+                user=case["role"], password=case["password"],
             ),
             semantic_agent_version=other["raw"]()["semantic_agent_version"],
             context_schema=other["schema"],
@@ -332,17 +371,19 @@ def _assert_database_cross_boundary(dsn: str) -> None:
         try:
             foreign_reader.load_active_context(user_profile="synthetic_ci")
         except ContextRepositoryError as error:
-            assert isinstance(
-                error.__cause__, psycopg.errors.InsufficientPrivilege,
-            ), "foreign context must fail specifically on PostgreSQL ACL"
+            # The foreign login is rejected at CONNECT, before a metadata
+            # SELECT can run. psycopg reports a connection-time error.
+            assert isinstance(error.__cause__, psycopg.OperationalError), (
+                "foreign database must reject CONNECT before a SELECT"
+            )
         else:
             raise AssertionError("reader escaped its private metadata schema")
-    print("J2_CROSS_TENANT_CONTEXT_READ=DENIED")
+    print("J2_CROSS_TENANT_DATABASE_CONNECT=DENIED")
 
 
 def _assert_mutated_catalog_rejected(dsn: str, approved_pin: str) -> None:
     beta = CASES[1]
-    with psycopg.connect(dsn) as connection, connection.cursor() as cursor:
+    with psycopg.connect(_database_dsn(dsn, beta)) as connection, connection.cursor() as cursor:
         cursor.execute(
             sql.SQL(
                 "UPDATE {}.{} SET metric_columns = %s "
