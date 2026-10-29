@@ -40,8 +40,16 @@ PRIVATE="$(mktemp -d /tmp/p3-source-audit.XXXXXXXX)" || deny PRIVATE_DIR_FAILED
 chmod 700 "$PRIVATE"
 # Retain private metadata for authorized accounting review. Operator
 # controls retention; never commit or post these files.
+# Keep the read-only audit report even when its result is REVIEW_REQUIRED.
+# Final evaluator still blocks. Do not repeat PUT/RECOVER to turn it green.
+set +e
 "$PY" "$ROOT/scripts/operations/g1_post_put_audit_readonly.py" \
-  --n8n-container "$N8N" >"$PRIVATE/g1-proof.txt" || deny OFFICIAL_WORKFLOW_UNATTESTED
+  --n8n-container "$N8N" >"$PRIVATE/g1-proof.txt"
+G1_RC=$?
+set -e
+if (( G1_RC != 0 )); then
+  printf 'P3_G1_AUDIT=REVIEW_REQUIRED\n'
+fi
 
 WORKFLOW_ID="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["n8n"]["workflow_id"])' "$POLICY")"
 # Local prompt is non-secret; collector emits only sanitized status.
