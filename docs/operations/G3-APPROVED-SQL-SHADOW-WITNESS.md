@@ -19,7 +19,7 @@ e obriga nova geração e nova decisão humana.
 
 A chamada interna usa \`httpHeaderAuth\` separado da autenticação
 \`headerAuth\` do webhook do n8n. Configurar URL privada e credenciais
-**fora do repositório**, sem upload de segredos. 
+**fora do repositório**, sem upload de segredos.
 O envelope exige \`agent_run_id\`, \`approved_sql\`, tenant, principal,
 UUID da solicitação, \`approval_binding_sha256\` e \`request_id\`.
 Não aceita SQL de fonte browser: o Produto deve ler a SQL de um ledger
