@@ -605,6 +605,29 @@ def test_adapter_implementa_sql_generator_e_nao_raw_response() -> None:
     )
 
 
+def test_adapter_propaga_categorias_http_sanitizadas() -> None:
+    from app.domain.sql_generation import SqlGenerationProviderError
+    for status, expected_http in [(400, 400), (401, None), (429, None), (503, None)]:
+        client, _transport, _secret = _client(
+            transport_result=http_transport_success(HttpTransportResponse(
+                status_code=status, headers={}, body=b"{}", duration_ms=1,
+            ))
+        )
+        adapter = GoogleGeminiSqlGeneratorAdapter(client=client)
+        try:
+            adapter.generate(_request())
+        except SqlGenerationProviderError as exc:
+            expected_reason = {
+                400: "http_error", 401: "authentication_failed",
+                429: "rate_limited", 503: "provider_unavailable",
+            }[status]
+            assert exc.reason == expected_reason
+            assert exc.http_status == expected_http
+            assert "secret" not in str(exc).lower()
+        else:
+            raise AssertionError("Provider failure expected")
+
+
 def test_adapter_mapeia_usage_metadata() -> None:
     adapter, _transport, _secret = _adapter_success_with_usage()
 
@@ -793,6 +816,7 @@ def main() -> None:
         ("secret unavailable invalid", test_client_secret_unavailable_e_invalid_nao_chamam_http),
         ("adapter sucesso", test_adapter_implementa_sql_generator_e_nao_raw_response),
         ("adapter usage metadata", test_adapter_mapeia_usage_metadata),
+        ("adapter status sanitizado", test_adapter_propaga_categorias_http_sanitizadas),
         ("contract invalido", test_adapter_rejeita_contract_version_invalido),
         ("adapter nao limpa", test_adapter_nao_limpa_respostas_invalidas_do_modelo),
         ("dominio rejeita invalidas", test_adapter_deixa_dominio_rejeitar_sql_invalida),
