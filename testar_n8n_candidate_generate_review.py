@@ -58,6 +58,10 @@ assert.equal(output.sql,'SELECT 1');
 assert.throws(()=>run('Validate Candidate Result',{body:{...response,preflight:{status:'approved',executed:true}},statusCode:200},{'Validate Candidate Envelope':envelope}),/NOT_VALIDATED/);
 assert.throws(()=>run('Validate Candidate Result',{body:{...response,agent_run_id:'another'},statusCode:200} ,{'Validate Candidate Envelope':envelope}),/RESPONSE_INVALID/);
 assert.throws(()=>run('Validate Candidate Result',{body:response,statusCode:503},{'Validate Candidate Envelope':envelope}),/HTTP_NOT_SUCCESS/);
+assert.throws(()=>run('Validate Candidate Result',{body:{...response,gates:{security:{status:'rejected'},contract:{status:'approved'}}},statusCode:200},{'Validate Candidate Envelope':envelope}),/CANDIDATE_SQL_NOT_VALIDATED/);
+assert.throws(()=>run('Validate Candidate Result',{body:{...response,gates:{security:{status:'approved'},contract:{status:'not_run'}}},statusCode:200},{'Validate Candidate Envelope':envelope}),/CANDIDATE_SQL_NOT_VALIDATED/);
+assert.throws(()=>run('Validate Candidate Result',{body:{...response,gates:{security:{status:'approved',executed:true},contract:{status:'approved'}}},statusCode:200},{'Validate Candidate Envelope':envelope}),/CANDIDATE_SQL_NOT_VALIDATED/);
+assert.throws(()=>run('Validate Candidate Result',{body:{...response,gates:undefined},statusCode:200},{'Validate Candidate Envelope':envelope}),/CANDIDATE_SQL_NOT_VALIDATED/);
 console.log('G3_CANDIDATE_GENERATE_ONLY=PASS');
 """
     with tempfile.TemporaryDirectory() as directory:
