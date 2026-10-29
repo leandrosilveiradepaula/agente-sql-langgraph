@@ -37,7 +37,7 @@ def main() -> None:
     ))
     script = r"""
 const assert = require('node:assert/strict');
-const flow=JSON.parse(process.argv[1]);
+const flow=JSON.parse(process.argv[2]);
 const nodes=Object.fromEntries(flow.nodes.map(n=>[n.name,n]));
 const run=(name,body,prior={})=>
   new Function('$input','$',nodes[name].parameters.jsCode)(
