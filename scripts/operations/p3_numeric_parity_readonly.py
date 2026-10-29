@@ -223,7 +223,21 @@ def _typed(value: Any) -> Any:
     if isinstance(value, Decimal):
         if not value.is_finite():
             _fail("RESULT_UNSUPPORTED_TYPE")
-        return ["numeric", format(value.normalize(), "f")]
+        # Decimal.normalize() uses the active decimal context and can ROUND
+        # high-precision financial values (default precision is only 28).
+        # Canonicalize the coefficient/exponent exactly, without arithmetic.
+        parts = value.as_tuple()
+        digits = "".join(str(digit) for digit in parts.digits).lstrip("0")
+        if not digits:
+            return ["numeric", [0, "0", 0]]
+        exponent = parts.exponent
+        if not isinstance(exponent, int):
+            _fail("RESULT_UNSUPPORTED_TYPE")
+        trailing = len(digits) - len(digits.rstrip("0"))
+        if trailing:
+            digits = digits[:-trailing]
+            exponent += trailing
+        return ["numeric", [int(parts.sign), digits, exponent]]
     if isinstance(value, float):
         if not math.isfinite(value):
             _fail("RESULT_UNSUPPORTED_TYPE")
