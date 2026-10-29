@@ -31,6 +31,8 @@ class RuntimeDependencyTests(unittest.TestCase):
             {"user": "finance_reader." + SOURCE},
             {"database": "other"},
             {"ssl": "disable"},
+            {"sshTunnel": True},
+            {"port": 2222},
             {"allowUnauthorizedCerts": True},
             {"connectionString": SCHEME + "postgres:fake@db." + DEMO + ".supabase.co/postgres"},
         ):
@@ -77,7 +79,7 @@ class RuntimeDependencyTests(unittest.TestCase):
             {"id": "other", "type": "n8n-nodes-base.postgres",
              "credentials": {"postgres": {"id": "cred-b"}}},
         ]}
-        good = {"host": "aws-0-sa-east-1.pooler.supabase.com",
+        good = {"host": "aws-0-sa-east-1.pooler.supabase.com", "port": 5432,
                 "user": "finance_reader." + DEMO, "database": "postgres",
                 "ssl": "require", "password": "never-display"}
         other = {**good, "user": "postgres." + DEMO}
