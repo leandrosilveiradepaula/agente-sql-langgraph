@@ -82,5 +82,7 @@ RC=$?
 set -e
 printf 'P3_SOURCE_AUDIT=READ_ONLY\nP3_LLM_CALLS=0\nP3_FINANCIAL_SQL_EXECUTED=false\n'
 printf 'P3_PRIVATE_REPORTS_STORED=true\n'
-# Never print absolute private paths, SQL, URLs or credentials.
+printf 'P3_PRIVATE_REPORTS_DIRECTORY=%s\n' "$PRIVATE"
+# Directory path is an operator locator, not evidence or a credential.
+# Never print the files' raw contents, SQL, DSNs, URLs or tokens.
 exit "$RC"
