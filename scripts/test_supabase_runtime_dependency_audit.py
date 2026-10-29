@@ -51,11 +51,11 @@ class RuntimeDependencyTests(unittest.TestCase):
 
     def test_execution_binding_ids_reject_invalid_or_other_node_bindings(self):
         flow = {"nodes": [
-            {"id": "target-1", "type": "n8n-nodes-base.postgres",
+            {"id": "target-1", "name":"target-1", "type": "n8n-nodes-base.postgres",
              "credentials": {"postgres": {"id": "cred-a"}}},
-            {"id": "target-2", "type": "n8n-nodes-base.postgres",
+            {"id": "target-2", "name":"target-2", "type": "n8n-nodes-base.postgres",
              "credentials": {"postgres": {"id": "cred-a"}}},
-            {"id": "other", "type": "n8n-nodes-base.postgres",
+            {"id": "other", "name":"other", "type": "n8n-nodes-base.postgres",
              "credentials": {"postgres": {"id": "cred-b"}}},
         ]}
         self.assertEqual(module.execution_binding_credentials(
@@ -71,7 +71,8 @@ class RuntimeDependencyTests(unittest.TestCase):
 
     def test_bound_reader_is_attested_even_with_unrelated_nonreader_credential(self):
         import json
-        flow = {"id": "workflow-1", "nodes": [
+        flow = {"id": "workflow-1", "connections": {"start": {"main": [[{"node": "target-1"}, {"node": "other"}]]}, "target-1": {"main": [[{"node": "target-2"}]]}}, "nodes": [
+            {"id": "start", "name":"start", "type":"n8n-nodes-base.webhook"},
             {"id": "target-1", "type": "n8n-nodes-base.postgres",
              "credentials": {"postgres": {"id": "cred-a"}}},
             {"id": "target-2", "type": "n8n-nodes-base.postgres",
@@ -94,19 +95,49 @@ class RuntimeDependencyTests(unittest.TestCase):
                 return json.dumps([{"id": credential_id, "type": "postgres", "data": data}])
             raise AssertionError("unexpected command")
         with patch.object(module, "run_private_cli", side_effect=output):
-            nodes, count, target, attested = module.n8n_credentials_targets(
+            nodes, count, target, attested, reachable = module.n8n_credentials_targets(
                 "n8n-test", "workflow-1", source=SOURCE, demo=DEMO,
                 execution_role="finance_reader", database="postgres",
                 binding_ids=("target-1","target-2")
             )
-        self.assertEqual((nodes,count,target,attested),(3,2,"DEMO","PASS"))
+        self.assertEqual((nodes,count,target,attested),(4,2,"DEMO","PASS"))
+        self.assertEqual(reachable["DEMO"],2)
+        self.assertEqual(reachable["SOURCE"],0)
         good["user"] = "postgres." + DEMO
         with patch.object(module, "run_private_cli", side_effect=output):
             self.assertEqual(module.n8n_credentials_targets(
                 "n8n-test", "workflow-1", source=SOURCE, demo=DEMO,
                 execution_role="finance_reader", database="postgres",
                 binding_ids=("target-1","target-2")
-            )[-1],"BLOCKED")
+            )[3],"BLOCKED")
+
+    def test_reachable_source_is_separate_from_demonstrated_execution_role(self):
+        import json
+        flow={"id":"wf", "nodes":[
+            {"id":"trigger","name":"trigger","type":"n8n-nodes-base.webhook"},
+            {"id":"main","name":"main","type":"n8n-nodes-base.postgres",
+             "credentials":{"postgres":{"id":"demo-cred"}}},
+            {"id":"legacy","name":"legacy","type":"n8n-nodes-base.postgres",
+             "credentials":{"postgres":{"id":"source-cred"}}},
+            {"id":"dead","name":"dead","type":"n8n-nodes-base.postgres",
+             "credentials":{"postgres":{"id":"source-cred"}}},
+        ],"connections":{"trigger":{"main":[[{"node":"main"},{"node":"legacy"}]]}}}
+        assert module.reachable_postgres_binding_ids(flow)==["demo-cred","source-cred"]
+        def cli(cmd, **kw):
+            if cmd[-1]=="--version":return "2.4.8"
+            if "export:workflow" in cmd:return json.dumps([flow])
+            cid=cmd[-2].split("=",1)[1]
+            user=("finance_reader."+DEMO if cid=="demo-cred" else "postgres."+SOURCE)
+            return json.dumps([{"id":cid,"type":"postgres","data":{
+                "host":"aws-0-sa-east-1.pooler.supabase.com","port":5432,
+                "user":user,"database":"postgres","ssl":"require"}}])
+        with patch.object(module,"run_private_cli",side_effect=cli):
+            nodes, creds, aggregate, login, reachable = module.n8n_credentials_targets(
+                "n8n-test","wf",source=SOURCE,demo=DEMO,
+                execution_role="finance_reader",database="postgres",binding_ids=("main",))
+        self.assertEqual((nodes,creds,aggregate,login),(4,2,"SOURCE","PASS"))
+        self.assertEqual(reachable["SOURCE"],1)
+        self.assertEqual(reachable["DEMO"],1)
 
     def test_expected_execution_login_requires_local_tty_audit(self):
         with patch.object(module, "running_docker_environment") as runner:
