@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only VPS audit of actual Shadow DSNs and n8n financial credentials.
+"""Read-only VPS audit of Shadow DSNs, effective n8n executor and dependencies.
 
 No writes, no SQL queries, no n8n API key. Docker inspect and n8n CLI exports
 are captured strictly in process memory; secret contents NEVER enter output.
@@ -248,6 +248,70 @@ def find_pg_credentials(workflow: dict) -> tuple[int, list[str]]:
 
 
 
+
+def reachable_postgres_binding_ids(workflow: dict) -> list[str]:
+    """Conservative static reachability of PostgreSQL bindings from triggers.
+
+    This is an over-approximation: IF branches may be mutually exclusive.
+    Unreachable legacy nodes must not be mistaken for a financial executor,
+    while potentially reachable SOURCE dependencies must remain visible.
+    """
+    nodes = workflow.get("nodes")
+    connections = workflow.get("connections")
+    if not isinstance(nodes, list) or not isinstance(connections, dict):
+        raise AuditBlocked("N8N_REACHABILITY_UNVERIFIED")
+    by_name: dict[str, dict] = {}
+    triggers: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            raise AuditBlocked("N8N_REACHABILITY_UNVERIFIED")
+        name, kind = node.get("name"), node.get("type")
+        if (not isinstance(name, str) or not name or name in by_name
+                or not isinstance(kind, str)):
+            raise AuditBlocked("N8N_REACHABILITY_UNVERIFIED")
+        by_name[name] = node
+        if kind == "n8n-nodes-base.webhook" or kind.lower().endswith("trigger"):
+            triggers.append(name)
+    if not triggers:
+        raise AuditBlocked("N8N_TRIGGER_UNVERIFIED")
+    seen: set[str] = set()
+    pending = list(triggers)
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        if name not in by_name:
+            raise AuditBlocked("N8N_REACHABILITY_UNVERIFIED")
+        seen.add(name)
+        outputs = connections.get(name, {})
+        if not isinstance(outputs, dict):
+            raise AuditBlocked("N8N_REACHABILITY_UNVERIFIED")
+        for branches in outputs.values():
+            if not isinstance(branches, list):
+                raise AuditBlocked("N8N_REACHABILITY_UNVERIFIED")
+            for edges in branches:
+                if edges is None:
+                    continue
+                if not isinstance(edges, list):
+                    raise AuditBlocked("N8N_REACHABILITY_UNVERIFIED")
+                for edge in edges:
+                    dest = edge.get("node") if isinstance(edge, dict) else None
+                    if not isinstance(dest, str) or dest not in by_name:
+                        raise AuditBlocked("N8N_REACHABILITY_UNVERIFIED")
+                    pending.append(dest)
+    ids: list[str] = []
+    for name in seen:
+        node = by_name[name]
+        if node["type"] != "n8n-nodes-base.postgres" or node.get("disabled") is True:
+            continue
+        cred = (node.get("credentials") or {}).get("postgres")
+        cid = cred.get("id") if isinstance(cred, dict) else None
+        if not isinstance(cid, str) or not CREDENTIAL_ID.fullmatch(cid):
+            raise AuditBlocked("N8N_REACHABILITY_UNVERIFIED")
+        ids.append(cid)
+    return sorted(ids)
+
+
 def parse_single_n8n_container(ps_output: str) -> str:
     """Select only one n8n image, allowing registry-qualified image names.
 
@@ -308,8 +372,13 @@ def n8n_credentials_targets(
     required = execution_binding_credentials(workflow, binding_ids) if execution_role is not None else []
     if not ids:
         # Zero DB credential IDs cannot certify a database-independent workflow.
-        return n_nodes, 0, "UNKNOWN", "BLOCKED"
+        return n_nodes, 0, "UNKNOWN", "BLOCKED", {
+            "SOURCE": 0, "DEMO": 0, "UNKNOWN": 0,
+            "OTHER_SUPABASE_UNVERIFIED": 0,
+        }
+    reachable = reachable_postgres_binding_ids(workflow)
     targets: list[str] = []
+    by_credential: dict[str, str] = {}
     verified: list[bool] = []
     for credential_id in ids:
         # Locally decrypted only in an ephemeral process pipe, never in
@@ -318,7 +387,9 @@ def n8n_credentials_targets(
             n8n_exec_prefix(container) + ["export:credentials", "--id=" + credential_id, "--decrypted"],
         )
         credential = parse_n8n_one(raw, credential_id, decrypted=True)
-        targets.append(classify_pg_credential(credential["data"], source=source, demo=demo))
+        target = classify_pg_credential(credential["data"], source=source, demo=demo)
+        targets.append(target)
+        by_credential[credential_id] = target
         if credential_id in required:
             verified.append(attests_n8n_execution_login(credential["data"], role=execution_role or "",
                 database=database or "", project=demo))
@@ -332,7 +403,14 @@ def n8n_credentials_targets(
         raise AuditBlocked("N8N_CLASSIFICATION_INVALID")
     role_status = ("PASS" if required and len(verified) == len(required) and all(verified)
                    else "BLOCKED") if execution_role is not None else "NOT_ATTESTED"
-    return n_nodes, len(ids), combined, role_status
+    reachable_counts = {
+        "SOURCE": 0, "DEMO": 0, "UNKNOWN": 0,
+        "OTHER_SUPABASE_UNVERIFIED": 0,
+    }
+    for cid in reachable:
+        classification = by_credential.get(cid, "UNKNOWN")
+        reachable_counts[classification] += 1
+    return n_nodes, len(ids), combined, role_status, reachable_counts
 
 
 def audit(*, source: str, demo: str, shadow_container: str,
@@ -366,6 +444,7 @@ def audit(*, source: str, demo: str, shadow_container: str,
         "N8N_OFFICIAL_CREDENTIAL_TARGET": "NOT_AUDITED",
         "N8N_PUBLISHED_VERSION": "NOT_ATTESTED",
         "N8N_EXECUTION_ROLE_ATTESTED": "NOT_ATTESTED",
+        "N8N_EXECUTION_CREDENTIAL_TARGET": "NOT_ATTESTED",
     }
     if inspect_n8n:
         if not workflow_id:
@@ -376,11 +455,16 @@ def audit(*, source: str, demo: str, shadow_container: str,
         answer = input("Auditar localmente credenciais n8n em memoria? Digite AUDIT-N8N-LOCAL: ")
         if answer != "AUDIT-N8N-LOCAL":
             raise AuditBlocked("N8N_LOCAL_CONSENT_REQUIRED")
-        nodes, credentials, target, role_status = n8n_credentials_targets(
+        nodes, credentials, target, role_status, reachable_counts = n8n_credentials_targets(
             n8n_container, workflow_id, source=source, demo=demo,
             execution_role=execution_role, database=database, binding_ids=binding_ids,
         )
         result["N8N_EXECUTION_ROLE_ATTESTED"] = role_status
+        result["N8N_EXECUTION_CREDENTIAL_TARGET"] = (
+            "DEMO" if role_status == "PASS" else "UNKNOWN"
+        ) if execution_role is not None else "NOT_ATTESTED"
+        for item in ("SOURCE", "DEMO", "UNKNOWN", "OTHER_SUPABASE_UNVERIFIED"):
+            result["N8N_REACHABLE_" + item + "_POSTGRES_NODES"] = str(reachable_counts[item])
         result["N8N_OFFICIAL_NODE_COUNT"] = str(nodes)
         result["N8N_POSTGRES_CREDENTIAL_COUNT"] = str(credentials)
         result["N8N_OFFICIAL_CREDENTIAL_TARGET"] = target
