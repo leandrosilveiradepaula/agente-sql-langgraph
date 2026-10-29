@@ -52,6 +52,7 @@ jobs:
           scripts.test_g5_verify_encrypted_copy_readonly
           scripts.test_g5_restore_isolated_rehearsal
           scripts.test_p3_shadow_tenant_login
+          scripts.test_p3_numeric_parity_readonly
           -v
 
       - name: Hardcode scan
