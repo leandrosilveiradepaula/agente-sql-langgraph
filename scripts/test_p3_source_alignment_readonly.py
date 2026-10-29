@@ -51,6 +51,10 @@ class SourceGate(unittest.TestCase):
         self.deps = {
             "SUPABASE_DEPENDENCY_AUDIT": "READ_ONLY",
             "SUPABASE_N8N_OFFICIAL_CREDENTIAL_TARGET": "DEMO",
+            "SUPABASE_N8N_EXECUTION_CREDENTIAL_TARGET": "DEMO",
+            "SUPABASE_N8N_REACHABLE_SOURCE_POSTGRES_NODES": "0",
+            "SUPABASE_N8N_REACHABLE_UNKNOWN_POSTGRES_NODES": "0",
+            "SUPABASE_N8N_REACHABLE_OTHER_SUPABASE_UNVERIFIED_POSTGRES_NODES": "0",
             "SUPABASE_N8N_EXECUTION_ROLE_ATTESTED": "PASS",
             "SUPABASE_SHADOW_CONTEXT_TARGET": "DEMO",
             "SUPABASE_SHADOW_EVIDENCE_TARGET": "DEMO",
@@ -141,7 +145,7 @@ class SourceGate(unittest.TestCase):
 
     def test_dependency_proof_wrong_database_or_shadow_execution(self):
         for field, value in [
-            ("SUPABASE_N8N_OFFICIAL_CREDENTIAL_TARGET", "SOURCE"),
+            ("SUPABASE_N8N_EXECUTION_CREDENTIAL_TARGET", "SOURCE"),
             ("SUPABASE_N8N_EXECUTION_ROLE_ATTESTED", "BLOCKED"),
             ("SUPABASE_SHADOW_CONTEXT_TARGET", "SOURCE"),
             ("SUPABASE_SHADOW_EVIDENCE_TARGET", "UNKNOWN"),
@@ -153,6 +157,18 @@ class SourceGate(unittest.TestCase):
                 self.assertIn("N8N_DATASOURCE_NOT_ATTESTED",result["blockers"])
         self.assertIn("N8N_DATASOURCE_NOT_ATTESTED",
                       self.evaluate(deps=None)["blockers"])
+
+    def test_executor_demo_does_not_hide_reachable_source(self):
+        proof = dict(self.deps)
+        proof["SUPABASE_N8N_OFFICIAL_CREDENTIAL_TARGET"] = "SOURCE"
+        self.assertNotIn("N8N_DATASOURCE_NOT_ATTESTED",
+                         self.evaluate(deps=proof)["blockers"])
+        proof["SUPABASE_N8N_REACHABLE_SOURCE_POSTGRES_NODES"] = "3"
+        self.assertIn("N8N_REACHABLE_EXTERNAL_DEPENDENCIES",
+                      self.evaluate(deps=proof)["blockers"])
+        proof.pop("SUPABASE_N8N_REACHABLE_SOURCE_POSTGRES_NODES")
+        self.assertIn("N8N_REACHABLE_DEPENDENCIES_UNVERIFIED",
+                      self.evaluate(deps=proof)["blockers"])
 
     def test_wrong_policy_or_catalog_identifier_rejected(self):
         with self.assertRaises(p3.AlignmentBlocked):
