@@ -315,6 +315,7 @@ class ExecuteApprovedSqlShadowUseCase:
             raise ValueError("Original generation evidence is not equivalent.")
         original_response = evidence.get("response")
         query_plan = evidence.get("plan")
+        original_context = record.get("semantic_context")
         if not (
             isinstance(original_response, Mapping)
             and original_response.get("status") == "success"
@@ -330,9 +331,15 @@ class ExecuteApprovedSqlShadowUseCase:
             and isinstance(query_plan.get("planning_context"), Mapping)
             and query_plan["planning_context"].get("context_version")
                 == correlation.get("generation_context_version")
-            and bool(query_plan["planning_context"].get("context_fingerprint"))
+            and isinstance(original_context, Mapping)
+            and original_context.get("version")
+                == correlation.get("generation_context_version")
+            and isinstance(original_context.get("fingerprint"), str)
+            and bool(original_context["fingerprint"])
+            and query_plan.get("context_fingerprint")
+                == original_context["fingerprint"]
             and query_plan["planning_context"].get("context_fingerprint")
-                == lineage.get("context_fingerprint")
+                == original_context["fingerprint"]
         ):
             raise ValueError("Original authorized plan or response mismatched.")
         return deepcopy(dict(query_plan))
