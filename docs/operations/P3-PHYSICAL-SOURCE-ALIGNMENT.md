@@ -18,6 +18,8 @@ No projeto Supabase DEMO `cenhadslwxgykqtuobgc`:
 
 A versão ativa do workflow n8n não pode ser inferida apenas do histórico de SQL. O operador já confirmou anteriormente duas referências de credencial G1; o workflow publicado **precisa** ser novamente atestado, sem expor segredos.
 
+**Nova evidência de cobertura (29/10/2026, SELECT apenas em metadados):** no catálogo `demo-finance-v10`, há 37 entradas ativas de `ai_ducklake_entity_aliases` com `target_table` preenchido; 12 usam explicitamente `demo_lakehouse.`, 25 não qualificam o schema, nenhuma cita `rivatti_demo_masked.`. Somente 32 referências têm nome de tabela existente na fonte mascarada, e **apenas 2 referências têm simultaneamente nome de tabela e coluna existentes** (inspeção de nomes físicos; não atesta semântica contábil). Logo, **nem trocar prefixo de schema nem reutilizar aliases, fórmulas e regras da v10 constitui migração válida**. Revisar a correspondência e significado de cada conceito sob versão distinta, com os itens desconhecidos nulos/bloqueados.
+
 **Conclusão:** conceder SELECT à role atual no outro schema **não** resolve a divergência. As duas estruturas são materialmente distintas. Também é proibido copiar a semântica do modelo `demo_lakehouse` para `rivatti_demo_masked` por mera semelhança de nomes, sem revisão de joins, grain, métricas, sinais, período e mapeamento contábil.
 
 ## Solução estrutural
