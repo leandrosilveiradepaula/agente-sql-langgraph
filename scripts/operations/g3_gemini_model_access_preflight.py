@@ -55,8 +55,6 @@ def probe_model_access(
         return "NOT_SHADOW_RUNTIME", None
     if environ.get("LANGGRAPH_ALLOW_REAL_SQL_EXECUTION") != "false":
         return "REAL_SQL_NOT_DISABLED", None
-    if environ.get("GEMINI_SQL_GENERATOR_PROVIDER_KEY", "google_gemini") != "google_gemini":
-        return "GEMINI_NOT_SELECTED", None
 
     api_key = environ.get("GEMINI_API_KEY")
     if not isinstance(api_key, str) or not api_key.strip():
