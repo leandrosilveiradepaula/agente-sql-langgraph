@@ -193,16 +193,17 @@ def evaluate(policy: Mapping[str, Any], version: str,
 
 
 def collect_metadata(cursor: Any, policy: Mapping[str, Any],
-                     version: str, semantic_schema: str) -> tuple[list, list, list, tuple]:
+                     version: str, semantic_schema: str,
+                     catalog_table: str = "ai_ducklake_table_catalog") -> tuple[list, list, list, tuple]:
     """Read only approved semantic table catalog and PostgreSQL system metadata."""
     from psycopg import sql
-    if not ident(semantic_schema):
+    if not ident(semantic_schema) or not ident(catalog_table):
         deny("SEMANTIC_SCHEMA_INVALID")
     cursor.execute(
         sql.SQL("SELECT schema_name,table_name FROM {}.{} "
                 "WHERE agent_version=%s AND is_allowed IS TRUE").format(
                     sql.Identifier(semantic_schema),
-                    sql.Identifier("ai_ducklake_table_catalog")),
+                    sql.Identifier(catalog_table)),
         (version,),
     )
     context = cursor.fetchall()
