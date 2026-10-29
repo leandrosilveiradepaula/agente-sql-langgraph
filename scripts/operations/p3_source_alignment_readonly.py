@@ -265,6 +265,166 @@ def collect_metadata(cursor: Any, policy: Mapping[str, Any],
     return context, physical, grants, tuple(identity)
 
 
+
+def read_private_snapshot(path: Path, *, limit: int = 3000000) -> dict[str, Any]:
+    """Read owner-only metadata; fail closed on symlink or non-POSIX."""
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+        deny("SNAPSHOT_POSIX_REQUIRED")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                    or (info.st_mode & 0o077) or info.st_size > limit):
+                deny("SNAPSHOT_FILE_UNSAFE")
+            data = os.read(fd, limit + 1)
+        finally:
+            os.close(fd)
+        if len(data) > limit:
+            deny("SNAPSHOT_FILE_UNSAFE")
+        result = json.loads(data)
+    except AlignmentBlocked:
+        raise
+    except (OSError, ValueError, UnicodeError):
+        deny("SNAPSHOT_INVALID")
+    if not isinstance(result, dict):
+        deny("SNAPSHOT_INVALID")
+    return result
+
+
+def verify_probe_snapshot(raw: Mapping[str, Any], policy: Mapping[str, Any],
+                          version: str) -> tuple[list, list, list, tuple]:
+    required = {
+        "contract", "database", "role_name", "context_version",
+        "context", "physical", "grants", "identity", "sql_executed",
+        "llm_calls",
+    }
+    if (set(raw) != required
+            or raw.get("contract") != "p3-metadata-snapshot-v1"
+            or raw.get("database") != policy["database"]
+            or raw.get("role_name") != policy["role_name"]
+            or raw.get("context_version") != version
+            or raw.get("sql_executed") is not False
+            or raw.get("llm_calls") != 0):
+        deny("SNAPSHOT_IDENTITY_MISMATCH")
+    specs = (("context", 2), ("physical", 4), ("grants", 4))
+    for field, columns in specs:
+        group = raw.get(field)
+        if (not isinstance(group, list) or len(group) > 100000
+                or any(not isinstance(row, list) or len(row) != columns
+                       for row in group)):
+            deny("SNAPSHOT_SHAPE_INVALID")
+    identity = raw.get("identity")
+    if not isinstance(identity, list) or len(identity) != 14:
+        deny("SNAPSHOT_SHAPE_INVALID")
+    return (
+        [tuple(v) for v in raw["context"]],
+        [tuple(v) for v in raw["physical"]],
+        [tuple(v) for v in raw["grants"]],
+        tuple(identity),
+    )
+
+
+def probe_existing_shadow(version: str, semantic_schema: str,
+                          catalog_table: str) -> int:
+    """Run inside Shadow container using its private CONTEXT_POSTGRES_DSN."""
+    if os.environ.get("LANGGRAPH_ALLOW_REAL_SQL_EXECUTION") != "false":
+        deny("SHADOW_EXECUTION_FLAG_UNVERIFIED")
+    if os.environ.get("SEMANTIC_AGENT_VERSION") != version:
+        deny("SHADOW_CONTEXT_VERSION_MISMATCH")
+    dsn = os.environ.get("CONTEXT_POSTGRES_DSN")
+    if not dsn:
+        deny("SHADOW_CONTEXT_DSN_MISSING")
+    context_schema = os.environ.get("POSTGRES_CONTEXT_SCHEMA") or semantic_schema
+    table = catalog_table
+    config = os.environ.get("CONTEXT_CATALOG_TABLES_JSON")
+    if config is not None:
+        try:
+            catalog_config = json.loads(config)
+        except ValueError:
+            deny("CONTEXT_TABLE_MAPPING_INVALID")
+        if not isinstance(catalog_config, dict) or not ident(catalog_config.get("catalog")):
+            deny("CONTEXT_TABLE_MAPPING_INVALID")
+        table = catalog_config["catalog"]
+    # Local operator only, no public HTTP and no DSN sent to host logs.
+    raw = os.environ.get("P3_PHYSICAL_POLICY_JSON")
+    if not raw or len(raw) > 65000:
+        deny("PROBE_POLICY_MISSING")
+    try:
+        policy = validate_policy(json.loads(raw))
+    except (ValueError, TypeError):
+        deny("PROBE_POLICY_INVALID")
+    import psycopg
+    with psycopg.connect(dsn, autocommit=True, connect_timeout=8) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            cursor.execute(
+                "SELECT pg_catalog.set_config('statement_timeout','10000',true)"
+            )
+            cursor.execute("SELECT current_database()")
+            database = cursor.fetchone()[0]
+            if database != policy["database"]:
+                deny("DATABASE_MISMATCH")
+            result = collect_metadata(cursor, policy, version, context_schema, table)
+            cursor.execute("ROLLBACK")
+    context, physical, grants, identity = result
+    print(json.dumps({
+        "contract": "p3-metadata-snapshot-v1",
+        "database": database, "role_name": policy["role_name"],
+        "context_version": version, "context": context, "physical": physical,
+        "grants": grants, "identity": identity,
+        "sql_executed": False, "llm_calls": 0,
+    }, sort_keys=True))
+    return 0
+
+
+def schema_draft(policy: Mapping[str, Any],
+                 physical: list[tuple[str, str, str, str]]) -> dict[str, Any]:
+    """Generate a non-executable physical inventory with NO business assumptions."""
+    entries: list[dict[str, Any]] = []
+    for table in sorted(policy["relations"]):
+        cols = sorted((column, kind)
+                      for schema, name, column, kind in physical
+                      if schema == policy["schema"] and name == table)
+        entries.append({
+            "schema": policy["schema"], "table": table,
+            "columns": [{"name": column, "postgres_type": kind} for column, kind in cols],
+            "approved_grain": None, "approved_joins": None,
+            "approved_metrics": None, "approved_dimensions": None,
+            "approved_date_semantics": None, "approved_sign_conventions": None,
+            "approved_dre": None, "review": "UNMAPPED",
+        })
+    return {
+        "kind": "p3-physical-schema-review-draft-v1",
+        "status": "UNAPPROVED_NOT_AN_AGENT_CONTEXT",
+        "tables": entries,
+        "can_import_into_semantic_catalog": False,
+        "can_execute_financial_sql": False,
+    }
+
+
+def create_private_draft(path: Path, document: Mapping[str, Any]) -> None:
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+        deny("PRIVATE_POSIX_REQUIRED")
+    try:
+        folder = path.parent.stat()
+        if (not stat.S_ISDIR(folder.st_mode) or folder.st_uid != os.geteuid()
+                or folder.st_mode & 0o077):
+            deny("PRIVATE_DIRECTORY_REQUIRED")
+        content = (json.dumps(document, sort_keys=True) + "\n").encode("utf-8")
+        if len(content) > 2000000:
+            deny("PRIVATE_DRAFT_TOO_LARGE")
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "wb", closefd=False) as stream:
+                stream.write(content)
+        finally:
+            os.close(fd)
+    except AlignmentBlocked:
+        raise
+    except OSError:
+        deny("PRIVATE_DRAFT_WRITE_BLOCKED")
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--policy", type=Path, required=True)
