@@ -284,25 +284,168 @@ def _collect(cursor: Any, sql: str, policy: dict[str, Any]) -> dict[str, Any]:
     return {"column_oids": oids, "row_count": count, "row_hashes": rows}
 
 
+def _assert_no_effective_privilege(
+    cursor: Any, query: str, error_code: str, params: tuple[Any, ...] = (),
+) -> None:
+    """A single EXISTS/boolean query must return *exactly* false.
+
+    The independent evaluator must not infer safety from GRANT text alone.
+    PUBLIC and inherited privileges are resolved by PostgreSQL itself.
+    """
+    cursor.execute(query, params)
+    result = cursor.fetchone()
+    if not isinstance(result, tuple) or len(result) != 1 or result[0] is not False:
+        _fail(error_code)
+
+
 def _check_role(cursor: Any, policy: dict[str, Any]) -> None:
+    # A connection must use the dedicated direct LOGIN. SET ROLE or a
+    # role with inheritance/memberships is not equivalent to least privilege.
     cursor.execute(
-        "SELECT current_user, current_database(), "
+        "SELECT current_user, session_user, current_database(), "
         "current_setting('transaction_read_only'), "
         "current_setting('transaction_isolation'), "
-        "rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls "
+        "current_setting('row_security'), "
+        "rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls, "
+        "rolcanlogin, rolinherit "
         "FROM pg_catalog.pg_roles WHERE rolname=current_user"
     )
     row = cursor.fetchone()
-    if (row is None or len(row) != 9 or row[0] != policy["expected_role"]
-            or row[1] != policy["expected_database"] or row[2] != "on"
-            or row[3] != "repeatable read" or any(row[4:])):
+    if (not isinstance(row, tuple) or len(row) != 13
+            or row[0] != policy["expected_role"]
+            or row[1] != policy["expected_role"]
+            or row[2] != policy["expected_database"]
+            or row[3] != "on" or row[4] != "repeatable read"
+            or row[5] != "on"
+            or any(value is not False for value in row[6:11])
+            or row[11] is not True or row[12] is not False):
         _fail("READONLY_ROLE_UNVERIFIED")
+
+    _assert_no_effective_privilege(
+        cursor,
+        """SELECT EXISTS (
+             SELECT 1 FROM pg_catalog.pg_auth_members m
+             JOIN pg_catalog.pg_roles r ON r.oid=m.member
+             WHERE r.rolname=current_user
+           )""",
+        "READONLY_MEMBERSHIP_UNVERIFIED",
+    )
+    _assert_no_effective_privilege(
+        cursor,
+        """SELECT (
+             pg_catalog.has_database_privilege(current_user,current_database(),'CREATE')
+             OR pg_catalog.has_database_privilege(current_user,current_database(),'TEMPORARY')
+             OR EXISTS (
+               SELECT 1 FROM pg_catalog.pg_namespace n
+               WHERE n.nspname NOT LIKE 'pg_toast%'
+                 AND n.nspname NOT LIKE 'pg_temp%'
+                 AND pg_catalog.has_schema_privilege(current_user,n.oid,'CREATE')
+             )
+           )""",
+        "READONLY_DATABASE_PRIVILEGES_UNVERIFIED",
+    )
+    # The reviewed policy must enumerate the FULL effective SELECT scope,
+    # not just the table(s) referenced in this particular SQL statement.
+    # Never accept a broad reader with extra table privileges.
+    _assert_no_effective_privilege(
+        cursor,
+        """SELECT EXISTS (
+             SELECT 1 FROM pg_catalog.pg_class c
+             JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+             WHERE c.relkind IN ('r','v','m','p','f')
+               AND n.nspname NOT IN ('pg_catalog','information_schema')
+               AND n.nspname NOT LIKE 'pg_toast%'
+               AND n.nspname NOT LIKE 'pg_temp%'
+               AND pg_catalog.has_schema_privilege(current_user,n.oid,'USAGE')
+               AND pg_catalog.has_table_privilege(current_user,c.oid,'SELECT')
+               AND n.nspname || '.' || c.relname <> ALL(%s::text[])
+           )""",
+        "READONLY_EXCESS_SELECT_UNVERIFIED",
+        (policy["authorized_relations"],),
+    )
+    # PostgreSQL itself grants PUBLIC UPDATE on pg_catalog.pg_settings for
+    # session SET. Preserve only that *intrinsic* exception, identical to the
+    # existing G1 financial role attestation. No business-table exceptions.
+    _assert_no_effective_privilege(
+        cursor,
+        """SELECT EXISTS (
+             SELECT 1 FROM pg_catalog.pg_class c
+             JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+             WHERE c.relkind IN ('r','v','m','p','f')
+               AND (
+                 pg_catalog.has_table_privilege(current_user,c.oid,'INSERT')
+                 OR (
+                   pg_catalog.has_table_privilege(current_user,c.oid,'UPDATE')
+                   AND NOT (
+                     n.nspname='pg_catalog' AND c.relname='pg_settings'
+                     AND c.relkind='v'
+                     AND EXISTS (
+                       SELECT 1 FROM pg_catalog.aclexplode(
+                         COALESCE(c.relacl,pg_catalog.acldefault('r',c.relowner))
+                       ) a WHERE a.grantee=0 AND a.privilege_type='UPDATE'
+                     )
+                     AND NOT EXISTS (
+                       SELECT 1 FROM pg_catalog.aclexplode(
+                         COALESCE(c.relacl,pg_catalog.acldefault('r',c.relowner))
+                       ) a JOIN pg_catalog.pg_roles r ON r.oid=a.grantee
+                       WHERE r.rolname=current_user AND a.privilege_type='UPDATE'
+                     )
+                   )
+                 )
+                 OR pg_catalog.has_table_privilege(current_user,c.oid,'DELETE')
+                 OR pg_catalog.has_table_privilege(current_user,c.oid,'TRUNCATE')
+                 OR pg_catalog.has_table_privilege(current_user,c.oid,'REFERENCES')
+                 OR pg_catalog.has_table_privilege(current_user,c.oid,'TRIGGER')
+               )
+           )""",
+        "READONLY_WRITE_PRIVILEGES_UNVERIFIED",
+    )
+    _assert_no_effective_privilege(
+        cursor,
+        """SELECT EXISTS (
+             SELECT 1 FROM pg_catalog.pg_class c
+             WHERE c.relkind='S' AND (
+               pg_catalog.has_sequence_privilege(current_user,c.oid,'USAGE')
+               OR pg_catalog.has_sequence_privilege(current_user,c.oid,'SELECT')
+               OR pg_catalog.has_sequence_privilege(current_user,c.oid,'UPDATE')
+             )
+           )""",
+        "READONLY_SEQUENCE_PRIVILEGES_UNVERIFIED",
+    )
+    _assert_no_effective_privilege(
+        cursor,
+        """SELECT EXISTS (
+             SELECT 1 FROM pg_catalog.pg_proc p
+             JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+             WHERE p.prosecdef
+               AND n.nspname NOT IN ('pg_catalog','information_schema')
+               AND pg_catalog.has_schema_privilege(current_user,n.oid,'USAGE')
+               AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')
+           )""",
+        "READONLY_DEFINER_PRIVILEGES_UNVERIFIED",
+    )
+    _assert_no_effective_privilege(
+        cursor,
+        """SELECT EXISTS (
+             SELECT 1 FROM pg_catalog.pg_class c
+             JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+             JOIN pg_catalog.pg_roles r ON r.oid=c.relowner
+             WHERE r.rolname=current_user
+               AND c.relkind IN ('r','v','m','p','f')
+               AND n.nspname || '.' || c.relname = ANY(%s::text[])
+           )""",
+        "READONLY_TABLE_OWNER_UNVERIFIED",
+        (policy["authorized_relations"],),
+    )
+    # Declared tables themselves must remain readable but never writable.
     for relation in policy["authorized_relations"]:
         cursor.execute(
-            "SELECT pg_catalog.has_table_privilege(current_user,%s,'SELECT'),"
+            "SELECT pg_catalog.has_table_privilege(current_user,%s,'SELECT') "
+            "AND pg_catalog.has_schema_privilege("
+            "current_user,split_part(%s,'.',1),'USAGE'), "
             "pg_catalog.has_table_privilege(current_user,%s,"
             "'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')",
-            (relation, relation),
+            (relation, relation, relation),
         )
         privileges = cursor.fetchone()
         if privileges != (True, False):
