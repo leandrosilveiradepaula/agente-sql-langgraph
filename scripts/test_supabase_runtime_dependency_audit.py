@@ -73,11 +73,11 @@ class RuntimeDependencyTests(unittest.TestCase):
         import json
         flow = {"id": "workflow-1", "connections": {"start": {"main": [[{"node": "target-1"}, {"node": "other"}]]}, "target-1": {"main": [[{"node": "target-2"}]]}}, "nodes": [
             {"id": "start", "name":"start", "type":"n8n-nodes-base.webhook"},
-            {"id": "target-1", "type": "n8n-nodes-base.postgres",
+            {"id": "target-1", "name": "target-1", "type": "n8n-nodes-base.postgres",
              "credentials": {"postgres": {"id": "cred-a"}}},
-            {"id": "target-2", "type": "n8n-nodes-base.postgres",
+            {"id": "target-2", "name": "target-2", "type": "n8n-nodes-base.postgres",
              "credentials": {"postgres": {"id": "cred-a"}}},
-            {"id": "other", "type": "n8n-nodes-base.postgres",
+            {"id": "other", "name": "other", "type": "n8n-nodes-base.postgres",
              "credentials": {"postgres": {"id": "cred-b"}}},
         ]}
         good = {"host": "aws-0-sa-east-1.pooler.supabase.com", "port": 5432,
