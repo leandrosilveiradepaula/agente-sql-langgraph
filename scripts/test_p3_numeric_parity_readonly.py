@@ -86,8 +86,8 @@ class Contract(TestCase):
                     )
                 elif self.current == self.blocked:
                     self.response = (True,)
-                elif 'has_table_privilege(current_user,%s' in statement and
-                      'split_part' in statement:
+                elif ('has_table_privilege(current_user,%s' in statement and
+                      'split_part' in statement):
                     self.response = (True, False)
                 else:
                     self.response = (False,)
