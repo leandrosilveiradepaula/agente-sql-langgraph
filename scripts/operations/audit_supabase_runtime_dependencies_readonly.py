@@ -101,6 +101,7 @@ def attests_n8n_execution_login(data: object, *, role: str, database: str, proje
         return False
     if (any(data.get(k) for k in ("connectionString", "connectionStringUrl"))
             or data.get("allowUnauthorizedCerts") is True
+            or data.get("sshTunnel") is True
             or data.get("database") != database
             or data.get("ssl") not in ("require", "verify-full", "verify-ca")):
         return False
@@ -109,8 +110,11 @@ def attests_n8n_execution_login(data: object, *, role: str, database: str, proje
     if not isinstance(host, str) or not isinstance(user, str):
         return False
     host = host.lower().rstrip(".")
+    port = data.get("port")
+    if type(port) not in (int, str) or str(port) not in ("5432", "6543"):
+        return False
     return (
-        (bool(DIRECT_HOST.fullmatch(host)) and
+        (bool(DIRECT_HOST.fullmatch(host)) and str(port) == "5432" and
          host == f"db.{project}.supabase.co" and user == role)
         or (bool(POOLER_HOST.fullmatch(host)) and
             user == f"{role}.{project}")
