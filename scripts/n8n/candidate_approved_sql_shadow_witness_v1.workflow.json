@@ -1,0 +1,149 @@
+{
+  "name": "CANDIDATE - Approved SQL Shadow Evidence (no execution) - inactive",
+  "nodes": [
+    {
+      "id": "90bfa240-6000-4000-8000-000000000001",
+      "name": "Webhook - Approved SQL Shadow Witness",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "langgraph-candidate-approved-sql-shadow-v1",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "90bfa240-6000-4000-8000-000000000002",
+      "name": "Validate Approved SQL Witness Envelope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const x=$input.first().json.body;\nconst obj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);\nconst UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nconst SHA=/^[0-9a-f]{64}$/i;\nconst valid=(v,n)=>typeof v==='string'&&v.trim().length>0&&v.length<=n;\nif(!obj(x)||Object.keys(x).sort().join(',')!=='agent_run_id,approved_sql,contract_version,correlation_metadata,principal'||\n   x.contract_version!=='1'||!UUID.test(x.agent_run_id)||!valid(x.approved_sql,262144))throw Error('WITNESS_ENVELOPE_INVALID');\nconst p=x.principal,m=x.correlation_metadata;\nif(!obj(p)||!UUID.test(p.id)||!UUID.test(p.organization_id)||!valid(p.profile,128)||\n   Object.keys(p).some(k=>!['id','profile','organization_id'].includes(k)))throw Error('WITNESS_PRINCIPAL_INVALID');\nif(!obj(m)||Object.keys(m).sort().join(',')!=='approval_binding_sha256,event,execution_request_id,request_id,route,source,timestamp'||\n   !UUID.test(m.execution_request_id)||!SHA.test(m.approval_binding_sha256)||\n   !UUID.test(m.request_id)||m.source!=='nextjs_bff'||m.event!=='execute_approved_shadow'||\n   m.route!=='candidate_execute_approved_shadow_v1'||!valid(m.timestamp,64))throw Error('WITNESS_CORRELATION_INVALID');\nreturn [{json:{shadow_witness_request:{contract_version:'1',agent_run_id:x.agent_run_id,approved_sql:x.approved_sql,principal:{id:p.id,profile:p.profile,organization_id:p.organization_id},correlation_metadata:{source:m.source,event:m.event,route:m.route,timestamp:m.timestamp,request_id:m.request_id,execution_request_id:m.execution_request_id,approval_binding_sha256:m.approval_binding_sha256}}}}];"
+      }
+    },
+    {
+      "id": "90bfa240-6000-4000-8000-000000000003",
+      "name": "Call LangGraph Execute Approved Shadow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.LANGGRAPH_SHADOW_INTERNAL_BASE_URL || '').replace(/\\/+$/, '') + '/v1/internal/sql-agent/execute-approved-shadow' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.shadow_witness_request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "90bfa240-6000-4000-8000-000000000004",
+      "name": "Validate Shadow Witness",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const raw=$input.first().json;const src=$('Validate Approved SQL Witness Envelope').first().json.shadow_witness_request;\nconst obj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);\nif(![200,422].includes(raw.statusCode))throw Error('WITNESS_HTTP_NOT_ACCEPTED');\nconst d=obj(raw.body)?raw.body:raw;\nconst SHA=/^[0-9a-f]{64}$/i;\nif(!obj(d)||d.contract_version!=='1'||d.agent_run_id!==src.agent_run_id||\n   typeof d.run_id!=='string'||!d.run_id||!SHA.test(d.response_fingerprint)||\n   !['success','rejected'].includes(d.status)||!obj(d.validation)||\n   typeof d.requires_reapproval!=='boolean'||\n   (raw.statusCode===200)!==(d.status==='success'))throw Error('WITNESS_EVIDENCE_INVALID');\nif(d.validation.preflight?.executed===true||d.validation.security?.executed===true||\n   d.validation.contract?.executed===true)throw Error('WITNESS_EXECUTED_FORBIDDEN');\nif(d.status==='success'&&(\n   d.validation.security?.status!=='approved'||\n   d.validation.contract?.status!=='approved'||\n   d.validation.preflight?.status!=='approved'||\n   d.requires_reapproval))throw Error('WITNESS_GATES_NOT_APPROVED');\nconst proposal=typeof d.repaired_sql_proposal==='string'&&d.repaired_sql_proposal.trim().length>0;\nif(proposal!==d.requires_reapproval)throw Error('WITNESS_REPAIR_PROVENANCE_INVALID');\nreturn [{json:{contract_version:'1',agent_run_id:d.agent_run_id,\n   execution_request_id:src.correlation_metadata.execution_request_id,\n   run_id:d.run_id,status:d.status,response_fingerprint:d.response_fingerprint,\n   requires_reapproval:d.requires_reapproval,\n   validation:{security:d.validation.security?.status||'not_run',contract:d.validation.contract?.status||'not_run',preflight:d.validation.preflight?.status||'not_run'},\n   real_sql_executed:false,financial_parity_proven:false}}];"
+      }
+    },
+    {
+      "id": "90bfa240-6000-4000-8000-000000000005",
+      "name": "Return Shadow Witness",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1160,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Approved SQL Shadow Witness": {
+      "main": [
+        [
+          {
+            "node": "Validate Approved SQL Witness Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Approved SQL Witness Envelope": {
+      "main": [
+        [
+          {
+            "node": "Call LangGraph Execute Approved Shadow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call LangGraph Execute Approved Shadow": {
+      "main": [
+        [
+          {
+            "node": "Validate Shadow Witness",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Shadow Witness": {
+      "main": [
+        [
+          {
+            "node": "Return Shadow Witness",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false
+  },
+  "active": false,
+  "pinData": {},
+  "tags": []
+}
