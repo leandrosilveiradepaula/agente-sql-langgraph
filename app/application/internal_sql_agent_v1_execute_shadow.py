@@ -33,6 +33,7 @@ from app.application.internal_sql_agent_v1_types import (
     InternalSqlAgentError,
 )
 from app.domain.result_normalization import stable_fingerprint
+from app.domain.shadow_evidence_types import validate_shadow_run_record
 from app.domain.shadow_evidence_types import build_execute_shadow_record
 from app.domain.sql_analysis import SqlAnalysisError, analyze_sql
 from app.graph.nodes.contract_gate import contract_gate
@@ -121,7 +122,12 @@ class ExecuteApprovedSqlShadowUseCase:
                 )
             return response
         try:
-            query_plan = _build_synthetic_query_plan_from_approved_sql(approved_sql)
+            witness_mode = _is_candidate_witness(request)
+            query_plan = (
+                self._verified_witness_generation_plan(request, approved_sql)
+                if witness_mode
+                else _build_synthetic_query_plan_from_approved_sql(approved_sql)
+            )
             state: GraphState = {
                 "request_id": agent_run_id,
                 "run_id": run_id,
@@ -147,6 +153,7 @@ class ExecuteApprovedSqlShadowUseCase:
                 "current_stage": "execute_approved_sql_shadow",
                 "final_status": "processing",
                 "failure_stage": "",
+                "semantic_lineage_verified": witness_mode,
             }
             state = self._apply(state, self._security_gate)
             if state.get("final_status") == "processing":
@@ -214,6 +221,27 @@ class ExecuteApprovedSqlShadowUseCase:
             )
             self._persist_shadow(request, state, response, created_at)
             return response
+        except (LookupError, ValueError) as provenance_failure:
+            unavailable = isinstance(provenance_failure, LookupError)
+            response = execute_response(
+                agent_run_id=agent_run_id,
+                run_id=run_id,
+                status="infrastructure_error" if unavailable else "rejected",
+                message="Original SQL generation evidence could not be verified.",
+                approved_sql_original=approved_sql,
+                state={},
+                repaired_sql_proposal=None,
+                requires_reapproval=False,
+                errors=[error(
+                    "INTERNAL_ORIGINAL_EVIDENCE_UNAVAILABLE"
+                    if unavailable else "INTERNAL_ORIGINAL_EVIDENCE_MISMATCH",
+                    "approved_sql",
+                    "Original SQL generation evidence could not be verified.",
+                    retryable=unavailable,
+                )],
+            )
+            self._persist_shadow(request, {}, response, created_at)
+            return response
         except Exception:
             response = execute_response(
                 agent_run_id=agent_run_id,
@@ -240,6 +268,74 @@ class ExecuteApprovedSqlShadowUseCase:
                 created_at,
             )
             return response
+
+    def _verified_witness_generation_plan(
+        self,
+        request: ExecuteApprovedSqlShadowV1Request,
+        approved_sql: str,
+    ) -> dict[str, Any]:
+        # A witness is only meaningful when based on the original authorized
+        # context/plan, never a self-declared allowlist derived from SQL.
+        if self._shadow_repository is None:
+            raise LookupError("Original generation evidence store unavailable.")
+        correlation = request.get("correlation_metadata", {})
+        if not isinstance(correlation, Mapping):
+            raise ValueError("Original generation correlation invalid.")
+        generation_run_id = correlation.get("generation_run_id")
+        original = self._shadow_repository.list_by_agent_run_id(
+            str(request["agent_run_id"]),
+            run_id=str(generation_run_id),
+        )
+        if original.get("status") != "ok":
+            raise LookupError("Original generation evidence store unavailable.")
+        records = original.get("records")
+        if not isinstance(records, list) or len(records) != 1:
+            raise ValueError("Original generation evidence missing or ambiguous.")
+        record = validate_shadow_run_record(records[0])
+        principal = record.get("principal")
+        request_principal = request.get("principal")
+        evidence = record.get("langgraph_evidence")
+        lineage = record.get("lineage")
+        if not (
+            record.get("agent_run_id") == request["agent_run_id"]
+            and record.get("run_id") == generation_run_id
+            and record.get("event_type") == "generate"
+            and record.get("status") == "success"
+            and record.get("generated_sql") == approved_sql
+            and isinstance(principal, Mapping)
+            and isinstance(request_principal, Mapping)
+            and principal.get("organization_id")
+                == request_principal.get("organization_id")
+            and principal.get("id") == correlation.get("generation_requester_id")
+            and isinstance(evidence, Mapping)
+            and isinstance(lineage, Mapping)
+            and lineage.get("context_version")
+                == correlation.get("generation_context_version")
+        ):
+            raise ValueError("Original generation evidence is not equivalent.")
+        original_response = evidence.get("response")
+        query_plan = evidence.get("plan")
+        if not (
+            isinstance(original_response, Mapping)
+            and original_response.get("status") == "success"
+            and original_response.get("sql") == approved_sql
+            and original_response.get("response_fingerprint")
+                == correlation.get("generation_response_fingerprint")
+            and isinstance(original_response.get("metadata"), Mapping)
+            and original_response["metadata"].get("context_version")
+                == correlation.get("generation_context_version")
+            and isinstance(query_plan, Mapping)
+            and query_plan.get("context_version")
+                == correlation.get("generation_context_version")
+            and isinstance(query_plan.get("planning_context"), Mapping)
+            and query_plan["planning_context"].get("context_version")
+                == correlation.get("generation_context_version")
+            and bool(query_plan["planning_context"].get("context_fingerprint"))
+            and query_plan["planning_context"].get("context_fingerprint")
+                == lineage.get("context_fingerprint")
+        ):
+            raise ValueError("Original authorized plan or response mismatched.")
+        return deepcopy(dict(query_plan))
 
     def _persist_shadow(
         self,
@@ -289,6 +385,29 @@ def validate_execute_shadow_request(
                 "Approved SQL is required.",
             )
         )
+    correlation = request.get("correlation_metadata")
+    if _is_candidate_witness(request):
+        required = (
+            "execution_request_id", "approval_binding_sha256",
+            "generation_run_id", "generation_response_fingerprint",
+            "generation_context_version", "generation_requester_id",
+        )
+        if not isinstance(correlation, Mapping) or (
+            correlation.get("source") != "nextjs_bff"
+            or correlation.get("event") != "execute_approved_shadow"
+            or not all(
+                isinstance(correlation.get(key), str)
+                and 0 < len(correlation[key]) <= 128
+                for key in required
+            )
+            or not _sha256_hex(correlation.get("approval_binding_sha256"))
+            or not _sha256_hex(correlation.get("generation_response_fingerprint"))
+        ):
+            errors.append(error(
+                "INTERNAL_WITNESS_PROVENANCE_REQUIRED",
+                "correlation_metadata",
+                "Original generation provenance is required.",
+            ))
     for key in request:
         if key not in {
             "contract_version",
@@ -305,6 +424,24 @@ def validate_execute_shadow_request(
                 )
             )
     return errors
+
+
+def _is_candidate_witness(request: object) -> bool:
+    if not isinstance(request, Mapping):
+        return False
+    correlation = request.get("correlation_metadata")
+    return isinstance(correlation, Mapping) and (
+        correlation.get("event") == "execute_approved_shadow"
+        or "execution_request_id" in correlation
+    )
+
+
+def _sha256_hex(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 def _build_synthetic_query_plan_from_approved_sql(sql: str) -> dict[str, Any]:
@@ -470,7 +607,10 @@ def execute_response(
         "repaired_sql_proposal": repaired_sql_proposal,
         "requires_reapproval": bool(requires_reapproval),
         "errors": deepcopy(errors),
-        "metadata": metadata(state),
+        "metadata": {
+            **metadata(state),
+            "semantic_lineage_verified": state.get("semantic_lineage_verified") is True,
+        },
         "response_fingerprint": "",
     }
     return with_response_fingerprints(response)
