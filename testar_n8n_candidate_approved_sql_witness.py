@@ -59,7 +59,9 @@ const p={contract_version:'1',agent_run_id:run,
   correlation_metadata:{source:'nextjs_bff',event:'execute_approved_shadow',
     route:'candidate_execute_approved_shadow_v1',timestamp:'2026-10-29T00:00:00Z',
     request_id:correlation,execution_request_id:request,
-    approval_binding_sha256:'b'.repeat(64)}};
+    approval_binding_sha256:'b'.repeat(64),
+    generation_run_id:'lg-original-1',generation_requester_id:user,
+    generation_context_version:'context-v1',generation_response_fingerprint:'c'.repeat(64)}};
 const env=execute('Validate Approved SQL Witness Envelope',{body:p});
 assert.deepEqual(env.shadow_witness_request,p);
 assert.throws(()=>execute('Validate Approved SQL Witness Envelope',
@@ -71,7 +73,8 @@ const ok={contract_version:'1',agent_run_id:run,run_id:'shadow-a',
   approved_sql_original:p.approved_sql,
   validation:{security:{status:'approved'},contract:{status:'approved'},
     preflight:{status:'approved',executed:false}},
-  requires_reapproval:false,repaired_sql_proposal:null};
+  requires_reapproval:false,repaired_sql_proposal:null,
+  metadata:{semantic_lineage_verified:true}};
 const context={'Validate Approved SQL Witness Envelope':env};
 const witness=execute('Validate Shadow Witness',{body:ok,statusCode:200},context);
 assert.equal(witness.status,'success');
@@ -79,6 +82,8 @@ assert.equal(witness.real_sql_executed,false);
 assert.equal(witness.financial_parity_proven,false);
 assert.equal(witness.execution_request_id,request);
 assert(!JSON.stringify(witness).includes('synthetic_table'));
+assert.throws(()=>execute('Validate Shadow Witness',{body:{...ok,
+  metadata:{semantic_lineage_verified:false}},statusCode:200},context),/SEMANTIC_LINEAGE_UNVERIFIED/);
 assert.throws(()=>execute('Validate Shadow Witness',{body:{...ok,
   agent_run_id:'foreign'},statusCode:200},context),/EVIDENCE_INVALID/);
 assert.throws(()=>execute('Validate Shadow Witness',{body:{...ok,
