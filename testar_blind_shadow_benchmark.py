@@ -16,10 +16,12 @@ from unittest.mock import patch
 from app.domain.shadow_evidence_types import build_generate_shadow_record
 from scripts.blind_shadow_benchmark import (
     create_blind_manifest,
+    create_freeze_receipt,
     evaluate_blind_benchmark,
     load_baseline,
     main,
     verify_blind_manifest,
+    verify_freeze_receipt,
 )
 
 QUESTION_A = "Show aggregated values from warehouse records for the first quarter"
@@ -114,7 +116,8 @@ def export(*records):
 
 
 def evaluate(base, records):
-    return evaluate_blind_benchmark(base, create_blind_manifest(base), export(*records))
+    manifest = create_blind_manifest(base)
+    return evaluate_blind_benchmark(base, manifest, export(*records), create_freeze_receipt(base, manifest))
 
 
 def test_prepare_strips_all_evaluation_and_provenance() -> None:
@@ -198,8 +201,16 @@ def test_ambiguity_identity_tenant_and_question_all_fail_closed() -> None:
     ):
         tampered_base = deepcopy(base)
         tampered_base["cases"][0][field] = incorrect
-        res = evaluate(tampered_base, [match])["cases"][0]
-        assert res["status"] in {"inconclusivo", "sem_evidencia"}
+        if field == "agent_run_id":
+            try:
+                evaluate(tampered_base, [match])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("unexpected Shadow run was accepted")
+        else:
+            res = evaluate(tampered_base, [match])["cases"][0]
+            assert res["status"] in {"inconclusivo", "sem_evidencia"}
 
     wrong_tenant = deepcopy(base)
     wrong_tenant["cases"][0]["organization_id"] = "tenant-B"
@@ -281,26 +292,32 @@ def test_cli_is_two_phase_offline_and_private(tmp=None) -> None:
         manifest_path = work / "manifest.json"
         evidence_path = work / "evidence.json"
         result_path = work / "report.json"
+        receipt_path = work / "receipt.json"
         baseline_path.write_text(json.dumps(baseline()), encoding="utf-8")
+        baseline_path.chmod(0o600)
         row = evidence_record(
             case=baseline()["cases"][0], sql=SQL_A, generation_intent="aggregate"
         )
         evidence_path.write_text(json.dumps(export(row)), encoding="utf-8")
+        evidence_path.chmod(0o600)
         with contextlib.redirect_stdout(io.StringIO()) as stdout:
             with patch("sys.argv", [
                 "runner", "prepare", "--baseline", str(baseline_path),
-                "--output", str(manifest_path),
+                "--output", str(manifest_path), "--receipt-output", str(receipt_path),
             ]):
                 assert main() == 0
         assert "SELECT" not in stdout.getvalue()
         assert "questions_only" in stdout.getvalue()
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         verify_blind_manifest(baseline(), manifest)
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        verify_freeze_receipt(baseline(), manifest, receipt)
 
         with contextlib.redirect_stdout(io.StringIO()) as stdout:
             with patch("sys.argv", [
                 "runner", "evaluate", "--baseline", str(baseline_path),
                 "--manifest", str(manifest_path), "--evidence", str(evidence_path),
+                "--receipt", str(receipt_path),
                 "--output", str(result_path),
             ]):
                 assert main() == 1  # Two missing records are NOT a pass.
@@ -311,7 +328,7 @@ def test_cli_is_two_phase_offline_and_private(tmp=None) -> None:
         with contextlib.redirect_stdout(io.StringIO()):
             with patch("sys.argv", [
                 "runner", "prepare", "--baseline", str(baseline_path),
-                "--output", str(manifest_path),
+                "--output", str(manifest_path), "--receipt-output", str(receipt_path),
             ]):
                 assert main() == 2  # Never overwrite a frozen manifest.
 
@@ -322,10 +339,75 @@ def test_cli_is_two_phase_offline_and_private(tmp=None) -> None:
                 with patch("sys.argv", [
                     "runner", "prepare", "--baseline", str(baseline_path),
                     "--output", str(work / "new-manifest.json"),
+                    "--receipt-output", str(work / "new-receipt.json"),
                 ]):
                     assert main() == 3
         assert "live_execution_flags_present" in stdout.getvalue()
 
+
+
+def test_missing_provenance_and_freeze_mismatch_fail_closed() -> None:
+    base = baseline()
+    case = base["cases"][0]
+    row = evidence_record(case=case, sql=SQL_A, generation_intent="aggregate")
+    for field, reason in (
+        ("official_provider", "provider_provenance_unattested_or_mismatch"),
+        ("official_model", "provider_provenance_unattested_or_mismatch"),
+        ("official_context_fingerprint", "context_provenance_unattested_or_mismatch"),
+        ("official_intent", "intent_provenance_unattested"),
+    ):
+        changed = deepcopy(base)
+        changed["cases"][0].pop(field)
+        result = evaluate(changed, [row])["cases"][0]
+        assert result["status"] == "inconclusivo", result
+        assert result["reason"] == reason, result
+
+    manifest = create_blind_manifest(base)
+    receipt = create_freeze_receipt(base, manifest)
+    assert set(receipt) == {
+        "contract_version", "suite", "case_count",
+        "baseline_fingerprint", "manifest_fingerprint",
+    }
+    assert "official_sql" not in json.dumps(receipt)
+    assert "baseline_fingerprint" not in json.dumps(manifest)
+    changed = deepcopy(base)
+    changed["cases"][0]["official_sql"] += " "
+    try:
+        verify_freeze_receipt(changed, manifest, receipt)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("modified baseline passed freeze receipt")
+    try:
+        evaluate_blind_benchmark(base, manifest, export(row), {
+            **receipt, "baseline_fingerprint": "0" * 64,
+        })
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("tampered freeze receipt accepted")
+
+
+def test_duplicate_official_run_and_unrequested_evidence_rejected() -> None:
+    base = baseline()
+    changed = deepcopy(base)
+    changed["cases"][1]["agent_run_id"] = changed["cases"][0]["agent_run_id"]
+    try:
+        load_baseline(changed)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("same official execution reused across cases")
+    row = evidence_record(case=base["cases"][0], sql=SQL_A, generation_intent="aggregate")
+    outside = deepcopy(base["cases"][0])
+    outside["agent_run_id"] = "unexpected-official-run"
+    extra = evidence_record(case=outside, sql=SQL_A, generation_intent="aggregate")
+    try:
+        evaluate(base, [row, extra])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unrequested shadow record accepted")
 
 def main_tests() -> None:
     tests = (
@@ -337,6 +419,8 @@ def main_tests() -> None:
         test_blind_intake_can_never_contain_expected_fields,
         test_signed_evidence_tamper_prevents_full_evaluation,
         test_cli_is_two_phase_offline_and_private,
+        test_missing_provenance_and_freeze_mismatch_fail_closed,
+        test_duplicate_official_run_and_unrequested_evidence_rejected,
     )
     for test in tests:
         test()
