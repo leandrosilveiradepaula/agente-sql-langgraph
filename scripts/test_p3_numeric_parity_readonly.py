@@ -66,6 +66,57 @@ class Contract(TestCase):
             },
         }
 
+    def test_effective_role_attestation_blocks_any_excess_privilege(self):
+        # No database is accessed: test each attestation branch with a
+        # deterministic cursor, and ensure SQL input is never submitted.
+        class PrivilegeCursor:
+            def __init__(self, blocked=None):
+                self.blocked = blocked
+                self.current = -1
+                self.statements = []
+
+            def execute(self, statement, params=()):
+                self.current += 1
+                self.statements.append((statement, params))
+                if 'SELECT current_user, session_user' in statement:
+                    self.response = (
+                        'fixture_reader', 'fixture_reader', 'fixture_db',
+                        'on', 'repeatable read', 'on',
+                        False, False, False, False, False, True, False
+                    )
+                elif self.current == self.blocked:
+                    self.response = (True,)
+                elif 'has_table_privilege(current_user,%s' in statement and
+                      'split_part' in statement:
+                    self.response = (True, False)
+                else:
+                    self.response = (False,)
+
+            def fetchone(self):
+                return self.response
+
+        good = PrivilegeCursor()
+        p3._check_role(good, self.policy)
+        self.assertEqual(len(good.statements), 10)
+        for index in range(1, 9):
+            bad = PrivilegeCursor(blocked=index)
+            with self.subTest(privilege_query=index):
+                with self.assertRaises(p3.P3Blocked):
+                    p3._check_role(bad, self.policy)
+        for altered_index, altered_value in [(1, 'admin'), (5, 'off'), (11, False), (12, True)]:
+            bad = PrivilegeCursor()
+            original = bad.execute
+            def malicious(statement, params=()):
+                original(statement, params)
+                if bad.current == 0:
+                    changed = list(bad.response)
+                    changed[altered_index] = altered_value
+                    bad.response = tuple(changed)
+            bad.execute = malicious
+            with self.subTest(role_field=altered_index):
+                with self.assertRaises(p3.P3Blocked):
+                    p3._check_role(bad, self.policy)
+
     def test_valid_pair_and_authorized_sql(self):
         policy, pair = p3.prepare(self.policy, self.pair)
         self.assertEqual(pair["organization_id"], policy["organization_id"])
