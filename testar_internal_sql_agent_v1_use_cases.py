@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from app.adapters.testing.fake_engine_preflight import FakeEnginePreflight
+from app.adapters.testing.fake_shadow_evidence_repository import FakeShadowEvidenceRepository
 from app.adapters.testing.fake_sql_repairer import FakeSqlRepairer
 from app.application.internal_sql_agent_v1 import (
     ExecuteApprovedSqlShadowUseCase,
@@ -518,6 +519,175 @@ def test_metadata_expoe_diagnostico_estrutural_dos_gates_sem_sql() -> None:
     assert "token" not in serialized
 
 
+def _original_generation_witness_fixture():
+    """Full offline generation -> immutable evidence -> witness; no real SQL."""
+    evidence_store = FakeShadowEvidenceRepository()
+    ids = Ids()
+    generator = FakeSqlGenerator()
+    generate = GenerateSqlUseCase(
+        context_repository=SuccessContextRepository(),
+        sql_generator=generator,
+        engine_preflight=FakeEnginePreflight(),
+        sql_repairer=FakeSqlRepairer(),
+        id_generator=ids,
+        shadow_repository=evidence_store,
+    )
+    original = generate.execute({
+        "contract_version": "1",
+        "agent_run_id": "agent-run-witness",
+        "question": "Execute uma generic analysis de teste.",
+        "principal": _principal(),
+    })
+    assert original["status"] == "success"
+    assert original["metadata"]["context_version"]
+    assert len(evidence_store.records) == 1
+
+    preflight = FakeEnginePreflight()
+    witness = ExecuteApprovedSqlShadowUseCase(
+        engine_preflight=preflight,
+        sql_repairer=FakeSqlRepairer(),
+        id_generator=ids,
+        shadow_repository=evidence_store,
+        expected_organization_id="org-1",
+    )
+    request = {
+        "contract_version": "1",
+        "agent_run_id": original["agent_run_id"],
+        "approved_sql": original["sql"],
+        "principal": {
+            "id": "reviewer-2",
+            "profile": "admin",
+            "organization_id": "org-1",
+        },
+        "correlation_metadata": {
+            "source": "nextjs_bff",
+            "event": "execute_approved_shadow",
+            "request_id": "request-witness-1",
+            "execution_request_id": "execution-request-1",
+            "approval_binding_sha256": "b" * 64,
+            "generation_run_id": original["run_id"],
+            "generation_requester_id": _principal()["id"],
+            "generation_context_version": original["metadata"]["context_version"],
+            "generation_response_fingerprint": original["response_fingerprint"],
+        },
+    }
+    return original, request, evidence_store, witness, preflight, generator
+
+
+def test_witness_usa_plano_original_autorizado_sem_sql_real() -> None:
+    original, request, store, witness, preflight, generator = (
+        _original_generation_witness_fixture()
+    )
+    result = witness.execute(request)
+    assert result["status"] == "success", result["errors"]
+    assert result["metadata"]["semantic_lineage_verified"] is True
+    assert result["validation"]["security"]["status"] == "approved"
+    assert result["validation"]["contract"]["status"] == "approved"
+    assert result["validation"]["preflight"]["status"] == "approved"
+    assert result["validation"]["preflight"]["executed"] is False
+    assert result["approved_sql_original"] == original["sql"]
+    assert result["requires_reapproval"] is False
+    assert preflight.calls == 1
+    assert generator.calls == 1  # witness must never regenerate SQL or call LLM
+    assert len(store.records) == 2
+    assert sorted(record["event_type"] for record in store.records.values()) == [
+        "execute_approved_shadow", "generate"
+    ]
+
+
+def test_witness_bloqueia_drift_sql_contexto_e_identidade_sem_preflight() -> None:
+    for kind in ("sql", "context", "fingerprint", "generation_run", "requester"):
+        original, request, store, witness, preflight, generator = (
+            _original_generation_witness_fixture()
+        )
+        if kind == "sql":
+            request["approved_sql"] = "SELECT value FROM schema_test.table_test"
+        elif kind == "context":
+            request["correlation_metadata"]["generation_context_version"] = "other-context"
+        elif kind == "fingerprint":
+            request["correlation_metadata"]["generation_response_fingerprint"] = "c" * 64
+        elif kind == "generation_run":
+            request["correlation_metadata"]["generation_run_id"] = "unknown-run"
+        else:
+            request["correlation_metadata"]["generation_requester_id"] = "another-user"
+        result = witness.execute(request)
+        assert result["status"] == "rejected", (kind, result)
+        assert result["metadata"]["semantic_lineage_verified"] is False
+        assert result["errors"][0]["code"] == "INTERNAL_ORIGINAL_EVIDENCE_MISMATCH"
+        assert preflight.calls == 0
+        assert generator.calls == 1
+
+
+def test_witness_bloqueia_evidencia_adulterada_e_tenant_diferente() -> None:
+    original, request, store, witness, preflight, generator = (
+        _original_generation_witness_fixture()
+    )
+    record = next(iter(store.records.values()))
+    record["langgraph_evidence"]["plan"]["context_version"] = "tampered"
+    result = witness.execute(request)
+    assert result["status"] == "rejected"
+    assert result["errors"][0]["code"] == "INTERNAL_ORIGINAL_EVIDENCE_MISMATCH"
+    assert preflight.calls == 0
+
+    original, request, store, witness, preflight, generator = (
+        _original_generation_witness_fixture()
+    )
+    request["principal"]["organization_id"] = "org-2"
+    result = witness.execute(request)
+    assert result["status"] == "rejected"
+    assert result["errors"][0]["code"] == "INTERNAL_ORGANIZATION_SCOPE_MISMATCH"
+    assert preflight.calls == 0
+    assert len(store.records) == 1  # no foreign-tenant evidence write
+
+
+def test_witness_sem_evidencia_original_falha_fechado() -> None:
+    original, request, store, witness, preflight, generator = (
+        _original_generation_witness_fixture()
+    )
+    missing = ExecuteApprovedSqlShadowUseCase(
+        engine_preflight=preflight,
+        sql_repairer=FakeSqlRepairer(),
+        id_generator=Ids(),
+        shadow_repository=None,
+        expected_organization_id="org-1",
+    )
+    result = missing.execute(request)
+    assert result["status"] == "infrastructure_error"
+    assert result["errors"][0]["code"] == "INTERNAL_ORIGINAL_EVIDENCE_UNAVAILABLE"
+    assert preflight.calls == 0
+
+
+def test_witness_reparo_continua_exigindo_nova_aprovacao() -> None:
+    original, request, store, witness, preflight, generator = (
+        _original_generation_witness_fixture()
+    )
+    repair_preflight = FakeEnginePreflight(responses=[{
+        "status": "rejected",
+        "provider_name": "fake_engine_preflight",
+        "failure_category": "column_not_found",
+        "message": "column not found",
+        "repairable": True,
+        "executed": False,
+        "rows_returned": 0,
+    }])
+    repair = ExecuteApprovedSqlShadowUseCase(
+        engine_preflight=repair_preflight,
+        sql_repairer=FakeSqlRepairer(
+            responses=["SELECT value FROM schema_test.table_test"]
+        ),
+        id_generator=Ids(),
+        shadow_repository=store,
+        expected_organization_id="org-1",
+    )
+    result = repair.execute(request)
+    assert result["status"] == "rejected"
+    assert result["requires_reapproval"] is True
+    assert result["repaired_sql_proposal"] != original["sql"]
+    assert result["metadata"]["semantic_lineage_verified"] is True
+    assert repair_preflight.calls == 1
+    assert generator.calls == 1
+
+
 def main() -> None:
     tests = [
         test_metadata_expoe_diagnostico_estrutural_dos_gates_sem_sql,
@@ -534,6 +704,11 @@ def main() -> None:
         test_execute_approved_shadow_repair_exige_reapproval,
         test_execute_approved_shadow_rejeita_contract_version_invalida,
         test_execute_approved_shadow_rejeita_payload_com_secret,
+        test_witness_usa_plano_original_autorizado_sem_sql_real,
+        test_witness_bloqueia_drift_sql_contexto_e_identidade_sem_preflight,
+        test_witness_bloqueia_evidencia_adulterada_e_tenant_diferente,
+        test_witness_sem_evidencia_original_falha_fechado,
+        test_witness_reparo_continua_exigindo_nova_aprovacao,
     ]
     for index, test in enumerate(tests, start=1):
         test()

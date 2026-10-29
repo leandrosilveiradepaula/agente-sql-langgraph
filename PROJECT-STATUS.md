@@ -1,3 +1,20 @@
+# 29/10/2026 — G3: APROVAÇÃO PERSISTIDA NA DEMO; SHADOW WITNESS EM PR; EXECUÇÃO REAL BLOQUEADA
+
+**SUPABASE REAL (verificado por conector):** SOURCE `nywxpvzhlpqjtcafpdfe` = `INACTIVE` (pausa reversível, NÃO apagada nem aposentada); DEMO `cenhadslwxgykqtuobgc` = `ACTIVE_HEALTHY`. Migrações efetivamente registradas na DEMO:
+- `20261029043453` — `candidate_sql_review_gates_20261029` (ledger de SQL/revisões com RLS);
+- `20261029103634` — `tenant_onboarding_execute_intent_20261029` (identidade nomeada + solicitação imutável `pending_authorization`);
+- `20261029111200` — `lockdown_legacy_agent_data_api_20261029` (RLS + REVOKE nas 7 tabelas legadas; acesso direto de `postgres` preservado, `anon`/`authenticated`/`service_role` sem leitura/gravação).
+
+**ESTADO DA DEMO VERIFICADO:** 0 organizações, 0 memberships, 0 propostas, 0 intenções; estrutura e ACL de intent verificadas (RLS true, roles `anon`/`authenticated`/`service_role` sem leitura/gravação). Nenhum tenant ou usuário sintético foi provisionado. Código do Produto exige organização/identidade autorizada; só uma pessoa admin real não permite homologação de aprovação independente.
+
+**REPOS/PRs:** Produto [#37](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/37) mergeada; [#38](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/38) **mergeada; migração aplicada e validada na DEMO** (7/7 RLS + ACL sem acesso REST, advisors sem erro de RLS desabilitado); [#39](https://github.com/leandrosilveiradepaula/Agente-Financeiro/pull/39) prepara ledger de witness e rota Produto→n8n Shadow (ainda NÃO aplicada); LangGraph/n8n [#198](https://github.com/leandrosilveiradepaula/agente-sql-langgraph/pull/198) prepara webhook `execute-approved-shadow` de validação sem SQL financeira, **inativo**. Os PRs abertos não são autorização para importação/ativação.
+
+**PRÓXIMO ACEITE OPERACIONAL:** após merges humanos e migrations aprovadas, identificar tenant e segundo revisor reais; confirmar os bindings de produção, runtime TEST/Shadow `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`, credenciais S2S e contexto, com ativação específica. Sem esses controles não declarar aprovação real ou paridade financeira. A testemunha Shadow apenas valida pré-execução, não roda SELECT financeira. Separadamente exigir autorização de SQL read-only, isolamento, custos de LLM, paridade, rollback e cutover humano. `OFFICIAL=n8n`, `SHADOW=LangGraph`, sem migração automática dos hardcodes do n8n.
+
+**CUSTÓDIA G5:** backup SOURCE restaurado em PostgreSQL isolado, mas cópia cifrada externa, recuperação gerenciada Supabase, vínculos remanescentes, paridade numérica e cutover permanecem pendentes. SOURCE INACTIVE não satisfaz aposentadoria definitiva.
+
+---
+
 # 28/10/2026 18:24 UTC — G5 RESTORE REAL PASS / SOURCE AINDA INELEGÍVEL À APOSENTADORIA
 
 **EVIDÊNCIA DA VPS DO OPERADOR:** PR #193 mergeada (`18ca3fcd0227f3ed11bde0bc50ea0e400aa8e444`). Em contêiner rootless `supabase/postgres:17.6.1.136` SHA `f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`, sem rede/host volumes, GPG→pg_restore com transação única e cleanup: `G5_RESTORED_TABLES=86`, `G5_ISOLATED_CONTAINER_CLEANUP=PASS`, `G5_RESTORE_TEST=PASS`, **`G5_SUPABASE_FULL_RECOVERY=NOT_ATTESTED`**. Restauração PostgreSQL isolada comprovada; **não declarar plataforma, Auth, Storage, Vault/chave, roles/grants, RLS, SQL financeira, paridade ou cutover concluídos**. Não houve alterações SOURCE/DEMO/n8n/Shadow.
