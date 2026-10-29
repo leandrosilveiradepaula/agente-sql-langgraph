@@ -51,12 +51,13 @@ assert.equal(envelope.candidate_request.principal.organization_id,'tenant-1');
 assert.throws(()=>run('Validate Candidate Envelope',{body:{...payload,sql:'SELECT 1'}}),/ENVELOPE_INVALID/);
 assert.throws(()=>run('Validate Candidate Envelope',{body:{...payload,principal:{...payload.principal,organization_id:''}}}),/TENANT_INVALID/);
 const response={contract_version:'1',agent_run_id:'run-1',run_id:'lg-1',status:'success',sql:'SELECT 1',intent:'aggregate',gates:{security:{status:'approved'},contract:{status:'approved'}},preflight:{status:'approved',executed:false},response_fingerprint:'a'.repeat(64)};
-const output=run('Validate Candidate Result',{body:response},{'Validate Candidate Envelope':envelope});
+const output=run('Validate Candidate Result',{body:response,statusCode:200},{'Validate Candidate Envelope':envelope});
 assert.equal(output.real_sql_executed,false);
 assert.equal(output.requires_human_approval,true);
 assert.equal(output.sql,'SELECT 1');
-assert.throws(()=>run('Validate Candidate Result',{body:{...response,preflight:{status:'approved',executed:true}}},{'Validate Candidate Envelope':envelope}),/NOT_VALIDATED/);
-assert.throws(()=>run('Validate Candidate Result',{body:{...response,agent_run_id:'another'}} ,{'Validate Candidate Envelope':envelope}),/RESPONSE_INVALID/);
+assert.throws(()=>run('Validate Candidate Result',{body:{...response,preflight:{status:'approved',executed:true}},statusCode:200},{'Validate Candidate Envelope':envelope}),/NOT_VALIDATED/);
+assert.throws(()=>run('Validate Candidate Result',{body:{...response,agent_run_id:'another'},statusCode:200} ,{'Validate Candidate Envelope':envelope}),/RESPONSE_INVALID/);
+assert.throws(()=>run('Validate Candidate Result',{body:response,statusCode:503},{'Validate Candidate Envelope':envelope}),/HTTP_NOT_SUCCESS/);
 console.log('G3_CANDIDATE_GENERATE_ONLY=PASS');
 """
     with tempfile.TemporaryDirectory() as directory:
