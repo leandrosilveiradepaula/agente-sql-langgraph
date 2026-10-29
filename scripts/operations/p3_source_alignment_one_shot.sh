@@ -52,11 +52,18 @@ if (( G1_RC != 0 )); then
 fi
 
 WORKFLOW_ID="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["n8n"]["workflow_id"])' "$POLICY")"
+mapfile -t ROLE_BINDINGS < <("$PY" -c 'import json,sys; p=json.load(open(sys.argv[1])); print(p["role_name"]); print(p["database"]); print("\n".join(p["n8n"]["binding_node_ids"]))' "$POLICY")
+(( ${#ROLE_BINDINGS[@]} == 4 )) || deny POLICY_BINDING_COUNT_INVALID
+AUDIT_ROLE_ARGS=(--expected-execution-role "${ROLE_BINDINGS[0]}" --expected-database "${ROLE_BINDINGS[1]}")
+for NODE_ID in "${ROLE_BINDINGS[@]:2}"; do
+  AUDIT_ROLE_ARGS+=(--execution-binding-node-id "$NODE_ID")
+done
 # Local prompt is non-secret; collector emits only sanitized status.
 "$PY" "$ROOT/scripts/operations/audit_supabase_runtime_dependencies_readonly.py" \
   --source-project-ref "$SOURCE" --demo-project-ref "$DEMO" \
   --shadow-container "$SHADOW" --n8n-container "$N8N" \
   --official-workflow-id "$WORKFLOW_ID" --inspect-n8n-credentials \
+  "${AUDIT_ROLE_ARGS[@]}" \
   | tee "$PRIVATE/dependency-output.txt" || deny DATASOURCE_AUDIT_FAILED
 # n8n confirmation prompt can prefix a status. Extract only known tokens.
 grep -oE 'SUPABASE_[A-Z0-9_]+=[A-Za-z0-9_]+' "$PRIVATE/dependency-output.txt" \
