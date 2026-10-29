@@ -371,6 +371,14 @@ def main() -> None:
             test_falha_provider_vai_para_infra_sem_vazar_resposta,
         ),
         (
+            "provider reason sanitizado",
+            test_provider_reason_sanitizado_entra_no_diagnostico,
+        ),
+        (
+            "provider http sanitized",
+            test_provider_http_status_nao_vaza_detalhes,
+        ),
+        (
             "query plan ausente",
             test_query_plan_ausente_gera_erro_de_contrato,
         ),
