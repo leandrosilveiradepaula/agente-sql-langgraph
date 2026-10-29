@@ -51,6 +51,7 @@ class SourceGate(unittest.TestCase):
         self.deps = {
             "SUPABASE_DEPENDENCY_AUDIT": "READ_ONLY",
             "SUPABASE_N8N_OFFICIAL_CREDENTIAL_TARGET": "DEMO",
+            "SUPABASE_N8N_EXECUTION_ROLE_ATTESTED": "PASS",
             "SUPABASE_SHADOW_CONTEXT_TARGET": "DEMO",
             "SUPABASE_SHADOW_EVIDENCE_TARGET": "DEMO",
             "SUPABASE_SHADOW_REAL_SQL_EXECUTION_DISABLED": "PASS",
@@ -141,6 +142,7 @@ class SourceGate(unittest.TestCase):
     def test_dependency_proof_wrong_database_or_shadow_execution(self):
         for field, value in [
             ("SUPABASE_N8N_OFFICIAL_CREDENTIAL_TARGET", "SOURCE"),
+            ("SUPABASE_N8N_EXECUTION_ROLE_ATTESTED", "BLOCKED"),
             ("SUPABASE_SHADOW_CONTEXT_TARGET", "SOURCE"),
             ("SUPABASE_SHADOW_EVIDENCE_TARGET", "UNKNOWN"),
             ("SUPABASE_SHADOW_REAL_SQL_EXECUTION_DISABLED", "BLOCKED"),
