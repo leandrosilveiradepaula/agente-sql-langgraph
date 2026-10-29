@@ -217,8 +217,33 @@ def metadata(state: Mapping[str, Any]) -> dict[str, Any]:
         "intent_resolution": _intent_resolution_metadata(state),
         "query_plan": _query_plan_metadata(state),
         "gate_diagnostics": _gate_diagnostics_metadata(state),
+        "provider_failure": _provider_failure_metadata(state),
         "lineage": _lineage(state),
     }
+
+
+def _provider_failure_metadata(state: Mapping[str, Any]) -> dict[str, Any]:
+    if state.get("failure_stage") != "generate_sql":
+        return {"available": False}
+    for entry in state.get("errors", []):
+        if not isinstance(entry, Mapping) or entry.get("code") != "SQL_GENERATION_PROVIDER_FAILED":
+            continue
+        details = entry.get("details")
+        if not isinstance(details, Mapping):
+            return {"available": False}
+        reason = details.get("provider_reason")
+        http_status = details.get("provider_http_status")
+        result = {"available": True, "reason": reason if reason in {
+            "authentication_failed", "connection_failure", "dns_failure", "http_error",
+            "invalid_response", "provider_unavailable", "rate_limited",
+            "response_too_large", "secret_invalid", "secret_missing",
+            "secret_unavailable", "timeout", "transport_timeout",
+            "transport_unavailable", "tls_failure", "unexpected_error",
+        } else "provider_failed"}
+        if type(http_status) is int and 100 <= http_status <= 599:
+            result["http_status"] = http_status
+        return result
+    return {"available": False}
 
 
 def _gate_diagnostics_metadata(
