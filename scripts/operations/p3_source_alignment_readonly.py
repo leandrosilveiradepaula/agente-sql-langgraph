@@ -115,6 +115,7 @@ def verify_published(g1: Mapping[str, str] | None,
         blockers.append("N8N_PUBLISHED_NOT_ATTESTED")
     if (not deps or deps.get("SUPABASE_DEPENDENCY_AUDIT") != "READ_ONLY"
             or deps.get("SUPABASE_N8N_OFFICIAL_CREDENTIAL_TARGET") != "DEMO"
+            or deps.get("SUPABASE_N8N_EXECUTION_ROLE_ATTESTED") != "PASS"
             or deps.get("SUPABASE_SHADOW_CONTEXT_TARGET") != "DEMO"
             or deps.get("SUPABASE_SHADOW_EVIDENCE_TARGET") != "DEMO"
             or deps.get("SUPABASE_SHADOW_REAL_SQL_EXECUTION_DISABLED") != "PASS"
