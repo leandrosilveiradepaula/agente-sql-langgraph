@@ -427,33 +427,52 @@ def create_private_draft(path: Path, document: Mapping[str, Any]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--policy", type=Path, required=True)
+    p.add_argument("--policy", type=Path)
     p.add_argument("--context-version", required=True)
     p.add_argument("--semantic-schema", default="semantic_context")
+    p.add_argument("--catalog-table", default="ai_ducklake_table_catalog")
     p.add_argument("--g1-proof", type=Path)
     p.add_argument("--dependency-proof", type=Path)
+    p.add_argument("--snapshot", type=Path)
+    p.add_argument("--private-schema-draft", type=Path)
+    p.add_argument("--probe-shadow", action="store_true")
     args = p.parse_args(argv)
     try:
+        if not isinstance(args.context_version, str) or not VERSION.fullmatch(args.context_version):
+            deny("CONTEXT_VERSION_INVALID")
+        if args.probe_shadow:
+            return probe_existing_shadow(args.context_version, args.semantic_schema,
+                                         args.catalog_table)
+        if args.policy is None:
+            deny("SOURCE_POLICY_REQUIRED")
         policy = validate_policy(json.loads(args.policy.read_text(encoding="utf-8")))
         g1 = read_private_proof(args.g1_proof) if args.g1_proof else None
         deps = read_private_proof(args.dependency_proof) if args.dependency_proof else None
-        dsn = os.environ.get("P3_METADATA_DSN")
-        if not dsn:
-            deny("P3_METADATA_DSN_MISSING")
-        import psycopg
-        with psycopg.connect(dsn, autocommit=True, connect_timeout=8) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
-                cursor.execute(
-                    "SELECT pg_catalog.set_config('statement_timeout','10000',true)"
-                )
-                cursor.execute("SELECT current_database()")
-                if cursor.fetchone()[0] != policy["database"]:
-                    deny("DATABASE_MISMATCH")
-                result = collect_metadata(cursor, policy, args.context_version,
-                                          args.semantic_schema)
-                cursor.execute("ROLLBACK")
+        if args.snapshot:
+            result = verify_probe_snapshot(read_private_snapshot(args.snapshot),
+                                           policy, args.context_version)
+        else:
+            dsn = os.environ.get("P3_METADATA_DSN")
+            if not dsn:
+                deny("P3_METADATA_DSN_MISSING")
+            import psycopg
+            with psycopg.connect(dsn, autocommit=True, connect_timeout=8) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                    cursor.execute(
+                        "SELECT pg_catalog.set_config('statement_timeout','10000',true)"
+                    )
+                    cursor.execute("SELECT current_database()")
+                    if cursor.fetchone()[0] != policy["database"]:
+                        deny("DATABASE_MISMATCH")
+                    result = collect_metadata(cursor, policy, args.context_version,
+                                              args.semantic_schema,args.catalog_table)
+                    cursor.execute("ROLLBACK")
         report = evaluate(policy, args.context_version, *result, g1=g1, deps=deps)
+        if args.private_schema_draft:
+            create_private_draft(args.private_schema_draft,
+                                 schema_draft(policy, result[1]))
+            report["private_draft_written"] = True
         print(json.dumps(report, sort_keys=True))
         return 0 if report["status"] == "ready_for_semantic_review" else 2
     except AlignmentBlocked as exc:
@@ -461,7 +480,7 @@ def main(argv: list[str] | None = None) -> int:
                           "financial_sql_executed": False, "llm_calls": 0}))
         return 2
     except Exception:
-        # psycopg exception details can contain SQL/connection metadata.
+        # psycopg exceptions can contain SQL/connection metadata.
         print(json.dumps({"status": "blocked", "reason": "METADATA_UNAVAILABLE",
                           "financial_sql_executed": False, "llm_calls": 0}))
         return 3
