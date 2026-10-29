@@ -145,6 +145,20 @@ class Contract(TestCase):
             with self.assertRaises(p3.P3Blocked):
                 p3._private_json(path)
 
+    def test_decimal_hashes_are_exact_even_beyond_default_precision(self):
+        original = Decimal("1234567890123456789012345678901234567890.01")
+        different = Decimal("1234567890123456789012345678901234567890.02")
+        equivalent = Decimal("1234567890123456789012345678901234567890.0100")
+        # Python Decimal.normalize() would round both distinct values.
+        self.assertEqual(original.normalize(), different.normalize())
+        self.assertEqual(p3._typed(original), p3._typed(equivalent))
+        self.assertNotEqual(p3._typed(original), p3._typed(different))
+        self.assertEqual(p3._typed(Decimal("-0.00")), p3._typed(Decimal("0.0")))
+        policy = p3._parse_policy(self.policy)
+        left = p3._collect(Cursor([(original,)]), "SQL", policy)
+        right = p3._collect(Cursor([(different,)]), "SQL", policy)
+        self.assertNotEqual(left["row_hashes"], right["row_hashes"])
+
     def test_different_financial_values_and_order_independence(self):
         policy = p3._parse_policy(self.policy)
         a = p3._collect(Cursor([(Decimal("10.00"),), (Decimal("20.00"),)]), "SQL", policy)
