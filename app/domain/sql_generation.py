@@ -215,8 +215,14 @@ class SqlGenerationProviderError(RuntimeError):
         message: str,
         *,
         reason: str = "provider_failed",
+        http_status: int | None = None,
     ) -> None:
         self.reason = _safe_provider_failure_reason(reason)
+        self.http_status = (
+            http_status
+            if type(http_status) is int and 100 <= http_status <= 599
+            else None
+        )
         super().__init__(message)
 
 
@@ -226,13 +232,17 @@ def _safe_provider_failure_reason(value: object) -> str:
         "authentication_failed",
         "connection_failure",
         "dns_failure",
+        "http_error",
         "invalid_response",
         "provider_unavailable",
         "rate_limited",
         "response_too_large",
+        "secret_missing",
         "secret_invalid",
         "secret_unavailable",
         "timeout",
+        "transport_timeout",
+        "transport_unavailable",
         "tls_failure",
         "unexpected_error",
     }
