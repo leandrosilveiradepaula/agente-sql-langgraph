@@ -161,22 +161,59 @@ def review_existing_proofs(
         _equal(g1, "G1_SETTINGS_REVIEW_COUNT", "1")
         _equal(g1, "G1_SETTINGS_EQUIVALENCE", "REVIEW_REQUIRED")
 
+    # G1 only replaced the two explicitly named executor bindings; the
+    # previous snapshot can *already* contain other PostgreSQL credential
+    # identities. The original code incorrectly required every reachable
+    # PostgreSQL node to use old_id, although G1 never made that claim.
+    # Reconstruct the after-PUT identity *only* for those two executor IDs.
+    # Compare the resulting number of distinct credential references with
+    # the independent P3 audit, including disabled/unreachable nodes.
+    credential_ids_after_put: set[str] = set()
+    for node in workflow["nodes"]:
+        credentials = node.get("credentials") or {}
+        if not isinstance(credentials, dict):
+            deny("WORKFLOW_CREDENTIAL_UNVERIFIED")
+        pg = credentials.get("postgres")
+        if pg is None:
+            if node["id"] in bound:
+                deny("EXECUTOR_SNAPSHOT_CREDENTIAL_MISMATCH")
+            continue
+        cid = pg.get("id") if isinstance(pg, dict) else None
+        if not isinstance(cid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", cid):
+            deny("WORKFLOW_CREDENTIAL_UNVERIFIED")
+        if cid == new_id:
+            # The replacement was created *after* the captured snapshot.
+            deny("SNAPSHOT_CONTAINS_NEW_CREDENTIAL")
+        if node["id"] in bound:
+            if node.get("type") != "n8n-nodes-base.postgres" or cid != old_id:
+                deny("EXECUTOR_SNAPSHOT_CREDENTIAL_MISMATCH")
+            credential_ids_after_put.add(new_id)
+        else:
+            credential_ids_after_put.add(cid)
+    try:
+        observed_credential_count = int(deps["SUPABASE_N8N_POSTGRES_CREDENTIAL_COUNT"])
+    except (TypeError, ValueError, KeyError):
+        deny("EVIDENCE_INCOMPLETE_OR_DRIFTED")
+    if len(credential_ids_after_put) != observed_credential_count:
+        deny("P3_CREDENTIAL_TOPOLOGY_MISMATCH")
+
     postgres = _reachable_postgres(workflow)
     found_bindings: set[str] = set()
     rows: list[dict[str, Any]] = []
     counts = Counter()
     for ordinal, node in postgres:
         node_id = node["id"]
-        cred = node["credentials"]["postgres"]["id"]
-        # Snapshot is pre-PUT: only explicitly bound executors may be rebased
-        # to the new login, as attested by the G1 proof. No other mapping.
-        if cred != old_id:
-            deny("UNEXPECTED_SNAPSHOT_CREDENTIAL")
         expected_executor = node_id in bound
         if expected_executor:
             if node_id in found_bindings:
                 deny("DUPLICATE_EXECUTOR")
             found_bindings.add(node_id)
+        # P3 independently classified *all* reachable PostgreSQL nodes
+        # as DEMO or SOURCE, with zero UNKNOWN/OTHER. Only the two executor
+        # nodes have a separately attested DEMO credential and G1 attests
+        # zero non-binding node drift. Thus the aggregate counts below must
+        # agree exactly before marking a non-executor as SOURCE. Never infer
+        # client/accounting semantics from that destination label.
         target = "DEMO" if expected_executor else "SOURCE"
         counts[target] += 1
         raw_operation = (node.get("parameters") or {}).get("operation")
@@ -224,6 +261,8 @@ def review_existing_proofs(
         "status": "REVIEW_ONLY_NOT_A_CUTOVER_GATE",
         "provenance": "G1_PREPUT_SNAPSHOT_CORRELATED_WITH_P3_LOCAL_AUDIT",
         "published_attestation": "REQUIRES_SEPARATE_G1_RECONCILIATION",
+        "classification_basis": "G1_EXACT_NONBINDING_NODES_AND_P3_COUNTS_ONLY",
+        "post_put_credential_reference_count": len(credential_ids_after_put),
         "mapping_approved": False,
         "operational_cutover_authorized": False,
         "real_financial_sql_executed": False,
