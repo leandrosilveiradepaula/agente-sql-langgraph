@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import json
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -365,7 +366,7 @@ def _sql_generator_registry(
 def _shadow_default_llm_selection(
     environ: Mapping[str, str] | None,
 ) -> dict[str, str] | None:
-    source = {} if environ is None else environ
+    source = os.environ if environ is None else environ
     raw = source.get("SHADOW_DEFAULT_LLM_SELECTION_JSON")
     if raw is None or not str(raw).strip():
         return None
