@@ -41,6 +41,10 @@ from app.infrastructure.http.stdlib_http_transport import StdlibHttpTransport
 from app.infrastructure.secrets.environment_secret_provider import (
     EnvironmentSecretProvider,
 )
+from app.composition.sql_repairer_registry import (
+    SqlRepairerRegistration,
+    SqlRepairerRegistry,
+)
 from app.composition.sql_generator_registry import (
     SqlGeneratorRegistration,
     SqlGeneratorRegistry,
@@ -54,6 +58,9 @@ from app.integrations.openai_compatible.configuration import (
 )
 from app.integrations.openai_compatible.sql_generator_adapter import (
     OpenAiCompatibleSqlGeneratorAdapter,
+)
+from app.integrations.openai_compatible.sql_repairer_adapter import (
+    OpenAiCompatibleSqlRepairerAdapter,
 )
 from app.integrations.google_gemini.sql_repairer_adapter import (
     GoogleGeminiSqlRepairerAdapter,
@@ -141,6 +148,12 @@ def create_shadow_test_runtime(
         http_transport=http_transport,
         secret_provider=secret_provider,
     )
+    sql_repairer_registry = _sql_repairer_registry(
+        environ=environ,
+        default_repairer=sql_repairer,
+        http_transport=http_transport,
+        secret_provider=secret_provider,
+    )
     ids = ShadowTestIds()
     request_limits = default_http_request_limits()
     response_limits = default_http_response_limits()
@@ -149,6 +162,7 @@ def create_shadow_test_runtime(
             context_repository=context_repository,
             sql_generator=sql_generator,
             sql_generator_resolver=sql_generator_registry,
+            sql_repairer_resolver=sql_repairer_registry,
             engine_preflight=engine_preflight,
             sql_repairer=sql_repairer,
             id_generator=ids,
@@ -337,6 +351,46 @@ def _sql_generator_registry(
         )
 
     return SqlGeneratorRegistry(registrations)
+
+
+def _sql_repairer_registry(
+    *,
+    environ: Mapping[str, str] | None,
+    default_repairer: SqlRepairer,
+    http_transport: Any,
+    secret_provider: Any,
+) -> SqlRepairerRegistry:
+    source = {} if environ is None else environ
+    gemini_config = load_google_gemini_repairer_configuration(environ)
+    registrations = [
+        SqlRepairerRegistration(
+            provider_key=str(source.get(
+                "GEMINI_SQL_GENERATOR_PROVIDER_KEY", "google_gemini"
+            )).strip(),
+            model_key=gemini_config.model_id,
+            config_version=str(source.get(
+                "GEMINI_SQL_GENERATOR_CONFIG_VERSION", "gemini-demo-v1"
+            )).strip(),
+            repairer=default_repairer,
+        ),
+    ]
+    compatible = load_openai_compatible_configuration(environ)
+    if compatible is not None:
+        client = OpenAiCompatibleClient(
+            configuration=compatible,
+            secret_provider=secret_provider,
+            http_transport=http_transport,
+        )
+        registrations.append(SqlRepairerRegistration(
+            provider_key=compatible.provider_key,
+            model_key=compatible.model_id,
+            config_version=compatible.config_version,
+            repairer=OpenAiCompatibleSqlRepairerAdapter(
+                client=client,
+                configuration=compatible,
+            ),
+        ))
+    return SqlRepairerRegistry(registrations)
 
 
 def _gemini_sql_generator(
