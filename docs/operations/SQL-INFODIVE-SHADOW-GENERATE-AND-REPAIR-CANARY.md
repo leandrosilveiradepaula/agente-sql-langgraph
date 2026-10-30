@@ -17,6 +17,16 @@ Antes da PR, o campo `llm_selection` selecionava SQL-InfoDive somente na etapa *
 
 A PR adiciona `SqlRepairerRegistry` versionado e `OpenAiCompatibleSqlRepairerAdapter`; o `GenerateSqlUseCase` resolve **ambos** antes da primeira chamada. Em seleção explícita, ausência de repairer retorna `INTERNAL_LLM_SELECTION_UNAVAILABLE` sem chamada LLM. O branch de Execute Approved mantém o contrato existente e **nao** recebe autorização para executar SQL financeira.
 
+## Default privado para a orquestração n8n -> Shadow
+
+A PR também introduz a configuração estrutural opt-in `SHADOW_DEFAULT_LLM_SELECTION_JSON`. Ela é aplicada **somente** no build/restart do runtime Shadow, mediante alteração operacional autorizada, e seleciona simultaneamente gerador e reparador para requisições que não transportem `llm_selection`:
+
+```json
+{"provider_key":"infodive_ibm_cloud","model_key":"<modelo-efetivamente-configurado>","config_version":"<versao-efetivamente-configurada>"}
+```
+
+Os dois valores entre sinais angulares são marcadores; obter da configuração existente de `OPENAI_COMPATIBLE_SQL_MODEL` e `OPENAI_COMPATIBLE_SQL_CONFIG_VERSION`. Não reutilizar literalmente os marcadores. O seletor é neutro a clientes, sem SQL ou conhecimento contábil. Se modelo/provedor/versão não estiverem cadastrados, o runtime falha fechado em vez de recorrer ao Gemini. A variável não é ativada por esta PR.
+
 ## Prova Shadow no runtime implantado (após merge e deploy controlado)
 
 O código versionado desta PR precisa estar presente no runtime Shadow. `git pull` do repositório da VPS não atualiza por si só o container Docker já iniciado. Antes da prova, confirmar `LANGGRAPH_COMMIT`/image e seguir o processo de build/restart TEST já homologado; nao fazer deploy implícito.
