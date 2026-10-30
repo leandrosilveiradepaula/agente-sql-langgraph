@@ -62,3 +62,35 @@ Campos `business_purpose`, `cutover_disposition`, `replacement_dependency`, `own
 - Execução financeira Shadow segue **desabilitada**. A comparação de equivalência numérica exige aprovação específica para SELECT read-only isolado. Primeiro Gemini/Gemini e cutover humano; somente depois Gemini/SQL-InfoDive.
 
 Código e testes: `scripts/operations/p3_source_node_review_readonly.py` e `scripts/test_p3_source_node_review_readonly.py`.
+
+## 30/10 — corrigida a hipótese de credencial única no snapshot pré-PUT
+
+A primeira execução da PR #206 retornou `P3_NODE_REVIEW_REASON=UNEXPECTED_SNAPSHOT_CREDENTIAL`.
+Esse resultado **não comprova** que algum nó foi alterado no n8n: a primeira
+versão do utilitário exigia incorretamente que **todos** os nós PostgreSQL
+usassem a `old_credential_id` do G1 no snapshot original. A política G1
+só vincula essa identidade aos **dois nós executores** selecionados para
+rebinding, não aos demais nós que permaneceram no workflow.
+
+A correção mantém o bloqueio quando a credencial original **de um executor**
+não é exatamente a esperada; preserva as identidades distintas dos outros
+nós, não as imprime, e reconstrói a cardinalidade das referências após o
+rebinding. Essa cardinalidade precisa coincidir com o total de credenciais
+PostgreSQL da auditoria P3 — inclusive considerando nós desconectados.
+Exige também que a contagem de nós alcançáveis `SOURCE`, `DEMO`, `UNKNOWN` e
+`OTHER_SUPABASE_UNVERIFIED` corresponda integralmente ao resultado P3.
+
+Como os dois executores DEMO foram atestados separadamente, o G1 atesta
+zero alteração dos outros nós e o P3 reportou somente esses dois nós
+DEMO, a atribuição dos seis não-executores alcançáveis a `SOURCE` é uma
+**dedução por exclusão controlada**, não uma leitura de credenciais nem uma
+atestação de finalidade de negócio. Ela não funciona quando as contagens
+ou a topologia de credenciais divergem: nesse caso bloqueia sem rascunho.
+O G1 segue com `SETTINGS_DRIFT_REVIEW`, e a mudança não torna o canário
+executável ou o fluxo oficial elegível ao cutover.
+
+Validação offline ampliada: casos com uma ou duas credenciais pré-PUT,
+uma terceira credencial alcançável ou desconectada, credencial inesperada
+nos dois executores, presença prematura da nova credencial e workflow
+sintético de **68 nós (60 alcançáveis, 8 desconectados, 11 PostgreSQL)**.
+Tudo isso permanece estrutural, sem importar lógica contábil do legado.
