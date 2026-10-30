@@ -27,6 +27,7 @@ CONTRACT = "g5-private-semantic-context-review-v1"
 
 
 def require_private_directory(path: Path) -> None:
+    g5.require_posix_io()
     if not path.is_absolute() or path.is_symlink() or not path.is_dir():
         g5.deny("REVIEW_DIRECTORY_INVALID")
     s = path.stat()
@@ -131,6 +132,7 @@ def private_json(value: dict) -> bytes:
 
 def seal_gpg(path: Path, content: bytes, password: str) -> str:
     """Encrypt in memory to owner-only file. No plaintext file or CLI password."""
+    g5.require_posix_io()
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     pass_r, pass_w = os.pipe()
     proc = None
