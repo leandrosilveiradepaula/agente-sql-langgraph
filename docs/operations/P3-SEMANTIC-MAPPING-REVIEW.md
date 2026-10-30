@@ -92,3 +92,38 @@ snapshot e outra revisão devidamente autorizada: não reaproveitar prova antiga
 
 Este documento especifica revisão de metadados; **não** afirma que a nova
 versão esteja pronta para ser carregada no planner.
+
+## Ponte candidata para o contrato do motor
+
+Após uma aprovação contábil verificável, a etapa offline
+`scripts.operations.p3_semantic_context_candidate.build_candidate` recebe a
+revisão privada e uma seção `semantic_context` completa no formato bruto já
+consumido por `normalize_context_snapshot`. Ela não completa aliases,
+métricas, sinais, períodos, joins, DRE ou regras a partir de nomes físicos.
+
+O adaptador exige, além do fingerprint físico atual:
+
+- `status=APPROVED` e `accounting_approval.status=APPROVED`;
+- identidade de organização e proveniência já presentes na revisão;
+- catálogo com o conjunto exato de tabelas, colunas e tipos do P3;
+- um contrato semântico integral que passe por
+  `normalize_context_snapshot` e `validate_context_snapshot`.
+
+Qualquer ausência, ambiguidade, drift físico ou tentativa de ativação retorna
+um código estável, incluindo `NEEDS_BUSINESS_APPROVAL`,
+`CANDIDATE_CATALOG_PHYSICAL_MISMATCH` ou `CONTEXT_CONTRACT_INVALID`.
+O resultado contém `CANDIDATE_READY_NOT_ACTIVATED`; não persiste contexto,
+não executa SQL, não chama LLM e não modifica `SEMANTIC_AGENT_VERSION`.
+
+O DEMO atual continua em `NEEDS_BUSINESS_APPROVAL`: o formulário P3 contém
+somente metadados físicos, sem definição homologada de métrica, sinal,
+agregação, período, relacionamento, granularidade, tenant ou DRE. Portanto,
+ele não pode ser promovido usando esta ponte.
+
+`testar_p3_semantic_context_candidate.py` prova offline, em dois esquemas
+sintéticos materialmente distintos, que uma revisão externamente aprovada
+passa pelo contrato real de contexto, e percorre pergunta inédita → resolução
+→ planejamento → gerador fake → Security Gate → Contract Gate. A SQL do fake
+é apenas pré-condição técnica de gate; não é resposta de benchmark, não é
+enviada a provider e não há execução financeira. O mesmo teste cobre rejeição
+de revisão sem aprovação e coluna fora do inventário físico.
