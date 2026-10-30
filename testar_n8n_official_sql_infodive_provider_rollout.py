@@ -167,7 +167,7 @@ class Tests(unittest.TestCase):
         def normalize_settings_after_put(method, path, body=None):
             response = original_request(method, path, body)
             if method == "PUT" and api.writes == 1:
-                api.workflow["settings"] = {"executionOrder": "v1", "drift": "unapproved"}
+                api.workflow["settings"] = {"executionOrder": "v1", "timezone": "UTC"}
             return response
 
         api.request = normalize_settings_after_put
