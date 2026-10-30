@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -154,6 +155,14 @@ def create_shadow_test_runtime(
         http_transport=http_transport,
         secret_provider=secret_provider,
     )
+    default_selection = _shadow_default_llm_selection(environ)
+    if default_selection is not None:
+        if sql_generator_override is not None or sql_repairer_override is not None:
+            raise RuntimeError("Explicit default LLM conflicts with adapter overrides.")
+        # Resolve the complete pair before starting the runtime, never fallback
+        # from a private generator to an unrelated repair provider.
+        sql_generator = sql_generator_registry.resolve(**default_selection)
+        sql_repairer = sql_repairer_registry.resolve(**default_selection)
     ids = ShadowTestIds()
     request_limits = default_http_request_limits()
     response_limits = default_http_response_limits()
@@ -351,6 +360,28 @@ def _sql_generator_registry(
         )
 
     return SqlGeneratorRegistry(registrations)
+
+
+def _shadow_default_llm_selection(
+    environ: Mapping[str, str] | None,
+) -> dict[str, str] | None:
+    source = {} if environ is None else environ
+    raw = source.get("SHADOW_DEFAULT_LLM_SELECTION_JSON")
+    if raw is None or not str(raw).strip():
+        return None
+    if not isinstance(raw, str) or len(raw) > 2048:
+        raise RuntimeError("SHADOW_DEFAULT_LLM_SELECTION_JSON is invalid.")
+    try:
+        selection = json.loads(raw)
+    except (ValueError, TypeError):
+        raise RuntimeError("SHADOW_DEFAULT_LLM_SELECTION_JSON is invalid.") from None
+    required = {"provider_key", "model_key", "config_version"}
+    if not isinstance(selection, dict) or set(selection) != required:
+        raise RuntimeError("SHADOW_DEFAULT_LLM_SELECTION_JSON is invalid.")
+    for value in selection.values():
+        if not isinstance(value, str) or not value.strip() or len(value) > 128:
+            raise RuntimeError("SHADOW_DEFAULT_LLM_SELECTION_JSON is invalid.")
+    return {key: selection[key].strip() for key in required}
 
 
 def _sql_repairer_registry(
