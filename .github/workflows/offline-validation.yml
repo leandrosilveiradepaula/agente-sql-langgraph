@@ -104,6 +104,8 @@ jobs:
         run: python3 -m unittest scripts.test_p3_numeric_parity_readonly -v
       - name: Verify POSIX-only candidate backup/upgrade path, offline
         run: python3 testar_n8n_parallel_shadow_candidate_upgrade.py
+      - name: Verify SQL-InfoDive official n8n apply and rollback on POSIX without network
+        run: python3 -m unittest testar_n8n_official_sql_infodive_provider_rollout -v
       - name: Validate private n8n workflow renderer (no n8n, SQL or LLM)
         run: |
           python3 testar_n8n_private_shadow_renderer.py

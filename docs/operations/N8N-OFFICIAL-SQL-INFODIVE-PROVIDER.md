@@ -52,6 +52,47 @@ O endereço IP acima é **ilustrativo**, não foi constatado no runtime. Substit
 
 A ferramenta só anuncia `CANDIDATE_IN_MEMORY_ONLY`, com os fingerprints anterior/candidato e contagem exata de quatro alterações. **Não grava o patch e não atualiza o n8n**.
 
+## Migração operacional (PR #205)
+
+A atualização oficial **não é realizada pelo merge**. O utilitário `scripts/n8n/official_sql_infodive_provider_rollout.py` permite dry-run, aplicação e rollback com gates de revisão. O auditor da VPS confirmou em 30/10/2026: `activeVersionId == versionId`, `active=true`, 68 nós, e fingerprint armazenado `37725fe765f5f727838c7b5de31bbcf01c25b5deecdef338ead60917e4d70b6d`.
+
+**O SQL-InfoDive disponível no Shadow não implica credencial correspondente no n8n.** Antes da migração, preparar uma credencial n8n com ID/nome/tipo conferidos no próprio n8n e armazenar o segredo no mecanismo de credenciais do serviço. A configuração local do candidato contém referências da credencial e endpoint privado, sem segredo.
+
+### Dry-run sem n8n API key
+
+```bash
+cd /docker/agente-sql-langgraph-repo
+.venv/bin/python scripts/n8n/official_sql_infodive_provider_rollout.py \
+  --n8n-container n8n-n8n-1 \
+  --workflow-id 2E6mbYg8CEJhGhqs \
+  --expected-stored-sha 37725fe765f5f727838c7b5de31bbcf01c25b5deecdef338ead60917e4d70b6d \
+  --config /root/.local/share/agente-sql-langgraph/sql-infodive-official-provider.json
+```
+
+É operação somente leitura, não exige API key, não modifica n8n, não chama LLM nem executa SQL.
+
+### Apply (operação separada, sujeita a autorização explícita)
+
+Criar anteriormente diretório privado com `mkdir -m 700 -p /root/.local/state/agente-sql-langgraph/llm-provider-rollout`. Depois de validar canário isolado e obter autorização operacional, o comando dry-run acima recebe:
+
+```text
+--apply
+--n8n-url https://n8n.srv1319424.hstgr.cloud
+--private-backup-dir /root/.local/state/agente-sql-langgraph/llm-provider-rollout
+```
+
+O modo apply solicita confirmação local `APPLY-INFODIVE` e chave API n8n sem eco. Ele verifica identidade/versão publicada por API e CLI, fingerprint, metadados da credencial privada, conectividade TCP desde o container n8n, formato do PUT, snapshot privado `0600` e edição concorrente; só então tenta alteração dos quatro nós. Não altera PostgreSQL nem switches de execução LangGraph.
+
+O PUT pode salvar sem publicar a nova revisão no n8n 2.4.8. **Nesse caso a ferramenta falha fechada:** não interpretar sucesso do PUT como efetiva substituição do Gemini, nem publicar automaticamente por uma segunda rota. Verificar via UI e reconciliar com o snapshot sob aprovação.
+
+### Rollback
+
+Usar `--rollback` (sem `--apply`) com os mesmos `--workflow-id`, `--expected-stored-sha`, `--n8n-url` e `--private-backup-dir`; não exige `--config`. A restauração só tenta PUT se os arquivos `0600` (backup e receipt) existirem, o fingerprint atual corresponder exatamente à revisão aplicada e o operador digitar `ROLLBACK-INFODIVE`. Após PUT, o script registra recibo com o fingerprint observado **antes da validação final**; divergência de publicação, configurações ou nós deixa esse recibo para rollback humano condicionado ao fingerprint. Se o GET pós-PUT falhar e não houver recibo, a operação exige reconciliação manual antes de novas escritas, preservando o snapshot local. Restaurar Gemini estruturalmente não restaura créditos de geração.
+
+### Comprovação necessária
+
+O fluxo oficial ainda pode alcançar SQL financeira. Portanto, não realizar execução end-to-end no webhook oficial enquanto a nova geração não estiver isoladamente homologada e a aprovação/escopo read-only não estiver comprovada. A mudança de provedor não autoriza execução financeira nem cutover n8n→LangGraph. O benchmark legado é somente avaliador, não contexto do gerador.
+
 ## Antes do cutover do provedor — gates separados
 
 1. Validar versão **publicada** do fluxo oficial e compatibilidade da API n8n 2.4.8 (não tratar export CLI isolado como published).

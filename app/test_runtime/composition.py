@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,6 +43,10 @@ from app.infrastructure.http.stdlib_http_transport import StdlibHttpTransport
 from app.infrastructure.secrets.environment_secret_provider import (
     EnvironmentSecretProvider,
 )
+from app.composition.sql_repairer_registry import (
+    SqlRepairerRegistration,
+    SqlRepairerRegistry,
+)
 from app.composition.sql_generator_registry import (
     SqlGeneratorRegistration,
     SqlGeneratorRegistry,
@@ -54,6 +60,9 @@ from app.integrations.openai_compatible.configuration import (
 )
 from app.integrations.openai_compatible.sql_generator_adapter import (
     OpenAiCompatibleSqlGeneratorAdapter,
+)
+from app.integrations.openai_compatible.sql_repairer_adapter import (
+    OpenAiCompatibleSqlRepairerAdapter,
 )
 from app.integrations.google_gemini.sql_repairer_adapter import (
     GoogleGeminiSqlRepairerAdapter,
@@ -141,6 +150,20 @@ def create_shadow_test_runtime(
         http_transport=http_transport,
         secret_provider=secret_provider,
     )
+    sql_repairer_registry = _sql_repairer_registry(
+        environ=environ,
+        default_repairer=sql_repairer,
+        http_transport=http_transport,
+        secret_provider=secret_provider,
+    )
+    default_selection = _shadow_default_llm_selection(environ)
+    if default_selection is not None:
+        if sql_generator_override is not None or sql_repairer_override is not None:
+            raise RuntimeError("Explicit default LLM conflicts with adapter overrides.")
+        # Resolve the complete pair before starting the runtime, never fallback
+        # from a private generator to an unrelated repair provider.
+        sql_generator = sql_generator_registry.resolve(**default_selection)
+        sql_repairer = sql_repairer_registry.resolve(**default_selection)
     ids = ShadowTestIds()
     request_limits = default_http_request_limits()
     response_limits = default_http_response_limits()
@@ -149,6 +172,7 @@ def create_shadow_test_runtime(
             context_repository=context_repository,
             sql_generator=sql_generator,
             sql_generator_resolver=sql_generator_registry,
+            sql_repairer_resolver=sql_repairer_registry,
             engine_preflight=engine_preflight,
             sql_repairer=sql_repairer,
             id_generator=ids,
@@ -337,6 +361,68 @@ def _sql_generator_registry(
         )
 
     return SqlGeneratorRegistry(registrations)
+
+
+def _shadow_default_llm_selection(
+    environ: Mapping[str, str] | None,
+) -> dict[str, str] | None:
+    source = os.environ if environ is None else environ
+    raw = source.get("SHADOW_DEFAULT_LLM_SELECTION_JSON")
+    if raw is None or not str(raw).strip():
+        return None
+    if not isinstance(raw, str) or len(raw) > 2048:
+        raise RuntimeError("SHADOW_DEFAULT_LLM_SELECTION_JSON is invalid.")
+    try:
+        selection = json.loads(raw)
+    except (ValueError, TypeError):
+        raise RuntimeError("SHADOW_DEFAULT_LLM_SELECTION_JSON is invalid.") from None
+    required = {"provider_key", "model_key", "config_version"}
+    if not isinstance(selection, dict) or set(selection) != required:
+        raise RuntimeError("SHADOW_DEFAULT_LLM_SELECTION_JSON is invalid.")
+    for value in selection.values():
+        if not isinstance(value, str) or not value.strip() or len(value) > 128:
+            raise RuntimeError("SHADOW_DEFAULT_LLM_SELECTION_JSON is invalid.")
+    return {key: selection[key].strip() for key in required}
+
+
+def _sql_repairer_registry(
+    *,
+    environ: Mapping[str, str] | None,
+    default_repairer: SqlRepairer,
+    http_transport: Any,
+    secret_provider: Any,
+) -> SqlRepairerRegistry:
+    source = {} if environ is None else environ
+    gemini_config = load_google_gemini_repairer_configuration(environ)
+    registrations = [
+        SqlRepairerRegistration(
+            provider_key=str(source.get(
+                "GEMINI_SQL_GENERATOR_PROVIDER_KEY", "google_gemini"
+            )).strip(),
+            model_key=gemini_config.model_id,
+            config_version=str(source.get(
+                "GEMINI_SQL_GENERATOR_CONFIG_VERSION", "gemini-demo-v1"
+            )).strip(),
+            repairer=default_repairer,
+        ),
+    ]
+    compatible = load_openai_compatible_configuration(environ)
+    if compatible is not None:
+        client = OpenAiCompatibleClient(
+            configuration=compatible,
+            secret_provider=secret_provider,
+            http_transport=http_transport,
+        )
+        registrations.append(SqlRepairerRegistration(
+            provider_key=compatible.provider_key,
+            model_key=compatible.model_id,
+            config_version=compatible.config_version,
+            repairer=OpenAiCompatibleSqlRepairerAdapter(
+                client=client,
+                configuration=compatible,
+            ),
+        ))
+    return SqlRepairerRegistry(registrations)
 
 
 def _gemini_sql_generator(

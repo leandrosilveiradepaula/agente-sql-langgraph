@@ -49,6 +49,7 @@ from app.ports.shadow_evidence_repository import ShadowEvidenceRepository
 from app.ports.sql_generator import SqlGenerator
 from app.ports.sql_generator_resolver import SqlGeneratorResolver
 from app.ports.sql_repairer import SqlRepairer
+from app.ports.sql_repairer_resolver import SqlRepairerResolver
 
 
 class GenerateSqlUseCase:
@@ -61,6 +62,7 @@ class GenerateSqlUseCase:
         sql_generator_resolver: SqlGeneratorResolver | None = None,
         sql_repairer: SqlRepairer,
         id_generator: IdGenerator,
+        sql_repairer_resolver: SqlRepairerResolver | None = None,
         shadow_repository: ShadowEvidenceRepository | None = None,
         langgraph_version: str | None = None,
         langgraph_commit: str | None = None,
@@ -79,6 +81,8 @@ class GenerateSqlUseCase:
         self._id_generator = id_generator
         self._sql_generator = sql_generator
         self._sql_generator_resolver = sql_generator_resolver
+        self._sql_repairer = sql_repairer
+        self._sql_repairer_resolver = sql_repairer_resolver
         self._shadow_repository = shadow_repository
         self._langgraph_version = langgraph_version
         self._langgraph_commit = langgraph_commit
@@ -92,7 +96,6 @@ class GenerateSqlUseCase:
         self._security_gate = security_gate
         self._contract_gate = contract_gate
         self._engine_preflight = create_engine_preflight_node(engine_preflight)
-        self._repair_sql = create_repair_sql_node(sql_repairer)
 
     def execute(self, request: GenerateSqlV1Request) -> GenerateSqlV1Response:
         validation = validate_generate_request(request)
@@ -169,6 +172,25 @@ class GenerateSqlUseCase:
                 )
                 self._persist_shadow(request, state, response, created_at)
                 return response
+            # Never repair with a different model/provider than the generator.
+            # Explicit selections must resolve both adapters before any LLM call.
+            try:
+                selected_repairer = self._resolve_sql_repairer(request)
+            except LookupError:
+                response = generate_response(
+                    agent_run_id=agent_run_id,
+                    run_id=run_id,
+                    status="rejected",
+                    message="Generate SQL request rejected.",
+                    state=state,
+                    errors=[error(
+                        "INTERNAL_LLM_SELECTION_UNAVAILABLE",
+                        "request",
+                        "Selected LLM repairer is not available.",
+                    )],
+                )
+                self._persist_shadow(request, state, response, created_at)
+                return response
             generate_sql = create_generate_sql_node(selected_generator)
             for node in (
                 self._load_context,
@@ -185,7 +207,7 @@ class GenerateSqlUseCase:
                         request,
                         created_at,
                     )
-            state = self._run_gate_preflight_repair_loop(state)
+            state = self._run_gate_preflight_repair_loop(state, selected_repairer)
             return self._generate_terminal(
                 agent_run_id,
                 run_id,
@@ -227,11 +249,25 @@ class GenerateSqlUseCase:
             config_version=str(selection.get("config_version", "")),
         )
 
+    def _resolve_sql_repairer(self, request: Mapping[str, Any]) -> SqlRepairer:
+        selection = request.get("llm_selection")
+        if not isinstance(selection, Mapping) or not selection:
+            return self._sql_repairer
+        if self._sql_repairer_resolver is None:
+            raise LookupError("llm_selection_unavailable")
+        return self._sql_repairer_resolver.resolve(
+            provider_key=str(selection.get("provider_key", "")),
+            model_key=str(selection.get("model_key", "")),
+            config_version=str(selection.get("config_version", "")),
+        )
+
     def _run_gate_preflight_repair_loop(
         self,
         state: GraphState,
+        selected_repairer: SqlRepairer,
     ) -> GraphState:
         current = deepcopy(state)
+        repair_node = create_repair_sql_node(selected_repairer)
         while True:
             for node in (
                 self._security_gate,
@@ -247,7 +283,7 @@ class GenerateSqlUseCase:
                 current["failure_stage"] = ""
                 return current
             if preflight_repairable(current):
-                repaired = self._apply(current, self._repair_sql)
+                repaired = self._apply(current, repair_node)
                 if repaired.get("final_status") == "processing":
                     current = repaired
                     continue
