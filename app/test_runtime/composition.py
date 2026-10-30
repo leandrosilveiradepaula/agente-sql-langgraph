@@ -133,37 +133,73 @@ def create_shadow_test_runtime(
     secret_provider = secret_provider_override or EnvironmentSecretProvider(
         environ=environ,
     )
-    sql_generator = sql_generator_override or _gemini_sql_generator(
-        environ=environ,
-        http_transport=http_transport,
-        secret_provider=secret_provider,
-    )
-    sql_generator_registry = _sql_generator_registry(
-        environ=environ,
-        default_generator=sql_generator,
-        http_transport=http_transport,
-        secret_provider=secret_provider,
-    )
-    engine_preflight = ShadowTestEnginePreflight()
-    sql_repairer = sql_repairer_override or _gemini_sql_repairer(
-        environ=environ,
-        http_transport=http_transport,
-        secret_provider=secret_provider,
-    )
-    sql_repairer_registry = _sql_repairer_registry(
-        environ=environ,
-        default_repairer=sql_repairer,
-        http_transport=http_transport,
-        secret_provider=secret_provider,
-    )
     default_selection = _shadow_default_llm_selection(environ)
+    engine_preflight = ShadowTestEnginePreflight()
+
     if default_selection is not None:
+        # An explicitly selected private model must not construct, validate
+        # or call the legacy Gemini adapters, even during application startup.
+        # Keep provider/model/config_version identical for generate and repair.
         if sql_generator_override is not None or sql_repairer_override is not None:
             raise RuntimeError("Explicit default LLM conflicts with adapter overrides.")
-        # Resolve the complete pair before starting the runtime, never fallback
-        # from a private generator to an unrelated repair provider.
-        sql_generator = sql_generator_registry.resolve(**default_selection)
-        sql_repairer = sql_repairer_registry.resolve(**default_selection)
+        compatible = load_openai_compatible_configuration(environ)
+        if compatible is None or default_selection != {
+            "provider_key": compatible.provider_key,
+            "model_key": compatible.model_id,
+            "config_version": compatible.config_version,
+        }:
+            raise RuntimeError("SHADOW_DEFAULT_LLM_SELECTION_JSON provider unavailable.")
+        private_client = OpenAiCompatibleClient(
+            configuration=compatible,
+            secret_provider=secret_provider,
+            http_transport=http_transport,
+        )
+        sql_generator = OpenAiCompatibleSqlGeneratorAdapter(
+            client=private_client, configuration=compatible,
+        )
+        sql_repairer = OpenAiCompatibleSqlRepairerAdapter(
+            client=private_client, configuration=compatible,
+        )
+        sql_generator_registry = SqlGeneratorRegistry([
+            SqlGeneratorRegistration(
+                provider_key=compatible.provider_key,
+                model_key=compatible.model_id,
+                config_version=compatible.config_version,
+                generator=sql_generator,
+            ),
+        ])
+        sql_repairer_registry = SqlRepairerRegistry([
+            SqlRepairerRegistration(
+                provider_key=compatible.provider_key,
+                model_key=compatible.model_id,
+                config_version=compatible.config_version,
+                repairer=sql_repairer,
+            ),
+        ])
+    else:
+        # Backward compatible legacy mode: no implicit operational cutover.
+        sql_generator = sql_generator_override or _gemini_sql_generator(
+            environ=environ,
+            http_transport=http_transport,
+            secret_provider=secret_provider,
+        )
+        sql_generator_registry = _sql_generator_registry(
+            environ=environ,
+            default_generator=sql_generator,
+            http_transport=http_transport,
+            secret_provider=secret_provider,
+        )
+        sql_repairer = sql_repairer_override or _gemini_sql_repairer(
+            environ=environ,
+            http_transport=http_transport,
+            secret_provider=secret_provider,
+        )
+        sql_repairer_registry = _sql_repairer_registry(
+            environ=environ,
+            default_repairer=sql_repairer,
+            http_transport=http_transport,
+            secret_provider=secret_provider,
+        )
     ids = ShadowTestIds()
     request_limits = default_http_request_limits()
     response_limits = default_http_response_limits()
