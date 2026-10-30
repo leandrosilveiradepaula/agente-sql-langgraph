@@ -57,3 +57,38 @@ O script usa o serviço interno existente, autenticação S2S, `llm_selection` r
 O workflow oficial n8n não foi modificado pela PR #205. Para alterar os quatro nós de Gemini, é preciso antes atestar que o endpoint/credencial privados estão disponíveis **no container n8n** (nao apenas no Shadow), preparar credencial de autenticação segura (sem segredo no JSON versionado), diff do workflow publicado, backup privado 0600 e rollback. Não publicar o candidato diretamente em produção sem canário isolado por causa do caminho legado de execução PostgreSQL.
 
 A PR #202 (fonte/catálogo/role) permanece pendente. Nenhuma equivalência numerica deve ser declarada por CI ou canário sem execução somente-leitura autorizada separadamente.
+
+## Bootstrap privado exclusivo — preparação offline de 30/10/2026
+
+Quando o operador seleciona explicitamente `SHADOW_DEFAULT_LLM_SELECTION_JSON`
+para um provider **OpenAI-compatible já cadastrado**, o Shadow monta apenas o
+gerador e o reparador desse provider, com **o mesmo client e a mesma identidade
+`provider_key/model_key/config_version`**. O bootstrap não instancia nem
+valida adaptadores Gemini nesse caminho. Se a seleção não coincidir exatamente
+com a configuração OpenAI-compatible ou o provider estiver desabilitado,
+o startup falha fechado, sem fallback para Gemini.
+
+O modo legado sem `SHADOW_DEFAULT_LLM_SELECTION_JSON` continua disponível
+exclusivamente para compatibilidade e para evitar cutover implícito.
+**Esta entrega não ativa a variável nem muda a seleção do runtime existente.**
+
+### Verificações determinísticas sem IBM Cloud
+
+- Com a seleção privada explícita e uma configuração Gemini deliberadamente
+  inválida, o bootstrap deve inicializar o mesmo client privado para Generate e
+  Repair; nenhum contato de rede é feito pelo teste.
+- Seleção ausente/mismatched, provider desabilitado e overrides conflitantes
+  devem bloquear o bootstrap privado, sem tentar Gemini.
+- A permissão de execução real deve permanecer `false`, assim como os gates
+  tenant, de SQL, aprovação e evidências já existentes.
+
+Os testes de unidade deste comportamento estão em
+`testar_shadow_test_runtime.py`. Eles são sintéticos e não comprovam
+que o endpoint IBM Cloud, o catálogo financeiro ou o n8n oficial já estejam
+prontos. Não copiar dados ou definições de negócios do n8n para código.
+
+**Política do operador (30/10):** novos testes de geração/reparo devem usar
+SQL-InfoDive; o legado n8n com Gemini só permanece como referência histórica
+para avaliação independente e rollback, sem chamadas novas ao Gemini.
+A sequência de homologação ainda exige semântica, segurança, identidade,
+paridade e cutover humano, jamais uma troca silenciosa da LLM oficial.
