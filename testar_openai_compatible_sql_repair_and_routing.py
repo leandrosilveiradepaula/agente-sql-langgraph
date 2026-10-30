@@ -10,6 +10,7 @@ from app.composition.sql_repairer_registry import (
     SqlRepairerRegistration, SqlRepairerRegistry, SqlRepairerSelectionError,
 )
 from app.domain.sql_repair import SQL_REPAIR_CONTRACT_VERSION, SqlRepairProviderError
+from app.test_runtime.composition import _shadow_default_llm_selection, _sql_repairer_registry
 from app.integrations.openai_compatible.configuration import OpenAiCompatibleConfiguration
 from app.integrations.openai_compatible.sql_repairer_adapter import OpenAiCompatibleSqlRepairerAdapter
 from testar_grafo_base import SuccessContextRepository
@@ -157,6 +158,36 @@ class Tests(unittest.TestCase):
         self.assertEqual(response["status"], "rejected")
         self.assertEqual(response["errors"][0]["code"], "INTERNAL_LLM_SELECTION_UNAVAILABLE")
         self.assertEqual(generator.calls, 0)
+
+
+    def test_explicit_default_private_selection_from_versioned_config(self):
+        import json
+        value = json.dumps(selection())
+        self.assertEqual(
+            _shadow_default_llm_selection({"SHADOW_DEFAULT_LLM_SELECTION_JSON": value}),
+            selection(),
+        )
+        self.assertIsNone(_shadow_default_llm_selection({}))
+        for invalid in ('{}', '{"provider_key":"x"}', '{"provider_key":null}', 'oops'):
+            with self.assertRaises(RuntimeError):
+                _shadow_default_llm_selection({"SHADOW_DEFAULT_LLM_SELECTION_JSON": invalid})
+
+    def test_private_repairer_registration_uses_selected_adapter(self):
+        env = {
+            "OPENAI_COMPATIBLE_SQL_ENABLED": "true",
+            "OPENAI_COMPATIBLE_SQL_PROVIDER_KEY": "private_provider",
+            "OPENAI_COMPATIBLE_SQL_CONFIG_VERSION": "context-v1",
+            "OPENAI_COMPATIBLE_SQL_BASE_URL": "https://private.example.test",
+            "OPENAI_COMPATIBLE_SQL_MODEL": "sql-model",
+        }
+        selected = _sql_repairer_registry(
+            environ=env,
+            default_repairer=FakeSqlRepairer(),
+            http_transport=object(),
+            secret_provider=object(),
+        ).resolve(**selection())
+        self.assertIsInstance(selected, OpenAiCompatibleSqlRepairerAdapter)
+        self.assertEqual(selected._configuration.provider_key, "private_provider")
 
 
 if __name__ == "__main__":
