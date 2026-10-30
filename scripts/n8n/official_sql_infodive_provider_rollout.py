@@ -218,16 +218,22 @@ def apply(*, api: N8nApi, container: str, workflow_id: str, config: dict,
     check(fingerprint(fresh) == fingerprint(before), "WORKFLOW_CHANGED_BEFORE_PUT")
     api.request("PUT", f"/api/v1/workflows/{workflow_id}", payload)
     after = api.request("GET", f"/api/v1/workflows/{workflow_id}")
-    check(isinstance(after, dict), "POST_APPLY_READ_FAILED_BACKUP_REQUIRED")
-    check(_published_and_active(after, workflow_id),
-          "POST_APPLY_NOT_PUBLISHED_BACKUP_REQUIRED")
-    _assert_only_four_changes(before, after, candidate)
+    check(isinstance(after, dict) and after.get("id") == workflow_id,
+          "POST_APPLY_READ_FAILED_BACKUP_REQUIRED")
     receipt_path = backup_dir / ("official-llm-receipt-" + expected_sha[:16] + ".json")
+    # Persist the exact observed post-PUT fingerprint BEFORE checking whether
+    # n8n preserved the publish state, settings and all 68 nodes. A failed
+    # post-PUT verification must not leave an irreversible change with no
+    # evidence that can be used for a later, explicitly authorized rollback.
     _private_create(receipt_path, {
         "workflow_id": workflow_id, "baseline_sha256": expected_sha,
         "applied_sha256": fingerprint(after),
         "candidate_sha256": report["candidate_sha256"],
+        "post_put_verification": "pending",
     })
+    check(_published_and_active(after, workflow_id),
+          "POST_APPLY_NOT_PUBLISHED_BACKUP_REQUIRED")
+    _assert_only_four_changes(before, after, candidate)
     return {
         "mode": "APPLY",
         "status": "APPLIED_AND_VERIFIED",
@@ -267,7 +273,11 @@ def rollback(*, api: N8nApi, container: str, workflow_id: str,
     check(isinstance(current, dict) and
           fingerprint(current) == receipt.get("applied_sha256"),
           "ROLLBACK_CURRENT_REVISION_CHANGED")
-    check(_published_and_active(current, workflow_id), "ROLLBACK_NOT_PUBLISHED")
+    # The observed post-PUT revision may be a draft or contain unexpected
+    # drift. Fingerprint equality is the concurrency gate; rollback must
+    # remain available after partial publication failure, with human approval.
+    check(_published_and_active(before, workflow_id),
+          "ROLLBACK_BASELINE_NOT_PUBLISHED")
     api.request("PUT", f"/api/v1/workflows/{workflow_id}", _projection(before))
     restored = api.request("GET", f"/api/v1/workflows/{workflow_id}")
     check(isinstance(restored, dict) and _published_and_active(restored, workflow_id),
