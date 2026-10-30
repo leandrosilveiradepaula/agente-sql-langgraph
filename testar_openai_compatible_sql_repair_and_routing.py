@@ -168,6 +168,9 @@ class Tests(unittest.TestCase):
             selection(),
         )
         self.assertIsNone(_shadow_default_llm_selection({}))
+        from unittest.mock import patch
+        with patch.dict("os.environ", {"SHADOW_DEFAULT_LLM_SELECTION_JSON": value}):
+            self.assertEqual(_shadow_default_llm_selection(None), selection())
         for invalid in ('{}', '{"provider_key":"x"}', '{"provider_key":null}', 'oops'):
             with self.assertRaises(RuntimeError):
                 _shadow_default_llm_selection({"SHADOW_DEFAULT_LLM_SELECTION_JSON": invalid})
