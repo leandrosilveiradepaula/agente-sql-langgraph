@@ -12,6 +12,7 @@ from scripts.operations import p3_source_node_review_readonly as review
 
 def fixture():
     old = "credential-old"
+    source = "credential-source"
     nodes = [
         {"id": "trigger", "name": "start", "type": "n8n-nodes-base.webhook"},
         {"id": "route", "name": "route", "type": "n8n-nodes-base.if"},
@@ -21,7 +22,7 @@ def fixture():
             "id": f"source-{i}", "name": f"data operation {i}",
             "type": "n8n-nodes-base.postgres",
             "parameters": {"operation": "executeQuery", "query": "SELECT secret_value FROM private_data"},
-            "credentials": {"postgres": {"id": old}},
+            "credentials": {"postgres": {"id": source}},
         })
     nodes.extend([
         {"id": "exec-a", "name": "approved-executor-a", "type": "n8n-nodes-base.postgres",
@@ -29,7 +30,7 @@ def fixture():
         {"id": "exec-b", "name": "approved-executor-b", "type": "n8n-nodes-base.postgres",
          "credentials": {"postgres": {"id": old}}},
         {"id": "dead", "name": "unused operation", "type": "n8n-nodes-base.postgres",
-         "credentials": {"postgres": {"id": old}}},
+         "credentials": {"postgres": {"id": source}}},
     ])
     connections = {
         "start": {"main": [[{"node": "route"}]]},
@@ -87,6 +88,9 @@ class SourceReview(unittest.TestCase):
         self.assertEqual(result["demo_executor_ordinals"], [7, 8])
         self.assertEqual(result["source_node_count"], 4)
         self.assertEqual(result["demo_executor_count"], 2)
+        self.assertEqual(result["post_put_credential_reference_count"], 2)
+        self.assertEqual(result["classification_basis"],
+                         "G1_EXACT_NONBINDING_NODES_AND_P3_COUNTS_ONLY")
         self.assertEqual(len(result["node_review"]), 6)
         self.assertEqual(result["shadow_evidence_target_at_p3_audit"], "SOURCE")
         self.assertFalse(result["mapping_approved"])
@@ -98,6 +102,7 @@ class SourceReview(unittest.TestCase):
         self.assertNotIn("password", serialized)
         self.assertNotIn("credential-old", serialized)
         self.assertNotIn("credential-new", serialized)
+        self.assertNotIn("credential-source", serialized)
         self.assertTrue(all(x["cutover_disposition"] is None
                             for x in result["node_review"]))
 
@@ -119,12 +124,49 @@ class SourceReview(unittest.TestCase):
         self.assertEqual(result["source_node_count"], 4)
         self.assertEqual(result["node_review"][0]["operation_class"], "UNKNOWN")
 
-    def test_decrypted_or_wrong_credential_in_pre_put_snapshot_rejected(self):
+    def test_third_reachable_credential_not_silently_assigned_source(self):
         def drift(p,s,g,d):
-            s["workflow"]["nodes"][2]["credentials"]["postgres"]["id"] = "other"
+            s["workflow"]["nodes"][2]["credentials"]["postgres"]["id"] = "third-project"
         with self.assertRaises(review.ReviewBlocked) as error:
             self.run_review(change=drift)
-        self.assertEqual(error.exception.code, "UNEXPECTED_SNAPSHOT_CREDENTIAL")
+        self.assertEqual(error.exception.code, "P3_CREDENTIAL_TOPOLOGY_MISMATCH")
+
+    def test_legacy_source_can_share_the_previous_executor_credential(self):
+        def share(p, s, g, d):
+            for n in s["workflow"]["nodes"]:
+                if n.get("type") == "n8n-nodes-base.postgres":
+                    n["credentials"]["postgres"]["id"] = "credential-old"
+        report = self.run_review(change=share)
+        self.assertEqual(report["post_put_credential_reference_count"], 2)
+        self.assertEqual(report["source_node_count"], 4)
+
+    def test_executor_must_have_exact_original_credential(self):
+        def drift(p, s, g, d):
+            s["workflow"]["nodes"][6]["credentials"]["postgres"]["id"] = "credential-source"
+        with self.assertRaises(review.ReviewBlocked) as error:
+            self.run_review(change=drift)
+        self.assertEqual(error.exception.code, "EXECUTOR_SNAPSHOT_CREDENTIAL_MISMATCH")
+
+    def test_rejected_if_new_credential_is_present_before_put(self):
+        def drift(p, s, g, d):
+            s["workflow"]["nodes"][2]["credentials"]["postgres"]["id"] = "credential-new"
+        with self.assertRaises(review.ReviewBlocked) as error:
+            self.run_review(change=drift)
+        self.assertEqual(error.exception.code, "SNAPSHOT_CONTAINS_NEW_CREDENTIAL")
+
+    def test_third_unreachable_credential_also_blocks(self):
+        def drift(p, s, g, d):
+            s["workflow"]["nodes"][8]["credentials"]["postgres"]["id"] = "third-project"
+        with self.assertRaises(review.ReviewBlocked) as error:
+            self.run_review(change=drift)
+        self.assertEqual(error.exception.code, "P3_CREDENTIAL_TOPOLOGY_MISMATCH")
+
+    def test_unexpected_non_postgres_executor_blocks(self):
+        def drift(p, s, g, d):
+            s["workflow"]["nodes"][6]["type"] = "n8n-nodes-base.code"
+        with self.assertRaises(review.ReviewBlocked) as error:
+            self.run_review(change=drift)
+        self.assertEqual(error.exception.code, "EXECUTOR_SNAPSHOT_CREDENTIAL_MISMATCH")
 
     def test_missing_two_execution_nodes_blocks(self):
         def drift(p,s,g,d):
@@ -132,6 +174,51 @@ class SourceReview(unittest.TestCase):
         with self.assertRaises(review.ReviewBlocked) as error:
             self.run_review(change=drift)
         self.assertEqual(error.exception.code, "EXECUTOR_NOT_REACHABLE")
+
+    def test_68_node_two_credentials_and_eight_unreachable(self):
+        """Mirror real G1/P3 cardinalities without using customer node names."""
+        policy, snapshot, g1, deps = fixture()
+        nodes = [
+            {"id": "trigger", "name": "start", "type": "n8n-nodes-base.webhook"}
+        ]
+        for i in range(1, 60):
+            node = {"id": f"node-{i}", "name": f"operation-{i}",
+                    "type": "n8n-nodes-base.code"}
+            if 2 <= i <= 7:
+                node.update({"type": "n8n-nodes-base.postgres",
+                             "credentials": {"postgres": {"id": "credential-source"}}})
+            if i in (30, 31):
+                node.update({"type": "n8n-nodes-base.postgres",
+                             "credentials": {"postgres": {"id": "credential-old"}}})
+            nodes.append(node)
+        for i in range(60, 68):
+            node = {"id": f"dead-{i}", "name": f"disconnected-{i}",
+                    "type": "n8n-nodes-base.code"}
+            if i in (60, 61, 62):
+                node.update({"type": "n8n-nodes-base.postgres",
+                             "credentials": {"postgres": {"id": "credential-source"}}})
+            nodes.append(node)
+        connections = {
+            nodes[i]["name"]: {"main": [[{"node": nodes[i+1]["name"]}]]}
+            for i in range(59)
+        }
+        snapshot["workflow"]["nodes"] = nodes
+        snapshot["workflow"]["connections"] = connections
+        policy["n8n"]["expected_node_count"] = 68
+        policy["n8n"]["binding_node_ids"] = ["node-30", "node-31"]
+        deps.update({
+            "SUPABASE_N8N_OFFICIAL_NODE_COUNT": "68",
+            "SUPABASE_N8N_REACHABLE_SOURCE_POSTGRES_NODES": "6",
+            "SUPABASE_N8N_REACHABLE_DEMO_POSTGRES_NODES": "2",
+        })
+        report = review.review_existing_proofs(policy=policy, snapshot=snapshot,
+                                                g1=g1, deps=deps)
+        self.assertEqual(report["source_node_ordinals"], [3, 4, 5, 6, 7, 8])
+        self.assertEqual(report["demo_executor_ordinals"], [31, 32])
+        self.assertEqual(report["source_node_count"], 6)
+        self.assertEqual(report["demo_executor_count"], 2)
+        self.assertEqual(report["post_put_credential_reference_count"], 2)
+        self.assertEqual(len(report["node_review"]), 8)
 
     def test_source_counts_must_agree_with_p3_local_audit(self):
         def drift(p,s,g,d):
