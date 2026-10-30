@@ -44,6 +44,13 @@ def deny(reason: str) -> None:
     raise Blocked(reason)
 
 
+def require_posix_io() -> None:
+    """Owner-only, no-follow private I/O is deliberately Linux/POSIX only."""
+    if (os.name != "posix" or not hasattr(os, "O_NOFOLLOW")
+            or not hasattr(os, "geteuid")):
+        deny("PRIVATE_POSIX_REQUIRED")
+
+
 def sha(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -391,6 +398,7 @@ def scan(stream, receipt: dict, prior: dict, index: dict,
 
 
 def decrypt_gpg(path: Path, passphrase: str) -> subprocess.Popen:
+    require_posix_io()
     read_fd, write_fd = os.pipe()
     proc = None
     try:
@@ -416,6 +424,7 @@ def decrypt_gpg(path: Path, passphrase: str) -> subprocess.Popen:
 
 
 def private_write(path: Path, value: dict) -> None:
+    require_posix_io()
     if not path.is_absolute() or path.parent.is_symlink():
         deny("OUTPUT_PATH_UNSAFE")
     if (not path.parent.is_dir() or path.parent.stat().st_uid != os.geteuid()
