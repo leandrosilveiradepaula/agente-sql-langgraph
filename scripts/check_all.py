@@ -54,6 +54,10 @@ STEPS = [
         [sys.executable, "testar_context_validator.py"],
     ),
     (
+        "testar_p3_semantic_context_candidate.py",
+        [sys.executable, "testar_p3_semantic_context_candidate.py"],
+    ),
+    (
         "testar_semantic_operations_context.py",
         [sys.executable, "testar_semantic_operations_context.py"],
     ),
