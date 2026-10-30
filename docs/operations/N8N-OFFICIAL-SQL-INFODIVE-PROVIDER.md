@@ -6,7 +6,7 @@ Decisão recente do operador em 29/10/2026: não comprar novos créditos Gemini 
 
 No inventário histórico do n8n oficial, o fluxo possui 68 nós. A geração e o reparo de SQL usam *dois* nós HTTP Gemini, com corpo `contents[0].parts[0].text`, e dois consumidores Code que extraem `candidates[0].content.parts[0].text`. O protocolo privado OpenAI-compatible precisa de `messages[0].content` e devolve `choices[0].message.content`.
 
-`scripts/n8n/official_sql_infodive_provider_candidate.py` faz apenas auditoria do workflow **armazenado** via CLI n8n, identifica os quatro IDs a partir do contrato de resposta, e opcionalmente prepara candidato **somente em memória**. Não exige chave da API n8n, não altera workflow, não faz chamadas LLM, não executa SQL, não grava export de workflow e não imprime segredos. 
+`scripts/n8n/official_sql_infodive_provider_candidate.py` faz apenas auditoria do workflow **armazenado** via CLI n8n, identifica os quatro IDs a partir do contrato de resposta, e opcionalmente prepara candidato **somente em memória**. Não exige chave da API n8n, não altera workflow, não faz chamadas LLM, não executa SQL, não grava export de workflow e não imprime segredos.
 
 **Importante:** o export CLI da versão armazenada não atesta a versão **publicada**. O candidato não é um instalador. Quatro alterações são propostas: duas chamadas HTTP e os dois consumidores da resposta; nenhum ajuste de plano, métricas, aliases, SQL, conexões, configuração do workflow, credenciais PostgreSQL ou regras financeiras.
 
