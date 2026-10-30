@@ -93,37 +93,58 @@ snapshot e outra revisão devidamente autorizada: não reaproveitar prova antiga
 Este documento especifica revisão de metadados; **não** afirma que a nova
 versão esteja pronta para ser carregada no planner.
 
-## Ponte candidata para o contrato do motor
+## Ponte candidata ao contexto — provas independentes
 
-Após uma aprovação contábil verificável, a etapa offline
-`scripts.operations.p3_semantic_context_candidate.build_candidate` recebe a
-revisão privada e uma seção `semantic_context` completa no formato bruto já
-consumido por `normalize_context_snapshot`. Ela não completa aliases,
-métricas, sinais, períodos, joins, DRE ou regras a partir de nomes físicos.
+A ponte `p3_semantic_context_candidate.py` exige duas provas distintas. Um
+JSON com `status=APPROVED` ou fingerprint recalculado da própria revisão não
+comprova homologação. Nada é ativado ou executado.
 
-O adaptador exige, além do fingerprint físico atual:
+**Prova física:** o CLI reconstrói a baseline por meio do snapshot P3 privado
+`physical-metadata.json`, da política existente e das validações de escopo da
+role, sem nova conexão, leitura financeira ou alteração de banco. A revisão
+precisa coincidir em banco, schema, role, versão, tabelas, colunas e tipos; o
+mapeamento também passa pelo `check_review` do P3 (grão, PK, métricas,
+sinais, datas, joins, cardinalidade e bloqueio de fanout).
 
-- `status=APPROVED` e `accounting_approval.status=APPROVED`;
-- identidade de organização e proveniência já presentes na revisão;
-- catálogo com o conjunto exato de tabelas, colunas e tipos do P3;
-- um contrato semântico integral que passe por
-  `normalize_context_snapshot` e `validate_context_snapshot`.
+**Prova contábil:** recibo externo de autoridade autorizada, autenticado por
+HMAC-SHA256 e vinculado ao SHA-256 da revisão integral, ao fingerprint físico,
+tenant, versão, revisor, data e referência de evidência. O segredo verificador
+é independente do autor do mapeamento, com mínimo de 32 bytes. A PR não
+implementa emissor de recibos, não provisiona segredo operacional e não
+estabelece autorização contábil. Não criar atestações sintéticas para DEMO.
 
-Qualquer ausência, ambiguidade, drift físico ou tentativa de ativação retorna
-um código estável, incluindo `NEEDS_BUSINESS_APPROVAL`,
-`CANDIDATE_CATALOG_PHYSICAL_MISMATCH` ou `CONTEXT_CONTRACT_INVALID`.
-O resultado contém `CANDIDATE_READY_NOT_ACTIVATED`; não persiste contexto,
-não executa SQL, não chama LLM e não modifica `SEMANTIC_AGENT_VERSION`.
+O formato privado do recibo é um objeto com `claims` contendo exatamente
+`contract, decision, review_sha256, physical_fingerprint, organization_id,
+candidate_version, reviewer_id, approved_at, evidence_ref` e com
+`hmac_sha256` calculado sobre a serialização JSON compacta, ASCII e com
+chaves ordenadas de `claims`. O contrato deve ser
+`p3-accounting-approval-v1`. O segredo não pode ser compartilhado pelo
+mesmo agente que cria a revisão.
 
-O DEMO atual continua em `NEEDS_BUSINESS_APPROVAL`: o formulário P3 contém
-somente metadados físicos, sem definição homologada de métrica, sinal,
-agregação, período, relacionamento, granularidade, tenant ou DRE. Portanto,
-ele não pode ser promovido usando esta ponte.
+Somente após aprovação real, o operador poderá fornecer os dois arquivos
+privados modo 0600 e a variável de ambiente
+`P3_APPROVAL_HMAC_VERIFY_KEY_HEX` por meio de mecanismo secreto adequado,
+sem expô-la em histórico de shell, logs ou chat. A execução de validação
+offline é:
 
-`testar_p3_semantic_context_candidate.py` prova offline, em dois esquemas
-sintéticos materialmente distintos, que uma revisão externamente aprovada
-passa pelo contrato real de contexto, e percorre pergunta inédita → resolução
-→ planejamento → gerador fake → Security Gate → Contract Gate. A SQL do fake
-é apenas pré-condição técnica de gate; não é resposta de benchmark, não é
-enviada a provider e não há execução financeira. O mesmo teste cobre rejeição
-de revisão sem aprovação e coluna fora do inventário físico.
+```bash
+cd /docker/agente-sql-langgraph-repo || exit 1
+.venv/bin/python -m scripts.operations.p3_semantic_context_candidate \
+  --audit-dir /tmp/p3-source-audit.7DIc9fUP \
+  --review-file /caminho/privado/revisao-aprovada.json \
+  --approval-file /caminho/privado/recibo-de-aprovacao.json
+```
+
+Sem prova independente o candidato falha fechado com
+`P3_INDEPENDENT_EVIDENCE_REQUIRED`, `P3_INDEPENDENT_APPROVAL_REQUIRED`,
+`P3_APPROVAL_SIGNATURE_INVALID`, `P3_APPROVAL_SCOPE_MISMATCH` ou
+`P3_SEMANTIC_REVIEW_INCOMPLETE`, entre outros. Com provas válidas:
+`CANDIDATE_READY_NOT_ACTIVATED` e fingerprints de candidato, origem,
+aprovação e tenant; não persiste, publica ou executa SQL.
+
+A DEMO real permanece em `NEEDS_BUSINESS_APPROVAL`. Os testes usam somente
+segredo e contextos sintéticos: dois tenants e esquemas materialmente distintos,
+um com DRE opcional e outro sem, perguntas inéditas, drift, versão, tenant,
+fanout, recusa semântica, fake SQL e Security/Contract Gates. Isso não prova
+paridade financeira. `OFFICIAL=n8n`, `SHADOW=LangGraph` e
+`LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false` permanecem.
