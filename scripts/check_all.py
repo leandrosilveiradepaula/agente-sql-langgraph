@@ -106,6 +106,7 @@ STEPS = [
     ("testar_shadow_read_organization_scope.py", [sys.executable, "testar_shadow_read_organization_scope.py"]),
     ("testar_shadow_context_portability_e2e.py", [sys.executable, "testar_shadow_context_portability_e2e.py"]),
     ("testar_n8n_workflow_export_audit.py", [sys.executable, "testar_n8n_workflow_export_audit.py"]),
+    ("testar_n8n_official_sql_infodive_provider_candidate.py", [sys.executable, "testar_n8n_official_sql_infodive_provider_candidate.py"]),
     ("testar_shadow_full_flow_live_opt_in.py", [sys.executable, "testar_shadow_full_flow_live_opt_in.py"]),
     (
         "testar_planned_filters_e2e.py",
