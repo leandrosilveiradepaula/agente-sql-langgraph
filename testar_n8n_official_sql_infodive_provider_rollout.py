@@ -159,6 +159,41 @@ class Tests(unittest.TestCase):
                 self.assertEqual(api.workflow["nodes"], before["nodes"])
 
     @unittest.skipUnless(os.name == "posix", "Private POSIX snapshots required")
+    def test_post_put_failure_retains_receipt_and_allows_exact_rollback(self):
+        baseline = current_workflow()
+        api = FakeN8nApi(baseline)
+        original_request = api.request
+
+        def normalize_settings_after_put(method, path, body=None):
+            response = original_request(method, path, body)
+            if method == "PUT" and api.writes == 1:
+                api.workflow["settings"] = {"executionOrder": "v1", "drift": "unapproved"}
+            return response
+
+        api.request = normalize_settings_after_put
+        with tempfile.TemporaryDirectory() as directory:
+            private = Path(directory)
+            private.chmod(0o700)
+            with patch.object(m, "_read_export", return_value=baseline), \
+                 patch.object(m, "_n8n_provider_tcp_reachable", return_value=True):
+                with self.assertRaises(m.Blocked) as failure:
+                    m.apply(
+                        api=api, container="safe-n8n", workflow_id="workflow-a",
+                        config=fixture.configuration(),
+                        expected_sha=m.fingerprint(baseline), backup_dir=private,
+                    )
+                self.assertEqual(str(failure.exception), "POST_APPLY_SETTINGS_DRIFT")
+                self.assertEqual(api.writes, 1)
+                prefix = m.fingerprint(baseline)[:16]
+                self.assertTrue((private / ("official-llm-receipt-" + prefix + ".json")).is_file())
+                result = m.rollback(
+                    api=api, container="safe-n8n", workflow_id="workflow-a",
+                    baseline_sha=m.fingerprint(baseline), backup_dir=private,
+                )
+                self.assertEqual(result["status"], "RESTORED_AND_VERIFIED")
+                self.assertEqual(api.writes, 2)
+
+    @unittest.skipUnless(os.name == "posix", "Private POSIX snapshots required")
     def test_apply_rejects_unreachable_provider_before_put(self):
         before = current_workflow()
         api = FakeN8nApi(before)
