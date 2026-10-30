@@ -14,7 +14,9 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -110,6 +112,33 @@ def _assert_only_four_changes(before: Mapping[str, Any],
           "POST_APPLY_SETTINGS_DRIFT")
     check(b["nodes"] == wanted["nodes"],
           "POST_APPLY_NODE_CONTENT_DRIFT")
+    for preserved in ("pinData", "meta", "tags", "staticData"):
+        check(before.get(preserved) == after.get(preserved),
+              "POST_APPLY_METADATA_DRIFT")
+
+
+def _n8n_provider_tcp_reachable(container: str, configuration: dict) -> bool:
+    """Network-only check inside n8n; never sends a prompt, key or HTTP request."""
+    url = urlsplit(configuration["url"])
+    if url.scheme not in ("https", "http") or not url.hostname:
+        return False
+    port = url.port or (443 if url.scheme == "https" else 80)
+    node_code = (
+        "const net=require('net');"
+        "const s=net.connect({host:process.argv[1],port:Number(process.argv[2])},"
+        "()=>{s.destroy();process.exit(0)});"
+        "s.setTimeout(5000,()=>{s.destroy();process.exit(2)});"
+        "s.on('error',()=>process.exit(2));"
+    )
+    try:
+        proc = subprocess.run(
+            ["docker", "exec", "-u", "node", container, "node", "-e",
+             node_code, url.hostname, str(port)],
+            capture_output=True, timeout=14, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
 
 
 def _check_credential(api: N8nApi, configuration: dict) -> None:
@@ -175,6 +204,8 @@ def apply(*, api: N8nApi, container: str, workflow_id: str, config: dict,
     check(isinstance(before, dict), "N8N_API_WORKFLOW_INVALID")
     _assert_baseline(cli, before, workflow_id)
     _check_credential(api, config)
+    check(_n8n_provider_tcp_reachable(container, config),
+          "N8N_PROVIDER_NETWORK_UNREACHABLE")
     candidate, report = prepare_candidate(before, workflow_id, config)
     payload = _projection(candidate)
     backup_path = backup_dir / ("official-llm-before-" + expected_sha[:16] + ".json")
