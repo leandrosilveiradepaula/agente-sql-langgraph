@@ -87,7 +87,7 @@ O PUT pode salvar sem publicar a nova revisão no n8n 2.4.8. **Nesse caso a ferr
 
 ### Rollback
 
-Usar `--rollback` (sem `--apply`) com os mesmos `--workflow-id`, `--expected-stored-sha`, `--n8n-url` e `--private-backup-dir`; não exige `--config`. A restauração só tenta PUT se os arquivos `0600` (backup e receipt) existirem, o fingerprint atual corresponder exatamente à revisão aplicada e o operador digitar `ROLLBACK-INFODIVE`. Falhas após PUT podem não gerar receipt: esse caso exige reconciliação manual antes de novas escritas, preservando a evidência local. Restaurar Gemini estruturalmente não restaura créditos de geração.
+Usar `--rollback` (sem `--apply`) com os mesmos `--workflow-id`, `--expected-stored-sha`, `--n8n-url` e `--private-backup-dir`; não exige `--config`. A restauração só tenta PUT se os arquivos `0600` (backup e receipt) existirem, o fingerprint atual corresponder exatamente à revisão aplicada e o operador digitar `ROLLBACK-INFODIVE`. Após PUT, o script registra recibo com o fingerprint observado **antes da validação final**; divergência de publicação, configurações ou nós deixa esse recibo para rollback humano condicionado ao fingerprint. Se o GET pós-PUT falhar e não houver recibo, a operação exige reconciliação manual antes de novas escritas, preservando o snapshot local. Restaurar Gemini estruturalmente não restaura créditos de geração.
 
 ### Comprovação necessária
 
