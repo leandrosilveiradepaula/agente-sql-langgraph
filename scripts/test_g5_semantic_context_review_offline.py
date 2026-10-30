@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -56,6 +57,7 @@ class SourceReviewTests(unittest.TestCase):
         with self.assertRaisesRegex(lineage.Blocked, "UNVERIFIED_CANDIDATE_REFERENCE"):
             collector.packages(receipt=receipt, lineage=report, hints=hints, p3_sha=p3_sha)
 
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NOFOLLOW"), "requires POSIX private files")
     def test_tampered_reconciled_report_fails(self):
         data, receipt, prior, p3, p3_sha, report, hints, collector = self.historical_fixture()
         report["source_row_count"] += 1
@@ -80,11 +82,12 @@ class SourceReviewTests(unittest.TestCase):
         with self.assertRaisesRegex(lineage.Blocked, "EVALUATION_ROW_REACHED_CONTEXT_COLLECTOR"):
             collector.accept(lineage.EVALUATION_ONLY, "a" * 64, {"agent_version": b"bad"}, b"bad\n")
 
-    @unittest.skipUnless(shutil.which("gpg"), "GPG unavailable")
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NOFOLLOW") and shutil.which("gpg"),
+                         "requires POSIX private files and GPG")
     def test_encryption_roundtrip_and_manifest_never_leak(self):
         _, receipt, _, _, p3_sha, report, hints, collector = self.historical_fixture()
         packets = collector.packages(receipt=receipt, lineage=report, hints=hints, p3_sha=p3_sha)
-        password = "local-fake-password-for-synthetic-tests-only-1234"
+        password = "test-fixture-passphrase-generated-locally"
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); root.chmod(0o700)
             manifest = {"versions": []}
