@@ -1,0 +1,30 @@
+name: G5 semantic offline review
+on:
+  pull_request:
+    paths:
+      - "scripts/operations/g5_semantic_lineage_candidate.py"
+      - "scripts/operations/g5_semantic_context_review_offline.py"
+      - "scripts/test_g5_semantic_lineage_candidate.py"
+      - "scripts/test_g5_semantic_context_review_offline.py"
+      - ".github/workflows/g5-semantic-offline.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-review:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile offline-only modules
+        run: python -m compileall -q scripts/operations/g5_semantic_lineage_candidate.py scripts/operations/g5_semantic_context_review_offline.py scripts/test_g5_semantic_lineage_candidate.py scripts/test_g5_semantic_context_review_offline.py
+      - name: Synthetic two-context and fail-closed checks (no network or DB)
+        run: python -m unittest scripts.test_g5_semantic_lineage_candidate scripts.test_g5_semantic_context_review_offline -v
