@@ -149,6 +149,16 @@ class LineageTests(unittest.TestCase):
         with self.assertRaises(Blocked):
             decode_copy_field(b'\\x')
 
+    def test_windows_private_file_operations_are_rejected(self):
+        if os.name == "posix" and hasattr(os, "O_NOFOLLOW"):
+            self.skipTest("Windows-only negative assertion")
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaisesRegex(Blocked, "PRIVATE_POSIX_REQUIRED"):
+                private_write(Path(td) / "review.json", {"not_approved": True})
+            with self.assertRaisesRegex(Blocked, "CIPHER_PATH_INVALID"):
+                digest_private_file(Path(td) / "missing.gpg")
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NOFOLLOW"), "requires POSIX owner-only I/O")
     def test_private_output_exclusive_and_no_symlink(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -164,11 +174,12 @@ class LineageTests(unittest.TestCase):
             with self.assertRaises(Blocked):
                 read_json_private(link)
 
-    @unittest.skipUnless(shutil.which("gpg"), "GPG unavailable")
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NOFOLLOW") and shutil.which("gpg"),
+                         "requires POSIX private pipes and GPG")
     def test_synthetic_gpg_passphrase_pipe_only(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "fixture.gpg"
-            password = "fake-only-password-provided-by-test-12345"
+            password = "test-fixture-passphrase-generated-locally"
             payload = b'private_fixture_content_that_must_not_leak'
             # Test-only fixture: no real user data and no external network.
             p = subprocess.run([
