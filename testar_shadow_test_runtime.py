@@ -21,6 +21,8 @@ from app.integrations.google_gemini.sql_repairer_adapter import (
     GoogleGeminiSqlRepairerAdapter,
 )
 from app.test_runtime.composition import create_shadow_test_runtime
+from app.integrations.openai_compatible.sql_generator_adapter import OpenAiCompatibleSqlGeneratorAdapter
+from app.integrations.openai_compatible.sql_repairer_adapter import OpenAiCompatibleSqlRepairerAdapter
 from app.test_runtime.config import load_shadow_test_runtime_config
 from app.test_runtime.offline_adapters import (
     OFFLINE_SQL,
@@ -352,6 +354,75 @@ def test_postgres_repository_selecionado_quando_configurado() -> None:
     assert isinstance(runtime.context_repository, PostgresContextRepository)
     assert isinstance(runtime.sql_generator, GoogleGeminiSqlGeneratorAdapter)
     assert isinstance(runtime.sql_repairer, GoogleGeminiSqlRepairerAdapter)
+
+
+def _private_only_env(**overrides: str) -> dict[str, str]:
+    provider = {
+        "provider_key": "private_compatible",
+        "model_key": "model-1",
+        "config_version": "tenant-version-1",
+    }
+    return _env(
+        SHADOW_DEFAULT_LLM_SELECTION_JSON=json.dumps(provider),
+        OPENAI_COMPATIBLE_SQL_ENABLED="true",
+        OPENAI_COMPATIBLE_SQL_PROVIDER_KEY=provider["provider_key"],
+        OPENAI_COMPATIBLE_SQL_CONFIG_VERSION=provider["config_version"],
+        OPENAI_COMPATIBLE_SQL_BASE_URL="https://private.example.invalid",
+        OPENAI_COMPATIBLE_SQL_MODEL=provider["model_key"],
+        **overrides,
+    )
+
+
+def test_explicit_private_default_skips_invalid_gemini_config_entirely() -> None:
+    env = _private_only_env(GEMINI_API_BASE_URL="http://invalid-gemini.example.invalid")
+    runtime = create_shadow_test_runtime(
+        env,
+        shadow_repository_override=FakeShadowEvidenceRepository(),
+        context_repository_override=ShadowTestContextRepository(),
+    )
+    assert isinstance(runtime.sql_generator, OpenAiCompatibleSqlGeneratorAdapter)
+    assert isinstance(runtime.sql_repairer, OpenAiCompatibleSqlRepairerAdapter)
+    assert runtime.sql_generator._client is runtime.sql_repairer._client
+    assert runtime.config.allow_real_sql_execution is False
+
+
+def test_private_default_mismatched_model_fails_without_gemini_fallback() -> None:
+    env = _private_only_env(GEMINI_API_BASE_URL="http://invalid-gemini.example.invalid")
+    env["SHADOW_DEFAULT_LLM_SELECTION_JSON"] = json.dumps({
+        "provider_key": "private_compatible",
+        "model_key": "not-configured",
+        "config_version": "tenant-version-1",
+    })
+    try:
+        create_shadow_test_runtime(env)
+    except RuntimeError as error:
+        assert str(error) == "SHADOW_DEFAULT_LLM_SELECTION_JSON provider unavailable."
+    else:
+        raise AssertionError("Unknown private model must fail closed")
+
+
+def test_private_default_unconfigured_provider_fails_without_gemini() -> None:
+    env = _private_only_env(GEMINI_API_BASE_URL="http://invalid-gemini.example.invalid")
+    env["OPENAI_COMPATIBLE_SQL_ENABLED"] = "false"
+    try:
+        create_shadow_test_runtime(env)
+    except RuntimeError as error:
+        assert "SHADOW_DEFAULT_LLM_SELECTION_JSON" in str(error)
+    else:
+        raise AssertionError("Disabled private provider cannot fall back")
+
+
+def test_private_default_rejects_adapter_overrides() -> None:
+    try:
+        create_shadow_test_runtime(
+            _private_only_env(),
+            sql_generator_override=ShadowTestSqlGenerator(),
+            sql_repairer_override=ShadowTestSqlRepairer(),
+        )
+    except RuntimeError as error:
+        assert str(error) == "Explicit default LLM conflicts with adapter overrides."
+    else:
+        raise AssertionError("Private default must reject conflicting overrides")
 
 
 def test_shadow_runtime_propaga_schema_contexto_para_repository() -> None:
