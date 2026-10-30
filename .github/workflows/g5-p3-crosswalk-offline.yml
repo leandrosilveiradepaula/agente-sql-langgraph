@@ -1,0 +1,28 @@
+name: G5 P3 semantic crosswalk offline
+on:
+  pull_request:
+    paths:
+      - "scripts/operations/g5_p3_semantic_crosswalk_offline.py"
+      - "scripts/test_g5_p3_semantic_crosswalk_offline.py"
+      - "scripts/operations/g5_semantic_context_review_offline.py"
+      - "scripts/operations/g5_semantic_lineage_candidate.py"
+      - ".github/workflows/g5-p3-crosswalk-offline.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  crosswalk:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile structural crosswalk and tests
+        run: python -m compileall -q scripts/operations/g5_p3_semantic_crosswalk_offline.py scripts/test_g5_p3_semantic_crosswalk_offline.py
+      - name: Cross-client review and integrity/authorization tests (no real data)
+        run: python -m unittest scripts.test_g5_p3_semantic_crosswalk_offline -v
