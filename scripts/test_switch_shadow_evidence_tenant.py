@@ -20,7 +20,7 @@ jsonmod.Jsonb = dict
 with patch.dict(sys.modules, {'psycopg':psycopg,'psycopg.conninfo':conninfo,
                               'psycopg.types':typesmod,'psycopg.types.json':jsonmod}):
     spec = importlib.util.spec_from_file_location(
-        'cutover', Path(__file__).resolve().parents[1] / 'operations' / 'switch_shadow_evidence_tenant.py'
+        'cutover', Path(__file__).resolve().parent / 'operations' / 'switch_shadow_evidence_tenant.py'
     )
     cutover = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cutover)
@@ -72,7 +72,7 @@ class SafetyTest(unittest.TestCase):
         self.assertEqual(out.count('LANGGRAPH_SHADOW_DATABASE_DSN='),1)
 
     def test_wrong_admin_privilege_is_not_assumed(self):
-        self.assertNotIn('ALTER ROLE',Path(__file__).resolve().parents[1].joinpath(
+        self.assertNotIn('ALTER ROLE',Path(__file__).resolve().parent.joinpath(
             'operations/switch_shadow_evidence_tenant.py').read_text())
 
 
