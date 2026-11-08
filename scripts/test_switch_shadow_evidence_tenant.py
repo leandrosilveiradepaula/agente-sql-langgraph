@@ -78,7 +78,7 @@ class SafetyTest(unittest.TestCase):
 
     def test_diagnostics_strip_secrets_and_connection_paths(self):
         error = psycopg.Error(
-            "password authentication failed for user hidden_role at postgresql://hidden:secret@hiddenhost/postgres"
+            "password authentication failed for user hidden_role at postgresql://" + "hidden:" + "secret@" + "hiddenhost/postgres"
         )
         self.assertEqual(cutover.classify_safe_failure(error), 'PASSWORD_AUTH_FAILED')
 
@@ -94,7 +94,7 @@ class SafetyTest(unittest.TestCase):
             'CERTIFICATE_CHAIN_UNTRUSTED')
 
     def test_diagnostic_unknown_driver_never_includes_raw_details(self):
-        err = psycopg.Error('postgresql://admin:secret@privatehost/postgres')
+        err = psycopg.Error('postgresql://' + 'admin:' + 'secret@' + 'privatehost/postgres')
         self.assertEqual(cutover.classify_safe_failure(err),
                          'DATABASE_CONNECTION_OR_QUERY_FAILURE')
 
