@@ -76,5 +76,58 @@ class SafetyTest(unittest.TestCase):
             'operations/switch_shadow_evidence_tenant.py').read_text())
 
 
+    def test_diagnostics_strip_secrets_and_connection_paths(self):
+        error = psycopg.Error(
+            "password authentication failed for user hidden_role at postgresql://hidden:secret@hiddenhost/postgres"
+        )
+        self.assertEqual(cutover.classify_safe_failure(error), 'PASSWORD_AUTH_FAILED')
+
+    def test_certificate_hostname_and_ca_categories_are_distinct(self):
+        self.assertEqual(cutover.classify_safe_failure(
+            psycopg.Error('server certificate does not match host name')),
+            'CERTIFICATE_HOSTNAME_MISMATCH')
+        self.assertEqual(cutover.classify_safe_failure(
+            psycopg.Error('root certificate file is missing')),
+            'CA_FILE_UNAVAILABLE')
+        self.assertEqual(cutover.classify_safe_failure(
+            psycopg.Error('certificate verify failed')),
+            'CERTIFICATE_CHAIN_UNTRUSTED')
+
+    def test_diagnostic_unknown_driver_never_includes_raw_details(self):
+        err = psycopg.Error('postgresql://admin:secret@privatehost/postgres')
+        self.assertEqual(cutover.classify_safe_failure(err),
+                         'DATABASE_CONNECTION_OR_QUERY_FAILURE')
+
+    def test_successful_candidate_requires_container_tls(self):
+        context={'host':'db.abcdefghijklmnopqrst.supabase.co',
+                 'user':'readonly','dbname':'postgres'}
+        with patch.object(cutover, 'candidate_uri', return_value='synthetic-verified-uri'), \
+             patch.object(cutover, 'check_login') as host, \
+             patch.object(cutover, 'check_inside_container') as inner:
+            uri = cutover.validated_candidate(
+                context,container='shadow-test',project_ref='abcdefghijklmnopqrst',
+                role='lgshadow_synthetic',password='test-secret',organization_id='synthetic-tenant',
+            )
+        self.assertEqual(uri,'synthetic-verified-uri')
+        host.assert_called_once()
+        inner.assert_called_once()
+
+    def test_container_failure_must_fail_closed(self):
+        context={'host':'db.abcdefghijklmnopqrst.supabase.co',
+                 'user':'readonly','dbname':'postgres'}
+        with patch.object(cutover, 'candidate_uri', return_value='synthetic-verified-uri'), \
+             patch.object(cutover, 'check_login'), \
+             patch.object(cutover, 'check_inside_container',
+                          side_effect=cutover.SwitchBlocked('CONTAINER_CA_FILE_UNAVAILABLE')):
+            with self.assertRaises(cutover.SwitchBlocked) as err:
+                cutover.validated_candidate(
+                    context,container='shadow-test',project_ref='abcdefghijklmnopqrst',
+                    role='lgshadow_synthetic',password='test-secret',organization_id='synthetic-tenant',
+                )
+        self.assertEqual(str(err.exception),
+                         'VERIFY_FULL_NOT_AVAILABLE_ON_BOTH_HOST_AND_CONTAINER')
+
+
+
 if __name__ == '__main__':
     unittest.main()
