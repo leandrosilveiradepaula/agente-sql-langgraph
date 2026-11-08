@@ -140,37 +140,131 @@ def check_login(conninfo: str, role: str, organization_id: str, *, smoke: bool) 
             connection.rollback()
 
 
+def classify_safe_failure(error: Exception) -> str:
+    """Return only a known, bounded diagnostic; never print a driver exception.
+
+    libpq errors may contain DSNs, user identifiers, hosts or connection data.
+    Internal matching is fine, but the original exception must remain private.
+    """
+    if isinstance(error, SwitchBlocked):
+        return str(error)
+    if isinstance(error, subprocess.TimeoutExpired):
+        return "TIMEOUT"
+    if isinstance(error, (PermissionError, FileNotFoundError, OSError)):
+        return "LOCAL_FILE_OR_NETWORK_ERROR"
+    message = str(error).casefold()
+    if "does not match host name" in message or "hostname mismatch" in message:
+        return "CERTIFICATE_HOSTNAME_MISMATCH"
+    if "root certificate" in message or "sslrootcert" in message or "certificate file" in message:
+        return "CA_FILE_UNAVAILABLE"
+    if (
+        "certificate verify failed" in message or "certificate verify" in message
+        or "unable to get local issuer" in message or "self-signed certificate" in message
+    ):
+        return "CERTIFICATE_CHAIN_UNTRUSTED"
+    if "password authentication failed" in message:
+        return "PASSWORD_AUTH_FAILED"
+    if "could not translate host name" in message or "name or service not known" in message:
+        return "DNS_FAILURE"
+    if "timeout" in message or "timed out" in message:
+        return "CONNECT_TIMEOUT"
+    if "connection refused" in message or "network is unreachable" in message:
+        return "NETWORK_UNREACHABLE"
+    if "row-level security" in message:
+        return "RLS_POLICY_DENIED"
+    if "permission denied" in message:
+        return "DATABASE_GRANT_DENIED"
+    if isinstance(error, psycopg.Error):
+        state = getattr(error, "sqlstate", None)
+        if isinstance(state, str) and re.fullmatch(r"[0-9A-Z]{5}", state):
+            return "DATABASE_SQLSTATE_" + state
+        return "DATABASE_CONNECTION_OR_QUERY_FAILURE"
+    return "PREFLIGHT_OPERATION_FAILED"
+
+
+_CONTAINER_CODES = frozenset({
+    "PASS", "CERTIFICATE_HOSTNAME_MISMATCH", "CA_FILE_UNAVAILABLE",
+    "CERTIFICATE_CHAIN_UNTRUSTED", "PASSWORD_AUTH_FAILED", "DNS_FAILURE",
+    "CONNECT_TIMEOUT", "NETWORK_UNREACHABLE", "RLS_OR_GRANT_DENIED",
+    "TENANT_SCOPE_MISMATCH", "OTHER_CONNECTION_FAILURE",
+})
+
+
 def check_inside_container(container: str, uri: str, *, role: str, organization_id: str) -> None:
     code = """import sys,psycopg
+def code(exc):
+    msg=str(exc).casefold()
+    if 'does not match host name' in msg or 'hostname mismatch' in msg:
+        return 'CERTIFICATE_HOSTNAME_MISMATCH'
+    if 'root certificate' in msg or 'sslrootcert' in msg or 'certificate file' in msg:
+        return 'CA_FILE_UNAVAILABLE'
+    if 'certificate verify failed' in msg or 'certificate verify' in msg or 'unable to get local issuer' in msg:
+        return 'CERTIFICATE_CHAIN_UNTRUSTED'
+    if 'password authentication failed' in msg: return 'PASSWORD_AUTH_FAILED'
+    if 'could not translate host name' in msg or 'name or service not known' in msg:
+        return 'DNS_FAILURE'
+    if 'timeout' in msg or 'timed out' in msg: return 'CONNECT_TIMEOUT'
+    if 'connection refused' in msg or 'network is unreachable' in msg:
+        return 'NETWORK_UNREACHABLE'
+    if 'permission denied' in msg or 'row-level security' in msg:
+        return 'RLS_OR_GRANT_DENIED'
+    return 'OTHER_CONNECTION_FAILURE'
 try:
     with psycopg.connect(sys.stdin.read(), connect_timeout=12) as db:
         identity = db.execute('SELECT session_user').fetchone()[0]
         scope = db.execute('SELECT organization_id FROM langgraph_internal.shadow_role_tenants').fetchall()
-        assert identity == sys.argv[1] and scope == [(sys.argv[2],)]
+        if identity != sys.argv[1] or scope != [(sys.argv[2],)]:
+            print('TENANT_SCOPE_MISMATCH')
+            sys.exit(2)
         db.execute('SELECT count(*) FROM public.langgraph_shadow_runs').fetchone()
-except Exception:
+    print('PASS')
+except Exception as exc:
+    print(code(exc))
     sys.exit(2)
 """
     result = docker("exec", "-i", container, "python", "-c", code, role, organization_id, stdin=uri, timeout=20)
-    require(result.returncode == 0, "CONTAINER_TLS_LOGIN_FAILED")
+    outcome = result.stdout.strip()
+    if outcome not in _CONTAINER_CODES:
+        outcome = "OTHER_CONNECTION_FAILURE"
+    require(result.returncode == 0 and outcome == "PASS", "CONTAINER_" + outcome)
 
 
 def validated_candidate(context: str, *, container: str, project_ref: str,
-                        role: str, password: str, organization_id: str) -> str:
+                        role: str, password: str, organization_id: str,
+                        ca_file: str | None = None) -> str:
     role_login = validate_target(context, project_ref, role)
     existing_ca = conninfo_to_dict(context).get("sslrootcert")
-    cas = dict.fromkeys([existing_ca, "system", "/etc/ssl/certs/ca-certificates.crt"])
-    for ca in cas:
-        if not ca:
+    ca_candidates = [
+        ("OPERATOR", ca_file),
+        ("CONTEXT", existing_ca),
+        ("SYSTEM", "system"),
+        ("BUNDLE", "/etc/ssl/certs/ca-certificates.crt"),
+    ]
+    seen: set[str] = set()
+    for label, ca in ca_candidates:
+        if not ca or ca in seen:
             continue
+        seen.add(ca)
         try:
             uri = candidate_uri(context, role_login=role_login, password=password, ca=ca)
-            # Both shells MUST verify certificate+hostname before switching.
-            check_login(uri, role, organization_id, smoke=True)
-            check_inside_container(container, uri, role=role, organization_id=organization_id)
-            return uri
-        except (psycopg.Error, SwitchBlocked, ValueError, OSError, subprocess.TimeoutExpired):
+        except (SwitchBlocked, psycopg.Error, ValueError, OSError) as error:
+            print("TLS_" + label + "_CANDIDATE=" + classify_safe_failure(error), flush=True)
             continue
+        try:
+            # All probes use verify-full; no fallback to require/verify-ca.
+            # Synthetic INSERT/UPDATE transactions must always be rolled back.
+            check_login(uri, role, organization_id, smoke=True)
+            print("TLS_" + label + "_HOST=PASS", flush=True)
+        except (psycopg.Error, SwitchBlocked, ValueError, OSError, subprocess.TimeoutExpired) as error:
+            print("TLS_" + label + "_HOST=" + classify_safe_failure(error), flush=True)
+            continue
+        try:
+            check_inside_container(container, uri, role=role, organization_id=organization_id)
+            print("TLS_" + label + "_CONTAINER=PASS", flush=True)
+            print("TLS_CA_SOURCE=" + label, flush=True)
+            return uri
+        except (psycopg.Error, SwitchBlocked, ValueError, OSError, subprocess.TimeoutExpired) as error:
+            print("TLS_" + label + "_CONTAINER=" + classify_safe_failure(error), flush=True)
     raise SwitchBlocked("VERIFY_FULL_NOT_AVAILABLE_ON_BOTH_HOST_AND_CONTAINER")
 
 
@@ -283,6 +377,7 @@ def main() -> int:
     parser.add_argument("--deploy-dir", type=Path, required=True)
     parser.add_argument("--shadow-container", required=True)
     parser.add_argument("--service", required=True)
+    parser.add_argument("--ssl-ca-file", help="Optional already-mounted trusted CA path available on both host and container")
     parser.add_argument("--apply", action="store_true", help="Authorized, rollback-protected recreation of Shadow TEST")
     args = parser.parse_args()
     try:
@@ -290,6 +385,8 @@ def main() -> int:
         require(ORGANIZATION.fullmatch(args.organization_id) is not None, "ORGANIZATION_ID_INVALID")
         require(IDENTIFIER.fullmatch(args.login_role) is not None, "LOGIN_ROLE_INVALID")
         require(IDENTIFIER.fullmatch(args.service.replace('-', '_')) is not None, "SERVICE_INVALID")
+        if args.ssl_ca_file is not None:
+            require(os.path.isabs(args.ssl_ca_file), "OPERATOR_CA_PATH_MUST_BE_ABSOLUTE")
         envfile = args.deploy_dir / "shadow-test.env"
         require(os.geteuid() == 0 and envfile.is_file() and not envfile.is_symlink(), "SHADOW_ENV_MISSING")
         original_lines = envfile.read_text(encoding="utf-8").splitlines()
@@ -303,6 +400,7 @@ def main() -> int:
             runtime_env["CONTEXT_POSTGRES_DSN"],
             container=args.shadow_container, project_ref=args.project_ref,
             role=args.login_role, password=password, organization_id=args.organization_id,
+            ca_file=args.ssl_ca_file,
         )
         print("RESTRICTED_LOGIN=PASS")
         print("TENANT_RLS_SMOKE=PASS_ROLLBACK_ONLY")

@@ -443,6 +443,7 @@ STEPS = [
         [sys.executable, "testar_g1_public_temp_preserve_roles.py"],
     ),
     ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
+    ("test_switch_shadow_evidence_tenant.py", [sys.executable, "scripts/test_switch_shadow_evidence_tenant.py"]),
     ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),]
 
 if os.environ.get("SQL_AGENT_CLEAN_ROOM") != "1":
