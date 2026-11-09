@@ -1385,6 +1385,32 @@ def test_ranking_requested_limit_positivo_deixa_limit_pending() -> None:
     assert result["errors"] == []
 
 
+def test_comparison_aggregate_alias_equals_physical_source_approved() -> None:
+    sql = (
+        'SELECT l.amount_left AS left_total, r.amount_right AS right_total '
+        'FROM (SELECT SUM("amount_left") AS amount_left '
+        'FROM "schema_test"."fact_left") AS l '
+        'CROSS JOIN (SELECT SUM("amount_right") AS amount_right '
+        'FROM "schema_test"."fact_right") AS r'
+    )
+    result = _run(sql, _comparison_plan())
+    assert result["status"] == "approved"
+    assert _check_status_by_name(result, "analytical_operations") == "passed"
+
+
+def test_comparison_alias_does_not_mask_wrong_physical_metric() -> None:
+    sql = (
+        "SELECT l.left_total, r.amount_right FROM ("
+        "SELECT SUM(amount_left) AS left_total FROM schema_test.fact_left"
+        ") AS l CROSS JOIN ("
+        "SELECT SUM(id) AS amount_right FROM schema_test.fact_right"
+        ") AS r"
+    )
+    result = _run(sql, _comparison_plan())
+    assert result["status"] == "rejected"
+    assert _comparison_reason(result) == "comparison_lineage_unproven"
+
+
 def test_comparison_multi_source_sem_dimensao_cross_join_aprova() -> None:
     result = _run(_comparison_sql(), _comparison_plan())
 
@@ -2199,6 +2225,14 @@ def main() -> None:
         (
             "comparison sem dimensao cross join",
             test_comparison_multi_source_sem_dimensao_cross_join_aprova,
+        ),
+        (
+            "comparison aggregate aliases same-name source approved",
+            test_comparison_aggregate_alias_equals_physical_source_approved,
+        ),
+        (
+            "comparison aggregate alias does not invent metric lineage",
+            test_comparison_alias_does_not_mask_wrong_physical_metric,
         ),
         (
             "comparison grouped preserve all",
