@@ -164,6 +164,88 @@ def test_cte_nao_e_tabela_externa() -> None:
     assert result["status"] == "approved"
 
 
+def test_subconsulta_derivada_autorizada_nao_e_tabela_externa() -> None:
+    sql = (
+        "SELECT derived.total FROM ("
+        "SELECT SUM(id) AS total FROM schema_test.table_test"
+        ") AS derived"
+    )
+    result = _run(sql)
+    assert result["status"] == "approved"
+    assert result["tables"] == ["schema_test.table_test"]
+    assert "derived" not in result["tables"]
+
+
+def test_subconsulta_derivada_aninhada_autorizada() -> None:
+    sql = (
+        "SELECT outer_alias.total FROM ("
+        "SELECT inner_alias.total FROM ("
+        "SELECT SUM(id) AS total FROM schema_test.table_test"
+        ") AS inner_alias"
+        ") AS outer_alias"
+    )
+    result = _run(sql)
+    assert result["status"] == "approved"
+    assert result["tables"] == ["schema_test.table_test"]
+
+
+def test_subconsulta_derivada_nao_oculta_tabela_proibida() -> None:
+    sql = (
+        "SELECT derived.total FROM ("
+        "SELECT SUM(id) AS total FROM schema_test.table_other"
+        ") AS derived"
+    )
+    result = _run(sql)
+    assert result["status"] == "rejected"
+    assert any(
+        error["code"] == "SQL_SECURITY_UNAUTHORIZED_TABLE"
+        for error in result["errors"]
+    )
+
+
+def test_subconsulta_derivada_nao_oculta_schema_proibido() -> None:
+    sql = (
+        "SELECT derived.total FROM ("
+        "SELECT SUM(id) AS total FROM schema_other.table_other"
+        ") AS derived"
+    )
+    result = _run(sql)
+    assert result["status"] == "rejected"
+    assert any(
+        error["code"] == "SQL_SECURITY_UNAUTHORIZED_SCHEMA"
+        for error in result["errors"]
+    )
+
+
+def test_comparacao_entre_agregados_derivados_sem_nova_tabela() -> None:
+    sql = (
+        "SELECT a.total_a, b.total_b FROM ("
+        "SELECT SUM(id) AS total_a FROM schema_test.table_test"
+        ") AS a CROSS JOIN ("
+        "SELECT SUM(id) AS total_b FROM schema_test.table_test"
+        ") AS b"
+    )
+    result = _run(sql)
+    assert result["status"] == "approved"
+    assert result["tables"] == ["schema_test.table_test"]
+
+
+def test_comparacao_derivada_com_fonte_nao_autorizada_bloqueada() -> None:
+    sql = (
+        "SELECT a.total_a, b.total_b FROM ("
+        "SELECT SUM(id) AS total_a FROM schema_test.table_test"
+        ") AS a CROSS JOIN ("
+        "SELECT SUM(id) AS total_b FROM schema_test.table_other"
+        ") AS b"
+    )
+    result = _run(sql)
+    assert result["status"] == "rejected"
+    assert any(
+        error["code"] == "SQL_SECURITY_UNAUTHORIZED_TABLE"
+        for error in result["errors"]
+    )
+
+
 def test_resultado_nao_contem_sql_completa() -> None:
     sql = "SELECT id FROM schema_test.table_test"
     result = _run(sql)
@@ -199,6 +281,12 @@ def main() -> None:
         ("palavra em comentario", test_palavra_proibida_em_comentario_nao_rejeita),
         ("objeto ambiguo", test_objeto_ambiguo_rejeitado),
         ("CTE nao externa", test_cte_nao_e_tabela_externa),
+        ("subconsulta derivada autorizada", test_subconsulta_derivada_autorizada_nao_e_tabela_externa),
+        ("subconsulta derivada aninhada", test_subconsulta_derivada_aninhada_autorizada),
+        ("subconsulta derivada com tabela proibida", test_subconsulta_derivada_nao_oculta_tabela_proibida),
+        ("subconsulta derivada com schema proibido", test_subconsulta_derivada_nao_oculta_schema_proibido),
+        ("comparacao derivada autorizada", test_comparacao_entre_agregados_derivados_sem_nova_tabela),
+        ("comparacao derivada proibida", test_comparacao_derivada_com_fonte_nao_autorizada_bloqueada),
         ("sem SQL completa", test_resultado_nao_contem_sql_completa),
         ("determinismo", test_determinismo_e_ausencia_de_mutacao),
     ]
