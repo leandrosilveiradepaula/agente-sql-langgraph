@@ -921,6 +921,8 @@ def main() -> None:
         ("SELECT simples", test_select_simples),
         ("WITH CTE", test_with_cte),
         ("subquery", test_subquery),
+        ("subquery aggregate alias lineage", test_derived_aggregate_alias_same_as_source_column_preserves_lineage),
+        ("subquery aggregate alias cannot fabricate physical lineage", test_derived_output_alias_does_not_fabricate_source_column),
         ("JOIN", test_join),
         (
             "JOIN comparacoes isoladas",
@@ -1092,6 +1094,61 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def test_derived_aggregate_alias_same_as_source_column_preserves_lineage() -> None:
+    sql = (
+        'SELECT left_data.amount, right_data.budget_amount FROM ('
+        'SELECT SUM("amount") AS amount FROM schema_a.fact_left'
+        ') AS left_data CROSS JOIN ('
+        'SELECT SUM("budget_amount") AS budget_amount '
+        'FROM schema_b.fact_right'
+        ') AS right_data'
+    )
+    analysis = analyze_sql(sql)
+    scopes = {
+        scope["scope_id"]: scope
+        for scope in analysis["query_scopes"]
+    }
+    assert analysis["tables"] == [
+        "schema_a.fact_left",
+        "schema_b.fact_right",
+    ]
+    assert len([s for s in scopes.values() if s["scope_type"] == "subquery"]) == 2
+
+    pairs = set()
+    for scope in scopes.values():
+        for item in scope["select_items"]:
+            for column in item["column_references"]:
+                if column.get("schema"):
+                    pairs.add((
+                        column.get("schema"),
+                        column.get("table"),
+                        column.get("column"),
+                    ))
+    assert ("schema_a", "fact_left", "amount") in pairs
+    assert ("schema_b", "fact_right", "budget_amount") in pairs
+
+
+def test_derived_output_alias_does_not_fabricate_source_column() -> None:
+    sql = (
+        "SELECT derived.amount FROM ("
+        "SELECT SUM(other_amount) AS amount "
+        "FROM schema_test.fact"
+        ") AS derived"
+    )
+    analysis = analyze_sql(sql)
+    operand = next(
+        scope for scope in analysis["query_scopes"]
+        if scope["scope_type"] == "subquery"
+    )
+    cols = [
+        column["column"]
+        for item in operand["select_items"]
+        for column in item["column_references"]
+    ]
+    assert "other_amount" in cols
+    assert "amount" not in cols
 
 
 def test_cte_reused_aliases_keep_physical_scope() -> None:
