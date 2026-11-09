@@ -850,9 +850,17 @@ def _extract_columns(
             current_clause in {"select", "where", "on", "group", "order", "having"}
             and _is_identifier(tokens[index])
             and norm not in _RESERVED_WORDS
+            # An output alias is a declaration only at AS <identifier>.
+            # The same identifier may also be a genuine source column in
+            # SUM(column) AS column; hiding every spelling match destroys
+            # provable physical lineage in derived aggregate scopes.
             and not (
                 norm in expression_aliases
-                and current_clause in {"select", "order"}
+                and (
+                    (current_clause == "select"
+                     and _norm_at(tokens, index - 1) == "as")
+                    or current_clause == "order"
+                )
             )
             and not _is_table_position(tokens, index)
             and _norm_at(tokens, index + 1) != "("
