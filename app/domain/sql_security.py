@@ -345,7 +345,10 @@ def _check_authorized_objects(
         authorized_by_table.setdefault(table_name, []).append(table)
 
     for item in analysis["object_references"]:
-        if item.get("is_cte"):
+        # A CTE or derived-subquery alias is a logical relation, not a
+        # physical table. The analyzer independently visits inner FROM/JOIN
+        # references, so their real tables still require authorization.
+        if item.get("is_cte") or item.get("is_subquery"):
             continue
         if item.get("is_function"):
             findings.append(
