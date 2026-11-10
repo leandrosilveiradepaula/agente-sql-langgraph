@@ -59,7 +59,9 @@ jobs:
           -v
 
       - name: Verify isolated 63-case benchmark recovery (no archive, DB or LLM)
-        run: python -m unittest scripts.test_g5_recover_legacy_benchmark_offline -v
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -B -m unittest scripts.test_g5_recover_legacy_benchmark_offline -v
 
       - name: Hardcode scan
         run: python scripts/check_hardcodes.py
