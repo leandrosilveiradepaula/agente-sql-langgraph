@@ -108,6 +108,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - name: Test bounded VPS MCP G5 capabilities (offline, Linux PTY)
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 -B -m unittest discover -s deploy/vps-mcp-g5 -p 'test_benchmark_ops.py' -v
+          bash -n deploy/vps-mcp-g5/install_mcp_g5_once.sh
       - name: Verify P3 source alignment, private files and read-only shell contract (offline)
         run: |
           python3 -m unittest scripts.test_p3_source_alignment_readonly -v
