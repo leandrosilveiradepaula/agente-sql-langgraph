@@ -217,7 +217,8 @@ def bind_baseline_for_evaluation(
 def _read_private_json(path: str) -> Any:
     file = Path(path)
     info = file.lstat()
-    if (not stat.S_ISREG(info.st_mode) or (info.st_mode & 0o077)
+    if (not stat.S_ISREG(info.st_mode)
+            or (os.name == "posix" and (info.st_mode & 0o077))
             or not 0 < info.st_size <= MAX_JSON_BYTES):
         raise ValueError("private_json_input_invalid")
     return json.loads(file.read_text(encoding="utf-8"))
