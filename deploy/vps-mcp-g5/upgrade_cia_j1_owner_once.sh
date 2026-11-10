@@ -10,6 +10,7 @@ BROKER="$BASE/operations_broker.py"
 AUDIT="$BASE/crypto_j1_readonly.py"
 SIDECAR="$BASE/cia_j1_sqlite_owner_sidecar.py"
 UNIT=/etc/systemd/system/cia-j1-owner-sqlite.service
+SOCKET_UNIT=/etc/systemd/system/cia-j1-owner-sqlite.socket
 GATEWAY="$BASE/mcp_server.py"
 FINANCE="$BASE/benchmark_ops.py"
 ORIG_UNIT=/etc/systemd/system/agente-financeiro-mcp-ops.service
@@ -17,14 +18,15 @@ BACKUP="$BASE/backup-before-cia-j1-owner"
 SOCKET=/run/cia-j1-owner/readonly.sock
 BROKER_SOCKET=/run/agente-financeiro-mcp/operations.sock
 
-SOURCE_COMMIT=1d02ab0e886e61517a33680991acefa0b1455664
+SOURCE_COMMIT=a1ef5778e125fd749fbacf235a648a7b22bbea9f
 SOURCE="https://raw.githubusercontent.com/leandrosilveiradepaula/agente-sql-langgraph/$SOURCE_COMMIT/deploy/vps-mcp-g5"
 OLD_BROKER=08566865997db33e888b4a474fa1fd129c9e5073
 OLD_AUDIT=19b2f724419acf5cbb6c6d923633376493aa023a
 NEW_BROKER=65f966f4eb947fca91b7cf3f23f9541347dab632
 NEW_AUDIT=e876c2ae46d1164b05b76b323a527f2a31dcceea
-NEW_SIDECAR=8e1ea84041a95ff8a699fc5907454f46b2ade754
-NEW_UNIT=277c42ec3ac8b0f1b51bd918d16fd9ec780f76b5
+NEW_SIDECAR=499c396c6936c6c63c5551c4d4e7956a198d3c45
+NEW_UNIT=ee67803955d03692404d5e0cbe81baf0d47c52a9
+NEW_SOCKET_UNIT=6dc5896d37ab8f1146955b6f70caaf4c7dca70cd
 GATEWAY_BLOB=334d9c22bcf7b160867ab0755ad3f898f361ea25
 FINANCE_BLOB=c8b18cdeeba39d101fe92457f69da5b1c5af231d
 ORIG_UNIT_BLOB=64fb7d4567952eccefa8b9b3ad74b392e12cdad2
@@ -50,6 +52,8 @@ if test "$(/usr/bin/git hash-object "$BROKER")" = "$NEW_BROKER" &&
    test "$(/usr/bin/git hash-object "$AUDIT")" = "$NEW_AUDIT" &&
    test -f "$SIDECAR" && test "$(/usr/bin/git hash-object "$SIDECAR")" = "$NEW_SIDECAR" &&
    test -f "$UNIT" && test "$(/usr/bin/git hash-object "$UNIT")" = "$NEW_UNIT" &&
+   test -f "$SOCKET_UNIT" && test "$(/usr/bin/git hash-object "$SOCKET_UNIT")" = "$NEW_SOCKET_UNIT" &&
+   /usr/bin/systemctl is-active --quiet cia-j1-owner-sqlite.socket &&
    /usr/bin/systemctl is-active --quiet cia-j1-owner-sqlite.service; then
   printf 'CIA_J1_OWNER_UPGRADE=ALREADY_CURRENT\n'
   exit 0
@@ -57,7 +61,7 @@ fi
 
 test "$(/usr/bin/git hash-object "$BROKER")" = "$OLD_BROKER" || reject BROKER_VERSION_UNEXPECTED
 test "$(/usr/bin/git hash-object "$AUDIT")" = "$OLD_AUDIT" || reject AUDIT_VERSION_UNEXPECTED
-for path in "$SIDECAR" "$UNIT" "$BACKUP"; do
+for path in "$SIDECAR" "$UNIT" "$SOCKET_UNIT" "$BACKUP"; do
   test ! -e "$path" && test ! -L "$path" || reject OWNER_COMPONENT_ALREADY_PRESENT
 done
 test ! -e "$SOCKET" || reject OWNER_SOCKET_ALREADY_PRESENT
@@ -71,9 +75,10 @@ cleanup() {
   trap - EXIT
   if test "$changed" = 1 && test "$done_ok" != 1; then
     /usr/bin/systemctl stop cia-j1-owner-sqlite.service >/dev/null 2>&1 || true
+    /usr/bin/systemctl disable --now cia-j1-owner-sqlite.socket >/dev/null 2>&1 || true
     /usr/bin/install -m 0644 -o root -g root "$BACKUP/operations_broker.py" "$BROKER" || true
     /usr/bin/install -m 0644 -o root -g root "$BACKUP/crypto_j1_readonly.py" "$AUDIT" || true
-    /usr/bin/rm -f -- "$SIDECAR" "$UNIT" || true
+    /usr/bin/rm -f -- "$SIDECAR" "$UNIT" "$SOCKET_UNIT" || true
     /usr/bin/systemctl daemon-reload || true
     /usr/bin/systemctl restart agente-financeiro-mcp-ops.service || true
     printf 'CIA_J1_OWNER_UPGRADE=ROLLED_BACK\n' >&2
@@ -87,7 +92,8 @@ for entry in \
   "operations_broker.py:$NEW_BROKER" \
   "crypto_j1_readonly.py:$NEW_AUDIT" \
   "cia_j1_sqlite_owner_sidecar.py:$NEW_SIDECAR" \
-  "cia-j1-owner-sqlite.service:$NEW_UNIT"; do
+  "cia-j1-owner-sqlite.service:$NEW_UNIT" \
+  "cia-j1-owner-sqlite.socket:$NEW_SOCKET_UNIT"; do
   name="${entry%%:*}"
   expected="${entry#*:}"
   /usr/bin/curl --fail --location --silent --show-error \
@@ -108,8 +114,9 @@ changed=1
 /usr/bin/install -m 0644 -o root -g root "$TMP/crypto_j1_readonly.py" "$AUDIT"
 /usr/bin/install -m 0644 -o root -g root "$TMP/cia_j1_sqlite_owner_sidecar.py" "$SIDECAR"
 /usr/bin/install -m 0644 -o root -g root "$TMP/cia-j1-owner-sqlite.service" "$UNIT"
+/usr/bin/install -m 0644 -o root -g root "$TMP/cia-j1-owner-sqlite.socket" "$SOCKET_UNIT"
 /usr/bin/systemctl daemon-reload
-/usr/bin/systemctl start cia-j1-owner-sqlite.service
+/usr/bin/systemctl start cia-j1-owner-sqlite.socket
 
 # The owner service must work independently BEFORE replacing the root broker.
 owner_ok=0
@@ -168,10 +175,13 @@ done
 test "$broker_ok" = 1 || reject BROKER_PROBE_FAILED
 /usr/bin/systemctl is-active --quiet agente-financeiro-mcp-tunnel.service || reject TUNNEL_HEALTH_FAILED
 /usr/bin/systemctl is-active --quiet cia-j1-owner-sqlite.service || reject OWNER_SERVICE_NOT_ACTIVE
+/usr/bin/systemctl is-active --quiet cia-j1-owner-sqlite.socket || reject OWNER_SOCKET_NOT_ACTIVE
 test "$(/usr/bin/git hash-object "$FINANCE")" = "$FINANCE_BLOB" || reject FINANCE_CHANGED
 test "$(/usr/bin/git hash-object "$GATEWAY")" = "$GATEWAY_BLOB" || reject GATEWAY_CHANGED
 test "$(/usr/bin/git hash-object "$BROKER")" = "$NEW_BROKER" || reject BROKER_INSTALL_CHANGED
 test "$(/usr/bin/git hash-object "$AUDIT")" = "$NEW_AUDIT" || reject AUDIT_INSTALL_CHANGED
+/usr/bin/systemctl enable cia-j1-owner-sqlite.socket >/dev/null || reject OWNER_SOCKET_ENABLE_FAILED
+/usr/bin/systemctl is-enabled --quiet cia-j1-owner-sqlite.socket || reject OWNER_SOCKET_NOT_ENABLED
 done_ok=1
 printf 'CIA_J1_OWNER_UPGRADE=PASS\n'
 printf 'OWNER_SQLITE_AUDIT=PASS\n'
