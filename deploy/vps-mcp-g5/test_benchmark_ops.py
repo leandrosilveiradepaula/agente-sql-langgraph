@@ -137,18 +137,24 @@ print('BENCHMARK_LLM_CALLS=0')
             read.assert_not_called()
 
     def test_status_with_installer_created_empty_directory(self):
+        # The CI runner is unprivileged; emulate only the private root's
+        # root-owned metadata, keeping the actual directory operations real.
+        root_metadata = types.SimpleNamespace(st_uid=0, st_mode=0o040700)
         with tempfile.TemporaryDirectory() as root, \
              mock.patch.object(ops, '_reviewed_source'), \
-             mock.patch.object(ops, 'DEST', Path(root)):
+             mock.patch.object(ops, 'DEST', Path(root)), \
+             mock.patch.object(Path, 'lstat', return_value=root_metadata):
             result = ops.benchmark_status()
         self.assertEqual(result, {'status': 'not_recovered'})
 
     def test_status_rejects_unexpected_private_root_content(self):
-        with tempfile.TemporaryDirectory() as root, \
-             mock.patch.object(ops, '_reviewed_source'), \
-             mock.patch.object(ops, 'DEST', Path(root)):
+        root_metadata = types.SimpleNamespace(st_uid=0, st_mode=0o040700)
+        with tempfile.TemporaryDirectory() as root:
             (Path(root)/'unexpected').write_text('do not delete')
-            result = ops.benchmark_status()
+            with mock.patch.object(ops, '_reviewed_source'), \
+                 mock.patch.object(ops, 'DEST', Path(root)), \
+                 mock.patch.object(Path, 'lstat', return_value=root_metadata):
+                result = ops.benchmark_status()
         self.assertEqual(result, {
             'status': 'blocked', 'reason': 'recovery_snapshot_missing_or_ambiguous'
         })
