@@ -369,6 +369,10 @@ def benchmark_status() -> dict[str, object]:
         if not stat.S_ISDIR(rootstat.st_mode) or rootstat.st_uid != 0 or rootstat.st_mode & 0o077:
             raise Refused('private_root_permissions_invalid')
         dirs = list(DEST.glob('legacy63-*'))
+        # The installer creates an empty private root before any recovery.
+        # Empty is a normal initial state, not evidence of a corrupt snapshot.
+        if not dirs and not any(DEST.iterdir()):
+            return {'status': 'not_recovered'}
         if len(dirs) != 1 or not FOLDER.fullmatch(dirs[0].name):
             raise Refused('recovery_snapshot_missing_or_ambiguous')
         substat = dirs[0].lstat()
