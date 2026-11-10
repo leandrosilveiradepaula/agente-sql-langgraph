@@ -1,0 +1,33 @@
+[Unit]
+Description=Crypto Intelligence J1 SQLite count-only audit under database owner
+After=local-fs.target
+ConditionPathExists=/home/cia-probe/agent/j1-rest-m3-20261109/canary/j1-rest-hourly-research.sqlite
+
+[Service]
+Type=simple
+User=cia-probe
+Group=agente-mcp
+WorkingDirectory=/opt/agente-financeiro-mcp
+ExecStart=/usr/bin/python3 -B /opt/agente-financeiro-mcp/cia_j1_sqlite_owner_sidecar.py
+ExecStopPost=/usr/bin/rm -f -- /run/cia-j1-owner/readonly.sock
+RuntimeDirectory=cia-j1-owner
+RuntimeDirectoryMode=0750
+UMask=0007
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONDONTWRITEBYTECODE=1
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectHome=read-only
+ProtectSystem=strict
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
