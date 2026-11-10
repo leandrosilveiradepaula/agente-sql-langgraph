@@ -73,8 +73,10 @@ def test_frozen_baseline_correlates_only_after_generate():
     )
     assert report["post_generation_correlation_verified"] is True
     assert report["summary"] == {
-        "corresponde": 1, "diverge": 0, "inconclusivo": 0, "sem_evidencia": 2,
+        "corresponde": 0, "diverge": 0, "inconclusivo": 1, "sem_evidencia": 2,
     }, report
+    assert report["cases"][0]["reason"] == "historical_tenant_provenance_unattested"
+    assert report["cases"][0]["sql_verdict"] == "normalized_sql_match"
     assert report["benchmark_fingerprint"] == stable_fingerprint(base)
     assert report["financial_parity_proven"] is False
     assert report["real_sql_executed"] is False
