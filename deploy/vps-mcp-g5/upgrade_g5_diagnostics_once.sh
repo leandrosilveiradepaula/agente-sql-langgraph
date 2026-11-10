@@ -82,7 +82,9 @@ import socket
 path = "/run/agente-financeiro-mcp/operations.sock"
 for op in ("benchmark_plan", "benchmark_status"):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.settimeout(3)
+        # The plan verifies a potentially large encrypted archive digest.
+        # A tiny socket timeout would create overlapping probes.
+        sock.settimeout(85 if op == "benchmark_plan" else 12)
         sock.connect(path)
         sock.sendall(json.dumps({"op": op}).encode("ascii") + b"\n")
         payload = bytearray()
