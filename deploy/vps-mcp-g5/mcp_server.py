@@ -21,7 +21,8 @@ SOCKET = "/run/agente-financeiro-mcp/operations.sock"
 def _read(operation: str, expected_sha: str | None = None) -> dict[str, object]:
     """Only fixed operations can be sent; no dynamic commands or arguments."""
     if operation not in {"runtime_status", "revision", "n8n_inventory", "import_evidence", "audit_evidence",
-                         "repo_sync", "benchmark_plan", "benchmark_recover", "benchmark_status"}:
+                         "repo_sync", "benchmark_plan", "benchmark_recover", "benchmark_status",
+                         "cia_timer", "cia_journal", "cia_sqlite"}:
         return {"status": "rejected", "reason": "operation_not_allowed"}
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -126,6 +127,24 @@ def audit_shadow_evidence_draft_bindings() -> dict[str, object]:
 def sync_approved_langgraph_main(expected_sha: str) -> dict[str, object]:
     """Fast-forward the VPS checkout to an exact GitHub main SHA (no other branch)."""
     return _read("repo_sync", expected_sha)
+
+
+@mcp.tool()
+def cia_j1_rest_timer_status() -> dict[str, object]:
+    """Read the fixed J1 REST timer/service state; no parameters."""
+    return _read("cia_timer")
+
+
+@mcp.tool()
+def cia_j1_rest_journal_summary() -> dict[str, object]:
+    """Read sanitized J1 REST journal counts without exposing raw logs."""
+    return _read("cia_journal")
+
+
+@mcp.tool()
+def cia_j1_rest_sqlite_audit() -> dict[str, object]:
+    """Replay the fixed J1 REST SQLite journal read-only, count-only."""
+    return _read("cia_sqlite")
 
 
 @mcp.tool()
