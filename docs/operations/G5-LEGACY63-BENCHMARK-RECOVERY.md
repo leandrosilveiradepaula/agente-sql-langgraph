@@ -184,3 +184,44 @@ provider/cost authorization, a bounded dispatch/export transport, and a
 post-generation evidence integrity/correlation audit. The approved 63-case
 benchmark tests regression against the legacy source; it is **not** a
 replacement for novel-question portability tests.
+
+## 10/11/2026 — isolated Gemini quality harness (NOT n8n parity)
+
+The operator verified on the VPS:
+
+- \`GIT_FAST_FORWARD=PASS\` at \`fb22285fba855528643fdaf43fbf214dc3f42857\`, with an unrelated untracked local file preserved.
+- \`BLIND_BATCH=PASS\`, 63 unique new run IDs, 0 HTTP/LLM/financial SQL calls.
+- \`OFFICIAL_MODEL_ATTESTED=0\`: historic baseline SQLs are available, but no historic Gemini provider/model provenance was captured.
+- In an isolated, nonpersistent runtime: \`ISOLATED_GEMINI_RUNTIME=PASS\`, model \`gemini-2.5-flash\`, model metadata HTTP 200 (not proof of successful generation), SQL execution false.
+- Existing running Shadow service still defaults to private SQL-InfoDive. **Do not reconfigure it** in order to perform the Gemini quality experiment.
+
+**Important filesystem correction:** The reviewed G5 MCP snapshot reader currently requires exactly four files in the recovered \`legacy63-*\` directory. Adding \`dispatch-plan-v1.json\` inside it triggers \`recovery_snapshot_files_invalid\` although its original four files remain valid. Move only this new dispatch-plan file into a separate root-private working directory. Do not touch the four historical files.
+
+\`\`\`bash
+set -Eeuo pipefail
+RECOVERY=/root/.local/share/agente-sql-langgraph/benchmark-private/legacy63-ea0035e714f64e275b0f
+WORK=/root/.local/share/agente-sql-langgraph/benchmark-private/gemini-quality-working
+install -d -m 700 "$WORK"
+if [ -f "$RECOVERY/dispatch-plan-v1.json" ]; then
+  test ! -e "$WORK/dispatch-plan-v1.json"
+  mv -- "$RECOVERY/dispatch-plan-v1.json" "$WORK/dispatch-plan-v1.json"
+fi
+cd /docker/agente-sql-langgraph-repo
+.venv/bin/python -m scripts.operations.run_blind_gemini_shadow_quality preflight \
+  --manifest "$RECOVERY/questions-only.json" \
+  --receipt "$RECOVERY/freeze-receipt.json" \
+  --dispatch-plan "$WORK/dispatch-plan-v1.json" \
+  --expected-cases 63
+\`\`\`
+
+The preflight is offline, read-only, and **cannot** call an LLM. It verifies the frozen manifest receipt and the 63 unique planned new run IDs.
+
+A separate \`run\` action exists but is **disabled unless** the operator explicitly authorizes the generation API costs, a maximum number of provider calls, the expected model, and a dedicated private result directory. This code is *not* an authorisation to call the model, and no activation is implied by merge. The example below is deliberately non-executable: parameters are illustrative and operator approval is still outstanding.
+
+When separately approved, the runner uses the unchanged running container *only as a process image* through \`docker exec -i\` with overrides visible solely to the new Python process. It never edits the container's original environment, restarts it, or writes to its PostgreSQL Shadow evidence database. It injects a dedicated **in-memory** evidence repository, bounds calls at the HTTP transport, and invokes the **real** LangGraph SQL Generate ASGI handler with real Gemini as configured. Historical SQL/expected answers are not available to this child process at any point. Full signed evidence files are saved in an owner-only output directory. Only **after all cases finish** does the parent read the frozen official baseline, bind signed generation records, and run the existing SQL structural comparator, producing its score report and an explicit notice that the n8n transport and financial results were NOT tested.
+
+The quality harness's principal is a **declared synthetic test principal**, not a Product-authenticated user. It MUST NOT be represented as proof of real n8n/Product-to-LangGraph identity, tenant authorisation, orchestration parity, or full Phase 1 integration. Actual Phase 1 parity still requires real n8n Shadow dispatch, S2S credential bindings, authenticated Product identity, and independent evidence correlation. This harness is preparatory generation-quality evidence only. The historical baseline does not attest the provider/model, so \`corresponde\` must not be inferred from matching SQL alone.
+
+The current MCP \`audit_shadow_evidence_draft_bindings\` is pinned to an obsolete checkout SHA and additionally requires one inactive evidence workflow, whereas the existing evidence-read workflow is active. A read-only audit of the **actual active published** Shadow workflow is needed rather than weakening this obsolete gate.
+
+The live Gemini quality experiment must be explicitly authorized separately from any eventual read-only *financial SQL execution*. No financial query execution, n8n modifications, cutover, permissions changes, or official n8n benchmark reruns are permitted by this runbook.
