@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import pwd
+import grp
 import socket
 import stat
 import struct
@@ -65,19 +66,31 @@ def _serve_client(conn: socket.socket) -> None:
 
 
 def main() -> None:
+    """Serve exactly the one fd3 listener allocated by systemd root.
+
+    No filesystem bind/chown, no ownership of the financial Unix group.
+    """
     expected_uid = pwd.getpwnam("cia-probe").pw_uid
-    if os.getuid() != expected_uid or os.geteuid() != expected_uid:
-        raise RuntimeError("owner_user_required")
+    expected_gid = pwd.getpwnam("cia-probe").pw_gid
+    if (os.getuid() != expected_uid or os.geteuid() != expected_uid
+            or os.getgid() != expected_gid or os.getegid() != expected_gid):
+        raise RuntimeError("owner_user_and_group_required")
+    if (os.environ.get("LISTEN_FDS") != "1"
+            or os.environ.get("LISTEN_PID") != str(os.getpid())):
+        raise RuntimeError("systemd_socket_activation_required")
     directory = os.path.dirname(SOCKET)
-    info = os.lstat(directory)
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != expected_uid or stat.S_IMODE(info.st_mode) != 0o750:
-        raise RuntimeError("runtime_directory_untrusted")
-    if os.path.lexists(SOCKET):
-        raise RuntimeError("socket_path_already_exists")
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-        server.bind(SOCKET)
-        os.chmod(SOCKET, 0o660)
-        server.listen(4)
+    dstat = os.lstat(directory)
+    statinfo = os.lstat(SOCKET)
+    if (not stat.S_ISDIR(dstat.st_mode) or dstat.st_uid != 0
+            or stat.S_IMODE(dstat.st_mode) != 0o755
+            or not stat.S_ISSOCK(statinfo.st_mode)
+            or statinfo.st_uid != 0
+            or statinfo.st_gid != grp.getgrnam(CLIENT_GROUP).gr_gid
+            or stat.S_IMODE(statinfo.st_mode) != 0o660):
+        raise RuntimeError("systemd_socket_untrusted")
+    with socket.socket(fileno=3) as server:
+        if server.family != socket.AF_UNIX or server.getsockname() != SOCKET:
+            raise RuntimeError("unexpected_listener")
         print("cia_j1_owner_sidecar=ready", flush=True)
         while True:
             conn, _addr = server.accept()
