@@ -348,11 +348,23 @@ def evaluate_blind_benchmark(
     manifest: Mapping[str, Any],
     evidence_export: Mapping[str, Any],
     receipt: Mapping[str, Any],
+    *,
+    dispatch_plan: Mapping[str, Any] | None = None,
+    correlation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate only after checking the separately retained freeze receipt."""
-    validated = load_baseline(baseline)
-    verify_blind_manifest(validated, manifest)
-    verify_freeze_receipt(validated, manifest, receipt)
+    """Freeze first; bind observed NEW run identities only after generation."""
+    frozen = load_baseline(baseline)
+    verify_blind_manifest(frozen, manifest)
+    verify_freeze_receipt(frozen, manifest, receipt)
+    if (dispatch_plan is None) != (correlation is None):
+        raise ValueError("post_generation_correlation_pair_required")
+    if dispatch_plan is not None:
+        from scripts.blind_shadow_batch import bind_baseline_for_evaluation
+        validated = bind_baseline_for_evaluation(
+            frozen, manifest, receipt, dispatch_plan, correlation, evidence_export,
+        )
+    else:
+        validated = frozen
     records = _validate_evidence(evidence_export)
     authorized_runs = {
         case["agent_run_id"] for case in validated["cases"]
@@ -377,10 +389,11 @@ def evaluate_blind_benchmark(
     return {
         "contract_version": CONTRACT_VERSION,
         "suite": validated["suite"],
-        "benchmark_fingerprint": stable_fingerprint(validated),
+        "benchmark_fingerprint": stable_fingerprint(frozen),
         "manifest_fingerprint": stable_fingerprint(manifest),
         "freeze_receipt_fingerprint": stable_fingerprint(receipt),
         "freeze_receipt_consistent": True,
+        "post_generation_correlation_verified": dispatch_plan is not None,
         "freeze_pre_generation_custody_attested": False,
         "historical_source_authenticity_attested": False,
         "evidence_fingerprint": stable_fingerprint([
@@ -428,6 +441,8 @@ def main() -> int:
     score.add_argument("--evidence", required=True)
     score.add_argument("--receipt", required=True)
     score.add_argument("--output", required=True)
+    score.add_argument("--dispatch-plan")
+    score.add_argument("--correlation")
     args = parser.parse_args()
 
     # Defense in depth, despite the fact this module has no execution port.
@@ -457,7 +472,16 @@ def main() -> int:
         evidence = _load_json(
             args.evidence, max_bytes=MAX_EVIDENCE_BYTES, require_private=True
         )
-        report = evaluate_blind_benchmark(baseline, manifest, evidence, receipt)
+        if bool(args.dispatch_plan) != bool(args.correlation):
+            raise ValueError("post_generation_correlation_pair_required")
+        plan = _load_json(args.dispatch_plan, max_bytes=MAX_BASELINE_BYTES,
+                          require_private=True) if args.dispatch_plan else None
+        links = _load_json(args.correlation, max_bytes=MAX_EVIDENCE_BYTES,
+                           require_private=True) if args.correlation else None
+        report = evaluate_blind_benchmark(
+            baseline, manifest, evidence, receipt,
+            dispatch_plan=plan, correlation=links,
+        )
         _write_exclusive(args.output, report)
         print("BLIND_EVALUATION_WRITTEN: " + report["status"])
         return 0 if all(
