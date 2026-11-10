@@ -292,14 +292,14 @@ def sqlite_audit_via_owner() -> dict:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(15)
             client.connect(OWNER_SOCKET)
-            client.sendall((json.dumps({"op": "cia_sqlite"}) + "\\n").encode("ascii"))
+            client.sendall((json.dumps({"op": "cia_sqlite"}) + "\n").encode("ascii"))
             chunks = bytearray()
-            while b"\\n" not in chunks and len(chunks) <= 4096:
+            while b"\n" not in chunks and len(chunks) <= 4096:
                 block = client.recv(min(1024, 4097-len(chunks)))
                 if not block:
                     break
                 chunks.extend(block)
-        if len(chunks) > 4096 or chunks.count(b"\\n") != 1 or not chunks.endswith(b"\\n"):
+        if len(chunks) > 4096 or chunks.count(b"\n") != 1 or not chunks.endswith(b"\n"):
             raise Rejected
         report = json.loads(bytes(chunks[:-1]))
         if (type(report) is not dict or report.get("trading_enabled") is not False
