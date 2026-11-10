@@ -71,7 +71,7 @@ class Repos(unittest.TestCase):
 
 class Recovery(unittest.TestCase):
     def test_plan_does_not_decrypt(self):
-        with mock.patch.object(ops, '_reviewed_source'), mock.patch.object(ops, '_source_ref',return_value='examplearchiverefval'), mock.patch.object(ops, '_exec', return_value='BENCHMARK_ARCHIVE_DIGEST=PASS\nBENCHMARK_IMAGE_PINNED=PASS\nBENCHMARK_PLAN=PASS\nBENCHMARK_SOURCE_DATA_READ=false') as run:
+        with mock.patch.object(ops, '_reviewed_source'), mock.patch.object(ops, '_source_ref',return_value='examplearchiverefval'), mock.patch.object(ops, '_run_plan_command', return_value='BENCHMARK_ARCHIVE_DIGEST=PASS\nBENCHMARK_IMAGE_PINNED=PASS\nBENCHMARK_PLAN=PASS\nBENCHMARK_SOURCE_DATA_READ=false') as run:
             self.assertEqual(ops.benchmark_plan()['status'],'pass')
             argv=run.call_args.args[0]
             self.assertIn('--plan',argv)
