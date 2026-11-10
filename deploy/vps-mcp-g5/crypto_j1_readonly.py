@@ -292,7 +292,7 @@ def sqlite_audit_via_owner() -> dict:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(15)
             client.connect(OWNER_SOCKET)
-            client.sendall(b'{"op":"cia_sqlite"}\\n'.replace(b"\\\\n", b"\\n"))
+            client.sendall((json.dumps({"op": "cia_sqlite"}) + "\\n").encode("ascii"))
             chunks = bytearray()
             while b"\\n" not in chunks and len(chunks) <= 4096:
                 block = client.recv(min(1024, 4097-len(chunks)))
