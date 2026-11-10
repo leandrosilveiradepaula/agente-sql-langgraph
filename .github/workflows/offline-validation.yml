@@ -114,6 +114,7 @@ jobs:
         run: |
           python3 -B -m unittest discover -s deploy/vps-mcp-g5 -p 'test_benchmark_ops.py' -v
           bash -n deploy/vps-mcp-g5/install_mcp_g5_once.sh
+          bash -n deploy/vps-mcp-g5/upgrade_g5_diagnostics_once.sh
       - name: Verify P3 source alignment, private files and read-only shell contract (offline)
         run: |
           python3 -m unittest scripts.test_p3_source_alignment_readonly -v
