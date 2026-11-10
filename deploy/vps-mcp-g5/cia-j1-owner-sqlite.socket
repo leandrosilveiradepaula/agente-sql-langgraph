@@ -1,0 +1,16 @@
+[Unit]
+Description=Fixed-capability socket for isolated Crypto Intelligence SQLite audit
+After=local-fs.target
+
+[Socket]
+ListenStream=/run/cia-j1-owner/readonly.sock
+Service=cia-j1-owner-sqlite.service
+SocketUser=root
+SocketGroup=agente-mcp
+SocketMode=0660
+DirectoryMode=0755
+Accept=no
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

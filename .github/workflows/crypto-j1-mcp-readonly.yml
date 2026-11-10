@@ -3,24 +3,13 @@ name: Crypto J1 MCP read-only validation
 on:
   pull_request:
     paths:
-      - "deploy/vps-mcp-g5/crypto_j1_readonly.py"
-      - "deploy/vps-mcp-g5/test_crypto_j1_readonly.py"
-      - "deploy/vps-mcp-g5/mcp_server.py"
-      - "deploy/vps-mcp-g5/operations_broker.py"
-      - "deploy/vps-mcp-g5/CIA-J1-MCP-RUNBOOK.md"
-      - "deploy/vps-mcp-g5/upgrade_cia_j1_readonly_once.sh"
-      - "deploy/vps-mcp-g5/upgrade_g5_diagnostics_once.sh"
+      - "deploy/vps-mcp-g5/**"
       - ".github/workflows/crypto-j1-mcp-readonly.yml"
   push:
     branches:
       - main
     paths:
-      - "deploy/vps-mcp-g5/crypto_j1_readonly.py"
-      - "deploy/vps-mcp-g5/test_crypto_j1_readonly.py"
-      - "deploy/vps-mcp-g5/mcp_server.py"
-      - "deploy/vps-mcp-g5/operations_broker.py"
-      - "deploy/vps-mcp-g5/upgrade_cia_j1_readonly_once.sh"
-      - "deploy/vps-mcp-g5/upgrade_g5_diagnostics_once.sh"
+      - "deploy/vps-mcp-g5/**"
       - ".github/workflows/crypto-j1-mcp-readonly.yml"
 
 permissions:
@@ -32,13 +21,30 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v5
-      - name: Compile fixed-scope modules
-        run: python3 -B -m py_compile deploy/vps-mcp-g5/crypto_j1_readonly.py deploy/vps-mcp-g5/mcp_server.py deploy/vps-mcp-g5/operations_broker.py
-      - name: Shell syntax for upgrade/rollback entrypoints
+      - name: Compile isolated gateway modules
+        run: |
+          python3 -B -m py_compile deploy/vps-mcp-g5/crypto_j1_readonly.py deploy/vps-mcp-g5/cia_j1_sqlite_owner_sidecar.py deploy/vps-mcp-g5/mcp_server.py deploy/vps-mcp-g5/operations_broker.py
+      - name: Shell syntax for all reviewed upgrade entrypoints
         run: |
           bash -n deploy/vps-mcp-g5/upgrade_cia_j1_readonly_once.sh
           bash -n deploy/vps-mcp-g5/upgrade_g5_diagnostics_once.sh
-      - name: Run entirely offline read-only evidence tests
+          bash -n deploy/vps-mcp-g5/upgrade_cia_j1_owner_once.sh
+      - name: Check owner service identity and sandboxing
+        run: |
+          grep -Fqx 'User=cia-probe' deploy/vps-mcp-g5/cia-j1-owner-sqlite.service
+          grep -Fqx 'Group=cia-probe' deploy/vps-mcp-g5/cia-j1-owner-sqlite.service
+          grep -Fqx 'SocketUser=root' deploy/vps-mcp-g5/cia-j1-owner-sqlite.socket
+          grep -Fqx 'SocketGroup=agente-mcp' deploy/vps-mcp-g5/cia-j1-owner-sqlite.socket
+          grep -Fqx 'SocketMode=0660' deploy/vps-mcp-g5/cia-j1-owner-sqlite.socket
+          grep -Fqx 'NoNewPrivileges=yes' deploy/vps-mcp-g5/cia-j1-owner-sqlite.service
+          grep -Fqx 'CapabilityBoundingSet=' deploy/vps-mcp-g5/cia-j1-owner-sqlite.service
+          grep -Fqx 'ProtectHome=read-only' deploy/vps-mcp-g5/cia-j1-owner-sqlite.service
+          grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/vps-mcp-g5/cia-j1-owner-sqlite.service
+      - name: Run owner socket boundary and malformed request tests offline
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -B -m unittest discover -s deploy/vps-mcp-g5 -p 'test_cia_j1_owner_sidecar.py' -v
+      - name: Run existing CIA read-only evidence tests offline
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 -B -m unittest discover -s deploy/vps-mcp-g5 -p 'test_crypto_j1_readonly.py' -v
