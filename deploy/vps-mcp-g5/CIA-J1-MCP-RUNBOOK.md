@@ -24,3 +24,19 @@ Separação de papéis: o endpoint MCP aceita apenas operações codificadas; br
 Se qualquer operação falhar, retornar somente `status=blocked` e código estático de falha; nunca mostrar traceback, payload Bybit, preços, símbolo, logs, caminho ou SQL. Em caso de falha de rollout, recuperar os três arquivos do backup root-only e reiniciar apenas broker/túnel para manter acesso financeiro existente. Nunca executar `git reset --hard`, desabilitar segurança SQL ou reiniciar coletores CIA para diagnosticar o MCP.
 
 Nesta entrega: **nenhum acesso novo ao SQLite foi instalado na VPS; auditoria final J1 permanece pendente.**
+
+## Upgrade consolidado pronto para homologação (sem execução na VPS)
+
+O script `upgrade_cia_j1_readonly_once.sh` é uma operação root one-shot de deploy, não uma ferramenta do MCP. Ele faz preflight dos hashes Git dos componentes instalados do broker/túnel, aceita apenas as revisões G5 anterior ou atual do módulo `benchmark_ops.py`, usa fontes fixadas no merge `26b9b8fa9b3f5a027fb82199c8bc77dc7f83734e` e valida SHA Git blob antes de qualquer substituição. Faz backup privado, instala apenas `mcp_server.py`, `operations_broker.py`, `crypto_j1_readonly.py`, reinicia broker/túnel e exige provas do socket e da readiness; rollback automático se falhar. O módulo financeiro nunca é sobrescrito. `upgrade_g5_diagnostics_once.sh` também aceita o novo hash do broker para preservar a evolução paralela sem resetar checkout.
+
+**Gate adicional real:** o ChatGPT conectado hoje não dispõe de nenhuma ação para executar um instalador root no host; o MCP expõe somente operações finitas G5/financeiras. Portanto esse script **NÃO FOI EXECUTADO**, mesmo que a PR passe e seja mesclada. Implantar sem operador ou sem uma action de rollout previamente autorizada é impossível com este conector, não uma falha de teste. A ampliação das ferramentas do plugin exige atualizar/recarregar o catálogo após restart do túnel.
+
+**Operação futura sob gate de autorização para ampliar acesso**: em SSH root no servidor correto, apenas com hashes compatíveis e ambiente não perturbado, verificar que a PR de upgrade foi integrada com CI verde, obter o script de `deploy/vps-mcp-g5/upgrade_cia_j1_readonly_once.sh` a partir do SHA conferido do merge e executá-lo uma única vez. Não baixar/rodar branch móvel, não executar código da PR aberta e não modificar o timer CIA. Não solicitar esse comando a quem está no celular agora.
+
+### Escopo de prova
+- Tests e CI = software preparado, sem comprovação VPS.
+- Upgrade PASS + refresh ChatGPT = capabilities realmente expostas.
+- `cia_j1_rest_journal_summary.status=pass` **e** `cia_j1_rest_sqlite_audit.status=pass` = prova da janela finita 24 rodadas N=2.
+- O timer não foi projetado como serviço 24/7 infinito, e nenhuma etapa libera ordens, sinal ou Top50.
+
+O operador consegue reverter o bridge apenas por restauração dos arquivos do backup root-only caso seja necessário; o script faz rollback automático em falhas ocorridas durante sua execução.
