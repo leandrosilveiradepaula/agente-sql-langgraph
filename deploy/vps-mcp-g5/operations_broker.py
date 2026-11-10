@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 from benchmark_ops import repo_sync, benchmark_plan, benchmark_recover, benchmark_status
-from crypto_j1_readonly import timer_status as cia_timer_status, journal_summary as cia_journal_summary, sqlite_audit as cia_sqlite_audit
+from crypto_j1_readonly import timer_status as cia_timer_status, journal_summary as cia_journal_summary, sqlite_audit_via_owner as cia_sqlite_audit
 
 SOCKET = Path("/run/agente-financeiro-mcp/operations.sock")
 ROOT = Path("/docker/agente-sql-langgraph-repo")
