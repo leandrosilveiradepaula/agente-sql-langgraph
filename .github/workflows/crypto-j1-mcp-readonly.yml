@@ -1,0 +1,36 @@
+name: Crypto J1 MCP read-only validation
+
+on:
+  pull_request:
+    paths:
+      - "deploy/vps-mcp-g5/crypto_j1_readonly.py"
+      - "deploy/vps-mcp-g5/test_crypto_j1_readonly.py"
+      - "deploy/vps-mcp-g5/mcp_server.py"
+      - "deploy/vps-mcp-g5/operations_broker.py"
+      - "deploy/vps-mcp-g5/CIA-J1-MCP-RUNBOOK.md"
+      - ".github/workflows/crypto-j1-mcp-readonly.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "deploy/vps-mcp-g5/crypto_j1_readonly.py"
+      - "deploy/vps-mcp-g5/test_crypto_j1_readonly.py"
+      - "deploy/vps-mcp-g5/mcp_server.py"
+      - "deploy/vps-mcp-g5/operations_broker.py"
+      - ".github/workflows/crypto-j1-mcp-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  j1-readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+      - name: Compile fixed-scope modules
+        run: python3 -B -m py_compile deploy/vps-mcp-g5/crypto_j1_readonly.py deploy/vps-mcp-g5/mcp_server.py deploy/vps-mcp-g5/operations_broker.py
+      - name: Run entirely offline read-only evidence tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -B -m unittest discover -s deploy/vps-mcp-g5 -p 'test_crypto_j1_readonly.py' -v
