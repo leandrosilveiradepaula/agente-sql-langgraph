@@ -1,0 +1,28 @@
+[Unit]
+Description=Agente Financeiro MCP restricted operations broker (local Unix socket)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=agente-mcp
+WorkingDirectory=/opt/agente-financeiro-mcp
+ExecStart=/usr/bin/python3 /opt/agente-financeiro-mcp/operations_broker.py
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=agente-financeiro-mcp
+RuntimeDirectoryMode=0750
+UMask=0007
+Environment=PYTHONDONTWRITEBYTECODE=1
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/docker/agente-sql-langgraph-repo
+ReadWritePaths=/root/.local/share/agente-sql-langgraph/benchmark-private
+PrivateTmp=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
