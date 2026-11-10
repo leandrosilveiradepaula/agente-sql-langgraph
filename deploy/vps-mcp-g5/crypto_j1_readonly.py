@@ -17,6 +17,7 @@ from pathlib import Path
 import pwd
 import re
 import sqlite3
+import socket
 import stat
 import subprocess
 
@@ -277,3 +278,47 @@ def sqlite_audit() -> dict:
     except (Rejected, OSError, sqlite3.Error, ValueError, TypeError,
             OverflowError, UnicodeError):
         return _fail("sqlite_audit_unavailable")
+
+
+# The financial broker deliberately has no DAC capabilities and cannot enter
+# the owner-only data tree. All DB reading happens in the separate cia-probe
+# sidecar, without relaxing the broker's systemd sandbox.
+OWNER_SOCKET = "/run/cia-j1-owner/readonly.sock"
+
+
+def sqlite_audit_via_owner() -> dict:
+    """Proxy one fixed audit request; never accept caller paths/SQL or raw rows."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(15)
+            client.connect(OWNER_SOCKET)
+            client.sendall(b'{"op":"cia_sqlite"}\\n'.replace(b"\\\\n", b"\\n"))
+            chunks = bytearray()
+            while b"\\n" not in chunks and len(chunks) <= 4096:
+                block = client.recv(min(1024, 4097-len(chunks)))
+                if not block:
+                    break
+                chunks.extend(block)
+        if len(chunks) > 4096 or chunks.count(b"\\n") != 1 or not chunks.endswith(b"\\n"):
+            raise Rejected
+        report = json.loads(bytes(chunks[:-1]))
+        if (type(report) is not dict or report.get("trading_enabled") is not False
+                or report.get("marketwide_top50_verified") is not False):
+            raise Rejected
+        if report.get("status") == "pass":
+            expected = {
+                "status": "pass", "contracts": 2, "stored_candles": 100,
+                "published_checkpoints": 26, "last_published_end_ms": EXPECT[-1],
+                "sqlite_integrity": True, "contiguous_candles": True,
+                "digest_replay": True, "halted": False,
+                "trading_enabled": False, "marketwide_top50_verified": False,
+            }
+            if report != expected:
+                raise Rejected
+            return expected
+        if report.get("status") == "blocked":
+            return _fail("sqlite_owner_audit_blocked")
+        raise Rejected
+    except (OSError, TimeoutError, Rejected, ValueError, TypeError,
+            OverflowError, UnicodeError):
+        return _fail("sqlite_owner_service_unavailable")
