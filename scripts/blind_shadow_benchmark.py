@@ -381,6 +381,20 @@ def evaluate_blind_benchmark(
         _score_case(case, records, service)
         for case in validated["cases"]
     ]
+    if dispatch_plan is not None:
+        # A new Shadow tenant identity cannot attest a historic n8n tenant.
+        # Keep structural SQL verdicts, but never promote missing historical
+        # identity into a qualified parity match.
+        for original, result in zip(frozen["cases"], cases):
+            result["historical_tenant_provenance_attested"] = bool(
+                _identifier(original.get("organization_id"))
+            )
+            if (not result["historical_tenant_provenance_attested"]
+                    and result["status"] == "corresponde"):
+                result.update(
+                    status="inconclusivo",
+                    reason="historical_tenant_provenance_unattested",
+                )
     counts = Counter(case["status"] for case in cases)
     summary = {
         status: counts[status]
