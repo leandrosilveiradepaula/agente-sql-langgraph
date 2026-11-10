@@ -32,6 +32,10 @@ jobs:
       - name: Check owner service identity and sandboxing
         run: |
           grep -Fqx 'User=cia-probe' deploy/vps-mcp-g5/cia-j1-owner-sqlite.service
+          grep -Fqx 'Group=cia-probe' deploy/vps-mcp-g5/cia-j1-owner-sqlite.service
+          grep -Fqx 'SocketUser=root' deploy/vps-mcp-g5/cia-j1-owner-sqlite.socket
+          grep -Fqx 'SocketGroup=agente-mcp' deploy/vps-mcp-g5/cia-j1-owner-sqlite.socket
+          grep -Fqx 'SocketMode=0660' deploy/vps-mcp-g5/cia-j1-owner-sqlite.socket
           grep -Fqx 'NoNewPrivileges=yes' deploy/vps-mcp-g5/cia-j1-owner-sqlite.service
           grep -Fqx 'CapabilityBoundingSet=' deploy/vps-mcp-g5/cia-j1-owner-sqlite.service
           grep -Fqx 'ProtectHome=read-only' deploy/vps-mcp-g5/cia-j1-owner-sqlite.service
