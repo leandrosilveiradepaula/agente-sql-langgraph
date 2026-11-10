@@ -58,7 +58,7 @@ cleanup() {
 trap cleanup EXIT
 
 /usr/bin/curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
-  --max-time 40 --output "$TMP" "$RAW" || reject APPROVED_SOURCE_FETCH_FAILED
+  --proto-redir '=https' --max-time 40 --output "$TMP" "$RAW" || reject APPROVED_SOURCE_FETCH_FAILED
 [[ "$(/usr/bin/git hash-object "$TMP")" == "$NEW_BLOB" ]] || reject APPROVED_SOURCE_DIGEST_MISMATCH
 /usr/bin/python3 -B -m py_compile "$TMP" || reject APPROVED_SOURCE_INVALID_PYTHON
 
