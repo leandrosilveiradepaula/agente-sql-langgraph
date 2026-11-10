@@ -16,6 +16,7 @@ SOURCE_COMMIT=f3edfba09b687d088a2a4b35dcdc3a66f63bae54
 OLD_BLOB=0d3fc77cd862780cd9008601d905d6d63122cd5f
 NEW_BLOB=c8b18cdeeba39d101fe92457f69da5b1c5af231d
 BROKER_BLOB=6f814a7bda5262dd85db0c4032dcee56d289ec9c
+BROKER_WITH_CIA_BLOB=08566865997db33e888b4a474fa1fd129c9e5073
 UNIT_BLOB=64fb7d4567952eccefa8b9b3ad74b392e12cdad2
 RAW="https://raw.githubusercontent.com/leandrosilveiradepaula/agente-sql-langgraph/$SOURCE_COMMIT/deploy/vps-mcp-g5/benchmark_ops.py"
 
@@ -28,7 +29,8 @@ done
 for file in "$BROKER" "$OTHER" "$UNIT"; do
   [[ -f "$file" && ! -L "$file" ]] || reject PACKAGE_COMPONENT_UNTRUSTED
 done
-[[ "$(/usr/bin/git hash-object "$OTHER")" == "$BROKER_BLOB" ]] || reject BROKER_VERSION_UNEXPECTED
+broker_actual="$(/usr/bin/git hash-object "$OTHER")"
+[[ "$broker_actual" == "$BROKER_BLOB" || "$broker_actual" == "$BROKER_WITH_CIA_BLOB" ]] || reject BROKER_VERSION_UNEXPECTED
 [[ "$(/usr/bin/git hash-object "$UNIT")" == "$UNIT_BLOB" ]] || reject SERVICE_VERSION_UNEXPECTED
 /usr/bin/systemctl is-active --quiet "$OPS_SERVICE" || reject BROKER_SERVICE_NOT_ACTIVE
 /usr/bin/systemctl is-active --quiet "$TUNNEL_SERVICE" || reject TUNNEL_SERVICE_NOT_ACTIVE
