@@ -32,7 +32,7 @@ ORIG_UNIT_BLOB=64fb7d4567952eccefa8b9b3ad74b392e12cdad2
 reject() { printf 'CIA_J1_OWNER_UPGRADE=BLOCKED\nREASON=%s\n' "$1" >&2; exit 2; }
 test "$(id -u)" -eq 0 || reject ROOT_REQUIRED
 test "$(hostname)" = srv1319424 || reject HOST_MISMATCH
-for cmd in /usr/bin/git /usr/bin/curl /usr/bin/python3 /usr/bin/systemctl /usr/bin/install /usr/bin/runuser; do
+for cmd in /usr/bin/git /usr/bin/curl /usr/bin/python3 /usr/bin/systemctl /usr/bin/install /usr/sbin/runuser; do
   test -x "$cmd" || reject DEPENDENCY_MISSING
 done
 test -d "$BASE" && test ! -L "$BASE" || reject INSTALL_DIR_UNTRUSTED
@@ -138,7 +138,7 @@ test "$owner_ok" = 1 || reject OWNER_SQLITE_READ_ONLY_AUDIT_FAILED
 broker_ok=0
 for attempt in $(seq 1 30); do
   if test -S "$BROKER_SOCKET" &&
-     /usr/bin/runuser -u agente-mcp -- /usr/bin/python3 -B - <<'PY' >/dev/null 2>&1
+     /usr/sbin/runuser -u agente-mcp -- /usr/bin/python3 -B - <<'PY' >/dev/null 2>&1
 import json,socket
 path="/run/agente-financeiro-mcp/operations.sock"
 for op in ("cia_timer","cia_journal","cia_sqlite","benchmark_status"):
