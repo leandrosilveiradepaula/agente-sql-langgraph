@@ -172,11 +172,43 @@ def _source_ref() -> str:
     return match.group(1)
 
 
+# Only explicit safe status codes from the reviewed CLI may cross MCP.
+# Never forward raw subprocess stdout/stderr, exception text, file names, or SQL.
+PLAN_SAFE_FAILURES = frozenset({
+    'ROOT_LOCAL_RUNTIME_REQUIRED', 'LIVE_EXECUTION_FLAGS_FORBIDDEN',
+    'SOURCE_ARCHIVE_MANIFEST_MISSING_OR_AMBIGUOUS',
+    'ARCHIVE_DIRECTORY_UNSAFE', 'ARCHIVE_FILE_UNSAFE',
+    'MANIFEST_PATH_UNSAFE', 'MANIFEST_INVALID',
+    'SOURCE_PROJECT_REF_INVALID', 'SYMMETRIC_ARCHIVE_REQUIRED',
+    'ENCRYPTED_ARCHIVE_DIGEST_MISMATCH',
+    'LOCAL_DOCKER_SOCKET_MISSING', 'LOCAL_DOCKER_SOCKET_UNSAFE',
+    'LOCAL_DOCKER_UNAVAILABLE', 'POSTGRES17_IMAGE_NOT_CACHED',
+})
+
+
+def _run_plan_command(argv: list[str]) -> str:
+    try:
+        cp = subprocess.run(argv, text=True, capture_output=True,
+                            timeout=70, env=ENVP, cwd=str(REPO), check=False)
+    except (OSError, subprocess.SubprocessError):
+        raise Refused('plan_command_unavailable') from None
+    if len(cp.stdout) > 16000:
+        raise Refused('plan_output_limit')
+    lines = cp.stdout.splitlines()
+    if cp.returncode != 0:
+        reasons = [line.removeprefix('BENCHMARK_BLOCK_REASON=')
+                   for line in lines if line.startswith('BENCHMARK_BLOCK_REASON=')]
+        if cp.returncode == 2 and len(reasons) == 1 and reasons[0] in PLAN_SAFE_FAILURES:
+            raise Refused('plan_' + reasons[0].lower())
+        raise Refused('plan_failed_unclassified')
+    return cp.stdout
+
+
 def _plan() -> dict[str, object]:
     _reviewed_source()
-    out = _exec([str(PYTHON), '-m',
-                 'scripts.operations.g5_recover_legacy_benchmark_offline',
-                 '--plan', '--source-project-ref', _source_ref()], timeout=70)
+    out = _run_plan_command([str(PYTHON), '-m',
+                             'scripts.operations.g5_recover_legacy_benchmark_offline',
+                             '--plan', '--source-project-ref', _source_ref()])
     parts = out.splitlines()
     checks = ('BENCHMARK_ARCHIVE_DIGEST=PASS', 'BENCHMARK_IMAGE_PINNED=PASS',
               'BENCHMARK_PLAN=PASS', 'BENCHMARK_SOURCE_DATA_READ=false')
@@ -337,6 +369,10 @@ def benchmark_status() -> dict[str, object]:
         if not stat.S_ISDIR(rootstat.st_mode) or rootstat.st_uid != 0 or rootstat.st_mode & 0o077:
             raise Refused('private_root_permissions_invalid')
         dirs = list(DEST.glob('legacy63-*'))
+        # The installer creates an empty private root before any recovery.
+        # Empty is a normal initial state, not evidence of a corrupt snapshot.
+        if not dirs and not any(DEST.iterdir()):
+            return {'status': 'not_recovered'}
         if len(dirs) != 1 or not FOLDER.fullmatch(dirs[0].name):
             raise Refused('recovery_snapshot_missing_or_ambiguous')
         substat = dirs[0].lstat()

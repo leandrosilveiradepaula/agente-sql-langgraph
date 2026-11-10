@@ -71,12 +71,27 @@ class Repos(unittest.TestCase):
 
 class Recovery(unittest.TestCase):
     def test_plan_does_not_decrypt(self):
-        with mock.patch.object(ops, '_reviewed_source'), mock.patch.object(ops, '_source_ref',return_value='examplearchiverefval'), mock.patch.object(ops, '_exec', return_value='BENCHMARK_ARCHIVE_DIGEST=PASS\nBENCHMARK_IMAGE_PINNED=PASS\nBENCHMARK_PLAN=PASS\nBENCHMARK_SOURCE_DATA_READ=false') as run:
+        with mock.patch.object(ops, '_reviewed_source'), mock.patch.object(ops, '_source_ref',return_value='examplearchiverefval'), mock.patch.object(ops, '_run_plan_command', return_value='BENCHMARK_ARCHIVE_DIGEST=PASS\nBENCHMARK_IMAGE_PINNED=PASS\nBENCHMARK_PLAN=PASS\nBENCHMARK_SOURCE_DATA_READ=false') as run:
             self.assertEqual(ops.benchmark_plan()['status'],'pass')
             argv=run.call_args.args[0]
             self.assertIn('--plan',argv)
             self.assertNotIn('--recover',argv)
 
+    def test_plan_safe_reason(self):
+        fake = types.SimpleNamespace(returncode=2,
+            stdout='BENCHMARK_BLOCK_REASON=POSTGRES17_IMAGE_NOT_CACHED\n', stderr='secret')
+        with mock.patch.object(ops.subprocess, 'run', return_value=fake):
+            with self.assertRaises(ops.Refused) as result:
+                ops._run_plan_command(['plan'])
+        self.assertEqual(str(result.exception), 'plan_postgres17_image_not_cached')
+
+    def test_plan_untrusted_reason_is_hidden(self):
+        fake = types.SimpleNamespace(returncode=2,
+            stdout='BENCHMARK_BLOCK_REASON=SECRET_VALUE\n', stderr='secret')
+        with mock.patch.object(ops.subprocess, 'run', return_value=fake):
+            with self.assertRaises(ops.Refused) as result:
+                ops._run_plan_command(['plan'])
+        self.assertEqual(str(result.exception), 'plan_failed_unclassified')
     def test_secret_rejected_and_deleted_if_not_root_owned(self):
         with tempfile.TemporaryDirectory() as temp:
             path=Path(temp)/'one-shot'
@@ -120,6 +135,29 @@ print('BENCHMARK_LLM_CALLS=0')
              mock.patch.object(ops,'_lock',return_value=os.open(os.devnull,os.O_RDONLY)):
             self.assertEqual(ops.benchmark_recover(),{'status':'blocked','reason':'archive_missing'})
             read.assert_not_called()
+
+    def test_status_with_installer_created_empty_directory(self):
+        # The CI runner is unprivileged; emulate only the private root's
+        # root-owned metadata, keeping the actual directory operations real.
+        root_metadata = types.SimpleNamespace(st_uid=0, st_mode=0o040700)
+        with tempfile.TemporaryDirectory() as root, \
+             mock.patch.object(ops, '_reviewed_source'), \
+             mock.patch.object(ops, 'DEST', Path(root)), \
+             mock.patch.object(Path, 'lstat', return_value=root_metadata):
+            result = ops.benchmark_status()
+        self.assertEqual(result, {'status': 'not_recovered'})
+
+    def test_status_rejects_unexpected_private_root_content(self):
+        root_metadata = types.SimpleNamespace(st_uid=0, st_mode=0o040700)
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root)/'unexpected').write_text('do not delete')
+            with mock.patch.object(ops, '_reviewed_source'), \
+                 mock.patch.object(ops, 'DEST', Path(root)), \
+                 mock.patch.object(Path, 'lstat', return_value=root_metadata):
+                result = ops.benchmark_status()
+        self.assertEqual(result, {
+            'status': 'blocked', 'reason': 'recovery_snapshot_missing_or_ambiguous'
+        })
 
     def test_status_without_results(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.object(ops, '_reviewed_source'), mock.patch.object(ops,'DEST',Path(d)/'nothing'):
