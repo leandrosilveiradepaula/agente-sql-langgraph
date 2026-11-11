@@ -411,3 +411,42 @@ de outro schema, bindings condicionais fora da allowlist, impedimento de
 inferência a partir de alias inválido, métrica parcialmente resolvida pela
 LLM e comportamento determinístico legado. Também testa dois contextos
 materialmente distintos, sem acesso a dados financeiros.
+
+
+## Defesa estrutural em runtime: escopo físico do tenant — 11/11/2026
+
+O planejador v1.6.0 (`PLANNER_VERSION=v1.6.0-tenant-physical-scope`)
+estabelece a fronteira de autorização **antes da geração de SQL**, em todos
+os caminhos de planejamento, inclusive no resolvedor determinístico legado:
+
+- `allowed_schemas` deve existir, ser uma lista não vazia de nomes válidos
+  e não pode conter valores nulos ou malformados; caso contrário,
+  `PLANNING_SCHEMA_SCOPE_INVALID`.
+- Todas as tabelas efetivamente selecionadas para o plano — inclusive
+  introduzidas por regras, entidades, métricas ou agrupamentos — precisam
+  pertencer ao escopo ativo do tenant. Tabela fisicamente existente em
+  catálogo não é autorização de leitura: `PLANNING_TABLE_SCHEMA_UNAUTHORIZED`.
+  Nenhuma tabela é silenciosamente omitida para fazer uma pergunta passar.
+- Toda dimensão projetada precisa apontar para tabela selecionada e coluna
+  presente em `table_catalog.columns`. A presença apenas em `key_columns`
+  ou o texto de um alias não comprova a existência física da coluna:
+  `PLANNING_DIMENSION_TARGET_INVALID`.
+- Casos cobertos com dois esquemas e nomenclaturas sintéticas diferentes,
+  dimensões migradas para schema estrangeiro, alias para coluna inexistente,
+  ausência de escopo e metadata de chave contraditória.
+- O gate não atribui significado financeiro a nenhuma coluna; conceitos e
+  vínculos contábeis seguem exigindo autorização e versão do tenant. Não há
+  conexão com banco, alteração do n8n, provider, SQL financeira executada
+  ou ativação do contexto.
+
+Observação: o erro de uma métrica fora do schema autorizado agora pode ser
+classificado prioritariamente como `PLANNING_TABLE_SCHEMA_UNAUTHORIZED`,
+em vez de `PLANNING_METRIC_BINDING_INCOMPLETE`. Ambos impedem a geração e
+a execução, mas o primeiro evidencia o bloqueio anterior do escopo físico.
+É uma alteração versionada e deve ser avaliada na paridade Shadow; jamais
+reinterprete códigos históricos de benchmark para mascarar diferenças.
+
+Esses testes sintéticos demonstram controle de acesso ao planejamento, não
+certificação multicliente real, equivalência financeira ou autorização de
+cutover. `OFFICIAL=n8n`, `SHADOW=LangGraph` e
+`LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false` permanecem inalterados.

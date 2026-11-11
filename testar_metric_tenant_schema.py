@@ -9,6 +9,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from app.domain.planner import _resolve_planned_metrics, build_query_plan
+from app.domain.planning import PLANNER_VERSION
 from testar_planner import (
     _metric_context,
     _append_metric_binding,
@@ -338,6 +339,7 @@ def test_planner_authorizes_same_code_in_two_unrelated_client_schemas():
             ),
         )
         assert result["status"] == "planned", result.get("error_code")
+        assert result["query_plan"]["planner_version"] == PLANNER_VERSION
         dimension = result["query_plan"]["planning_context"]["detected_dimensions"]
         assert len(dimension) == 1
         assert dimension[0]["target_table"] == schema + "." + table

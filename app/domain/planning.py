@@ -14,7 +14,7 @@ from app.domain.context import (
 )
 
 
-PLANNER_VERSION = "v1.5.0-tenant-metric-gate"
+PLANNER_VERSION = "v1.6.0-tenant-physical-scope"
 
 PlanningDecisionReason = Literal[
     "single_pattern_selected",
