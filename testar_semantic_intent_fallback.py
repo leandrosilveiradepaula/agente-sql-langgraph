@@ -488,6 +488,12 @@ def test_end_to_end_semantic_alias_reaches_authorized_planner_bindings():
     metric["normalized_terms"] = ["amount"]
     rules[0]["concepts"].append(metric)
     rules[0]["minimum_concept_matches"] = 2
+    # The role-to-concept association belongs to the tenant's versioned
+    # context, never to a conditional in the SQL or interpreter engine.
+    context["intent_resolution"]["config"]["concept_roles"] = {
+        "operation": ["analytical_operation"],
+        "metric": ["financial_metric"],
+    }
     question = "Top amount"
     assert resolve_intent(question, context["intent_resolution"])["applied"] is False
 
