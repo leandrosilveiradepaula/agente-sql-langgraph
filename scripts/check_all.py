@@ -46,16 +46,16 @@ STEPS = [
         [sys.executable, "testar_intent_resolver.py"],
     ),
     (
-        "testar_semantic_concept_roles.py",
-        [sys.executable, "testar_semantic_concept_roles.py"],
-    ),
-    (
         "testar_context_normalizer.py",
         [sys.executable, "testar_context_normalizer.py"],
     ),
     (
         "testar_context_validator.py",
         [sys.executable, "testar_context_validator.py"],
+    ),
+    (
+        "testar_semantic_concept_roles.py",
+        [sys.executable, "testar_semantic_concept_roles.py"],
     ),
     (
         "testar_p3_semantic_context_candidate.py",
