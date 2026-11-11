@@ -160,7 +160,7 @@ def test_low_score_can_pass_with_grounding_but_not_skip_physical_planning():
         calls = 0
         def interpret(self, request):
             self.calls += 1
-            return _accepted(request, "intent_x", "op", "cash")
+            return {"output_text": _accepted(request, "intent_x", "op", "cash"), "provider_name": "test_provider", "provider_model": "test_model", "token_usage": {"total_tokens": 13}}
     model = FakeModel()
     with patch("app.graph.nodes.semantic_classification.classify_intent", return_value={
         "final_status": "rejected",
