@@ -66,6 +66,7 @@ def prepare_role_migration(
     *,
     candidate_version: str,
     role_bindings: Mapping[str, list[str]],
+    expected_source_fingerprint: str,
 ) -> dict[str, Any]:
     """Create an isolated draft; never write a context or authorize activation.
 
@@ -102,6 +103,11 @@ def prepare_role_migration(
         raise SemanticRoleMigrationRefused("source_normalization_failed") from exc
     if validate_context_snapshot(original)["status"] != "valid":
         raise SemanticRoleMigrationRefused("source_context_invalid")
+    if (
+        not isinstance(expected_source_fingerprint, str)
+        or original["fingerprint"] != expected_source_fingerprint
+    ):
+        raise SemanticRoleMigrationRefused("source_fingerprint_mismatch")
     if original["version"] == candidate_version:
         raise SemanticRoleMigrationRefused("version_not_advanced")
 
@@ -206,6 +212,20 @@ def audit_role_migration_questions(
     rejected_candidate = 0
     planned_source = 0
     planned_candidate = 0
+    planned_to_rejected = 0
+    rejected_to_planned = 0
+    planned_projection_changes = 0
+    rejection_codes: dict[str, int] = {}
+    changed_fields: dict[str, int] = {}
+    projected_fields = (
+        "detected_dimensions",
+        "planned_metrics",
+        "analytical_operations",
+        "temporal_series",
+        "planned_filters",
+        "resolved_filter_bindings",
+        "authorized_joins",
+    )
 
     for question in questions:
         try:
@@ -223,7 +243,30 @@ def audit_role_migration_questions(
         new_plan = _safe_plan(candidate, candidate_intent, question)
         planned_source += old_plan is not None and old_plan["status"] == "planned"
         planned_candidate += new_plan is not None and new_plan["status"] == "planned"
-        plan_changes += _plan_signature(old_plan) != _plan_signature(new_plan)
+        changed = _plan_signature(old_plan) != _plan_signature(new_plan)
+        plan_changes += changed
+        old_status = old_plan["status"] if old_plan is not None else "not_applicable"
+        new_status = new_plan["status"] if new_plan is not None else "not_applicable"
+        if old_status == "planned" and new_status == "rejected":
+            planned_to_rejected += 1
+            code = new_plan.get("error_code")
+            if isinstance(code, str) and code:
+                rejection_codes[code] = rejection_codes.get(code, 0) + 1
+        if old_status == "rejected" and new_status == "planned":
+            rejected_to_planned += 1
+        if changed and old_status == "planned" and new_status == "planned":
+            planned_projection_changes += 1
+            old_projection = (
+                (old_plan.get("query_plan") or {}).get("planning_context") or {}
+            )
+            new_projection = (
+                (new_plan.get("query_plan") or {}).get("planning_context") or {}
+            )
+            for field in projected_fields:
+                if _canonical_json(old_projection.get(field)) != (
+                    _canonical_json(new_projection.get(field))
+                ):
+                    changed_fields[field] = changed_fields.get(field, 0) + 1
 
     requires_review = bool(intent_changes or plan_changes)
     return {
@@ -239,6 +282,11 @@ def audit_role_migration_questions(
         "rejected_candidate": rejected_candidate,
         "planned_source": planned_source,
         "planned_candidate": planned_candidate,
+        "planned_to_rejected": planned_to_rejected,
+        "rejected_to_planned": rejected_to_planned,
+        "planned_projection_changes": planned_projection_changes,
+        "rejection_code_counts": dict(sorted(rejection_codes.items())),
+        "changed_projection_field_counts": dict(sorted(changed_fields.items())),
         "sql_generated": False,
         "sql_executed": False,
         "provider_calls": 0,
@@ -283,8 +331,12 @@ def _plan_signature(result: Mapping[str, Any] | None) -> Any:
     )
     return (
         "planned",
-        json.dumps(
-            {key: projection.get(key) for key in keys},
-            sort_keys=True, ensure_ascii=False, default=str,
-        ),
+        _canonical_json({key: projection.get(key) for key in keys}),
+    )
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(
+        value, sort_keys=True, ensure_ascii=False,
+        separators=(",", ":"), allow_nan=False, default=str,
     )
