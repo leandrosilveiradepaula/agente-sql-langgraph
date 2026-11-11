@@ -148,3 +148,22 @@ repetir o preflight e comprovar que os 9 casos têm operandos completos,
 sem inventar métricas. Se novas operações forem legítimas, o planejamento
 pode mudar, mas requer revisão explícita; o benchmark nunca determina
 quais vínculos contábeis devem ser configurados.
+
+
+### Integridade de papéis: capacidades e exclusividade
+
+O mecanismo admite somente os papéis estruturais implementados pelo
+planejador: `grouping`, `operation`, `metric` e `period`. Uma chave de
+papel inexistente não pode ser ignorada silenciosamente: toda solicitação
+com papel não suportado falha com `concept_role_unsupported`.
+
+Um mesmo conceito de catálogo também não pode receber dois papéis diferentes
+na mesma versão (`concept_role_overlap`). Essa regra protege contra
+contabilizar a mesma evidência conceitual simultaneamente como operação e
+métrica, por exemplo. Vários conceitos distintos **podem** representar
+um mesmo papel estrutural, se existirem no catálogo do tenant. Não há nomes
+de negócio pré-configurados no código.
+
+Esses gates foram validados por testes e no snapshot privado em memória.
+O diagnóstico anterior de migração permanece `REVIEW_REQUIRED`:
+não são autorizados reparos automáticos de métricas ou alterações de produção.
