@@ -241,7 +241,7 @@ def start(argv: Any, cwd: Any = str(REPO), timeout_seconds: Any = 3600) -> dict[
         }, exclusive=True)
         unit = UNIT_PREFIX + job_id
         cmd = [
-            SYSTEMD_RUN, "--quiet", "--collect", "--unit=" + unit,
+            SYSTEMD_RUN, "--quiet", "--collect", "--no-block", "--unit=" + unit,
             "--property=Type=oneshot",
             "--property=TimeoutStartSec=" + str(timeout + 120),
             PYTHON, str(CODE), "--worker", job_id,
