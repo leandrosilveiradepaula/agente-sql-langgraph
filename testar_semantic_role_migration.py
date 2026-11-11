@@ -193,6 +193,25 @@ def test_audit_classifies_plan_loss_and_planned_projection_changes() -> None:
     assert "synthetic first question" not in repr(result)
 
 
+
+def test_preserves_opaque_legacy_rule_content_without_interpreting_it_as_json() -> None:
+    source = _raw_snapshot()
+    for rule in source["regras"]:
+        if rule["rule_group"] == "general":
+            rule["rule_content"] = "Opaque legacy business text; not JSON."
+    prepared = _prepare(source)
+    assert prepared["status"] == "PREPARED_NOT_ACTIVATED"
+    assert prepared["candidate_raw"]["regras"][1]["rule_content"] == (
+        "Opaque legacy business text; not JSON."
+    )
+    assert prepared["source"]["rules"][1]["rule_content"] == (
+        "Opaque legacy business text; not JSON."
+    )
+    assert prepared["candidate"]["rules"][1]["rule_content"] == (
+        "Opaque legacy business text; not JSON."
+    )
+
+
 if __name__ == "__main__":
     import inspect
     tests = sorted(
