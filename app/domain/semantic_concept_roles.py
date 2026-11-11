@@ -24,6 +24,8 @@ def parse_concept_roles(
     if not isinstance(intent_resolution, Mapping):
         raise ConceptRoleConfigurationError("intent_resolution_invalid")
     config = intent_resolution.get("config")
+    if config is None:
+        return {}
     if not isinstance(config, Mapping):
         raise ConceptRoleConfigurationError("intent_resolver_config_invalid")
     raw = config.get("concept_roles")
@@ -65,14 +67,20 @@ def unknown_role_concepts(
 ) -> dict[str, list[str]]:
     """Reference-integrity check, used at context validation and direct calls."""
     roles = parse_concept_roles(intent_resolution)
+    if not roles:
+        return {}
     entries = intent_resolution.get("intent_catalog")
     if not isinstance(entries, list):
         raise ConceptRoleConfigurationError("intent_catalog_invalid")
     known = {
         str(c.get("concept_name")).strip().casefold()
         for entry in entries if isinstance(entry, Mapping)
-        for rule in entry.get("rules", []) if isinstance(rule, Mapping)
-        for c in rule.get("concepts", []) if isinstance(c, Mapping)
+        for rule in (
+            entry.get("rules") if isinstance(entry.get("rules"), list) else []
+        ) if isinstance(rule, Mapping)
+        for c in (
+            rule.get("concepts") if isinstance(rule.get("concepts"), list) else []
+        ) if isinstance(c, Mapping)
         and isinstance(c.get("concept_name"), str)
         and c.get("concept_name", "").strip()
     }
