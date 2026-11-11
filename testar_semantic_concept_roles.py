@@ -276,6 +276,69 @@ def test_context_role_reference_integrity_is_generic_across_multiple_roles() -> 
     }
 
 
+
+def test_foreign_best_candidate_is_never_used_by_selected_intent() -> None:
+    from app.domain.planner import _selected_intent_candidates
+
+    evidence = {
+        "intent": "selected_intent",
+        "best_candidate": {
+            "intent_name": "unrelated_intent",
+            "matches": [{"match_details": {"concepts": [
+                {"concept_name": "untrusted", "satisfied": True}
+            ]}}],
+        },
+        "candidates": [{
+            "intent_name": "selected_intent",
+            "matches": [{"match_details": {"concepts": [
+                {"concept_name": "allowed", "satisfied": True}
+            ]}}],
+        }],
+    }
+    candidates = _selected_intent_candidates(
+        evidence, selected_intent="selected_intent",
+    )
+    assert len(candidates) == 1
+    assert candidates[0]["intent_name"] == "selected_intent"
+
+
+def test_incomplete_analytical_metric_bindings_fail_closed() -> None:
+    from app.domain.planner import _analytical_operand_bindings_complete
+
+    metric = {"metric_ref": "tenant-metric-A"}
+    comparison = {
+        "operation_type": "comparison",
+        "binding_cardinality": {
+            "mode": "multiple", "minimum": 2, "maximum": 2,
+            "distinct_bindings": True,
+            "same_metric_concept": False,
+        },
+    }
+    assert _analytical_operand_bindings_complete({
+        "analytical_operations": [comparison], "planned_metrics": [],
+    }) is False
+    assert _analytical_operand_bindings_complete({
+        "analytical_operations": [{
+            **comparison, "operand_metric_refs": ["tenant-metric-A", "unknown-metric"],
+        }],
+        "planned_metrics": [metric],
+    }) is False
+    assert _analytical_operand_bindings_complete({
+        "analytical_operations": [{
+            **comparison, "operand_metric_refs": ["tenant-metric-A", "tenant-metric-B"],
+        }],
+        "planned_metrics": [metric, {"metric_ref": "tenant-metric-B"}],
+    }) is True
+    assert _analytical_operand_bindings_complete({
+        "analytical_operations": [{
+            "operation_type": "ranking",
+            "binding_cardinality": {"minimum": 1, "maximum": 1},
+            "metric_ref": "unknown-metric",
+        }],
+        "planned_metrics": [metric],
+    }) is False
+
+
 if __name__ == "__main__":
     tests = sorted((k, v) for k, v in globals().items() if k.startswith("test_") and callable(v))
     for name, fn in tests:
