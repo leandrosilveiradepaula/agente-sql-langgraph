@@ -85,7 +85,7 @@ def assess_tenant_semantic_candidate(
         or not isinstance(semantic_version, str)
         or not semantic_version.strip()
     ):
-        raise ValueError("UNTRUSTED_CUSTOMER_CONTEXT")
+        raise ValueError("UNTRUSTED_TENANT_CONTEXT")
     if (
         raw_context.get("tenant_id") != tenant_id
         or raw_context.get("semantic_agent_version") != semantic_version
