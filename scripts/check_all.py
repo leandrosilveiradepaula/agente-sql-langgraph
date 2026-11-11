@@ -50,6 +50,10 @@ STEPS = [
         [sys.executable, "testar_context_normalizer.py"],
     ),
     (
+        "testar_canonical_context_repository.py",
+        [sys.executable, "testar_canonical_context_repository.py"],
+    ),
+    (
         "testar_context_validator.py",
         [sys.executable, "testar_context_validator.py"],
     ),
