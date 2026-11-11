@@ -703,6 +703,70 @@ def test_invalid_structural_role_configuration_refuses_before_model():
             raise AssertionError("invalid structural role was tolerated")
 
 
+
+def test_unplannable_intent_does_not_disable_other_authorized_intents():
+    context = _physical_metric_context(include_unbacked=False)
+    second = deepcopy(context["intent_resolution"]["intent_catalog"][0])
+    second["intent_name"] = "unplannable_intent"
+    second["semantic_description"] = "A distinct candidate without metrics"
+    for concept in second["rules"][0]["concepts"]:
+        concept["terms"] = ["not_a_metric"]
+        concept["normalized_terms"] = ["not_a_metric"]
+    context["intent_resolution"]["intent_catalog"].append(second)
+    context["query_patterns"].append({
+        "intent_name": "unplannable_intent",
+        "required_tables": ["schema_test.fact_metrics"],
+    })
+    request = prepare_interpretation("Summarize a known measure", context)
+    assert [x["intent_name"] for x in request["allowed_intents"]] == [
+        "portable_intent"
+    ]
+    assert "unplannable_intent" not in repr(request)
+
+
+def test_analytical_operation_requires_real_metadata_before_provider():
+    context = _physical_metric_context(include_unbacked=False)
+    concept = {
+        "concept_name": "operation_signal",
+        "terms": ["highest", "invented_sort_direction"],
+        "normalized_terms": ["highest", "invented_sort_direction"],
+        "match_mode": "contains",
+        "minimum_term_matches": 1,
+    }
+    rule = context["intent_resolution"]["intent_catalog"][0]["rules"][0]
+    rule["concepts"].append(concept)
+    rule["minimum_concept_matches"] = 2
+    context["intent_resolution"]["config"]["concept_roles"][
+        "operation"
+    ] = ["operation_signal"]
+    request = prepare_interpretation("Which entries rank highest", context)
+    lexicon = {
+        x["concept_name"]: x["terms"]
+        for x in request["allowed_intents"][0]["concept_lexicon"]
+    }
+    assert lexicon["operation_signal"] == ["highest"]
+    assert lexicon["metric_signal"] == ["amount"]
+    assert "invented_sort_direction" not in repr(request)
+
+    # A second, physically conflicting definition under the same alias
+    # cannot be disambiguated by metadata priority or by the model.
+    alternate = next(
+        e for e in context["entities"]
+        if e.get("entity_type") == "analytical_operation"
+        and e.get("user_term") == "highest"
+    )
+    conflicting = deepcopy(alternate)
+    conflicting["business_rule"]["operation"]["direction"] = "ascending"
+    context["entities"].append(conflicting)
+    try:
+        prepare_interpretation("Which entries rank highest", context)
+    except SemanticIntentRejected as exc:
+        assert str(exc) == "catalog_no_grounded_intents"
+    else:
+        raise AssertionError("conflicting operation alias offered to model")
+
+
+
 if __name__ == "__main__":
     # The repository uses explicit script entrypoints, not pytest discovery.
     # Ensure this module actually runs in scripts/check_all.py and CI.
