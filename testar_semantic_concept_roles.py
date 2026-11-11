@@ -132,6 +132,45 @@ def test_no_role_does_not_guess_grouping_from_name() -> None:
     assert result["query_plan"]["planning_context"]["detected_dimensions"] == []
 
 
+
+def test_two_tenants_with_different_physical_schemas_and_concepts() -> None:
+    def rename(value, old, new):
+        if isinstance(value, dict):
+            return {k: rename(v, old, new) for k, v in value.items()}
+        if isinstance(value, list):
+            return [rename(v, old, new) for v in value]
+        return value.replace(old, new) if isinstance(value, str) else value
+
+    for concept_name, schema_name, table_name in (
+        ("dimension_grouping", "schema_test", "dim_region"),
+        ("allocation_axis", "erp_books", "cost_axis"),
+    ):
+        context = deepcopy(_dimension_context())
+        context = rename(context, "schema_test", schema_name)
+        context = rename(context, "dim_region", table_name)
+        context["intent_resolution"]["config"]["concept_roles"]["grouping"] = [concept_name]
+        for entry in context["intent_resolution"]["intent_catalog"]:
+            for rule in entry.get("business_rule", {}).get("intent_catalog", {}).get("rules", []):
+                for concept in rule.get("concepts", []):
+                    if concept.get("concept_name") == "dimension_grouping":
+                        concept["concept_name"] = concept_name
+        evidence = _intent_dimension_evidence(term="by region", matched_tokens=["region"])
+        item = evidence["best_candidate"]["matches"][0]["match_details"]["concepts"][0]
+        item["concept_name"] = concept_name
+        item["terms"][0]["match_details"]["semantic_signal"]["concept_name"] = concept_name
+        plan = build_query_plan(
+            context=context,
+            intent_name="generic_test_intent",
+            intent_confidence=0.98,
+            normalized_question="total amount across regions",
+            intent_resolution_result=evidence,
+        )
+        assert plan["status"] == "planned"
+        dimension = plan["query_plan"]["planning_context"]["detected_dimensions"][0]
+        assert dimension["target_table"] == schema_name + "." + table_name
+        assert dimension["target_column"] == "region_name"
+
+
 if __name__ == "__main__":
     tests = sorted((k, v) for k, v in globals().items() if k.startswith("test_") and callable(v))
     for name, fn in tests:
