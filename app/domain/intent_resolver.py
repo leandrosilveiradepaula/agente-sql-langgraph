@@ -19,6 +19,11 @@ from app.domain.context import (
     IntentSignalPolarity,
     IntentTokenFallbackConfig,
 )
+from app.domain.semantic_concept_roles import (
+    ConceptRoleConfigurationError,
+    role_concepts,
+    unknown_role_concepts,
+)
 from app.domain.search_text import (
     normalize_search_text,
     tokenize_search_text,
@@ -322,6 +327,12 @@ def resolve_intent(
         for index, signal in enumerate(raw_signals)
     ]
     catalog = _validated_catalog(raw_catalog)
+    try:
+        grouping_concepts = role_concepts(intent_resolution, "grouping")
+        if unknown_role_concepts(intent_resolution):
+            raise ConceptRoleConfigurationError("concept_role_unknown_concept")
+    except ConceptRoleConfigurationError as exc:
+        raise IntentResolverInputError(str(exc)) from exc
     negation_scope = _validated_negation_scope_config(
         config.get("negation_scope")
     )
@@ -392,6 +403,7 @@ def resolve_intent(
             normalized_question,
             entry,
             negated_terms=negated_terms,
+            grouping_concepts=grouping_concepts,
         )
         for entry in catalog
     ]
@@ -1342,12 +1354,14 @@ def _evaluate_catalog_entry(
     entry: IntentCatalogEntry,
     *,
     negated_terms: Mapping[str, set[str]] | None = None,
+    grouping_concepts: frozenset[str] = frozenset(),
 ) -> IntentCatalogEntryEvaluation:
     rule_evaluations = [
         _evaluate_catalog_rule(
             normalized_question,
             rule,
             negated_terms=negated_terms,
+            grouping_concepts=grouping_concepts,
         )
         for rule in entry["rules"]
     ]
@@ -1403,10 +1417,12 @@ def _evaluate_catalog_rule(
     rule: IntentCatalogRule,
     *,
     negated_terms: Mapping[str, set[str]] | None = None,
+    grouping_concepts: frozenset[str] = frozenset(),
 ) -> IntentCatalogRuleEvaluation:
     protected_token_indexes = _protected_dimension_token_indexes(
         normalized_question,
         rule["concepts"],
+        grouping_concepts=grouping_concepts,
     )
     concept_evaluations = [
         _evaluate_catalog_concept(
@@ -1414,6 +1430,7 @@ def _evaluate_catalog_rule(
             concept,
             protected_token_indexes=protected_token_indexes,
             negated_terms=negated_terms,
+            grouping_concepts=grouping_concepts,
         )
         for concept in rule["concepts"]
     ]
@@ -1616,6 +1633,7 @@ def _evaluate_catalog_concept(
     *,
     protected_token_indexes: set[int] | None = None,
     negated_terms: Mapping[str, set[str]] | None = None,
+    grouping_concepts: frozenset[str] = frozenset(),
 ) -> IntentCatalogConceptEvaluation:
     term_evaluations: list[IntentCatalogTermEvaluation] = []
     semantic_signals: list[SemanticSignal] = []
@@ -1643,8 +1661,8 @@ def _evaluate_catalog_concept(
                 normalized_term,
                 protected_token_indexes=(
                     protected
-                    if concept["concept_name"]
-                    != "dimension_grouping"
+                    if concept["concept_name"].casefold()
+                    not in grouping_concepts
                     else set()
                 ),
             )
@@ -1660,8 +1678,8 @@ def _evaluate_catalog_concept(
                     normalized_term,
                     protected_token_indexes=(
                         protected
-                        if concept["concept_name"]
-                        != "dimension_grouping"
+                        if concept["concept_name"].casefold()
+                        not in grouping_concepts
                         else set()
                     ),
                 )
@@ -1759,10 +1777,12 @@ def _requires_semantic_token_match(
 def _protected_dimension_token_indexes(
     normalized_question: str,
     concepts: list[IntentCatalogConcept],
+    *,
+    grouping_concepts: frozenset[str] = frozenset(),
 ) -> set[int]:
     protected: set[int] = set()
     for concept in concepts:
-        if concept["concept_name"] != "dimension_grouping":
+        if concept["concept_name"].casefold() not in grouping_concepts:
             continue
         for normalized_term in concept["normalized_terms"]:
             match_result = _match_catalog_term_semantically(
