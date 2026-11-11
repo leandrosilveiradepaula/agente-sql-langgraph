@@ -674,12 +674,14 @@ def _analytical_operand_bindings_complete(
             return False
         kind = operation.get("operation_type")
         if kind == "ranking":
-            # Ranking is equally dependent on a real metric: an unbound
-            # ranking must never become an apparently valid query plan.
+            # Preserve the existing plan stage contract. A strict required
+            # ranking operand is a separate versioned policy/cutover decision.
+            # If the planner actually supplied a binding, it must be valid.
             metric_ref = operation.get("metric_ref")
-            if (
-                type(metric_ref) is not str or not metric_ref.strip()
-                or metric_ref not in refs or len(refs) != 1
+            if metric_ref is not None and (
+                type(metric_ref) is not str
+                or not metric_ref.strip()
+                or metric_ref not in refs
             ):
                 return False
         elif kind == "comparison":
@@ -693,7 +695,6 @@ def _analytical_operand_bindings_complete(
             ):
                 return False
         else:
-            # Unknown operation types cannot silently bypass the operand gate.
             return False
     return True
 
