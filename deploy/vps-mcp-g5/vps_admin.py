@@ -109,7 +109,7 @@ def _job_dir(job_id: Any) -> Path:
 
 def _read_json(path: Path) -> dict[str, Any]:
     st = path.lstat()
-    if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o077:
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o077:
         raise Refused("private_state_permissions_invalid")
     if st.st_size > MAX_ARGV_BYTES + 4096:
         raise Refused("state_document_too_large")
