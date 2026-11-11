@@ -7,8 +7,17 @@ from app.domain.semantic_catalog_audit import audit_semantic_catalog
 from testar_planner import _metric_context, _append_metric_alias, _append_metric_binding
 
 
+def _base_context():
+    # Tests focus on physical metadata independently of role bindings.
+    # This legacy test fixture contains names not present in its synthetic
+    # intent catalog; role validation is tested separately below.
+    context = _metric_context()
+    context["intent_resolution"]["config"]["concept_roles"] = {}
+    return context
+
+
 def _tenant(*, schema: str, table: str, metric: str) -> dict:
-    context = deepcopy(_metric_context())
+    context = deepcopy(_base_context())
     # Changing all schema references is deliberate: the engine, not these
     # test values, is the product. No branches depend on client identity.
     def rewrite(value):
@@ -48,7 +57,7 @@ def test_two_distinct_tenants_use_identical_audit_code():
 
 
 def test_invalid_physical_metric_is_reported_without_leaking_metadata():
-    context = _metric_context()
+    context = _base_context()
     metric = next(e for e in context["entities"] if e["entity_type"] == "financial_metric")
     metric["target_column"] = "nonexistent_column"
     result = audit_semantic_catalog(context)
@@ -58,7 +67,7 @@ def test_invalid_physical_metric_is_reported_without_leaking_metadata():
 
 
 def test_ambiguous_aliases_require_review_not_priority_guess():
-    context = _metric_context()
+    context = _base_context()
     _append_metric_alias(
         context, user_term="amount", canonical_value="different_measure",
         metric_concept="different_measure",
@@ -70,7 +79,7 @@ def test_ambiguous_aliases_require_review_not_priority_guess():
 
 
 def test_valid_conditional_binding_does_not_claim_every_metric_complete():
-    context = _metric_context()
+    context = _base_context()
     _append_metric_binding(context, when_present=["approved_predicate"])
     result = audit_semantic_catalog(context)
     assert result["status"] == "INVENTORY_COMPLETE", result
@@ -80,7 +89,7 @@ def test_valid_conditional_binding_does_not_claim_every_metric_complete():
 
 
 def test_invalid_binding_and_missing_roles_are_fail_closed():
-    context = _metric_context()
+    context = _base_context()
     _append_metric_binding(context, when_present=["approved_predicate"])
     entity = context["entities"][-1]
     entity["target_column"] = "unknown_column"
@@ -96,7 +105,7 @@ def test_invalid_binding_and_missing_roles_are_fail_closed():
 
 
 def test_context_and_question_data_never_enter_reports():
-    context = _metric_context()
+    context = _base_context()
     context["secret_question"] = "confidential_question_marker"
     context["private_sql"] = "SELECT secret_text FROM vault"
     result = audit_semantic_catalog(context)
