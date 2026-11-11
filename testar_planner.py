@@ -176,7 +176,16 @@ def _context() -> dict:
                 "component": "generic_component",
             }
         },
-        "intent_resolution": {},
+        "intent_resolution": {
+            "config": {
+                "concept_roles": {
+                    "grouping": ["dimension_grouping"],
+                    "operation": ["analytical_operation"],
+                    "metric": ["financial_metric"],
+                    "period": ["period_reference", "explicit_period_reference"],
+                }
+            },
+        },
     }
 
 
