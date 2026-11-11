@@ -183,6 +183,7 @@ def build_generate_shadow_record(
     )
     langgraph_evidence = {
         "intent": state.get("intent"),
+        "semantic_interpretation_result": state.get("semantic_interpretation_result"),
         "plan": state.get("query_plan"),
         "generated_sql": generated_sql,
         "current_sql": current_sql,
@@ -469,6 +470,7 @@ def _lineage_from_state(state: Mapping[str, Any]) -> dict[str, Any]:
 def _provider_metadata(state: Mapping[str, Any]) -> dict[str, Any]:
     output: dict[str, Any] = {}
     for source in (
+        "semantic_interpretation_result",
         "sql_generation_result",
         "sql_repair_result",
         "generation_result",
