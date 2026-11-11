@@ -72,12 +72,15 @@ intenções, operações e esquemas físicos diferentes. Isso comprova o
 desacoplamento da transformação isolada, **não** a portabilidade operacional
 entre dois tenants reais nem paridade numérica.
 
-A primeira integração do interpretador foi adicionada à configuração privada
-OpenAI-compatible do Shadow e à porta opcional do LangGraph. Outros provedores
-podem implementar a mesma porta, mas **não** se deve inferir que Gemini está
-operacional neste novo estágio sem adaptador e teste explícitos.
-Seleções de LLM para geração e interpretação devem permanecer coerentes; não
-habilitar interpretações automáticas com outro modelo.
+A interpretação reutiliza a porta neutra `SemanticIntentInterpreter`.
+A branch inclui adaptadores offline-testados para **OpenAI-compatible** e
+**Gemini**, ambos baseados nos clientes já existentes; nenhum modelo ou
+provider adicional é ativado por default. Uma seleção explícita só é
+aceita quando `provider_key`, `model_key` e `config_version` coincidem
+integralmente com a identidade do interpretador configurado; sem coincidência
+o fallback rejeita e não chama provedor externo. Os adaptadores não provam
+disponibilidade real da LLM e a portabilidade entre múltiplos tenants reais
+ainda precisa de homologação.
 
 ### Gates antes de qualquer ativação
 
