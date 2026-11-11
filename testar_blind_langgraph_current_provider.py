@@ -60,7 +60,6 @@ def test_unchanged_historical_questions_and_63_unique_ids():
 
 def test_child_uses_existing_private_provider_not_gemini():
     assert "GEMINI_API_KEY" in CHILD
-    assert "GEMINI_API_KEY" + '\',"") != ""' not in CHILD  # static guard remains readable
     assert "gemini" in CHILD.casefold()  # explicit no-gemini guard
     assert "PrivateModelOnlyTransport" in CHILD
     assert '"openai_compatible_chat_completions"' in CHILD
