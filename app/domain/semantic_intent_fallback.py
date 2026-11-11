@@ -19,7 +19,7 @@ from app.domain.planner import (
     _qualified_table_name,
 )
 
-CONTRACT_VERSION = "semantic-intent-v2"
+CONTRACT_VERSION = "semantic-intent-v3"
 MAX_INTERPRETATION_REQUEST_BYTES = 65_536
 
 
@@ -153,6 +153,10 @@ def prepare_interpretation(
             "intent_name": name,
             "semantic_description": description,
             "allowed_concepts": sorted(available),
+            "literal_metric_concepts": sorted(
+                cname for cname in available
+                if cname.strip().casefold() in concept_roles.get("metric", set())
+            ),
             "concept_lexicon": [
                 {"concept_name": cname, "terms": sorted(lexicon[cname])}
                 for cname in sorted(available)
@@ -170,7 +174,10 @@ def prepare_interpretation(
             "concept_name and an EXACT catalog_term from that concept's "
             "concept_lexicon; the catalog_term may differ from the user quote. "
             "Never generate an alias or metric that is not present in the "
-            "catalog. Respect every required_concept_group. Return "
+            "catalog. For literal_metric_concepts the quote must be the "
+            "exact physically authorized metric alias in the question; "
+            "never infer an accounting meaning from unrelated words. "
+            "Respect every required_concept_group. Return "
             "insufficient if no authorized catalog term preserves the meaning. "
             "Return only JSON with exactly keys: status ('selected' or "
             "'insufficient'), intent_name (name or null), context_fingerprint "
@@ -378,6 +385,15 @@ def validate_interpretation(
             raise SemanticIntentRejected("provider_catalog_term_not_authorized")
         authorized_catalog_term = permitted_terms[normalized_catalog_term]
         normalized_span = normalize_search_text(span)
+        literal_metric_concepts = target.get("literal_metric_concepts", [])
+        if (
+            concept in literal_metric_concepts
+            and normalized_span != normalized_catalog_term
+        ):
+            # A model is not an authority to assign an unknown user phrase
+            # to an accounting metric. Tenant-approved synonyms must exist
+            # as physical aliases in the versioned catalog.
+            raise SemanticIntentRejected("provider_metric_alias_unverified")
         if not normalized_span or not re.search(
             r"(?<!\w)" + re.escape(normalized_span) + r"(?!\w)", question
         ):
