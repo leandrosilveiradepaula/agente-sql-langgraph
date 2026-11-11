@@ -58,6 +58,10 @@ STEPS = [
         [sys.executable, "testar_tenant_semantic_readiness.py"],
     ),
     (
+        "testar_physical_catalog_reader.py",
+        [sys.executable, "testar_physical_catalog_reader.py"],
+    ),
+    (
         "testar_context_validator.py",
         [sys.executable, "testar_context_validator.py"],
     ),
