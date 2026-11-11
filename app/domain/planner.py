@@ -1408,18 +1408,11 @@ def _grouping_terms_from_intent_evidence(
         return []
 
     selected_intent = intent_resolution_result.get("intent")
-    best_candidate = intent_resolution_result.get("best_candidate")
-    candidates: list[Any] = []
-    if isinstance(best_candidate, Mapping):
-        candidates.append(best_candidate)
-    candidates.extend(
-        candidate
-        for candidate in intent_resolution_result.get("candidates", [])
-        if isinstance(candidate, Mapping)
-        and (
-            selected_intent is None
-            or _same_text(candidate.get("intent_name"), selected_intent)
-        )
+    # Grouping must observe the same selected-intent boundary as metrics,
+    # operations and periods; never import a foreign best_candidate.
+    candidates = _selected_intent_candidates(
+        intent_resolution_result,
+        selected_intent=selected_intent,
     )
 
     matches: list[tuple[str, str]] = []
@@ -2452,6 +2445,18 @@ def _resolve_planned_metrics(
 
     if not legacy_candidates:
         return [], "invalid_metadata" if invalid_seen else "unresolved", {}
+    # Priority is not financial authorization. The same lexical alias may
+    # have multiple distinct physical metric meanings across tenants.
+    # Without explicit conditional bindings, no deterministic priority
+    # can choose the correct business metric.
+    distinct_refs = {
+        candidate["metric_ref"] for _priority, candidate in legacy_candidates
+    }
+    if len(distinct_refs) != 1:
+        raise PlanningRejection(
+            "PLANNING_METRIC_ALIAS_AMBIGUOUS",
+            "Alias semantico associado a multiplas metricas fisicas.",
+        )
     return [
         sorted(
             legacy_candidates,
@@ -3282,6 +3287,26 @@ def _resolve_analytical_operation(
         )
     if not candidates:
         return None
+    # Operation priority must not decide between incompatible analytical
+    # semantics. Equivalent duplicate alias records may still be deduped.
+    semantic_signatures = {
+        json.dumps(
+            {
+                key: value for key, value in candidate.items()
+                if key not in {
+                    "priority", "matched_user_term",
+                    "detection_source", "mapping_source",
+                }
+            },
+            sort_keys=True,
+        )
+        for _priority, candidate in candidates
+    }
+    if len(semantic_signatures) != 1:
+        raise PlanningRejection(
+            "PLANNING_OPERATION_ALIAS_AMBIGUOUS",
+            "Alias semantico associado a operacoes analiticas conflitantes.",
+        )
     return sorted(
         candidates,
         key=lambda item: (
