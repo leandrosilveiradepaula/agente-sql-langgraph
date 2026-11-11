@@ -122,4 +122,3 @@ inédito para um alias autorizado e sua vinculação física; os testes de
 segurança demonstram rejeição quando há alias inventado ou vínculo perdido.
 A prova não demonstra ainda qualidade no benchmark ou equivalência
 financeira, que exigem seus próprios gates.
-
