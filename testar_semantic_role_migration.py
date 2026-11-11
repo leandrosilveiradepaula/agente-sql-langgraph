@@ -345,6 +345,30 @@ def test_blind_audit_counts_each_structural_cause_once_per_case() -> None:
 
 
 
+
+def test_rejection_cause_extractor_handles_incomplete_diagnostics() -> None:
+    from app.domain.semantic_role_migration import _structural_rejection_causes
+
+    for shape in (
+        {"planned_metrics": [], "diagnostics": None},
+        {"planned_metrics": [], "diagnostics": {
+            "planned_metric_diagnostic": {
+                "binding_failures": None,
+                "unresolved_terms": [],
+            },
+        }},
+        {"planned_metrics": [], "diagnostics": {
+            "planned_metric_diagnostic": {
+                "binding_failures": [{
+                    "binding_diagnostics": [{"rejected": None}],
+                }],
+            },
+        }},
+    ):
+        assert "no_projected_metric" in _structural_rejection_causes(shape)
+
+
+
 if __name__ == "__main__":
     import inspect
     tests = sorted(
