@@ -349,12 +349,13 @@ def build_legacy_migration_inventory(
                 "match_class": label,
                 "business_equivalence": "NOT_ATTESTED",
             })
-    if len(nodes) != len(raw_nodes) or len(edges) != sum(
-        sum(len(d) for d in ports)
-        for ports_by_kind in connections.values()
-        for ports in ports_by_kind.values()
-        for d in ports
-    ):
+    expected_edges = sum(
+        len(destinations)
+        for channel_groups in connections.values()
+        for lanes in channel_groups.values()
+        for destinations in lanes
+    )
+    if len(nodes) != len(raw_nodes) or len(edges) != expected_edges:
         _deny("WORKFLOW_COVERAGE_INCOMPLETE")
     return {
         "contract": "n8n-g5-source-crosswalk-offline-v1",

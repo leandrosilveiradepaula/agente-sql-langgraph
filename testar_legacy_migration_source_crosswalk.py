@@ -175,6 +175,21 @@ def test_no_inference_from_absence_or_similar_words() -> None:
                for node in report["nodes"])
 
 
+
+
+def test_multiple_lanes_and_branches_are_all_accounted_for() -> None:
+    args = fixtures("many_branches")
+    names = [node["name"] for node in args["workflow"]["nodes"]]
+    args["workflow"]["connections"][names[0]]["main"].append([{
+        "node": names[2], "type": "main", "index": 0,
+    }])
+    args["workflow"]["connections"][names[0]]["main"][0].append({
+        "node": names[2], "type": "main", "index": 0,
+    })
+    report = build_legacy_migration_inventory(**args)
+    assert report["counts"]["edges"] == 4
+    assert report["counts"]["nodes"] == 3
+
 if __name__ == "__main__":
     tests = sorted(
         (name, func) for name, func in globals().items()
