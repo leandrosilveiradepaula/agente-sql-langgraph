@@ -248,6 +248,103 @@ def test_audit_counts_missing_operands_without_exposing_metric_identity() -> Non
     assert "metric_ref" not in repr(result)
 
 
+
+def test_rejection_cause_taxonomy_contains_only_platform_labels() -> None:
+    from app.domain.semantic_role_migration import _structural_rejection_causes
+
+    projection = {
+        "planned_metrics": [],
+        "diagnostics": {
+            "planned_metric_diagnostic": {
+                "unresolved_terms": ["confidential_customer_metric"],
+                "invalid_metadata_terms": ["private_schema.table"],
+                "binding_failures": [{
+                    "binding_diagnostics": [{
+                        "rejected": [
+                            {"reason": "when_present_missing",
+                             "missing_present": ["secret_business_concept"]},
+                            {"reason": "when_absent_present",
+                             "blocked_absent": ["other_private_concept"]},
+                        ],
+                    }],
+                }],
+                "binding_inference": {
+                    "status": "ambiguous_metric_concept",
+                    "candidate_metric_concepts": ["private_sensitivity"],
+                },
+            },
+            "analytical_operation_diagnostic": {
+                "unresolved_terms": ["private_operation_alias"],
+                "invalid_metadata_terms": ["private_operation_metadata"],
+                "dimension_compatibility": {"status": "unreachable",
+                                            "private_table": "top_secret"},
+            },
+        },
+    }
+    expected = {
+        "no_projected_metric",
+        "metric_alias_unresolved",
+        "metric_metadata_invalid",
+        "metric_binding_not_applicable_or_invalid",
+        "metric_concept_inference_ambiguous",
+        "binding_required_concept_missing",
+        "binding_forbidden_concept_present",
+        "operation_alias_unresolved",
+        "operation_metadata_invalid",
+        "comparison_dimension_incompatible",
+    }
+    actual = _structural_rejection_causes(projection)
+    assert set(actual) == expected
+    assert actual == sorted(actual)
+    rendered = repr(actual)
+    for private in (
+        "private", "secret", "schema", "table", "customer_metric",
+    ):
+        assert private not in rendered
+
+
+def test_blind_audit_counts_each_structural_cause_once_per_case() -> None:
+    from unittest.mock import patch
+    from app.domain import semantic_role_migration as migration
+
+    prepared = _prepare()
+    outputs = iter([
+        {"status": "planned", "query_plan": {"planning_context": {}}},
+        {"status": "rejected",
+         "error_code": "PLANNING_ANALYTICAL_BINDING_INCOMPLETE",
+         "projection": {
+             "planned_metrics": [],
+             "analytical_operations": [],
+             "diagnostics": {
+                 "planned_metric_diagnostic": {
+                     "unresolved_terms": ["confidential_input_one"],
+                     "binding_failures": [{
+                         "binding_diagnostics": [{
+                             "rejected": [{"reason": "when_present_missing",
+                                           "missing_present": ["secret_filter"]}],
+                         }],
+                     }],
+                 },
+             },
+         }},
+    ])
+    with patch.object(migration, "_safe_plan", side_effect=lambda *args: next(outputs)):
+        report = audit_role_migration_questions(
+            prepared, ["confidential_input_one"],
+        )
+    assert report["rejected_case_cause_counts"] == {
+        "binding_required_concept_missing": 1,
+        "metric_alias_unresolved": 1,
+        "metric_binding_not_applicable_or_invalid": 1,
+        "no_projected_metric": 1,
+    }
+    assert report["sql_executed"] is False
+    assert report["provider_calls"] == 0
+    assert "confidential_input_one" not in repr(report)
+    assert "secret_filter" not in repr(report)
+
+
+
 if __name__ == "__main__":
     import inspect
     tests = sorted(
