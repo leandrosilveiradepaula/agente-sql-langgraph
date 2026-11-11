@@ -58,6 +58,10 @@ STEPS = [
         [sys.executable, "testar_semantic_concept_roles.py"],
     ),
     (
+        "testar_semantic_role_migration.py",
+        [sys.executable, "testar_semantic_role_migration.py"],
+    ),
+    (
         "testar_p3_semantic_context_candidate.py",
         [sys.executable, "testar_p3_semantic_context_candidate.py"],
     ),
