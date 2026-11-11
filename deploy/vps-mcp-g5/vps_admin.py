@@ -18,6 +18,7 @@ import json
 import os
 from pathlib import Path
 import re
+import resource
 import stat
 import subprocess
 import sys
@@ -36,7 +37,7 @@ MAX_ARGV_BYTES = 12000
 MAX_ARG_COUNT = 64
 MAX_SYNC_TIMEOUT = 120
 MAX_JOB_TIMEOUT = 14400
-MAX_LOG_BYTES = 128 * 1024
+MAX_LOG_BYTES = 16 * 1024 * 1024
 MAX_RETURN_CHARS = 5000
 JOB_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
@@ -176,6 +177,10 @@ def _tail(path: Path) -> tuple[str, bool]:
     return msg, clipped or size > MAX_RETURN_CHARS
 
 
+def _limit_output_file_size() -> None:
+    resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_LOG_BYTES, MAX_LOG_BYTES))
+
+
 def _execute(argv: list[str], cwd: str, timeout: int, *, output_path: Path) -> tuple[int | None, str]:
     try:
         with output_path.open("xb") as output:
@@ -184,6 +189,7 @@ def _execute(argv: list[str], cwd: str, timeout: int, *, output_path: Path) -> t
                 argv, cwd=cwd, env=EXEC_ENV, stdin=subprocess.DEVNULL,
                 stdout=output, stderr=subprocess.STDOUT,
                 timeout=timeout, check=False, shell=False,
+                preexec_fn=_limit_output_file_size,
             )
         return result.returncode, "completed"
     except subprocess.TimeoutExpired:
