@@ -25,6 +25,8 @@ from app.ports.semantic_intent_interpreter import SemanticIntentInterpreter
 
 def create_semantic_classification_node(
     interpreter: SemanticIntentInterpreter | None,
+    *,
+    interpreter_identity: Mapping[str, str] | None = None,
 ) -> Callable[[GraphState], GraphState]:
     def classify(state: GraphState) -> GraphState:
         original = classify_intent(state)
@@ -41,11 +43,25 @@ def create_semantic_classification_node(
             policy = versioned_policy(context)
             if policy is None:
                 return original
-            # An explicit per-request LLM override may select a different
-            # generator. Never perform interpretation under a different
-            # default model identity; a matching registry is needed first.
-            if state.get("llm_selection"):
-                raise SemanticIntentRejected("explicit_model_selection_unattested")
+            # An explicit selection must match the interpreter's configured
+            # provider, model and config version. Never silently use a
+            # different default model for semantic interpretation.
+            selection = state.get("llm_selection")
+            if selection:
+                required = {"provider_key", "model_key", "config_version"}
+                if (
+                    not isinstance(selection, Mapping)
+                    or set(selection) != required
+                    or interpreter_identity is None
+                    or set(interpreter_identity) != required
+                    or any(
+                        not isinstance(selection[key], str)
+                        or not isinstance(interpreter_identity[key], str)
+                        or selection[key] != interpreter_identity[key]
+                        for key in required
+                    )
+                ):
+                    raise SemanticIntentRejected("semantic_model_selection_mismatch")
             if interpreter is None:
                 raise RuntimeError("semantic_interpreter_unavailable")
             request = prepare_interpretation(str(state.get("question") or ""), context)
