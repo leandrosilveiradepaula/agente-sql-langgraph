@@ -24,7 +24,7 @@ from app.domain.context_normalizer import (
 from app.domain.context_validator import validate_context_snapshot
 from app.ports.context_repository import ContextRepositoryError
 
-_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _TENANT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 # A stable platform contract, not the schema of any customer's accounting DB.
@@ -115,14 +115,14 @@ class CanonicalContextRepository:
                         },
                     )
                     row = cursor.fetchone()
-        except psycopg.Error as exc:
+        except psycopg.Error:
             raise ContextRepositoryError(
                 "Falha ao consultar o catálogo semântico autorizado."
-            ) from exc
-        except Exception as exc:
+            ) from None
+        except Exception:
             raise ContextRepositoryError(
                 "Catálogo semântico indisponível."
-            ) from exc
+            ) from None
         if (
             not isinstance(row, Mapping)
             or type(row.get("matching_rows")) is not int
@@ -135,10 +135,10 @@ class CanonicalContextRepository:
         if isinstance(raw, str):
             try:
                 raw = json.loads(raw)
-            except (ValueError, TypeError) as exc:
+            except (ValueError, TypeError):
                 raise ContextRepositoryError(
                     "Snapshot do catálogo inválido."
-                ) from exc
+                ) from None
         if not isinstance(raw, Mapping):
             raise ContextRepositoryError("Snapshot do catálogo inválido.")
         if (
@@ -152,10 +152,10 @@ class CanonicalContextRepository:
             )
         try:
             snapshot = normalize_context_snapshot(raw)
-        except (ContextNormalizationError, TypeError, ValueError) as exc:
+        except (ContextNormalizationError, TypeError, ValueError):
             raise ContextRepositoryError(
                 "Falha na normalização do contexto semântico."
-            ) from exc
+            ) from None
         if snapshot["fingerprint"] != self._expected_fingerprint:
             raise ContextRepositoryError(
                 "Fingerprint do contexto não corresponde ao aprovado."

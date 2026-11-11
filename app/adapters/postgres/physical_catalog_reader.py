@@ -13,7 +13,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _MAX_SCHEMAS = 32
 _MAX_COLUMNS = 65536
 _DISCOVERY_QUERY = """
@@ -42,6 +42,8 @@ class PostgresPhysicalCatalogReader:
     ) -> None:
         if not isinstance(dsn, str) or not dsn.strip():
             raise ValueError("Credencial de leitura de metadados ausente.")
+        if isinstance(allowed_schemas, (str, bytes)):
+            raise ValueError("Lista de schemas autorizados inválida.")
         schemas = list(allowed_schemas)
         if (
             not 1 <= len(schemas) <= _MAX_SCHEMAS

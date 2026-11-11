@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 from app.domain.context_normalizer import (
@@ -19,7 +19,7 @@ from app.domain.context_normalizer import (
 )
 from app.domain.context_validator import validate_context_snapshot
 
-_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _MAX_TABLES = 2048
 _MAX_COLUMNS = 2048
 _FIELD_CLASSES = ("primary_key", "key_columns", "metric_columns", "date_columns")
