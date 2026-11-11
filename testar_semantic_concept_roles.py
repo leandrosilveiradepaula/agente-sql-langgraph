@@ -171,6 +171,64 @@ def test_two_tenants_with_different_physical_schemas_and_concepts() -> None:
         assert dimension["target_column"] == "region_name"
 
 
+
+def test_metric_and_operation_roles_port_across_client_vocabularies() -> None:
+    from testar_planner import _metric_context, _intent_metric_evidence
+
+    for operation_concept, metric_concept in (
+        ("analytical_operation", "financial_metric"),
+        ("measure_aggregation", "book_value"),
+    ):
+        context = deepcopy(_metric_context())
+        context["intent_resolution"]["config"]["concept_roles"].update({
+            "operation": [operation_concept],
+            "metric": [metric_concept],
+        })
+        evidence = _intent_metric_evidence(
+            term="amount", operation_term="highest",
+        )
+        for concept in evidence["best_candidate"]["matches"][0]["match_details"]["concepts"]:
+            if concept["concept_name"] == "analytical_operation":
+                concept["concept_name"] = operation_concept
+            elif concept["concept_name"] == "financial_metric":
+                concept["concept_name"] = metric_concept
+            for term in concept.get("terms", []):
+                term["match_details"]["semantic_signal"]["concept_name"] = concept["concept_name"]
+        result = build_query_plan(
+            context=context,
+            intent_name="generic_test_intent",
+            intent_confidence=0.98,
+            normalized_question="highest amount by region",
+            intent_resolution_result=evidence,
+        )
+        assert result["status"] == "planned"
+        projection = result["query_plan"]["planning_context"]
+        assert len(projection["planned_metrics"]) == 1
+        assert len(projection["analytical_operations"]) == 1
+        assert projection["analytical_operations"][0]["operation_type"] == "ranking"
+
+
+def test_missing_roles_never_infer_metric_or_operation_from_concept_name() -> None:
+    from testar_planner import _metric_context, _intent_metric_evidence
+
+    context = deepcopy(_metric_context())
+    del context["intent_resolution"]["config"]["concept_roles"]["metric"]
+    del context["intent_resolution"]["config"]["concept_roles"]["operation"]
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="highest amount",
+        intent_resolution_result=_intent_metric_evidence(
+            term="amount", operation_term="highest",
+        ),
+    )
+    assert result["status"] == "planned"
+    projection = result["query_plan"]["planning_context"]
+    assert projection["planned_metrics"] == []
+    assert projection["analytical_operations"] == []
+
+
 if __name__ == "__main__":
     tests = sorted((k, v) for k, v in globals().items() if k.startswith("test_") and callable(v))
     for name, fn in tests:
