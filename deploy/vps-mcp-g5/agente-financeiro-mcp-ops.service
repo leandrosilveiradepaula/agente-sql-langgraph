@@ -20,6 +20,7 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/docker/agente-sql-langgraph-repo
 ReadWritePaths=/root/.local/share/agente-sql-langgraph/benchmark-private
+ReadWritePaths=/var/lib/agente-financeiro-mcp-admin
 PrivateTmp=yes
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
