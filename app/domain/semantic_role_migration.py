@@ -219,6 +219,7 @@ def audit_role_migration_questions(
     rejection_codes: dict[str, int] = {}
     changed_fields: dict[str, int] = {}
     missing_operand_operations: dict[str, int] = {}
+    rejected_case_cause_counts: dict[str, int] = {}
     projected_fields = (
         "detected_dimensions",
         "planned_metrics",
@@ -258,6 +259,10 @@ def audit_role_migration_questions(
             # questions, tenant tables, aliases, metrics or binding names.
             projection = new_plan.get("projection")
             if isinstance(projection, Mapping):
+                for cause in _structural_rejection_causes(projection):
+                    rejected_case_cause_counts[cause] = (
+                        rejected_case_cause_counts.get(cause, 0) + 1
+                    )
                 metrics = projection.get("planned_metrics")
                 operations = projection.get("analytical_operations")
                 if isinstance(metrics, list) and isinstance(operations, list):
@@ -339,11 +344,68 @@ def audit_role_migration_questions(
         "incomplete_analytical_operand_counts": dict(
             sorted(missing_operand_operations.items())
         ),
+        "rejected_case_cause_counts": dict(
+            sorted(rejected_case_cause_counts.items())
+        ),
         "sql_generated": False,
         "sql_executed": False,
         "provider_calls": 0,
         "automated_activation_authorized": False,
     }
+
+
+def _structural_rejection_causes(projection: Mapping[str, Any]) -> list[str]:
+    """Privacy-safe structural failure classes, counted once per rejected case.
+
+    No labels, questions, SQL, names of tenant tables or metric aliases leave
+    this function. Multiple causes can coexist in the same rejected case.
+    """
+    found: set[str] = set()
+    metrics = projection.get("planned_metrics")
+    if isinstance(metrics, list) and not metrics:
+        found.add("no_projected_metric")
+    diagnostics = projection.get("diagnostics")
+    if not isinstance(diagnostics, Mapping):
+        return sorted(found)
+    metric = diagnostics.get("planned_metric_diagnostic")
+    if isinstance(metric, Mapping):
+        if metric.get("unresolved_terms"):
+            found.add("metric_alias_unresolved")
+        if metric.get("invalid_metadata_terms"):
+            found.add("metric_metadata_invalid")
+        if metric.get("binding_failures"):
+            found.add("metric_binding_not_applicable_or_invalid")
+        inference = metric.get("binding_inference")
+        if isinstance(inference, Mapping) and inference.get("status") == (
+            "ambiguous_metric_concept"
+        ):
+            found.add("metric_concept_inference_ambiguous")
+        for failure in metric.get("binding_failures", []):
+            if not isinstance(failure, Mapping):
+                continue
+            for diagnostic in failure.get("binding_diagnostics", []):
+                if not isinstance(diagnostic, Mapping):
+                    continue
+                for rejected in diagnostic.get("rejected", []):
+                    if not isinstance(rejected, Mapping):
+                        continue
+                    reason = rejected.get("reason")
+                    if reason == "when_present_missing":
+                        found.add("binding_required_concept_missing")
+                    elif reason == "when_absent_present":
+                        found.add("binding_forbidden_concept_present")
+    analytical = diagnostics.get("analytical_operation_diagnostic")
+    if isinstance(analytical, Mapping):
+        if analytical.get("unresolved_terms"):
+            found.add("operation_alias_unresolved")
+        if analytical.get("invalid_metadata_terms"):
+            found.add("operation_metadata_invalid")
+        dimension = analytical.get("dimension_compatibility")
+        if isinstance(dimension, Mapping) and dimension.get("status") not in (
+            "passed", "not_applicable", None
+        ):
+            found.add("comparison_dimension_incompatible")
+    return sorted(found)
 
 
 def _safe_plan(
