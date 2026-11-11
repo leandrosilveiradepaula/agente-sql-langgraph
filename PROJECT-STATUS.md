@@ -1,3 +1,9 @@
+# 2026-11-11 — CAPACIDADE GENÉRICA DE CONFIGURAÇÃO POR TENANT (PR #233 DRAFT)
+
+**Implementado e testado offline, sem ativação:** adapter de descoberta física PostgreSQL read-only em `information_schema.columns`; pré-validação de semântica versus tabelas/colunas autorizadas; loader JSONB de contexto canônico com tenant/versão/fingerprint e aprovação; seleção desse loader via variáveis de deploy, preservando modo antigo como default. Testes com dois clientes de esquemas distintos, recusando alias/tabelas/colunas inventados. Ver `docs/architecture/GENERIC-CUSTOMER-SEMANTIC-ONBOARDING.md`. Isso ainda não extrai integralmente o conhecimento contábil G5 cifrado, nem comprova homologação multicliente, versionamento publicado, UI de onboarding, rotas de execução n8n ou paridade financeira. **Benchmark 63 casos somente avaliação posterior.** Nenhuma modificação em produção/n8n/banco; merge humano pendente.
+
+---
+
 # 11/11/2026 — MATRIZ DE 14 CAPACIDADES E DÍVIDAS DE PORTABILIDADE
 
 Adicionada `docs/audits/LEGACY-N8N-LANGGRAPH-CAPABILITY-GAP-20261111.md`: 14 capacidades inventariadas n8n→Produto/LangGraph, status verdadeiro do código, provas pendentes e source gate. Scan seguro 41 Code nodes (14.440 linhas JS, 3.403 literais) preservado com hash; **nem literais nem coocorrências são regras contábeis atestadas**. Portabilidade requer resolver adapter com defaults DuckLake/DRE e vínculo de contexto versionado por tenant. G5 cifrado e SOURCE inativo ainda impedem avaliação completa dos 11 pacotes. Os 63 casos são somente controle posterior de qualidade, sem alimentar gerador. Nenhuma mudança de dados, n8n, permissões, credenciais, runtime ou cutover.

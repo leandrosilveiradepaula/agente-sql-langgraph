@@ -53,3 +53,18 @@ Consultar `docs/operations/LEGACY-N8N-DATABASE-MIGRATION-MAP.md` para o backlog 
 - O adaptador PostgreSQL atual do LangGraph recebe DSN/schema/version por injeção e permite catálogo configurado, mas mantém template compatível com nomes DuckLake, projeção de DRE tipada e leitura `load_active_context(user_profile)` que ignora o perfil ao consultar. Prova de routing do tenant ao adaptador e portabilidade de esquemas/colunas materialmente distintos permanece pendente. São pontos do porting e não autorização para if por cliente.
 - O leitor de contexto legado contém `sql_patterns`; os 106 SQL patterns históricos G5 são **apenas avaliação**, nunca contexto do gerador. Não misturar essa coleção criptografada com padrões estruturais novos autorizados.
 - SOURCE Supabase inativo, pacotes G5 cifrados separados por 11 versões; análises das linhas contábeis originais exigem **desbloqueio seguro em TTY, sem senha em chat/arquivo/env/log**. Inventário do conteúdo integral ainda não foi realizado. n8n e Shadow não foram modificados, SQL financeira real segue false.
+
+## 2026-11-11 — Caminho de onboarding sem hardcode implementado na PR #233
+
+**Decisão do operador:** migrar a inteligência financeira real do legado n8n (68 nós) e G5 para n8n+LangGraph, mas o motor deve atender clientes com qualquer nomenclatura/esquema mediante configurações, acesso e definições fornecidas/validadas. **Nenhum hardcode de cliente no código**; as 63 perguntas históricas **somente controle de qualidade posterior**.
+
+**Implementação nesta branch ainda sem merge/cutover:** 
+- `app/adapters/postgres/physical_catalog_reader.py` inspeciona apenas `information_schema.columns` em transação READ ONLY e lista explícita de schemas, sem ler dados financeiros;
+- `app/domain/tenant_semantic_readiness.py` faz pré-validação física sem inferir semântica, nunca promove mapeamento automaticamente;
+- `app/adapters/postgres/canonical_context_repository.py` carrega JSONB de contexto versionado, já aprovado, vinculado a tenant/versão/fingerprint e exclusivo de SQL de avaliação;
+- `app/config/postgres_context.py` e `app/bootstrap.py` habilitam modo `canonical_snapshot` por configuração autenticada mantendo `legacy_tables` como default;
+- `docs/architecture/GENERIC-CUSTOMER-SEMANTIC-ONBOARDING.md` descreve pré-requisitos por cliente, publicação governada e lacunas.
+
+**Testes isolados:** 4+6+8 novos com dois esquemas sintéticos materialmente distintos; regressão legada do repositório/config/bootstrap; container efêmero sem rede e testado em usuário não-root, removido depois. **Não provam clientes reais, publicação, autorização per-request, paridade financeira ou cutover.**
+
+**Gates inalterados:** n8n oficial preservado, Shadow sem execução real; nenhum SQL financeiro, banco, produção, credencial, contexto ativo, merge ou migração alterados. Próxima entrega de produto: ler o conteúdo cifrado G5 com custódia adequada, externalizar cada regra do legado e provar contextos reais, roteamento tenant, aprovações e paridade antes de substituir inteligência n8n.
