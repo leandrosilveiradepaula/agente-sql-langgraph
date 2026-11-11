@@ -78,6 +78,10 @@ def test_reports_only_aggregates_and_never_leaks_questions_or_sql() -> None:
     for text in ("análise genérica", "unrelated question", "codigo ab", "select"):
         assert text not in rendered
     assert result["candidate_fingerprint"] != result["source_fingerprint"]
+    assert result["source_catalog_audit"]["automated_activation_authorized"] is False
+    assert result["candidate_catalog_audit"]["automated_activation_authorized"] is False
+    assert result["source_catalog_audit"]["provider_calls"] == 0
+    assert result["candidate_catalog_audit"]["sql_executed"] is False
     assert result["planned_to_rejected"] >= 0
     assert result["rejected_to_planned"] >= 0
     assert result["planned_projection_changes"] >= 0
