@@ -85,7 +85,12 @@ def _resolver_config_rule() -> dict:
             "applied_confidence": 0.98,
             "fallback_to_previous_intent": False,
             "token_fallback": {"enabled": False},
-            "concept_roles": {"grouping": ["dimension_grouping"]},
+            "concept_roles": {
+                "grouping": ["dimension_grouping"],
+                "operation": ["analytical_operation"],
+                "metric": ["financial_metric"],
+                "period": ["period_reference", "explicit_period_reference"],
+            },
         },
         "applies_to_intents": [],
         "validation_hint": None,
