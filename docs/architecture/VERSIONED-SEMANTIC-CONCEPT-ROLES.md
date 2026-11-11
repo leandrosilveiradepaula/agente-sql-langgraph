@@ -167,3 +167,27 @@ de negócio pré-configurados no código.
 Esses gates foram validados por testes e no snapshot privado em memória.
 O diagnóstico anterior de migração permanece `REVIEW_REQUIRED`:
 não são autorizados reparos automáticos de métricas ou alterações de produção.
+
+
+## Gate de integridade de interpretação na saída do planejamento
+
+`app/domain/semantic_plan_gate.py` valida **somente** os casos cuja
+classificação utilizou o interpretador opcional (`semantic_interpretation_selected`).
+Ele extrai os aliases declarados na evidência, resolve seu papel por
+`intent_resolution.config.concept_roles` e exige que permaneçam nas
+projeções físicas já autorizadas (`planned_metrics`,
+`analytical_operations`, `detected_dimensions`). Referências temporais
+exigem evidência de projeção temporal ou filtros e não devem ganhar datas
+inferidas. O código aceita os formatos de evidência do resolvedor legado
+(`semantic_signal`) e do interpretador (`semantic_signals`) sem descartar
+nenhum deles.
+
+Quando a interpretação não tem papel utilizável ou o plano perde algum
+binding, `build_plan` retorna `PLANNING_SEMANTIC_BINDING_INCOMPLETE`,
+sem SQL e com o nome estrutural do papel ausente, jamais dados do cliente.
+Não afeta a validação de perguntas atendidas pelo classificador
+determinístico.
+
+Esta proteção é complementar, não substitui a checagem da cardinalidade
+e das relações entre operações e métricas. Os mapeamentos contábeis ainda
+precisam ser definidos pelo contexto autorizado de cada tenant.
