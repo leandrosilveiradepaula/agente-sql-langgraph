@@ -122,3 +122,32 @@ inédito para um alias autorizado e sua vinculação física; os testes de
 segurança demonstram rejeição quando há alias inventado ou vínculo perdido.
 A prova não demonstra ainda qualidade no benchmark ou equivalência
 financeira, que exigem seus próprios gates.
+
+## Grounding físico antes da chamada ao modelo (sem vínculo inventado)
+
+Quando a configuração versionada declara os papéis estruturais `metric`
+ou `operation`, o projetor do contexto apresentado à LLM só mantém os
+aliases do léxico de intenções que correspondem a entidades de métrica/
+operação efetivamente autorizadas no catálogo do próprio tenant. A
+verificação reutiliza os validadores físicos do planejador; não envia nomes
+de tabelas, colunas nem SQL ao modelo.
+
+Aliases de métricas com destinos físicos diferentes ou de operações com
+significados incompatíveis **não são oferecidos**. Registros equivalentes
+continuam utilizáveis. Um conceito obrigatório sem alias comprovado
+torna aquela intenção indisponível; as demais intenções válidas permanecem
+selecionáveis. Se nenhuma intenção subsistir, o fallback recusa a solicitação
+**antes de consumir tokens**. Isso não altera os thresholds existentes nem
+cria respostas tabeladas.
+
+O uso de um alias fisicamente válido **não garante que seus bindings
+condicionais sejam aplicáveis** à pergunta. A cardinalidade, filtros,
+períodos, joins e permissões continuam sujeitos aos gates posteriores.
+Sinônimos ausentes ou semanticamente incertos devem ser confirmados e
+versionados pelo domínio financeiro do cliente, nunca associados pelo
+benchmark ou por suposição da LLM.
+
+Os testes usam dois contextos sintéticos de esquemas e métricas diferentes,
+intenção parcialmente indisponível, alias ambíguo e falta de coluna física.
+São verificações offline, sem SQL financeira, rede ou chamada real ao modelo.
+
