@@ -2,8 +2,8 @@
 """Root-owned, local-only capability broker for the private MCP service.
 
 Linux SO_PEERCRED restricts requests to the non-root agente-mcp identity.
-Only fixed infrastructure diagnostics and an exact, inactive evidence relay
-import are available. No shell execution, database queries or dynamic targets.
+Legacy fixed diagnostics remain available. The administrator-approved
+execution operations are authenticated via SO_PEERCRED, bounded, and audited.
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 from benchmark_ops import repo_sync, benchmark_plan, benchmark_recover, benchmark_status
+import vps_admin
 from crypto_j1_readonly import timer_status as cia_timer_status, journal_summary as cia_journal_summary, sqlite_audit_via_owner as cia_sqlite_audit
 
 SOCKET = Path("/run/agente-financeiro-mcp/operations.sock")
@@ -29,7 +30,8 @@ SHADOW = "agente-sql-langgraph-shadow-test-langgraph-shadow-test-1"
 KNOWN_WEBHOOKS = ("langgraph-shadow-parallel-v1", "langgraph-shadow-evidence-v1")
 ALLOWLIST = {"revision", "runtime_status", "n8n_inventory", "import_evidence", "audit_evidence",
              "repo_sync", "benchmark_plan", "benchmark_recover", "benchmark_status",
-             "cia_timer", "cia_journal", "cia_sqlite"}
+             "cia_timer", "cia_journal", "cia_sqlite",
+             "admin_exec", "admin_start", "admin_status", "admin_cancel"}
 ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
@@ -38,7 +40,7 @@ class Blocked(Exception):
 
 
 def _run(argv: list[str], timeout: int = 20, stdin: str | None = None) -> str:
-    """Fixed argv only. Never put user-provided text in a command, even quoted."""
+    """Fixed argv executor used by the legacy diagnostic operations only."""
     try:
         result = subprocess.run(
             argv, input=stdin, capture_output=True, text=True, timeout=timeout,
@@ -202,9 +204,27 @@ def _audit_evidence() -> dict[str, object]:
             "financial_sql_executed": False}
 
 
-def dispatch(op: str, expected_sha: str | None = None) -> dict[str, object]:
+def dispatch(op: str, expected_sha: str | None = None,
+             params: dict[str, object] | None = None) -> dict[str, object]:
     if op not in ALLOWLIST:
         return {"status": "rejected", "reason": "operation_not_allowed"}
+    if op in {"admin_exec", "admin_start", "admin_status", "admin_cancel"}:
+        payload = params if isinstance(params, dict) else {}
+        expected = {
+            "admin_exec": {"argv", "cwd", "timeout_seconds", "show_output"},
+            "admin_start": {"argv", "cwd", "timeout_seconds"},
+            "admin_status": {"job_id", "show_output"},
+            "admin_cancel": {"job_id"},
+        }[op]
+        if set(payload) != expected:
+            return {"status": "blocked", "reason": "admin_arguments_invalid"}
+        if op == "admin_exec":
+            return vps_admin.execute(**payload)
+        if op == "admin_start":
+            return vps_admin.start(**payload)
+        if op == "admin_status":
+            return vps_admin.status(**payload)
+        return vps_admin.cancel(**payload)
     if op == "cia_timer":
         return cia_timer_status()
     if op == "cia_journal":
@@ -243,19 +263,25 @@ class Handler(socketserver.StreamRequestHandler):
             if peer[1] != pwd.getpwnam("agente-mcp").pw_uid:
                 return
             self.request.settimeout(3750)
-            raw = self.rfile.readline(1025)
-            if len(raw) > 1024 or not raw.endswith(b"\n"):
+            raw = self.rfile.readline(16385)
+            if len(raw) > 16384 or not raw.endswith(b"\n"):
                 return
             req = json.loads(raw)
             if not isinstance(req, dict) or not isinstance(req.get("op"), str):
                 return
             op = req["op"]
-            if set(req) != ({"op", "expected_sha"} if op == "repo_sync" else {"op"}):
+            expected_fields = ({"op", "expected_sha"} if op == "repo_sync" else
+                               {"op", "argv", "cwd", "timeout_seconds", "show_output"} if op == "admin_exec" else
+                               {"op", "argv", "cwd", "timeout_seconds"} if op == "admin_start" else
+                               {"op", "job_id", "show_output"} if op == "admin_status" else
+                               {"op", "job_id"} if op == "admin_cancel" else {"op"})
+            if set(req) != expected_fields:
                 return
-            result = dispatch(op, req.get("expected_sha"))
+            params = {k: v for k, v in req.items() if k not in ("op", "expected_sha")}
+            result = dispatch(op, req.get("expected_sha"), params)
             print("mcp_op=" + (op if op in ALLOWLIST else "rejected") +
                   " status=" + str(result.get("status", "ok")), flush=True)
-            data = json.dumps(result, separators=(",", ":")).encode("ascii") + b"\n"
+            data = json.dumps(result, ensure_ascii=True, separators=(",", ":")).encode("ascii") + b"\n"
             self.wfile.write(data[:16384])
         except (OSError, ValueError, json.JSONDecodeError):
             pass
