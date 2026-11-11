@@ -938,6 +938,26 @@ def project_planning_context(
             "context deve ser um objeto canonico."
         )
 
+    # Never plan any table without an explicit tenant schema scope.
+    # This runtime boundary also protects direct planner callers which have
+    # not passed through context validation, including optional LLM paths.
+    schema_scope = context.get("allowed_schemas")
+    if (
+        not isinstance(schema_scope, list)
+        or not schema_scope
+        or any(
+            not isinstance(schema, str) or not schema.strip()
+            for schema in schema_scope
+        )
+    ):
+        raise PlanningRejection(
+            "PLANNING_SCHEMA_SCOPE_INVALID",
+            "Escopo de schemas autorizados ausente ou invalido.",
+        )
+    authorized_schemas = {
+        schema.strip().casefold() for schema in schema_scope
+    }
+
     required_rules, missing_rules = _project_rules(
         context.get("rules", []),
         intent_name=intent_name,
@@ -1003,6 +1023,44 @@ def project_planning_context(
         raise PlanningRejection(
             "PLANNING_REQUIRED_TABLE_NOT_FOUND",
             "Uma ou mais tabelas requeridas pelo padrao nao existem.",
+        )
+
+    # Catalog presence is not permission. A dimension or pattern may
+    # reference a real table belonging to another allowed-catalog schema,
+    # but it must never cross the tenant's active authorization boundary.
+    if any(
+        table["schema_name"].strip().casefold() not in authorized_schemas
+        for table in required_tables
+    ):
+        raise PlanningRejection(
+            "PLANNING_TABLE_SCHEMA_UNAUTHORIZED",
+            "Tabela requerida fora do escopo autorizado para consulta.",
+        )
+
+    # An entity alias cannot authorize a column absent from the physical
+    # catalog, and key_columns alone are not evidence that a column exists.
+    # Fail before constructing a plan that could reach SQL generation.
+    catalog_columns = {
+        table["qualified_name"].casefold(): {
+            column["name"].strip().casefold()
+            for column in table.get("columns", [])
+            if isinstance(column, Mapping)
+            and isinstance(column.get("name"), str)
+            and column["name"].strip()
+        }
+        for table in required_tables
+    }
+    if any(
+        not isinstance(dim.get("target_table"), str)
+        or not isinstance(dim.get("target_column"), str)
+        or dim["target_column"].strip().casefold() not in catalog_columns.get(
+            dim["target_table"].strip().casefold(), set()
+        )
+        for dim in dimension_projection
+    ):
+        raise PlanningRejection(
+            "PLANNING_DIMENSION_TARGET_INVALID",
+            "Dimensao sem tabela e coluna fisica autorizada.",
         )
 
     table_names = {

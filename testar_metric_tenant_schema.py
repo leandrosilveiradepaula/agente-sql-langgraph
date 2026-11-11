@@ -213,6 +213,135 @@ def test_valid_explicit_metric_plans_with_runtime_acl():
     assert result["query_plan"]["planning_context"]["planned_metrics"]
 
 
+def test_planner_rejects_required_tables_outside_tenant_schema():
+    from testar_planner import _dimension_context, _intent_dimension_evidence
+    context = _dimension_context()
+    evidence = _intent_dimension_evidence(
+        term="by region", matched_tokens=["region"],
+    )
+    args = {
+        "intent_name": "generic_test_intent",
+        "intent_confidence": 0.98,
+        "normalized_question": "total amount across regions",
+        "intent_resolution_result": evidence,
+    }
+    assert build_query_plan(context=context, **args)["status"] == "planned"
+    context["allowed_schemas"] = ["another_tenant"]
+    result = build_query_plan(context=context, **args)
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "PLANNING_TABLE_SCHEMA_UNAUTHORIZED"
+    assert result["query_plan"] is None
+
+
+def test_planner_rejects_empty_or_malformed_tenant_scope():
+    from testar_planner import _dimension_context, _intent_dimension_evidence
+    context = _dimension_context()
+    evidence = _intent_dimension_evidence(
+        term="by region", matched_tokens=["region"],
+    )
+    for invalid in (None, [], "schema_test", ["schema_test", None], [""]):
+        candidate = deepcopy(context)
+        candidate["allowed_schemas"] = invalid
+        result = build_query_plan(
+            context=candidate, intent_name="generic_test_intent",
+            intent_confidence=0.98,
+            normalized_question="total amount across regions",
+            intent_resolution_result=evidence,
+        )
+        assert result["status"] == "rejected"
+        assert result["error_code"] == "PLANNING_SCHEMA_SCOPE_INVALID"
+        assert result["query_plan"] is None
+
+
+def test_planner_rejects_cross_tenant_dimension_with_valid_primary_table():
+    from testar_planner import _dimension_context, _intent_dimension_evidence
+    context = _dimension_context()
+    source = next(
+        t for t in context["table_catalog"]
+        if t["table_name"] == "dim_region"
+    )
+    foreign = deepcopy(source)
+    foreign["schema_name"] = "another_tenant"
+    context["table_catalog"].append(foreign)
+    for entry in context["entities"]:
+        if entry.get("entity_type") == "dimension" and (
+            entry.get("user_term") == "region"
+        ):
+            entry["target_table"] = "another_tenant.dim_region"
+    result = build_query_plan(
+        context=context, intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total amount across regions",
+        intent_resolution_result=_intent_dimension_evidence(
+            term="by region", matched_tokens=["region"],
+        ),
+    )
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "PLANNING_TABLE_SCHEMA_UNAUTHORIZED"
+    assert result["query_plan"] is None
+
+
+def test_planner_never_invents_dimension_columns_from_aliases_or_keys():
+    from testar_planner import _dimension_context, _intent_dimension_evidence
+    evidence = _intent_dimension_evidence(
+        term="by region", matched_tokens=["region"],
+    )
+    for remove_physical_column in (False, True):
+        context = _dimension_context()
+        if remove_physical_column:
+            # The key_columns shortcut alone does not prove physical existence.
+            table = next(
+                t for t in context["table_catalog"]
+                if t["table_name"] == "dim_region"
+            )
+            table["columns"] = [{"name": "region_id"}]
+        else:
+            for entity in context["entities"]:
+                if entity.get("entity_type") == "dimension" and (
+                    entity.get("user_term") == "region"
+                ):
+                    entity["target_column"] = "unpublished_column"
+        result = build_query_plan(
+            context=context, intent_name="generic_test_intent",
+            intent_confidence=0.98,
+            normalized_question="total amount across regions",
+            intent_resolution_result=evidence,
+        )
+        assert result["status"] == "rejected"
+        assert result["error_code"] == "PLANNING_DIMENSION_TARGET_INVALID"
+        assert result["query_plan"] is None
+
+
+def test_planner_authorizes_same_code_in_two_unrelated_client_schemas():
+    from testar_planner import _dimension_context, _intent_dimension_evidence
+
+    def rename(value, old, new):
+        if isinstance(value, dict):
+            return {key: rename(v, old, new) for key, v in value.items()}
+        if isinstance(value, list):
+            return [rename(v, old, new) for v in value]
+        return value.replace(old, new) if isinstance(value, str) else value
+
+    for schema, table in (
+        ("journal_tenant", "geography_axis"),
+        ("billing_tenant", "territory_index"),
+    ):
+        context = rename(_dimension_context(), "schema_test", schema)
+        context = rename(context, "dim_region", table)
+        result = build_query_plan(
+            context=context, intent_name="generic_test_intent",
+            intent_confidence=0.98,
+            normalized_question="total amount across regions",
+            intent_resolution_result=_intent_dimension_evidence(
+                term="by region", matched_tokens=["region"],
+            ),
+        )
+        assert result["status"] == "planned", result.get("error_code")
+        dimension = result["query_plan"]["planning_context"]["detected_dimensions"]
+        assert len(dimension) == 1
+        assert dimension[0]["target_table"] == schema + "." + table
+
+
 if __name__ == "__main__":
     tests = sorted(
         (name, fn) for name, fn in globals().items()
