@@ -2,6 +2,14 @@
 
 **Decisão operacional explícita:** 2026-10-19. **Status:** objetivo e critérios de aceitação; **não representa cutover autorizado ou concluído**. Em conflito com notas históricas, prevalecem a decisão atual do operador, este contrato e `AGENTS.md`. Consulte `DOCUMENTATION-MAP.md` para precedência.
 
+## Bloqueio obrigatório de entrega: prova funcional, não implementação isolada (11/11/2026)
+
+Uma capacidade financeira migrada exige **nó/branch e regra do n8n legado → objeto/versão G5 e significado contábil aprovado → contexto semântico versionado por tenant → interpretação/plano/SQL dinâmica e gates LangGraph em pergunta inédita**. O resultado só recebe status `PROVEN` com evidência reproduzível e sem SQL financeira real no Shadow. Código disponível, prompt, CI, mocks, documentação e acerto no benchmark não bastam. Expandir prova para todas as capacidades necessárias do legado; a migração não termina na primeira.
+
+Benchmarks: 63 perguntas e SQL históricas usadas **somente em avaliação comparativa posterior**. Sem hardcodes, `if cliente`, DRE obrigatório, thresholds casuísticos ou SQL conhecida por pergunta. Em caso de campo contábil ambíguo, validar mapeamento e falhar com segurança. Preservar Fase 1 oficial n8n+Gemini, Shadow n8n+LangGraph+Gemini com SQL real desabilitada; Generate/Repair/Execute Approved separados; testes numéricos SELECT-only exigem autorização adicional; cutover humano. A estimativa de 12–20 semanas foi **retirada** por falta de medição.
+
+Especificação de aceite: `docs/operations/FIRST-FINANCIAL-CAPABILITY-PROOF.md`.
+
 ## Objetivo verificável
 
 Entregar o caminho oficial **Produto → n8n (orquestração) → LangGraph (inteligência SQL) → LLM configurada**, com aprovação e execução controlada, sem regras cliente-específicas embutidas no código do motor ou nos nós operacionais do n8n. Primeiro homologar com **Gemini**; somente depois avaliar **Gemini × SQL-InfoDive**. Não aposentar n8n: aposentar **a inteligência legada implementada em nós n8n com Gemini direto**.

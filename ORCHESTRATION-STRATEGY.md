@@ -1,5 +1,11 @@
 ﻿# ORCHESTRATION-STRATEGY.md
 
+## Proof-first development gate — operator instruction, 2026-11-11 21:36 UTC
+
+Do not replace real financial migration with paperwork, a checklist, a high benchmark score, or a green CI. First prove **one genuinely legacy financial capability** with published n8n node/branch evidence **and** validated financial rule/source/version from G5; the tenant's versioned context must drive LangGraph interpretation, planning, dynamic SQL generation and SQL security validation on a **novel question**. Repeat for all needed legacy behaviors. Track `NOT_MIGRATED`, `IMPLEMENTED_UNPROVEN`, `PROVEN` per capability; describe missing source or accounting approval openly.
+
+The 63 archived questions and historical SQL are independent **evaluation-only**. No customer hardcodes in Python/TypeScript or new n8n logic; no required DRE. Preserve Product approvals and n8n operations. `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`; repair invalidates approval. No cutover without parity, two real tenant contexts, separate read-only authorization and human gate. Any unsupported 12–20 week estimate is withdrawn. Contract: `docs/operations/FIRST-FINANCIAL-CAPABILITY-PROOF.md`.
+
 ## Purpose
 
 This document defines the canonical orchestration strategy for coexistence between the original product, n8n, and LangGraph.

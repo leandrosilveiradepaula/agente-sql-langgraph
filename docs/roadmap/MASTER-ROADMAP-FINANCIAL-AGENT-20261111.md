@@ -1,8 +1,8 @@
 # Roadmap mestre — migração n8n + Gemini → n8n + LangGraph + Gemini
 
-**Elaborado em:** 11/11/2026  
-**Natureza:** estudo de planejamento e contrato de entregas; **não** autorização de merge, credencial, custo, SQL financeira, migração de banco, deploy ou cutover.  
-**Fonte de precedência:** decisão mais recente do operador → `AGENTS.md` / `CHATGPT-PROJECT-INSTRUCTIONS.md` → `docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md` → `ORCHESTRATION-STRATEGY.md` → evidências operacionais.  
+**Elaborado em:** 11/11/2026
+**Natureza:** estudo de planejamento e contrato de entregas; **não** autorização de merge, credencial, custo, SQL financeira, migração de banco, deploy ou cutover.
+**Fonte de precedência:** decisão mais recente do operador → `AGENTS.md` / `CHATGPT-PROJECT-INSTRUCTIONS.md` → `docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md` → `ORCHESTRATION-STRATEGY.md` → evidências operacionais.
 **Repositórios:** `leandrosilveiradepaula/agente-sql-langgraph` (motor) e `leandrosilveiradepaula/Agente-Financeiro` (Produto existente).
 
 ## 1. Visão de produto e limite de escopo
@@ -53,19 +53,19 @@ Trabalhos de segurança, testes, tracing e observabilidade atravessam todas as e
 
 ### M0 — Consolidar a fundação e evitar duplicação de trabalho
 
-**Entrada:** repositórios, PRs #230/#231/#233, contratos e runtime.  
+**Entrada:** repositórios, PRs #230/#231/#233, contratos e runtime.
 **Execução:**
 1. Revisar criticamente as três PRs draft, conflitos, interfaces, testes e sobreposição semântica; produzir decisão de integrar/retrabalhar/descartar por contribuição efetiva.
 2. Congelar referência auditável do export oficial n8n, hash/version, backup G5 e contexto Shadow, sem copiar dados brutos para GitHub.
 3. Confirmar os endpoints reais do Produto e os bindings n8n, distinguindo URL fallback no código de variável efetiva de runtime.
 4. Definir um único painel por capacidade/gate, rastreando evidência, responsável, commit e pendência, sem porcentagens artificiais.
 
-**Saída:** baseline e fila consolidada de migração por capacidades reais.  
+**Saída:** baseline e fila consolidada de migração por capacidades reais.
 **Aceite:** nenhuma função sendo reimplementada duas vezes; nenhum merge/deploy/credential change implícito.
 
 ### M1 — Engenharia reversa semântica integral do legado (**caminho crítico**)
 
-**Entrada:** export dos 68 nós + banco/backup G5 cifrado, 11 versões segregadas.  
+**Entrada:** export dos 68 nós + banco/backup G5 cifrado, 11 versões segregadas.
 **Execução:**
 1. Analisar privadamente **41 Code, 11 PostgreSQL, 10 IF, 2 HTTP, 3 Respond e 1 Webhook**; identificar todas as condições, efeitos, SQL, filtros, joins, prompts, I/O, tratamento de erros, cache, logs e caminhos externos, inclusive 8 nós fora da rota direta do webhook.
 2. Inspecionar **conteúdo integral necessário** das 11 versões do G5 em ambiente isolado, com GPG desbloqueado localmente por custódia aprovada; jamais publicar textos contábeis sensíveis nem misturar versões.
@@ -73,12 +73,12 @@ Trabalhos de segurança, testes, tracing e observabilidade atravessam todas as e
 4. Separar comportamento genérico do n8n de inteligência financeira local. Não inferir sinal, contabilidade ou coluna por semelhança textual. Registros sem correspondência viram pendências de validação com responsável, não código especial.
 5. Identificar o subconjunto de comportamentos que realmente pode continuar determinístico no n8n e o que deve migrar para LangGraph/contexto.
 
-**Saída:** catálogo rastreável de comportamentos antigos e regras versionadas candidatas, com pendências contábeis explícitas.  
+**Saída:** catálogo rastreável de comportamentos antigos e regras versionadas candidatas, com pendências contábeis explícitas.
 **Aceite:** **100% dos comportamentos relevantes inventariados e classificados**, cada regra financeira com origem/versionamento e status; nenhum hardcode específico incorporado ao novo código; lacunas não certificadas permanecem bloqueadas. O inventário estrutural já existente não satisfaz sozinho este gate.
 
 ### M2 — Ontologia/catálogo universal e onboarding por cliente
 
-**Entrada:** comportamentos/proveniência M1, leitor físico e repositório canônico inicial da PR #233.  
+**Entrada:** comportamentos/proveniência M1, leitor físico e repositório canônico inicial da PR #233.
 **Execução:**
 1. Definir o contrato canônico: fontes/schemas, tipos, relações e cardinalidades; granularidade, dimensões, medidas, fórmulas derivadas, sinais, moedas, calendário/períodos, unidades, contexto de filtro, políticas e rastreabilidade.
 2. Modelar **declarações de conhecimento opcionais**: DRE/IMD, orçamento, realizado, contas, marcas, centros de custo etc. só aparecem quando o cliente efetivamente os possui e aprova.
@@ -87,12 +87,12 @@ Trabalhos de segurança, testes, tracing e observabilidade atravessam todas as e
 5. Provar que o grafo seleciona seu repository/credencial/versão **a partir da identidade autenticada pelo Produto**, jamais da pergunta. Separar metadados, dados financeiros e benchmark.
 6. Para PostgreSQL, aproveitar `physical_catalog_reader.py`; demais tecnologias entram por **adaptador de metadata/dialeto** com contrato uniforme, implementado conforme necessidade real, não por branches especiais de cliente.
 
-**Saída:** procedimento repetível para configurar e homologar qualquer tenant *nas tecnologias/adaptadores suportados*.  
+**Saída:** procedimento repetível para configurar e homologar qualquer tenant *nas tecnologias/adaptadores suportados*.
 **Aceite:** dois contextos materialmente distintos são aceitos com **o mesmo código**, sem DRE obrigatória; mappings desconhecidos bloqueiam operação; RLS/grants, versionamento, revogação e tenant routing verificados.
 
 ### M3 — Motor NL→SQL financeiro completo e genérico
 
-**Entrada:** catálogo M2 versionado e aprovado.  
+**Entrada:** catálogo M2 versionado e aprovado.
 **Execução:**
 1. Interpretar pergunta inédita em métricas, entidades, dimensões, filtros, períodos e operações; resolver ambiguidades com catálogo e pedir esclarecimento quando necessário.
 2. Planejar métricas, joins, fonte, sinais, períodos, agregações e operações com evidência de autorização e grão compatível.
@@ -102,12 +102,12 @@ Trabalhos de segurança, testes, tracing e observabilidade atravessam todas as e
 6. Reconstituir comportamentos do legado identificados em M1 (cache, reports, errors, sign convention etc.) colocando-os na camada correta; remover resquícios financeiros de código genérico.
 7. Executar testes **inéditos e adversariais**, sem benchmark no prompt/planejador, com métricas de cobertura por capacidade e sem redução de thresholds.
 
-**Saída:** motor capaz de interpretar e produzir SQL financeiramente explicável a partir do contexto configurado.  
+**Saída:** motor capaz de interpretar e produzir SQL financeiramente explicável a partir do contexto configurado.
 **Aceite:** nenhuma intenção/alias/SQL hardcoded; plano e SQL rastreáveis; falha fechada em semântica ambígua; testes em dois modelos de dados distintos, não só variações de frases.
 
 ### M4 — Integração real com Produto + n8n e Shadow
 
-**Entrada:** M3 suficientemente estável; endpoints Produto reais identificados.  
+**Entrada:** M3 suficientemente estável; endpoints Produto reais identificados.
 **Execução:**
 1. Integrar o Produto existente (incluindo `/api/generate-sql` e rota real de execução `/api/execute-watson`, sujeitas à confirmação do deployment) ao n8n e ao LangGraph.
 2. Preservar orquestração n8n, políticas Next.js, logs, cache, conectores e aprovações. Deslocar **somente** as decisões inteligentes antigas, mantendo Gemini como provider comum durante Shadow.
@@ -116,12 +116,12 @@ Trabalhos de segurança, testes, tracing e observabilidade atravessam todas as e
 5. Evitar dupla execução e corrida entre request/repair/approve/executor; preservar retorno oficial n8n+Gemini e circuit breaker/rollback do Shadow.
 6. Confirmar binding **efetivo** Produto→webhook, S2S, status e uso de credenciais reais sem expor secretos.
 
-**Saída:** mesmo pedido corre no caminho oficial e em Shadow, em paralelo, de forma rastreável.  
+**Saída:** mesmo pedido corre no caminho oficial e em Shadow, em paralelo, de forma rastreável.
 **Aceite:** evidência real end-to-end da mesma tentativa; nenhum efeito adicional no retorno oficial; n8n operacional preservado; execução SQL financeira real do Shadow ainda **desabilitada**.
 
 ### M5 — Homologação de portabilidade, paridade financeira e segurança (G1–G4)
 
-**Entrada:** M4 estável e M2/M3 aprovados, ambiente e credenciais adequados.  
+**Entrada:** M4 estável e M2/M3 aprovados, ambiente e credenciais adequados.
 **Execução:**
 1. Testar **ao menos dois clientes/contextos reais materialmente distintos**, com permissão, esquema e vocabulário distintos. Se não houver segundo cliente autorizado, não declarar universalidade comprovada.
 2. Separar ensaios em: semântica/planos; SQL/gates; produção de resultados financeiros; produto/fluxo operacional.
@@ -131,23 +131,23 @@ Trabalhos de segurança, testes, tracing e observabilidade atravessam todas as e
 6. Definir tolerâncias monetárias e critérios de severidade **com o responsável financeiro**, não ajustar thresholds para o benchmark. Corrigir capacidade geral e repetir contraprovas.
 7. Exercitar RBAC, aprovação/reaprovação, isolamento, rollback operacional, falhas dos provedores, observabilidade e recuperação.
 
-**Saída:** relatório de equivalência, cobertura, desvios resolvidos/aceitos explicitamente e readiness real de G1–G4.  
+**Saída:** relatório de equivalência, cobertura, desvios resolvidos/aceitos explicitamente e readiness real de G1–G4.
 **Aceite:** nenhuma divergência financeira ou de segurança material sem resolução/decisão humana; evidência auditável e testes de portabilidade real; liberação de cutover **não automática**.
 
 ### M6 — Cutover humano e controlado (G5)
 
-**Entrada:** M5 homologado, aprovação humana formal, runbook de rollback, janela de operação e observabilidade real.  
+**Entrada:** M5 homologado, aprovação humana formal, runbook de rollback, janela de operação e observabilidade real.
 **Execução:** usar feature flag/canário; mover a **inteligência oficial** de n8n+Gemini para **n8n+LangGraph+Gemini**; preservar webhooks, conectores, operação n8n e Produto; acompanhar erros/latência/números; executar rollback se houver critério de falha; documentar evidência pós-corte.
 
-**Saída:** caminho oficial n8n+LangGraph+Gemini sob controle humano.  
+**Saída:** caminho oficial n8n+LangGraph+Gemini sob controle humano.
 **Aceite:** canário + observação + rollback testado + autorização explícita + evidência sem regressão material. Merge e CI verde não significam autorização.
 
 ### M7 — Benchmark de modelos Gemini vs SQL-InfoDive (G6)
 
-**Entrada:** M6 homologado e estável.  
+**Entrada:** M6 homologado e estável.
 **Execução:** comparar Gemini e SQL-InfoDive no **mesmo** motor, catálogos, perguntas inéditas, credenciais e critérios; avaliar SQL/semântica, qualidade financeira, repair, latência, tokens/custo e falhas. Não usar troca de LLM como correção de defeitos no planner ou contexto.
 
-**Saída:** decisão auditável de provider configurável por implantação/tenant, sem mudar código de negócio.  
+**Saída:** decisão auditável de provider configurável por implantação/tenant, sem mudar código de negócio.
 **Aceite:** paridade ou diferenças explicadas e homologadas; política e privacidade verificadas.
 
 ## 5. Priorização de risco e caminho crítico
@@ -179,22 +179,21 @@ Agrupar em entregas coerentes, com revisão humana de merge:
 
 Cada entrega deve trazer mudanças concretas em código e/ou contexto **relacionadas a uma jornada completa**, testes, evidência, riscos, artefatos e SHA/PR reais. Não abrir PRs somente para elevar pontuação ou recontar métricas.
 
-## 7. Cronograma indicativo — condicionado a capacidade e gates
+## 7. Ordem de execução por evidências — cronograma não validado
 
-**Não há data de entrega confiável até confirmar a disponibilidade de desbloqueio G5, um especialista financeiro que aprove as regras e dois contextos reais.** Para planejamento de capacidade (não compromisso de prazo), considerar o seguinte cenário-base com **duas pessoas técnicas dedicadas**, apoio operacional do n8n/Produto e **responsável contábil disponível para validações**:
+**Correção da decisão de 11/11/2026:** a faixa anterior de 12–20 semanas e os prazos indicativos sem medição real estão **retirados**. Não emitir outro prazo até comprovar ao menos uma capacidade financeira migrada e medir o volume de regras/versionamento ainda a transformar.
 
-| Bloco | Ordem | Esforço inicial indicativo (semanas corridas) | Observação |
-|---|---|---:|---|
-| M0 — reconciliação de baseline/PRs | primeiro | 0,5–1 | Pode ocorrer junto à preparação G5 |
-| M1 — inventário semântico completo | crítico | 2–4 | Principal incerteza: acesso e significado contábil |
-| M2 — catálogo e onboarding governado | após M1 inicial | 2–4 | Parte de código já existe na PR #233 |
-| M3 — LangGraph dinâmico/sem hardcodes | após M2 mínimo | 3–5 | Sobrepõe M2 parcialmente |
-| M4 — integração n8n/Produto/Shadow | após contrato M3 | 2–3 | Depende de rotas/identidade efetivas |
-| M5 — prova de portabilidade/paridade/segurança | após M4 | 3–5 | SQL financeira depende de autorização própria |
-| M6 — canário/cutover/observação | após M5 | 1–2 | Gate de aprovação humana |
-| M7 — comparação dos LLMs | **após M6** | 1–3 | Fora da homologação inicial |
+**Prioridade P0:** resolver falha `Whitespace check` na PR #233, preservar gates humanos e conciliar #230/#231/#233, sem novo projeto nem duplicação.
 
-Essas faixas são **hipóteses de planejamento**, não foram inferidas de velocidade histórica de commits nem equivalem a promessas. O sequenciamento permite sobreposição seletiva entre M1/M2 e M2/M3; assim, uma referência inicial seria aproximadamente **12–20 semanas até estabilizar a arquitetura com Gemini**, somente no cenário-base e **sem bloqueios de acesso, domínio ou autorização**; modelos depois. Se faltarem especialistas, ambientes ou clientes, o cronograma deve ser reestimado. Registrar o esforço real da primeira entrega A para calibrar.
+**Prioridade P1 — primeira prova:** identificar regra concreta do n8n publicado e fonte/versão financeira validada no G5; configurar contexto tenant; demonstrar interpretação, plano e SQL dinâmica generate-only com pergunta inédita, segurança e evidências. O contrato é `docs/operations/FIRST-FINANCIAL-CAPABILITY-PROOF.md`.
+
+**Prioridade P2 — cobertura funcional:** repetir o mesmo processo por capacidade, removendo hardcodes do novo fluxo, sem reduzir thresholds. Estado por capacidade: `NOT_MIGRATED`, `IMPLEMENTED_UNPROVEN`, `PROVEN`; entregas completas com SHA/PR, fontes e testes.
+
+**Prioridade P3 — multicliente e Shadow:** dois contextos reais materialmente distintos, aprovações, isolamento, n8n+LangGraph+Gemini em paralelo ao oficial. Somente após geração independente, usar as 63 perguntas como controle de qualidade.
+
+**Prioridade P4 — equivalência e cutover:** teste numérico read-only isolado mediante autorização separada, validação financeira humana, rollback e canário; Gemini×SQL-InfoDive somente após Fase 2.
+
+**Conclusão:** CI verde, documentação ou pontuação semântica não significam prontidão nem determinam prazo. Somente capacidades e etapas comprovadas contam.
 
 ## 8. Intervenções do operador e responsáveis
 

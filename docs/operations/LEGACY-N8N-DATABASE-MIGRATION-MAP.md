@@ -2,6 +2,12 @@
 
 **Status:** contrato de execução / inventário integral **AINDA NÃO CONCLUÍDO**. Decisão do operador em 2026-11-11. Repositório: `leandrosilveiradepaula/agente-sql-langgraph`.
 
+## Execução prioritária: primeira capacidade financeira efetivamente demonstrada (11/11/2026)
+
+Não continuar produzindo somente matrizes, scores e infraestrutura. **Selecionar uma capacidade real** a partir dos 68 nós n8n e das 11 versões G5; ler conteúdo/ramificações necessárias com custódia autorizada, validar o significado contábil e externalizar a regra em contexto por tenant. Demonstrar **pergunta inédita → LangGraph → plano explicável → SQL dinâmica generate-only e security gates**, sem execução financeira. Anexar hashes/versão e prova reproduzível. Se faltar vínculo de origem, semântica ou permissão, marcar `IMPLEMENTED_UNPROVEN` ou `NOT_MIGRATED`, nunca `PROVEN`.
+
+Expandir por comportamento até migrar toda a inteligência financeira necessária, mantendo cache/conectores/orquestração no n8n e Produto como autoridade de políticas. Não copiar hardcodes nem usar 63 perguntas/golden SQL como entrada de geração; elas serão apenas o avaliador cego posterior. Não criar estimativa de conclusão sem medir a complexidade real. Ver `docs/operations/FIRST-FINANCIAL-CAPABILITY-PROOF.md` e `AGENTS.md`.
+
 ## Resultado obrigatório
 
 Reconstituir o comportamento **real existente** do Agente Financeiro, combinando **o workflow n8n publicado com 68 nós** e **a origem persistida no banco/backup G5**, preservando rastreabilidade, controles humanos e semântica financeira. Isso não é greenfield; não é acertar 63 exemplos por imitação. Migrar toda a inteligência e as regras legítimas para a arquitetura alvo, **sem transportar hardcodes de negócio para Python/TypeScript**.
