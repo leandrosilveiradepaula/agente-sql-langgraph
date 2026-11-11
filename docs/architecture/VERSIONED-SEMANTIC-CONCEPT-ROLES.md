@@ -76,3 +76,44 @@ Critérios para homologar:
 
 Esta PR é apenas código/testes/documentação. Não altera banco, n8n, produção,
 catálogo ativo, permissões ou credenciais. Não implica aprovação de merge.
+
+
+## Preflight de migração, somente leitura
+
+A implementação de `app/domain/semantic_role_migration.py` prepara em memória
+uma **nova versão candidata**, sempre a partir do catálogo bruto completo.
+O chamador deve fornecer `expected_source_fingerprint` e o mapa de papéis
+**escolhido e revisado fora do benchmark**, não inferido automaticamente pelo
+código. O preflight confirma:
+
+- a impressão digital exata do contexto de origem;
+- a existência de uma regra única e válida de configuração do resolvedor;
+- a validade do novo catálogo e a integridade das referências de papéis;
+- a imutabilidade das demais coleções, regras, tabelas, políticas e aliases;
+- a alteração da versão e do fingerprint da candidata;
+- a comparação de decisões de intenção e projeções de planejamento, usando
+  somente perguntas (sem golden answer, SQL histórica ou SQL executada).
+
+O relatório contém apenas contagens de transições e categorias de vínculos
+incompletos. Os dados de cada pergunta, SQL e exemplos históricos não são
+devolvidos. Uma alteração de intenção ou plano resulta em `REVIEW_REQUIRED`.
+Mesmo `NO_DETECTED_DRIFT` **não autoriza ativação**, paridade financeira ou
+cutover. A migração é proibida sem novo snapshot e aprovação humana.
+
+### Evidência diagnóstica G5 (não homologação)
+
+Em ensaio privado offline, com 63 perguntas históricas usadas somente como
+avaliação posterior e um **mapeamento de papéis provisório**, o preflight
+confirmou o fingerprint de origem e encontrou:
+
+- intenções alteradas: 0;
+- planos alterados: 25;
+- planos antes aceitos: 26; candidatos aceitos: 17;
+- transições `planned → rejected`: 9, todas por
+  `PLANNING_ANALYTICAL_BINDING_INCOMPLETE`;
+- projeções aceitas mas alteradas: 16.
+
+O resultado é `REVIEW_REQUIRED`. O teste não usou SQL histórica, não
+chamou LLM, não executou SQL financeira e não ativou configuração. A causa
+exata de cada vínculo e a correção de negócio devem ser determinadas pelo
+catálogo autorizado, não por perguntas→SQL nem por thresholds artificiais.
