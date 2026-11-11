@@ -39,6 +39,10 @@ from app.domain.planning import (
     SelectedPattern,
     selected_pattern_from_query_pattern,
 )
+from app.domain.metric_source_composition import (
+    MetricSourceCompositionError,
+    project_metric_source_composition,
+)
 from app.domain.search_text import (
     normalize_search_text,
     tokenize_search_text,
@@ -937,6 +941,23 @@ def project_planning_context(
         intent_resolution_result=intent_resolution_result,
     )
 
+    try:
+        metric_source_composition = project_metric_source_composition(
+            definitions=context.get("metric_source_compositions", []),
+            intent_name=intent_name,
+            required_tables=required_tables,
+            detected_dimensions=dimension_projection,
+            planned_metrics=planned_metrics,
+            planned_filters=planned_filters,
+            analytical_operations=operation_projection,
+            temporal_series=temporal_series,
+        )
+    except MetricSourceCompositionError:
+        raise PlanningRejection(
+            "PLANNING_METRIC_COMPOSITION_INVALID",
+            "Composição de fontes sem mapeamento/grão autorizado.",
+        ) from None
+
     relevant_columns = {
         table["qualified_name"]: deepcopy(
             table.get("columns", [])
@@ -968,6 +989,7 @@ def project_planning_context(
         "planned_metrics": planned_metrics,
         "planned_filters": planned_filters,
         "resolved_filter_bindings": resolved_filter_bindings,
+        "metric_source_composition": metric_source_composition,
         "allowed_schemas": list(context.get("allowed_schemas", [])),
         "component_configs": deepcopy(
             context.get("component_configs", {})
