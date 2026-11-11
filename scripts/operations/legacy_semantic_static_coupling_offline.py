@@ -110,7 +110,7 @@ def audit_legacy_semantic_coupling(
         if key in catalog_names:
             raise LegacyAuditBlocked("G5_CATALOG_DUPLICATED")
         use = collection.get("use")
-        if use not in ("EVALUATION_ONLY", "SOURCE_SEMANTIC_REVIEW_ONLY"):
+        if use not in ("EVALUATION_ONLY", "CONTEXT_REVIEW_ONLY"):
             # Never silently treat unknown original business content as safe.
             raise LegacyAuditBlocked("G5_CATALOG_USE_UNREVIEWED")
         catalog_names[key] = use

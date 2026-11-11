@@ -53,7 +53,7 @@ def fixture(*, ledger: str = "cash_settlements", schema: str = "source"):
         "source_collections": [
             {
                 "name": "versioned_rules",
-                "use": "SOURCE_SEMANTIC_REVIEW_ONLY",
+                "use": "CONTEXT_REVIEW_ONLY",
             },
             {
                 "name": "historical_examples",
