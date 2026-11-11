@@ -1,4 +1,4 @@
-"""Offline, no VPS/network, for the fixed Crypto Intelligence J1 MCP boundary."""
+"""Offline, no VPS/network, for the bounded J1 MCP SQLite reader."""
 from __future__ import annotations
 
 import importlib.util
@@ -60,7 +60,8 @@ class J1AuditTests(unittest.TestCase):
                 db.executescript("""
                 CREATE TABLE scope(id INTEGER,scope_digest TEXT,members_json TEXT,
                                    initial_end_ms INTEGER,halted_reason TEXT);
-                CREATE TABLE published_hour(end_ms INTEGER, observed_contracts INTEGER);
+                CREATE TABLE published_hour(end_ms INTEGER,observed_at_ms INTEGER,
+                   scope_digest TEXT,observed_contracts INTEGER);
                 CREATE TABLE cursor(symbol TEXT,next_open_ms INTEGER);
                 CREATE TABLE candles(symbol TEXT,open_ms INTEGER,
                   open TEXT,high TEXT,low TEXT,close TEXT,
@@ -70,8 +71,8 @@ class J1AuditTests(unittest.TestCase):
                 db.execute("INSERT INTO scope VALUES(1,?,?,?,NULL)",
                            ("a"*64, json.dumps(symbols), init))
                 pubs = [init, init+j1.HOUR_MS, *j1.EXPECT]
-                db.executemany("INSERT INTO published_hour VALUES(?,2)",
-                               ((end,) for end in pubs))
+                db.executemany("INSERT INTO published_hour VALUES(?,?,?,2)",
+                               ((end,end+120_000,"a"*64) for end in pubs))
                 for symbol in symbols:
                     db.execute("INSERT INTO cursor VALUES(?,?)",
                                (symbol,j1.EXPECT[-1]))
@@ -90,7 +91,40 @@ class J1AuditTests(unittest.TestCase):
                 self.assertEqual(good["status"],"pass",good)
                 self.assertEqual(good["stored_candles"],100)
                 self.assertNotIn("BTCUSDT",json.dumps(good))
+                # Simulate the actual Nov-11 catch-up: 21 closed hours of
+                # candles, one genuine published checkpoint, 20 missing PITs.
+                last = j1.EXPECT[-1] + 21*j1.HOUR_MS
                 with sqlite3.connect(dbpath) as db:
+                    db.execute("INSERT INTO published_hour VALUES(?,?,?,2)",
+                               (last,last+120_000,"a"*64))
+                    for symbol in symbols:
+                        db.execute("UPDATE cursor SET next_open_ms=? WHERE symbol=?",
+                                   (last,symbol))
+                        for i in range(21):
+                            opened = j1.EXPECT[-1] + i*j1.HOUR_MS
+                            row=[str(opened),"1","2","1","2","20","40"]
+                            from hashlib import sha256
+                            digest=sha256(json.dumps(
+                                [symbol,row],sort_keys=True,separators=(",",":"),
+                                ensure_ascii=True).encode("ascii")).hexdigest()
+                            db.execute("INSERT INTO candles VALUES(?,?,?,?,?,?,?,?,?,?)",
+                                       (symbol,opened,*row[1:],last+120_000,digest))
+                    db.commit()
+                recurrent = j1.sqlite_audit()
+                self.assertEqual(recurrent["status"],"pass",recurrent)
+                self.assertEqual(recurrent["stored_candles"],142)
+                self.assertEqual(recurrent["published_checkpoints"],27)
+                self.assertEqual(recurrent["last_published_end_ms"],last)
+                self.assertNotIn("BTCUSDT",json.dumps(recurrent))
+                # Tampered receipt outside the allowed UTC close window
+                # must block even if all candle rows are still valid.
+                with sqlite3.connect(dbpath) as db:
+                    db.execute("UPDATE published_hour SET observed_at_ms=? WHERE end_ms=?",
+                               (last+901_000,last))
+                self.assertEqual(j1.sqlite_audit()["status"],"blocked")
+                with sqlite3.connect(dbpath) as db:
+                    db.execute("UPDATE published_hour SET observed_at_ms=? WHERE end_ms=?",
+                               (last+120_000,last))
                     db.execute("UPDATE candles SET close='9' WHERE open_ms=?",(
                         init-24*j1.HOUR_MS,))
                     db.commit()
