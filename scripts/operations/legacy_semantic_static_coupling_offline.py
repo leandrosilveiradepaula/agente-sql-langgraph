@@ -228,6 +228,82 @@ def audit_legacy_semantic_coupling(
             entry["static_object_maps"] = found_maps
         results.append(entry)
 
+    # Reconstruct only direct graph dataflow, never assume an IF "approved"
+    # field is a human authorization. An error-list-length guard is technical.
+    incoming: dict[str, set[str]] = defaultdict(set)
+    connections = workflow.get("connections", {})
+    if isinstance(connections, Mapping):
+        for source_name, node_outputs in connections.items():
+            if not isinstance(node_outputs, Mapping):
+                continue
+            for branch_outputs in node_outputs.values():
+                if not isinstance(branch_outputs, list):
+                    continue
+                for branch in branch_outputs:
+                    if not isinstance(branch, list):
+                        continue
+                    for edge in branch:
+                        if not isinstance(edge, Mapping):
+                            continue
+                        target_name = edge.get("node")
+                        if _valid_string(target_name):
+                            incoming[target_name].add(str(source_name))
+    name_to_ordinal = {
+        node["name"]: idx
+        for idx, node in enumerate(nodes, 1)
+    }
+    gate_signals = []
+    for entry, node in zip(results, nodes):
+        if entry["type"] != "if":
+            continue
+        params = node.get("parameters") or {}
+        predicate_group = params.get("conditions") or {}
+        predicates = (
+            predicate_group.get("conditions", [])
+            if isinstance(predicate_group, Mapping) else []
+        )
+        if not isinstance(predicates, list):
+            predicates = []
+        fields: set[str] = set()
+        for predicate in predicates:
+            if not isinstance(predicate, Mapping):
+                continue
+            fields.update(
+                re.findall(
+                    r"\$json\.([A-Za-z_$][A-Za-z0-9_$]*)",
+                    str(predicate.get("leftValue", "")),
+                )
+            )
+        parent_names = incoming.get(node["name"], set())
+        technical = []
+        for parent_name in sorted(parent_names):
+            ordinal = name_to_ordinal.get(parent_name)
+            if ordinal is None:
+                continue
+            parent = nodes[ordinal - 1]
+            text = (parent.get("parameters") or {}).get("jsCode", "")
+            if not isinstance(text, str):
+                continue
+            if any(
+                re.search(
+                    rf"\b(?:const|let|var)\s+{re.escape(field)}\s*=\s*"
+                    r"[A-Za-z_$][A-Za-z0-9_$]*\.length\s*===\s*0\b",
+                    text,
+                )
+                for field in fields
+            ):
+                technical.append(ordinal)
+        gate_signals.append({
+            "ordinal": entry["ordinal"],
+            "predicate_field_names": sorted(fields),
+            "direct_source_code_ordinals": sorted(technical),
+            "gate_classification": (
+                "ERROR_COUNT_TECHNICAL_VALIDATION_ONLY"
+                if technical else "SIGNAL_PROVENANCE_NOT_ESTABLISHED"
+            ),
+            "human_approval_verified": False,
+        })
+
     loaded_evaluation = [
         {
             "ordinal": e["ordinal"],
@@ -263,6 +339,7 @@ def audit_legacy_semantic_coupling(
         "static_bindings_with_textual_g5_hints": matched_aliases,
         "total_js_lines": total_js_lines,
         "fixed_source_version_nodes": fixed_version_nodes,
+        "if_gate_signals": gate_signals,
         "evaluation_only_sources_read_by_legacy": loaded_evaluation,
         "nodes": results,
         "business_mappings_approved": False,

@@ -197,6 +197,53 @@ def test_can_handle_no_physical_hints():
     assert r["business_mappings_approved"] is False
 
 
+
+
+def test_if_gate_cannot_infer_human_approval_from_validator_success():
+    values = fixture()
+    wf = values["workflow"]
+    wf["nodes"][1]["parameters"]["jsCode"] += (
+        "\nconst aprovado = errors.length === 0;\n"
+    )
+    wf["nodes"].append({
+        "name": "Gate",
+        "type": "n8n-nodes-base.if",
+        "parameters": {
+            "conditions": {
+                "conditions": [{
+                    "leftValue": "={{ $json.aprovado === true }}",
+                }],
+            },
+        },
+    })
+    wf["connections"] = {
+        "Plan": {"main": [[{"node": "Gate", "type": "main", "index": 0}]]}
+    }
+    result = audit_legacy_semantic_coupling(**values)
+    assert len(result["if_gate_signals"]) == 1
+    gate = result["if_gate_signals"][0]
+    assert gate["ordinal"] == 3
+    assert gate["direct_source_code_ordinals"] == [2]
+    assert gate["gate_classification"] == "ERROR_COUNT_TECHNICAL_VALIDATION_ONLY"
+    assert gate["human_approval_verified"] is False
+
+
+def test_if_gate_with_unknown_parent_does_not_certify_human_approval():
+    values = fixture()
+    values["workflow"]["nodes"].append({
+        "name": "Unknown Approval",
+        "type": "n8n-nodes-base.if",
+        "parameters": {
+            "conditions": {
+                "conditions": [{"leftValue": "={{ $json.approved === true }}"}],
+            }
+        },
+    })
+    result = audit_legacy_semantic_coupling(**values)
+    gate = result["if_gate_signals"][0]
+    assert gate["gate_classification"] == "SIGNAL_PROVENANCE_NOT_ESTABLISHED"
+    assert gate["human_approval_verified"] is False
+
 if __name__ == "__main__":
     cases = [
         (name, test)
