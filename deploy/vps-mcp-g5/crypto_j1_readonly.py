@@ -366,7 +366,7 @@ def sqlite_audit_via_owner() -> dict:
                     or type(candles) is not int
                     or candles != 100 + 2 * ((last - EXPECT[-1]) // HOUR_MS)
                     or type(pubs) is not int
-                    or not 26 <= pubs <= 26 + ((last - EXPECT[-1]) // HOUR_MS)
+                    or not 26 + (last > EXPECT[-1]) <= pubs <= 26 + ((last - EXPECT[-1]) // HOUR_MS)
                     or report.get("sqlite_integrity") is not True
                     or report.get("contiguous_candles") is not True
                     or report.get("digest_replay") is not True
