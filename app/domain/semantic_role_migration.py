@@ -380,13 +380,18 @@ def _structural_rejection_causes(projection: Mapping[str, Any]) -> list[str]:
             "ambiguous_metric_concept"
         ):
             found.add("metric_concept_inference_ambiguous")
-        for failure in metric.get("binding_failures", []):
+        failures = metric.get("binding_failures")
+        for failure in failures if isinstance(failures, list) else []:
             if not isinstance(failure, Mapping):
                 continue
-            for diagnostic in failure.get("binding_diagnostics", []):
+            details = failure.get("binding_diagnostics")
+            for diagnostic in details if isinstance(details, list) else []:
                 if not isinstance(diagnostic, Mapping):
                     continue
-                for rejected in diagnostic.get("rejected", []):
+                rejected_items = diagnostic.get("rejected")
+                for rejected in (
+                    rejected_items if isinstance(rejected_items, list) else []
+                ):
                     if not isinstance(rejected, Mapping):
                         continue
                     reason = rejected.get("reason")
