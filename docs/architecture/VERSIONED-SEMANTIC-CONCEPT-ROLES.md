@@ -286,4 +286,3 @@ equivalência por pergunta é intencional: são gates independentes.
 
 Sem chamadas de LLM, execução financeira, leitura da SQL histórica,
 ativação de catálogo ou mudança na operação oficial.
-
