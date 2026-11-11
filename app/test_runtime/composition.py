@@ -55,6 +55,7 @@ from app.integrations.google_gemini.sql_generator_adapter import (
     GoogleGeminiSqlGeneratorAdapter,
 )
 from app.integrations.openai_compatible.client import OpenAiCompatibleClient
+from app.ports.semantic_intent_interpreter import OpenAiCompatibleSemanticIntentInterpreter
 from app.integrations.openai_compatible.configuration import (
     load_openai_compatible_configuration,
 )
@@ -135,6 +136,7 @@ def create_shadow_test_runtime(
     )
     default_selection = _shadow_default_llm_selection(environ)
     engine_preflight = ShadowTestEnginePreflight()
+    semantic_intent_interpreter = None
 
     if default_selection is not None:
         # An explicitly selected private model must not construct, validate
@@ -156,6 +158,9 @@ def create_shadow_test_runtime(
         )
         sql_generator = OpenAiCompatibleSqlGeneratorAdapter(
             client=private_client, configuration=compatible,
+        )
+        semantic_intent_interpreter = OpenAiCompatibleSemanticIntentInterpreter(
+            private_client
         )
         sql_repairer = OpenAiCompatibleSqlRepairerAdapter(
             client=private_client, configuration=compatible,
@@ -216,6 +221,7 @@ def create_shadow_test_runtime(
             langgraph_version=config.langgraph_version,
             langgraph_commit=config.langgraph_commit,
             expected_organization_id=config.expected_organization_id,
+            semantic_intent_interpreter=semantic_intent_interpreter,
         ),
         execute_approved_shadow_use_case=ExecuteApprovedSqlShadowUseCase(
             engine_preflight=engine_preflight,
