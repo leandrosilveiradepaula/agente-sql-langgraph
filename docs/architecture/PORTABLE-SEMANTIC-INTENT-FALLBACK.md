@@ -97,7 +97,7 @@ ainda precisa de homologação.
 A branch e a PR desta proposta não habilitam configuração, não executam
 migrações, não alteram n8n, não fazem deploy e não habilitam SQL.
 
-## Contrato semantic-intent-v2 — trecho do usuário versus alias autorizado
+## Contrato semantic-intent-v3 — trecho do usuário versus alias autorizado
 
 O interpretador não pode enviar diretamente um sinônimo novo ao planejador.
 A resposta deve conter um vínculo com **três campos**: nome do conceito
@@ -106,7 +106,18 @@ e `catalog_term` pertencente ao léxico versionado desse mesmo conceito.
 
 O validador verifica o termo contra `concept_lexicon` e preserva separadamente
 a citação do usuário. Na projeção para o planejador, somente o alias validado
-é empregado na resolução das entidades/métricas. São recusados termos
+é empregado na resolução das entidades/métricas.
+
+Para conceitos associados ao papel estrutural `metric`, o contrato v3
+informa `literal_metric_concepts`: o `question_span` normalizado deve
+coincidir literalmente com o `catalog_term` físico autorizado. Não se
+permite que uma LLM associe uma palavra contábil desconhecida a uma medida
+apenas porque essa medida consta no catálogo. Um sinônimo financeiro legítimo
+precisa ser cadastrado e validado como alias físico da versão do tenant.
+Isso preserva perguntas inéditas compostas de conceitos conhecidos, mas
+falha com segurança quando o próprio significado financeiro é desconhecido.
+Para operações estruturais, continua possível reconhecer expressões novas,
+sem criar métricas, datas ou filtros por suposição. São recusados termos
 inventados, conceitos inexistentes, citações fora da pergunta, fingerprints
 diferentes e spans conflitantes.
 
