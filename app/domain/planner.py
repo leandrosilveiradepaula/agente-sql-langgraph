@@ -662,20 +662,38 @@ def _analytical_operand_bindings_complete(
     for operation in operations:
         if not isinstance(operation, Mapping):
             return False
-        if operation.get("operation_type") != "comparison":
-            continue
-        cardinality = operation.get("binding_cardinality", {})
+        cardinality = operation.get("binding_cardinality")
         if not isinstance(cardinality, Mapping):
             return False
         minimum = cardinality.get("minimum")
-        if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 1:
+        maximum = cardinality.get("maximum")
+        if (
+            type(minimum) is not int or minimum < 1
+            or type(maximum) is not int or maximum < minimum
+        ):
             return False
-        operand_refs = operation.get("operand_metric_refs", [])
-        if not isinstance(operand_refs, list):
-            return False
-        if len(operand_refs) < minimum or len(operand_refs) != len(set(operand_refs)):
-            return False
-        if any(not isinstance(ref, str) or ref not in refs for ref in operand_refs):
+        kind = operation.get("operation_type")
+        if kind == "ranking":
+            # Ranking is equally dependent on a real metric: an unbound
+            # ranking must never become an apparently valid query plan.
+            metric_ref = operation.get("metric_ref")
+            if (
+                type(metric_ref) is not str or not metric_ref.strip()
+                or metric_ref not in refs or len(refs) != 1
+            ):
+                return False
+        elif kind == "comparison":
+            operand_refs = operation.get("operand_metric_refs")
+            if not isinstance(operand_refs, list):
+                return False
+            if (
+                not minimum <= len(operand_refs) <= maximum
+                or len(operand_refs) != len(set(operand_refs))
+                or any(type(ref) is not str or ref not in refs for ref in operand_refs)
+            ):
+                return False
+        else:
+            # Unknown operation types cannot silently bypass the operand gate.
             return False
     return True
 
@@ -3177,7 +3195,13 @@ def _selected_intent_candidates(
 ) -> list[Mapping[str, Any]]:
     candidates: list[Mapping[str, Any]] = []
     best_candidate = intent_resolution_result.get("best_candidate")
-    if isinstance(best_candidate, Mapping):
+    if (
+        isinstance(best_candidate, Mapping)
+        and (
+            selected_intent is None
+            or _same_text(best_candidate.get("intent_name"), selected_intent)
+        )
+    ):
         candidates.append(best_candidate)
     candidates.extend(
         candidate
