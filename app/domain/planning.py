@@ -14,7 +14,7 @@ from app.domain.context import (
 )
 
 
-PLANNER_VERSION = "v1.3.0-selected-table-join-filtering"
+PLANNER_VERSION = "v1.4.0-semantic-alias-integrity"
 
 PlanningDecisionReason = Literal[
     "single_pattern_selected",
