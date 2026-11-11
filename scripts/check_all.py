@@ -46,6 +46,10 @@ STEPS = [
         [sys.executable, "testar_intent_resolver.py"],
     ),
     (
+        "testar_semantic_concept_roles.py",
+        [sys.executable, "testar_semantic_concept_roles.py"],
+    ),
+    (
         "testar_context_normalizer.py",
         [sys.executable, "testar_context_normalizer.py"],
     ),
