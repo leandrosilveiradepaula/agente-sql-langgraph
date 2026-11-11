@@ -120,3 +120,20 @@ Legenda: `G5` = coocorrencias textuais nao homologadas; `flags` = sinais de revi
 4. **Homologacao real**: rota Produto/n8n certificada, 2 clientes distintos, SQL dinamica para perguntas ineditas, Shadow Gemini correlacionado; benchmark 63 somente avaliacao posterior; teste financeiro read-only apenas com autorizacao especifica.
 
 Controles: `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. Nenhum merge, deploy ou cutover implicado por este censo.
+
+
+## Fila de revisao funcional, baseada no codigo real do n8n
+
+O codigo/parametros de cada um dos 68 nos foi inspecionado **somente em memoria** para detectar indicadores estruturais genericos (SQL, prompt, provider, condicionais, conectores). A triagem abaixo **nao atribui propriedade final ao LangGraph, n8n ou Produto**, nem substitui leitura funcional/manual de cada branch. Nenhuma SQL ou prompt bruto foi mantido no relatorio.
+
+| Prioridade de revisao | Nos por indice da exportacao | Total |
+|---|---|---:|
+| P1 — provedor, interpretacao, geracao e prompts | 8, 9, 10, 11, 13, 23, 24, 34, 39, 40, 50, 53, 54, 55, 57, 58, 59 | 17 |
+| P2 — montagem SQL, bindings, consultas e efeitos | 5, 12, 15, 18, 19, 21, 22, 26, 28, 30, 36, 42, 46, 49, 51, 60, 61, 63, 66, 67, 68 | 21 |
+| P3 — roteamento, regras condicionais e transformacoes | 2, 3, 6, 7, 17, 20, 25, 27, 29, 31, 32, 33, 35, 37, 38, 41, 43, 44, 45, 47, 48, 52, 56, 62, 64, 65 | 26 |
+| P4 — infraestrutura/webhook/resposta e conectores gerais | 1, 4, 14, 16 | 4 |
+| **Cobertura do inventario de triagem** | **68/68, sem duplicatas** | **68** |
+
+Indicadores de busca (somente triagem): 9 Code nodes mencionam provider LLM, 10 contem estrutura associada a prompts, 16 contem formatos associados a SQL, 32 contem logica condicional; os 2 HTTP nodes usam endereco estatico de API Google. **Sinais lexicais nao provam papel funcional nem que sejam todos os caminhos efetivamente executados.** Em particular, queries PostgreSQL dinamicas e nodos de escrita nao devem ser desligados apenas por aparecerem nessa lista.
+
+A sequencia de revisao deve combinar cada item P1/P2 com sua cadeia de conexoes e respectivos objetos G5; em seguida analisar todas as condicoes P3 e efeitos P4, cobrindo tambem 8 nos fora da rota iniciada pelo webhook. Revisao completa permanece **PENDENTE**.
