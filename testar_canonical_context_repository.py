@@ -23,6 +23,13 @@ DSN = "postgresql://test.invalid/semantic_catalog"
 
 def client_raw(*, tenant: str, version: str, alternate: bool = False) -> dict:
     payload = deepcopy(_physical_snapshot())
+    # Canonical mode excludes answer keys and example questions.
+    # Only structural, independently approved catalog patterns may enter.
+    for pattern in payload["padroes"]:
+        pattern["source_use"] = "APPROVED_SEMANTIC_STRUCTURAL"
+        pattern["sql_pattern"] = ""
+        pattern["business_question_examples"] = []
+        pattern["notes"] = None
     # Complete the structural resolver configuration used by validation;
     # no client-specific financial vocabulary enters the runtime.
     payload["regras"][0]["rule_content"].update({
@@ -242,6 +249,54 @@ def test_runtime_config_and_bootstrap_are_fail_closed() -> None:
     else:
         raise AssertionError("Unknown context source accepted")
 
+
+
+
+def test_canonical_snapshot_rejects_historical_sql_with_spoofed_safe_flag() -> None:
+    for sql_text in ("SELECT 1", "WITH example AS (SELECT 1) SELECT * FROM example"):
+        payload = client_raw(tenant="tenant-one", version="release-1")
+        payload["historical_evaluation_sql_excluded"] = True
+        payload["padroes"][0]["sql_pattern"] = sql_text
+        repo, _ = make_repo(payload, tenant="tenant-one", version="release-1")
+        denied(repo, "Material de avaliação")
+
+
+def test_canonical_snapshot_rejects_evaluation_questions_even_if_approved() -> None:
+    payload = client_raw(tenant="tenant-one", version="release-1")
+    payload["padroes"][0]["business_question_examples"] = [
+        "Example financial question reserved for comparative evaluation"
+    ]
+    repo, _ = make_repo(payload, tenant="tenant-one", version="release-1")
+    denied(repo, "Material de avaliação")
+
+
+def test_canonical_snapshot_rejects_missing_or_claimed_evaluation_provenance() -> None:
+    for use in (None, "EVALUATION_ONLY", "UNKNOWN_SOURCE"):
+        payload = client_raw(tenant="tenant-one", version="release-1")
+        if use is None:
+            payload["padroes"][0].pop("source_use")
+        else:
+            payload["padroes"][0]["source_use"] = use
+        repo, _ = make_repo(payload, tenant="tenant-one", version="release-1")
+        denied(repo, "Material de avaliação")
+
+
+def test_canonical_snapshot_rejects_unreviewed_free_text_patterns() -> None:
+    payload = client_raw(tenant="tenant-one", version="release-1")
+    payload["padroes"][0]["notes"] = "Copy a historical query."
+    repo, _ = make_repo(payload, tenant="tenant-one", version="release-1")
+    denied(repo, "Material de avaliação")
+
+
+def test_canonical_snapshot_allows_only_structural_intent_reference() -> None:
+    payload = client_raw(tenant="tenant-one", version="release-1")
+    repo, _ = make_repo(payload, tenant="tenant-one", version="release-1")
+    result = repo.load_active_context(user_profile="reader")
+    assert result["query_patterns"][0]["sql_pattern"] == ""
+    assert result["query_patterns"][0]["business_question_examples"] == []
+    assert result["query_patterns"][0]["source_use"] == (
+        "APPROVED_SEMANTIC_STRUCTURAL"
+    )
 
 if __name__ == "__main__":
     tests = sorted(

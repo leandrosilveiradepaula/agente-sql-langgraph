@@ -22,6 +22,10 @@ from app.domain.context_normalizer import (
     normalize_context_snapshot,
 )
 from app.domain.context_validator import validate_context_snapshot
+from app.domain.canonical_source_boundary import (
+    CanonicalSourceBoundaryError,
+    require_structural_patterns_only,
+)
 from app.ports.context_repository import ContextRepositoryError
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
@@ -150,6 +154,12 @@ class CanonicalContextRepository:
             raise ContextRepositoryError(
                 "Proveniência e aprovação do snapshot não verificadas."
             )
+        try:
+            require_structural_patterns_only(raw)
+        except CanonicalSourceBoundaryError:
+            raise ContextRepositoryError(
+                "Material de avaliação ou origem não aprovada no contexto."
+            ) from None
         try:
             snapshot = normalize_context_snapshot(raw)
         except (ContextNormalizationError, TypeError, ValueError):
