@@ -23,6 +23,13 @@ DSN = "postgresql://test.invalid/semantic_catalog"
 
 def client_raw(*, tenant: str, version: str, alternate: bool = False) -> dict:
     payload = deepcopy(_physical_snapshot())
+    # Complete the structural resolver configuration used by validation;
+    # no client-specific financial vocabulary enters the runtime.
+    payload["regras"][0]["rule_content"].update({
+        "ambiguity_margin": 20,
+        "applied_confidence": 0.95,
+        "fallback_to_previous_intent": False,
+    })
     payload["tenant_id"] = tenant
     payload["semantic_agent_version"] = version
     payload["source_approval_status"] = "APPROVED"
