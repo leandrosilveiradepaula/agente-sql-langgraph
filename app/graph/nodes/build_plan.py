@@ -6,6 +6,7 @@ from typing import Any
 from typing import cast
 
 from app.domain.context import ContextSnapshot
+from app.domain.semantic_plan_gate import missing_semantic_plan_bindings
 from app.domain.planner import (
     PlanningInputError,
     build_query_plan,
@@ -63,6 +64,26 @@ def build_plan(
                 code="PLANNING_CONTEXT_INVALID",
             )
 
+        missing = missing_semantic_plan_bindings(
+            context=context,
+            interpretation=state.get("intent_resolution_result"),
+            query_plan=query_plan,
+        )
+        if missing:
+            return {
+                "query_plan": {},
+                "errors": [
+                    *state.get("errors", []),
+                    _planning_error(
+                        code="PLANNING_SEMANTIC_BINDING_INCOMPLETE",
+                        message="Interpretacao sem vinculo semantico fisico completo.",
+                        details={"unresolved_roles": missing},
+                    ),
+                ],
+                "current_stage": "build_plan",
+                "final_status": "rejected",
+                "failure_stage": "build_plan",
+            }
         return {
             "query_plan": query_plan,
             "current_stage": "build_plan",
