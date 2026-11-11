@@ -10,7 +10,11 @@ from collections.abc import Mapping
 from typing import Any
 
 ROLE_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-MAX_ROLES = 32
+# The engine's structural capabilities are explicitly declared. These are
+# NOT tenant-specific concepts or business aliases; the mapped names remain
+# entirely within each tenant's versioned semantic catalog.
+SUPPORTED_ROLES = frozenset({"grouping", "operation", "metric", "period"})
+MAX_ROLES = len(SUPPORTED_ROLES)
 MAX_ROLE_CONCEPTS = 64
 
 
@@ -34,9 +38,12 @@ def parse_concept_roles(
     if not isinstance(raw, Mapping) or len(raw) > MAX_ROLES:
         raise ConceptRoleConfigurationError("concept_roles_invalid")
     roles: dict[str, frozenset[str]] = {}
+    concept_owners: dict[str, str] = {}
     for role, names in raw.items():
         if not isinstance(role, str) or ROLE_NAME.fullmatch(role) is None:
             raise ConceptRoleConfigurationError("concept_role_name_invalid")
+        if role not in SUPPORTED_ROLES:
+            raise ConceptRoleConfigurationError("concept_role_unsupported")
         if (
             not isinstance(names, list)
             or not 1 <= len(names) <= MAX_ROLE_CONCEPTS
@@ -49,6 +56,13 @@ def parse_concept_roles(
         normalized = [name.strip().casefold() for name in names]
         if len(set(normalized)) != len(normalized):
             raise ConceptRoleConfigurationError("concept_role_duplicate_concept")
+        for name in normalized:
+            previous = concept_owners.get(name)
+            if previous is not None and previous != role:
+                # One piece of semantic evidence must never silently count
+                # as both an operation and a metric/dimension/time request.
+                raise ConceptRoleConfigurationError("concept_role_overlap")
+            concept_owners[name] = role
         roles[role] = frozenset(normalized)
     return roles
 
@@ -59,6 +73,8 @@ def role_concepts(
 ) -> frozenset[str]:
     if not isinstance(role, str) or ROLE_NAME.fullmatch(role) is None:
         raise ConceptRoleConfigurationError("requested_role_invalid")
+    if role not in SUPPORTED_ROLES:
+        raise ConceptRoleConfigurationError("requested_role_unsupported")
     return parse_concept_roles(intent_resolution).get(role, frozenset())
 
 
