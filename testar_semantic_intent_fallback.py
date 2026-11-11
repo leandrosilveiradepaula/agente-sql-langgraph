@@ -404,6 +404,28 @@ def test_selected_interpretation_clears_transient_deterministic_error():
     assert accepted_with_previous["errors"] == preceding["errors"]
 
 
+
+def test_oversized_tenant_catalog_fails_closed_before_provider():
+    """A large tenant catalog is rejected, never silently truncated."""
+    context = _context("intent_x", "A generic operation", "op", schema="ledger")
+    original = context["intent_resolution"]["intent_catalog"][0]
+    context["query_patterns"] = []
+    context["intent_resolution"]["intent_catalog"] = []
+    for index in range(60):
+        intent = "operation_" + str(index)
+        context["query_patterns"].append({"intent_name": intent})
+        entry = deepcopy(original)
+        entry["intent_name"] = intent
+        entry["semantic_description"] = "z" * 1500
+        context["intent_resolution"]["intent_catalog"].append(entry)
+    try:
+        prepare_interpretation("generic question", context)
+    except SemanticIntentRejected as exc:
+        assert str(exc) == "semantic_prompt_too_large"
+        return
+    raise AssertionError("unbounded semantic catalog was accepted")
+
+
 if __name__ == "__main__":
     # The repository uses explicit script entrypoints, not pytest discovery.
     # Ensure this module actually runs in scripts/check_all.py and CI.
