@@ -39,6 +39,7 @@ from app.domain.planning import (
     SelectedPattern,
     selected_pattern_from_query_pattern,
 )
+from app.domain.semantic_concept_roles import role_concepts
 from app.domain.search_text import (
     normalize_search_text,
     tokenize_search_text,
@@ -1300,8 +1301,12 @@ def _detect_grouping_dimensions(
     normalized_question: str,
     intent_resolution_result: Mapping[str, Any] | None = None,
 ) -> tuple[list[ProjectedDimension], dict[str, Any]]:
+    grouping_concepts = role_concepts(
+        context.get("intent_resolution", {}), "grouping",
+    )
     evidence_terms = _grouping_terms_from_intent_evidence(
         intent_resolution_result,
+        grouping_concepts=grouping_concepts,
     )
     evidence_dimensions: list[ProjectedDimension] = []
     evidence_unresolved: list[str] = []
@@ -1333,6 +1338,7 @@ def _detect_grouping_dimensions(
     requested_terms = _grouping_terms_from_context(
         context.get("intent_resolution", {}),
         normalized_question,
+        grouping_concepts=grouping_concepts,
     )
     if not requested_terms:
         return [], {
@@ -1369,6 +1375,8 @@ def _detect_grouping_dimensions(
 
 def _grouping_terms_from_intent_evidence(
     intent_resolution_result: Mapping[str, Any] | None,
+    *,
+    grouping_concepts: frozenset[str],
 ) -> list[tuple[str, str]]:
     if not isinstance(intent_resolution_result, Mapping):
         return []
@@ -1399,8 +1407,8 @@ def _grouping_terms_from_intent_evidence(
             for concept in details.get("concepts", []):
                 if not isinstance(concept, Mapping):
                     continue
-                if str(concept.get("concept_name", "")).casefold() != (
-                    "dimension_grouping"
+                if str(concept.get("concept_name", "")).casefold() not in (
+                    grouping_concepts
                 ):
                     continue
                 if not concept.get("satisfied"):
@@ -3414,6 +3422,8 @@ def _dimension_name_from_semantic_signal(
 def _grouping_terms_from_context(
     intent_resolution: Any,
     normalized_question: str,
+    *,
+    grouping_concepts: frozenset[str],
 ) -> list[tuple[str, str]]:
     if not isinstance(intent_resolution, Mapping):
         return []
@@ -3451,8 +3461,8 @@ def _grouping_terms_from_context(
             for concept in concepts:
                 if not isinstance(concept, Mapping):
                     continue
-                if str(concept.get("concept_name", "")).casefold() != (
-                    "dimension_grouping"
+                if str(concept.get("concept_name", "")).casefold() not in (
+                    grouping_concepts
                 ):
                     continue
                 terms = concept.get("terms", [])
