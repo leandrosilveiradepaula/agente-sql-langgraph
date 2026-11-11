@@ -1,3 +1,23 @@
+# 2026-11-11 21:36 UTC — ORDEM VINCULANTE: PROVAR A MIGRAÇÃO FINANCEIRA REAL
+
+**Missão única:** migrar a inteligência do Agente Financeiro EXISTENTE, estudando juntos o workflow n8n publicado (**68 nós, 78 conexões**) e as **11 versões semânticas do banco/backup G5**, para Produto + n8n (preservado) + LangGraph + Gemini. Não criar outro agente, não confundir com Factory/CRM, não copiar código/SQL/regras casuísticas ou hardcodes financeiros do n8n para Python/TypeScript.
+
+**Próxima entrega, antes de mais infraestrutura/benchmark/documentação:** selecionar uma capacidade financeira **real** do legado e demonstrar rastreavelmente **nó/branch do n8n + regra/registro/versão G5 + significado financeiro validado → contexto semântico versionado por tenant → pergunta inédita → interpretação/plano LangGraph → SQL dinâmica generate-only e gates**. Depois expandir até cobrir os comportamentos necessários, preservando logs, cache, relatórios, aprovações e outros efeitos na camada correta. Sem vínculo contábil aprovado não afirmar migração.
+
+**Zero hardcode e multicliente:** motor conhece processo, catálogo aprovado/versionado conhece o negócio. Sem nomes de clientes, tabelas, colunas, DRE obrigatória, métricas, aliases, joins, sinais, filtros ou fórmulas no código novo; clientes podem ter estruturas distintas e exigir adaptadores de dialeto. Significado contábil não comprovado gera falha segura/pendência humana. Testar pelo menos dois contextos materialmente diferentes e perguntas inéditas.
+
+**Métrica de progresso por capacidade:** `NOT_MIGRATED`, `IMPLEMENTED_UNPROVEN` ou `PROVEN`, com SHA/PR, fonte, versão/fingerprint, teste, resultado e riscos. CI verde, número de documentos, 68 nós enumerados, mocks ou benchmark alto **não** provam migração. A estimativa de 12–20 semanas anterior foi **retirada**: não inventar novos prazos ou percentuais sem medição real.
+
+**Benchmark e SQL histórica:** 63 perguntas oficiais e 106 padrões SQL históricos são **somente para avaliação cega posterior** n8n+Gemini versus n8n+LangGraph+Gemini, nunca exemplos, prompt, input do planner, SQL esperada ou resposta a copiar. Correção de divergência deve ser genérica, não por benchmark.
+
+**Gates:** `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. `Generate`, `Repair` e `Execute Approved` separados; SQL reparada exige `requires_reapproval=true`. SQL financeira read-only para comparação numérica requer autorização separada em isolamento; merge, migração, alteração de DB/n8n/produção/permissões, custos e cutover são humanos. Gemini × SQL-InfoDive somente após cutover homologado.
+
+**Retomada e execução:** verificar GitHub HEAD/PRs #230/#231/#233, CI, runtime VPS e fontes reais; trabalhar em blocos substantivos sem pedir `prossiga` a cada microtarefa. Não reauditar continuamente o que já foi provado. Relatar apenas capacidades com evidência real. Ler `MEMORY.md`, `docs/operations/FIRST-FINANCIAL-CAPABILITY-PROOF.md`, `docs/operations/LEGACY-N8N-DATABASE-MIGRATION-MAP.md` e o contrato de portabilidade.
+
+**Baseline verificado antes desta atualização:** `main@955eda46015d35dbe44a40f9240b821b1f493201`, VPS checkout `87d167969345c3dfcf9deaf36e33ab07a1f9c890`, PRs #230/#231/#233 draft, n8n running, Shadow TEST healthy e execução financeira Shadow desabilitada. A PR #233 em `5b29a89036ac80c1a3a792e8184e96a91662ee5a` falhou no Windows no passo `Whitespace check` do roadmap; CI Linux PASS. Migração completa/paridade financeira **não demonstradas**.
+
+---
+
 # INSTRUÇÃO PRIORITÁRIA — 11/11/2026: MIGRAÇÃO INTEGRAL DO LEGADO
 
 **A tarefa não é desenvolver outro agente financeiro.** É analisar profundamente e **em conjunto** o workflow n8n publicado com 68 nós e o banco/backup G5 (todas as versões, tabelas, regras, entidades, semântica, relacionamentos e dados pertinentes) para migrar integralmente o comportamento do sistema existente para **n8n + LangGraph**. n8n continua como orquestrador; só a inteligência antiga deixa o n8n depois de provar paridade e autorização humana. Business rules ficam em catálogos semânticos versionados por tenant, sem hardcodes de cliente.

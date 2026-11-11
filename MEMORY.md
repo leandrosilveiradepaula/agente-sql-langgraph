@@ -2,6 +2,18 @@
 
 > **Memória durável do repositório, não a memória pessoal do ChatGPT.** Ler junto com `AGENTS.md` em toda retomada. Decisão recente explícita do operador prevalece sobre notas históricas. Atualizado em 2026-11-11.
 
+## Prioridade operacional inequívoca — 11/11/2026 21:36 UTC
+
+**Não considerar progresso financeiro certificado apenas por código, documentação ou benchmark.** A primeira prova exige uma capacidade **real** extraída conjuntamente dos 68 nós do n8n e do banco/backup G5: fonte/versionamento/significado aprovado → contexto de tenant → pergunta inédita → LangGraph (interpretação, plano, geração SQL dinâmica e gates). Sem SQL financeira real no Shadow. O aceite detalhado consta em `docs/operations/FIRST-FINANCIAL-CAPABILITY-PROOF.md`.
+
+**Classificação única por capacidade:** `NOT_MIGRATED`, `IMPLEMENTED_UNPROVEN`, `PROVEN`. Registrar origem n8n/G5, risco, responsáveis, SHA/PR, testes e evidência. Não transportar hardcodes; nem 63 perguntas, SQL histórica ou golden answers entram no gerador. Dois clientes materialmente distintos serão requeridos. Não inventar prazo: a antiga estimativa de 12–20 semanas foi retirada.
+
+**Estado a reconfirmar:** PRs #230/#231/#233 draft, `main@955eda46`, VPS `87d16796`, n8n oficial preservado, Shadow SQL real false. CI da PR #233 SHA `5b29a890` falhou em Windows **somente** no `Whitespace check` (espaços no roadmap), apesar de outros passos daquele job PASS. Corrigir e revalidar. Não há prova de migração financeira integral ou paridade numérica.
+
+**Controles:** OFFICIAL=n8n, SHADOW=LangGraph, Generate/Repair/Execute Approved separados, reparo invalida aprovação; DB, produção, merge/cutover/credenciais e SQL real exigem gates humanos.
+
+---
+
 ## Missão invariável
 
 **Fazer engenharia reversa do agente financeiro EXISTENTE** — n8n publicado (observado com 68 nós) **E** banco/backup G5 recuperado — para reconstruir suas capacidades no fluxo **Produto + n8n + LangGraph + LLM configurável**. Não criar agente do zero nem tentar ensinar o legado por 63 SQLs/respostas prontas. Migrar o comportamento, não copiar hardcodes. Conhecimento de cliente pertence a contexto semântico versionado por tenant; o motor é agnóstico.
