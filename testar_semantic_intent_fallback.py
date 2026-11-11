@@ -402,3 +402,20 @@ def test_selected_interpretation_clears_transient_deterministic_error():
     }
     accepted_with_previous = create_semantic_classification_node(Fake())(preceding)
     assert accepted_with_previous["errors"] == preceding["errors"]
+
+
+if __name__ == "__main__":
+    # The repository uses explicit script entrypoints, not pytest discovery.
+    # Ensure this module actually runs in scripts/check_all.py and CI.
+    import inspect
+    tests = sorted(
+        (name, fn) for name, fn in globals().items()
+        if name.startswith("test_") and inspect.isfunction(fn)
+        and fn.__module__ == __name__
+    )
+    if not tests:
+        raise AssertionError("semantic_fallback_tests_missing")
+    for name, test in tests:
+        test()
+        print("PASS " + name)
+    print("SEMANTIC_FALLBACK_TESTS_PASS=" + str(len(tests)))
