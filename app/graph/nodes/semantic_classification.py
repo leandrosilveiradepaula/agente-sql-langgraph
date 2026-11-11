@@ -83,16 +83,22 @@ def create_semantic_classification_node(
         for binding in validated["bindings"]:
             span = binding["question_span"]
             concept = binding["concept_name"]
+            # Preserve the user's quote for audit, but send ONLY the
+            # independently authorized catalog alias to the planner.
+            # The planner must never interpret a new unregistered synonym
+            # as a physical metric, operation, dimension or table.
+            catalog_term = binding["catalog_term"]
             concepts.append({
                 "concept_name": concept,
                 "satisfied": True,
                 "semantic_signals": [{
                     "concept_name": concept,
-                    "term": span,
-                    "normalized_term": normalize_search_text(span),
+                    "term": catalog_term,
+                    "normalized_term": normalize_search_text(catalog_term),
+                    "question_span": span,
                     "source": "grounded_semantic_interpretation",
                     "confidence": 1.0,
-                    "matched_tokens": normalize_search_text(span).split(),
+                    "matched_tokens": normalize_search_text(catalog_term).split(),
                 }],
             })
         best_candidate = {
