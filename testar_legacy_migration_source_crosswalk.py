@@ -190,6 +190,30 @@ def test_multiple_lanes_and_branches_are_all_accounted_for() -> None:
     assert report["counts"]["edges"] == 4
     assert report["counts"]["nodes"] == 3
 
+
+
+def test_client_without_historical_sql_pattern_collection_is_supported() -> None:
+    args = fixtures("tenant_without_sql_history")
+    source = args["inventory"]["source_collections"]
+    excluded = source.pop()
+    assert excluded["use"] == "EVALUATION_ONLY"
+    args["inventory"]["sql_patterns_classification"] = "NO_HISTORICAL_SQL_PATTERNS"
+    args["manifest"]["sql_pattern_rows_excluded"] = 0
+    args["lineage"]["source_row_count"] = 1
+    report = build_legacy_migration_inventory(**args)
+    assert report["counts"]["g5_identifier_hints"] == 1
+    assert report["counts"]["textual_reference_links"] == 1
+    assert report["sql_patterns_evaluation_only"] is True
+
+
+def test_no_historical_sql_history_cannot_masquerade_as_unreviewed_sql() -> None:
+    args = fixtures("tenant_without_sql_history")
+    args["inventory"]["source_collections"].pop()
+    args["manifest"]["sql_pattern_rows_excluded"] = 0
+    args["lineage"]["source_row_count"] = 1
+    args["inventory"]["sql_patterns_classification"] = "ALLOW_GENERATOR"
+    denied(args, "HISTORICAL_SQL_NOT_ISOLATED")
+
 if __name__ == "__main__":
     tests = sorted(
         (name, func) for name, func in globals().items()

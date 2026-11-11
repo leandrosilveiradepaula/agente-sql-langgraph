@@ -90,9 +90,15 @@ def _schema_guard(
         counts[name] = rows
         if usage == "EVALUATION_ONLY":
             historical_only += rows
-    if not historical_only or inventory.get("sql_patterns_classification") != (
+    # Some tenants have no historical SQL patterns. Zero rows is valid,
+    # provided no evaluation-only content leaks into a context packet.
+    if historical_only and inventory.get("sql_patterns_classification") != (
         "EVALUATION_ONLY_NOT_GENERATOR_INPUT"
     ):
+        _deny("HISTORICAL_SQL_NOT_ISOLATED")
+    if not historical_only and inventory.get(
+        "sql_patterns_classification"
+    ) not in (None, "NO_HISTORICAL_SQL_PATTERNS", "EVALUATION_ONLY_NOT_GENERATOR_INPUT"):
         _deny("HISTORICAL_SQL_NOT_ISOLATED")
     if sum(counts.values()) != lineage.get("source_row_count"):
         _deny("SOURCE_ROW_COUNT_MISMATCH")
