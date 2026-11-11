@@ -186,6 +186,7 @@ def test_audit_classifies_plan_loss_and_planned_projection_changes() -> None:
     assert result["rejection_code_counts"] == {
         "PLANNING_ANALYTICAL_BINDING_INCOMPLETE": 1
     }
+    assert result["incomplete_analytical_operand_counts"] == {}
     assert result["changed_projection_field_counts"] == {
         "analytical_operations": 1,
     }
@@ -210,6 +211,37 @@ def test_preserves_opaque_legacy_rule_content_without_interpreting_it_as_json() 
     assert prepared["candidate"]["rules"][1]["rule_content"] == (
         "Opaque legacy business text; not JSON."
     )
+
+
+
+def test_audit_counts_missing_operands_without_exposing_metric_identity() -> None:
+    from unittest.mock import patch
+    from app.domain import semantic_role_migration as migration
+
+    prepared = _prepare()
+    comparison = {
+        "operation_type": "comparison",
+        "binding_cardinality": {"minimum": 2},
+    }
+    ranking = {"operation_type": "ranking"}
+    synthetic = iter([
+        {"status": "planned", "query_plan": {"planning_context": {}}},
+        {"status": "rejected",
+         "error_code": "PLANNING_ANALYTICAL_BINDING_INCOMPLETE",
+         "projection": {
+             "planned_metrics": [],
+             "analytical_operations": [comparison, ranking],
+         }},
+    ])
+    with patch.object(migration, "_safe_plan", side_effect=lambda *args: next(synthetic)):
+        result = audit_role_migration_questions(prepared, ["synthetic query"])
+    assert result["status"] == "REVIEW_REQUIRED"
+    assert result["planned_to_rejected"] == 1
+    assert result["incomplete_analytical_operand_counts"] == {
+        "comparison": 1, "ranking": 1,
+    }
+    assert "synthetic query" not in repr(result)
+    assert "metric_ref" not in repr(result)
 
 
 if __name__ == "__main__":
