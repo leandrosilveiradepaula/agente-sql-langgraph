@@ -2,8 +2,8 @@
 """Root-owned, local-only capability broker for the private MCP service.
 
 Linux SO_PEERCRED restricts requests to the non-root agente-mcp identity.
-Only fixed infrastructure diagnostics and an exact, inactive evidence relay
-import are available. No shell execution, database queries or dynamic targets.
+Legacy fixed diagnostics remain available. The administrator-approved
+execution operations are authenticated via SO_PEERCRED, bounded, and audited.
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ class Blocked(Exception):
 
 
 def _run(argv: list[str], timeout: int = 20, stdin: str | None = None) -> str:
-    """Fixed argv only. Never put user-provided text in a command, even quoted."""
+    """Fixed argv executor used by the legacy diagnostic operations only."""
     try:
         result = subprocess.run(
             argv, input=stdin, capture_output=True, text=True, timeout=timeout,
