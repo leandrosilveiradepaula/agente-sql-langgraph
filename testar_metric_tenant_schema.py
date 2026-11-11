@@ -64,7 +64,7 @@ def test_direct_metric_is_rejected_when_schema_not_authorized():
     )
     assert result["status"] == "rejected"
     assert result["query_plan"] is None
-    assert result["error_code"] == "PLANNING_ANALYTICAL_BINDING_INCOMPLETE"
+    assert result["error_code"] == "PLANNING_METRIC_BINDING_INCOMPLETE"
 
 
 def test_unauthorized_metric_binding_cannot_override_direct_alias():
@@ -143,6 +143,71 @@ def test_same_planner_portable_across_two_distinct_authorized_schemas():
         context["allowed_schemas"] = ["another_organization"]
         metrics, status, _ = _metric_result(context, term=alias)
         assert metrics == [] and status == "invalid_metadata"
+
+
+
+def test_partially_resolved_explicit_metric_is_not_silently_dropped():
+    context = _metric_context()
+    evidence = _intent_metric_evidence(
+        term="amount", operation_term="highest",
+    )
+    metric_concept = next(
+        c for c in evidence["best_candidate"]["matches"][0][
+            "match_details"
+        ]["concepts"] if c.get("concept_name") == "financial_metric"
+    )
+    missing_term = deepcopy(metric_concept["terms"][0])
+    missing_term["term"] = "unregistered_measure"
+    missing_term["normalized_term"] = "unregistered_measure"
+    details = missing_term.get("match_details")
+    if isinstance(details, dict):
+        signal = details.get("semantic_signal")
+        if isinstance(signal, dict):
+            signal["term"] = "unregistered_measure"
+            signal["normalized_term"] = "unregistered_measure"
+    metric_concept["terms"].append(missing_term)
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.9,
+        normalized_question="highest amount and unregistered_measure",
+        intent_resolution_result=evidence,
+    )
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "PLANNING_METRIC_BINDING_INCOMPLETE"
+    assert result["query_plan"] is None
+    projection = result["projection"]
+    assert projection["planned_metrics"]
+    diagnostic = projection["diagnostics"]["planned_metric_diagnostic"]
+    assert diagnostic["unresolved_terms"] == ["unregistered_measure"]
+
+
+def test_legacy_planning_without_explicit_metric_stays_available():
+    from testar_planner import _context
+
+    result = build_query_plan(
+        context=_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.9,
+        normalized_question="generic analysis",
+    )
+    assert result["status"] == "planned"
+    assert result["query_plan"] is not None
+
+
+def test_valid_explicit_metric_plans_with_runtime_acl():
+    context = _metric_context()
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.9,
+        normalized_question="highest amount",
+        intent_resolution_result=_intent_metric_evidence(
+            term="amount", operation_term="highest",
+        ),
+    )
+    assert result["status"] == "planned", result.get("error_code")
+    assert result["query_plan"]["planning_context"]["planned_metrics"]
 
 
 if __name__ == "__main__":
