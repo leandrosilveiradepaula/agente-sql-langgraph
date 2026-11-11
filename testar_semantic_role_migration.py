@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from app.domain.context_normalizer import normalize_context_snapshot
 from app.domain.semantic_role_migration import (
     SemanticRoleMigrationRefused,
     audit_role_migration_questions,
@@ -21,6 +22,7 @@ def _prepare(raw=None, roles=None, version="context-test-v4"):
         roles = {"grouping": ["first_concept"]}
     return prepare_role_migration(
         raw, candidate_version=version, role_bindings=roles,
+        expected_source_fingerprint=normalize_context_snapshot(raw)["fingerprint"],
     )
 
 
@@ -48,6 +50,14 @@ def test_prepares_versioned_candidate_without_mutating_source() -> None:
     assert result["source"]["intent_resolution"]["config"].get("concept_roles") is None
     assert result["candidate_raw"]["semantic_agent_version"] == "context-test-v4"
     assert result["candidate_raw"] != original
+    _refuses(
+        "source_fingerprint_mismatch",
+        lambda: prepare_role_migration(
+            original, candidate_version="context-test-v4",
+            role_bindings={"grouping": ["first_concept"]},
+            expected_source_fingerprint="0" * 64,
+        ),
+    )
 
 
 def test_reports_only_aggregates_and_never_leaks_questions_or_sql() -> None:
@@ -68,6 +78,11 @@ def test_reports_only_aggregates_and_never_leaks_questions_or_sql() -> None:
     for text in ("análise genérica", "unrelated question", "codigo ab", "select"):
         assert text not in rendered
     assert result["candidate_fingerprint"] != result["source_fingerprint"]
+    assert result["planned_to_rejected"] >= 0
+    assert result["rejected_to_planned"] >= 0
+    assert result["planned_projection_changes"] >= 0
+    assert isinstance(result["rejection_code_counts"], dict)
+    assert isinstance(result["changed_projection_field_counts"], dict)
 
 
 def test_rejects_unmapped_concepts_and_duplicate_roles() -> None:
