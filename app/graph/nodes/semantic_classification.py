@@ -41,6 +41,11 @@ def create_semantic_classification_node(
             policy = versioned_policy(context)
             if policy is None:
                 return original
+            # An explicit per-request LLM override may select a different
+            # generator. Never perform interpretation under a different
+            # default model identity; a matching registry is needed first.
+            if state.get("llm_selection"):
+                raise SemanticIntentRejected("explicit_model_selection_unattested")
             if interpreter is None:
                 raise RuntimeError("semantic_interpreter_unavailable")
             request = prepare_interpretation(str(state.get("question") or ""), context)
