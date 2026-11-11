@@ -204,7 +204,7 @@ def test_runtime_config_and_bootstrap_are_fail_closed() -> None:
         "POSTGRES_CONTEXT_SCHEMA": "catalog_private",
         "POSTGRES_CANONICAL_CONTEXT_TABLE": "versioned_context_documents",
         "CONTEXT_TENANT_ID": "tenant-one",
-        "EXPECTED_CONTEXT_FINGERPRINT": normalize_context_snapshot(source)["fingerprint"],
+        "SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT": normalize_context_snapshot(source)["fingerprint"],
     }
     config = load_postgres_context_runtime_config(env)
     assert config.context_source_mode == "canonical_snapshot"
@@ -215,7 +215,7 @@ def test_runtime_config_and_bootstrap_are_fail_closed() -> None:
     for key in (
         "CONTEXT_TENANT_ID",
         "POSTGRES_CANONICAL_CONTEXT_TABLE",
-        "EXPECTED_CONTEXT_FINGERPRINT",
+        "SEMANTIC_CONTEXT_EXPECTED_FINGERPRINT",
     ):
         unsafe = dict(env)
         del unsafe[key]
