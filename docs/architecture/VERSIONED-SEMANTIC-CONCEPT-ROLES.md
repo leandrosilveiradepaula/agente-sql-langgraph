@@ -286,3 +286,41 @@ equivalência por pergunta é intencional: são gates independentes.
 
 Sem chamadas de LLM, execução financeira, leitura da SQL histórica,
 ativação de catálogo ou mudança na operação oficial.
+
+## Gate de identidade semântica em tempo de planejamento (v1.4)
+
+O scanner de catálogo identifica aliases ambíguos, mas a segurança exige
+que o **próprio planejador** também recuse uma escolha errada:
+
+- `PLANNING_METRIC_ALIAS_AMBIGUOUS`: um alias de métrica sem vínculo
+  condicional que permita desambiguar o significado aponta para múltiplos
+  `metric_ref` físicos. A prioridade não autoriza escolher uma medida.
+- `PLANNING_OPERATION_ALIAS_AMBIGUOUS`: o mesmo alias representa
+  configurações analíticas incompatíveis (direção, limite, cardinalidade ou
+  operação), mesmo que uma delas tenha prioridade menor.
+- Registros semanticamente equivalentes e duplicados podem ser deduplicados;
+  conflitos reais de significado exigem nova versão do catálogo.
+- Uma evidência de agrupamento de `best_candidate` de outra intenção é
+  ignorada, igual aos mecanismos já aplicados às métricas e operações.
+
+O contrato do planejador evolui para
+`PLANNER_VERSION=v1.4.0-semantic-alias-integrity`, preservando evidência
+do comportamento efetivamente testado e sem mudar o significado de nenhuma
+empresa no código.
+
+### Períodos nunca são comprovados por filtros alheios
+
+Para interpretações opcionais por LLM, `semantic_plan_gate.py` exige
+que cada alias de período identificado apareça em uma série temporal
+cuja coluna de data esteja autorizada no catálogo, ou em um filtro cujo
+`binding_ref` resolvido tenha **alvo físico em `date_columns`** do
+mesmo catálogo e que preserve o alias citado. Um filtro de produto,
+organização ou qualquer outra dimensão não prova período. Não há nome de
+coluna de data fixo; dois tenants com estruturas diferentes passam pelo
+mesmo mecanismo. Essa verificação é adicional às validações de SQL e
+autorizações físicas existentes.
+
+Regressões: testes de aliases ambíguos e equivalentes, isolamento de
+intenções, datas não autorizadas, filtros sem relação temporal e dois
+esquemas sintéticos materialmente distintos. Estas verificações não
+certificam paridade numérica nem autorizam cutover.
