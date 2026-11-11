@@ -350,7 +350,7 @@ def test_gemini_adapter_serializes_semantic_context_only():
                 configuration=GoogleGeminiConfiguration(model_id="test-model"),
             ))
             prompt = json.loads(payload["contents"][0]["parts"][0]["text"])
-            assert prompt["contract_version"] == "semantic-intent-v2"
+            assert prompt["contract_version"] == "semantic-intent-v3"
             assert "table_catalog" not in prompt
             assert "official_sql" not in prompt
             assert prompt["allowed_intents"][0]["intent_name"] == "intent_x"
@@ -375,7 +375,7 @@ def test_gemini_adapter_refuses_provider_failure():
         client=Failing(), configuration=GoogleGeminiConfiguration(),
     )
     try:
-        adapter.interpret({"contract_version": "semantic-intent-v2"})
+        adapter.interpret({"contract_version": "semantic-intent-v3"})
     except RuntimeError:
         return
     raise AssertionError("Gemini infrastructure failure was silently accepted")
@@ -568,7 +568,7 @@ def _physical_metric_context(*, include_unbacked: bool = True):
 def test_pre_provider_lexicon_excludes_unbound_financial_synonyms():
     context = _physical_metric_context()
     request = prepare_interpretation(
-        "How much of the portfolio is active", context,
+        "How much amount is active", context,
     )
     allowed = request["allowed_intents"][0]["concept_lexicon"][0]["terms"]
     assert allowed == ["amount"]
@@ -577,7 +577,7 @@ def test_pre_provider_lexicon_excludes_unbound_financial_synonyms():
     assert "fact_metrics" not in repr(request)
     good = _accepted(
         request, "portable_intent", "metric_signal",
-        "portfolio", catalog_term="amount",
+        "amount", catalog_term="amount",
     )
     result = validate_interpretation(
         good, request, {"intent_catalog": {"evaluations": []}},
@@ -792,6 +792,50 @@ def test_same_semantic_concept_cannot_have_two_structural_roles():
         assert str(exc) == "semantic_role_config_invalid"
     else:
         raise AssertionError("overlapping roles accepted before provider")
+
+
+
+def test_unmapped_metric_phrase_cannot_be_assigned_accounting_meaning():
+    context = _physical_metric_context(include_unbacked=False)
+    request = prepare_interpretation(
+        "Show portfolio liquidity", context,
+    )
+    value = _accepted(
+        request, "portable_intent", "metric_signal",
+        "liquidity", catalog_term="amount",
+    )
+    try:
+        validate_interpretation(
+            value, request, {"intent_catalog": {"evaluations": []}},
+        )
+    except SemanticIntentRejected as exc:
+        assert str(exc) == "provider_metric_alias_unverified"
+    else:
+        raise AssertionError("unmapped business phrase silently became a metric")
+
+    authorized = prepare_interpretation("Show amount", context)
+    good = _accepted(
+        authorized, "portable_intent", "metric_signal",
+        "amount", catalog_term="amount",
+    )
+    result = validate_interpretation(
+        good, authorized, {"intent_catalog": {"evaluations": []}},
+    )
+    assert result["bindings"][0]["catalog_term"] == "amount"
+
+
+def test_metric_evidence_policy_is_scoped_to_metric_role_only():
+    context = _context("intent_x", "Describe an operation", "op", schema="ledger")
+    request = prepare_interpretation("Top entries", context)
+    assert request["allowed_intents"][0]["literal_metric_concepts"] == []
+    output = _accepted(
+        request, "intent_x", "op",
+        "Top", catalog_term="op",
+    )
+    accepted = validate_interpretation(
+        output, request, {"intent_catalog": {"evaluations": []}},
+    )
+    assert accepted["bindings"][0]["question_span"] == "Top"
 
 
 if __name__ == "__main__":
