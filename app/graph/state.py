@@ -140,6 +140,7 @@ class GraphState(TypedDict, total=False):
     intent: str | None
     intent_confidence: float | None
     intent_resolution_result: IntentResolutionResult
+    semantic_interpretation_result: dict[str, Any]
     query_plan: QueryPlan
     sql_generation_result: SqlGenerationResult
     sql_repair_result: SqlRepairResult
