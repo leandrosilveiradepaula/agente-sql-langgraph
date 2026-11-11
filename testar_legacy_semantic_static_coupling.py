@@ -244,6 +244,116 @@ def test_if_gate_with_unknown_parent_does_not_certify_human_approval():
     assert gate["gate_classification"] == "SIGNAL_PROVENANCE_NOT_ESTABLISHED"
     assert gate["human_approval_verified"] is False
 
+
+
+def _pin_fixture_to_active_manifest(values: dict) -> str:
+    import hashlib
+    pinned = hashlib.sha256(b"fixed-legacy-version").hexdigest()
+    values["source_manifest"]["versions"][0]["source_version_sha256"] = pinned
+    values["source_hints"]["candidates"][0]["source_version_sha256"] = pinned
+    values["source_manifest"]["versions"][0].update({
+        "row_counts": {"versioned_rules": 2},
+        "identifier_hints_count": 1,
+        "sealed_and_roundtrip_verified": True,
+    })
+    return pinned
+
+
+def test_reconcile_exact_legacy_version_to_sealed_manifest_without_decrypting():
+    values = fixture()
+    version = _pin_fixture_to_active_manifest(values)
+    report = audit_legacy_semantic_coupling(**values)
+    scoped = report["pinned_source_version_reconciliation"]
+    assert scoped["status"] == "PINNED_VERSION_MATCHES_SEALED_G5"
+    assert scoped["matching_source_version_sha256"] == version
+    assert scoped["matching_manifest_row_counts"] == {"versioned_rules": 2}
+    assert scoped["matching_manifest_identifier_hint_count"] == 1
+    assert scoped["seal_roundtrip_reported_by_manifest"] is True
+    mapping = scoped["selected_version_binding_evidence"][0]
+    assert mapping["binding_count"] == 2
+    assert mapping["bindings_with_textual_hints"] == 1
+    assert mapping["accounting_equivalence_approved"] is False
+    assert scoped["source_plaintext_reviewed"] is False
+    assert scoped["ready_for_generation"] is False
+
+
+def test_missing_pinned_version_does_not_silently_substitute_another_version():
+    report = audit_legacy_semantic_coupling(**fixture())
+    scoped = report["pinned_source_version_reconciliation"]
+    assert scoped["status"] == "PINNED_VERSION_NOT_IN_G5_MANIFEST"
+    assert scoped["matching_source_version_sha256"] is None
+    assert scoped["matching_manifest_row_counts"] == {}
+    assert scoped["selected_version_binding_evidence"] == []
+
+
+def test_multiple_workflow_version_literals_are_never_merged():
+    values = fixture()
+    _pin_fixture_to_active_manifest(values)
+    source = values["workflow"]["nodes"][0]["parameters"]["query"]
+    values["workflow"]["nodes"][0]["parameters"]["query"] = source.replace(
+        "WHERE agent_version='fixed-legacy-version';",
+        "WHERE agent_version='fixed-legacy-version';",
+        1,
+    ).replace(
+        "SELECT * FROM source.historical_examples "
+        "WHERE agent_version='fixed-legacy-version';",
+        "SELECT * FROM source.historical_examples "
+        "WHERE agent_version='second-version';",
+    )
+    report = audit_legacy_semantic_coupling(**values)
+    scoped = report["pinned_source_version_reconciliation"]
+    assert scoped["status"] == "MULTIPLE_PINNED_VERSIONS_REQUIRE_REVIEW"
+    assert scoped["matching_source_version_sha256"] is None
+
+
+def test_version_scoped_counts_do_not_mix_old_alias_records():
+    values = fixture()
+    pinned = _pin_fixture_to_active_manifest(values)
+    extra = "b" * 64
+    values["source_manifest"]["versions"].append({
+        "source_version_sha256": extra,
+        "row_counts": {"versioned_rules": 100},
+    })
+    values["source_hints"]["candidates"].append({
+        "source_version_sha256": extra,
+        "source_table_ref": "cash_settlements",
+        "candidate_status": "COLUMN_UNRESOLVED",
+    })
+    report = audit_legacy_semantic_coupling(**values)
+    scoped = report["pinned_source_version_reconciliation"]
+    assert scoped["matching_source_version_sha256"] == pinned
+    assert scoped["matching_manifest_row_counts"] == {"versioned_rules": 2}
+    assert scoped["matching_manifest_identifier_hint_count"] == 1
+    match = scoped["selected_version_binding_evidence"][0]
+    assert match["candidate_status_counts"] == {
+        "AMBIGUOUS_TABLE_NAME": 1
+    }
+
+
+def test_unknown_or_negative_manifest_counts_fail_closed():
+    for rows in ({"untrusted_collection": 1}, {"versioned_rules": -1},
+                 {"versioned_rules": "2"}):
+        values = fixture()
+        _pin_fixture_to_active_manifest(values)
+        values["source_manifest"]["versions"][0]["row_counts"] = rows
+        try:
+            audit_legacy_semantic_coupling(**values)
+        except LegacyAuditBlocked:
+            pass
+        else:
+            raise AssertionError("Invalid source row count accepted")
+
+
+def test_no_version_selector_never_approves_unpinned_context():
+    values = fixture()
+    values["workflow"]["nodes"][0]["parameters"]["query"] = (
+        "SELECT * FROM source.versioned_rules WHERE tenant_id='tenant-1'"
+    )
+    report = audit_legacy_semantic_coupling(**values)
+    scoped = report["pinned_source_version_reconciliation"]
+    assert scoped["status"] == "NO_LEGACY_VERSION_SELECTOR"
+    assert scoped["ready_for_generation"] is False
+
 if __name__ == "__main__":
     cases = [
         (name, test)

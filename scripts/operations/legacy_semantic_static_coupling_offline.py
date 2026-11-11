@@ -328,6 +328,100 @@ def audit_legacy_semantic_coupling(
         for e in results
         if e.get("inline_version_literal_count", 0)
     ]
+    # Reconcile the actually pinned workflow version with sealed G5 versions.
+    # This is cryptographic identity matching, NOT decryption, approval or
+    # equivalence of accounting rules. Never merge different versions.
+    pinned_hashes = sorted({
+        version
+        for item in fixed_version_nodes
+        for version in item["version_hashes"]
+    })
+    manifest_by_hash = {
+        record["source_version_sha256"]: record
+        for record in manifest_versions
+    }
+    selected_hash: str | None = None
+    if not pinned_hashes:
+        selected_status = "NO_LEGACY_VERSION_SELECTOR"
+    elif len(pinned_hashes) > 1:
+        selected_status = "MULTIPLE_PINNED_VERSIONS_REQUIRE_REVIEW"
+    elif pinned_hashes[0] not in manifest_by_hash:
+        selected_status = "PINNED_VERSION_NOT_IN_G5_MANIFEST"
+    else:
+        selected_status = "PINNED_VERSION_MATCHES_SEALED_G5"
+        selected_hash = pinned_hashes[0]
+
+    scoped_rows: dict[str, int] = {}
+    scoped_hint_count = 0
+    scoped_map_evidence = []
+    if selected_hash is not None:
+        packet = manifest_by_hash[selected_hash]
+        declared = packet.get("row_counts", {})
+        if not isinstance(declared, Mapping):
+            raise LegacyAuditBlocked("G5_SELECTED_ROW_COUNTS_INVALID")
+        for name, count in declared.items():
+            if (
+                not isinstance(name, str)
+                or name.casefold() not in catalog_names
+                or type(count) is not int
+                or count < 0
+            ):
+                raise LegacyAuditBlocked("G5_SELECTED_ROW_COUNT_INVALID")
+            scoped_rows[name] = count
+        scoped_hint_count = sum(
+            candidate.get("source_version_sha256") == selected_hash
+            for candidate in candidates
+        )
+        for node_ordinal, node in enumerate(nodes, 1):
+            kind = str(node.get("type") or "").rsplit(".", 1)[-1]
+            if kind != "code":
+                continue
+            source = (node.get("parameters") or {}).get("jsCode", "")
+            if not isinstance(source, str):
+                continue
+            for map_match in _STATIC_MAP.finditer(source):
+                bindings = _MAP_ITEM.findall(map_match.group(2))
+                if not bindings:
+                    continue
+                status_count: Counter[str] = Counter()
+                matched = 0
+                for _, _, physical_name in bindings:
+                    candidates_in_version = [
+                        hint
+                        for hint in refs.get(physical_name.casefold(), [])
+                        if hint["source_version_sha256"] == selected_hash
+                    ]
+                    matched += bool(candidates_in_version)
+                    status_count.update(
+                        _status(hint.get("candidate_status"))
+                        for hint in candidates_in_version
+                    )
+                scoped_map_evidence.append({
+                    "ordinal": node_ordinal,
+                    "source_line": source.count("\n", 0, map_match.start()) + 1,
+                    "binding_count": len(bindings),
+                    "bindings_with_textual_hints": matched,
+                    "candidate_status_counts": dict(sorted(status_count.items())),
+                    "accounting_equivalence_approved": False,
+                })
+    reconciliation = {
+        "status": selected_status,
+        "pinned_version_hashes": pinned_hashes,
+        "matching_source_version_sha256": selected_hash,
+        "matching_manifest_row_counts": dict(sorted(scoped_rows.items())),
+        "matching_manifest_identifier_hint_count": scoped_hint_count,
+        "selected_version_binding_evidence": scoped_map_evidence,
+        "seal_roundtrip_reported_by_manifest": (
+            manifest_by_hash[selected_hash].get(
+                "sealed_and_roundtrip_verified"
+            ) is True
+            if selected_hash is not None else False
+        ),
+        "source_plaintext_reviewed": False,
+        "accounting_definition_approved": False,
+        "ready_for_generation": False,
+    }
+
     return {
         "contract": "legacy-semantic-static-coupling-audit-v1",
         "status": "SOURCE_REVIEW_ONLY_NOT_FINANCIAL_EQUIVALENCE",
@@ -339,6 +433,7 @@ def audit_legacy_semantic_coupling(
         "static_bindings_with_textual_g5_hints": matched_aliases,
         "total_js_lines": total_js_lines,
         "fixed_source_version_nodes": fixed_version_nodes,
+        "pinned_source_version_reconciliation": reconciliation,
         "if_gate_signals": gate_signals,
         "evaluation_only_sources_read_by_legacy": loaded_evaluation,
         "nodes": results,
