@@ -161,6 +161,90 @@ def test_custom_entity_type_is_not_disclosed():
     assert "confidential_marker" not in repr(report)
 
 
+
+def test_semantic_vocabulary_gap_is_detected_without_inventing_aliases():
+    context = _base_context()
+    metric_alias = next(
+        entry["user_term"] for entry in context["entities"]
+        if entry.get("entity_type") == "financial_metric"
+    )
+    operation_alias = next(
+        entry["user_term"] for entry in context["entities"]
+        if entry.get("entity_type") == "analytical_operation"
+    )
+    context["intent_resolution"] = {
+        "config": {
+            "concept_roles": {
+                "metric": ["measure_class"],
+                "operation": ["operation_class"],
+            },
+        },
+        "intent_catalog": [
+            {
+                "intent_name": "synthetic_operation",
+                "rules": [{
+                    "effect": "require",
+                    "concepts": [
+                        {"concept_name": "measure_class",
+                         "terms": [metric_alias, "unmapped_user_synonym"]},
+                        {"concept_name": "operation_class",
+                         "terms": [operation_alias, "unmapped_operation_synonym"]},
+                    ],
+                }],
+            },
+        ],
+    }
+    report = audit_semantic_catalog(context)
+    assert report["status"] == "INVENTORY_COMPLETE"
+    for role in ("metric", "operation"):
+        assert report["semantic_role_lexicon_coverage"][role] == {
+            "catalog_alias_terms": 2,
+            "physically_resolved_terms": 1,
+            "unbound_alias_terms": 1,
+        }
+    assert report["semantic_fallback_binding_review_required"] is True
+    assert "unmapped_user_synonym" not in repr(report)
+    assert "unmapped_operation_synonym" not in repr(report)
+    assert report["financial_parity_verified"] is False
+    assert report["automated_activation_authorized"] is False
+
+
+def test_lexicon_differences_do_not_change_context_of_tenant_schemas():
+    base = _base_context()
+    for schema, table, term in (
+        ("alpha_ledger", "balance_rows", "flow"),
+        ("beta_book", "invoice_facts", "volume"),
+    ):
+        context = _tenant(schema=schema, table=table, metric=term)
+        alias = next(
+            entry["user_term"] for entry in context["entities"]
+            if entry.get("entity_type") == "financial_metric"
+        )
+        context["intent_resolution"] = {
+            "config": {"concept_roles": {"metric": ["role_measure"]}},
+            "intent_catalog": [{
+                "intent_name": "tenant_metric_operation",
+                "rules": [{
+                    "effect": "positive_score",
+                    "concepts": [{
+                        "concept_name": "role_measure",
+                        "terms": [alias],
+                    }],
+                }],
+            }],
+        }
+        report = audit_semantic_catalog(context)
+        assert report["status"] == "INVENTORY_COMPLETE"
+        assert report["semantic_role_lexicon_coverage"]["metric"] == {
+            "catalog_alias_terms": 1,
+            "physically_resolved_terms": 1,
+            "unbound_alias_terms": 0,
+        }
+        assert report["semantic_fallback_binding_review_required"] is False
+        assert schema not in repr(report)
+        assert table not in repr(report)
+
+
 if __name__ == "__main__":
     tests = sorted(
         (name, value) for name, value in globals().items()
