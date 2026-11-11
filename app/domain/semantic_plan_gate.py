@@ -70,11 +70,32 @@ def missing_semantic_plan_bindings(
                 if concept_name.casefold() in names
             ]
             for role in assigned_roles:
-                signals = concept.get("semantic_signals")
-                if not isinstance(signals, list) or not signals:
+                # The resolver and the Graph use two equivalent evidence
+                # shapes. Accept direct signals and matched nested term
+                # signals, but never infer an alias from free text.
+                signals: list[Any] = []
+                direct = concept.get("semantic_signals")
+                if isinstance(direct, list):
+                    signals.extend(direct)
+                terms = concept.get("terms")
+                if isinstance(terms, list):
+                    for matched_term in terms:
+                        if not isinstance(matched_term, Mapping) or (
+                            matched_term.get("matched") is not True
+                        ):
+                            continue
+                        details = matched_term.get("match_details")
+                        if not isinstance(details, Mapping):
+                            continue
+                        nested = details.get("semantic_signal")
+                        if isinstance(nested, Mapping):
+                            signals.append(nested)
+                if not signals:
                     return [role]
                 for signal in signals:
-                    if not isinstance(signal, Mapping):
+                    if not isinstance(signal, Mapping) or (
+                        signal.get("concept_name") != concept_name
+                    ):
                         return [role]
                     term = signal.get("normalized_term")
                     if not isinstance(term, str) or not term.strip():
