@@ -45,7 +45,12 @@ def create_semantic_classification_node(
                 raise RuntimeError("semantic_interpreter_unavailable")
             request = prepare_interpretation(str(state.get("question") or ""), context)
             response = interpreter.interpret(request)
-            validated = validate_interpretation(response, request, result)
+            if not isinstance(response, Mapping):
+                raise RuntimeError("semantic_provider_result_invalid")
+            raw_text = response.get("output_text")
+            if not isinstance(raw_text, str):
+                raise RuntimeError("semantic_provider_text_invalid")
+            validated = validate_interpretation(raw_text, request, result)
         except (SemanticIntentRejected, RuntimeError, ValueError, TypeError) as exc:
             return _safe_rejection(original, type(exc).__name__)
         except Exception:
@@ -91,6 +96,9 @@ def create_semantic_classification_node(
                 "source": "provider_interpretation",
                 "context_fingerprint": validated["context_fingerprint"],
                 "binding_count": len(validated["bindings"]),
+                "provider_name": str(response.get("provider_name", ""))[:128],
+                "provider_model": str(response.get("provider_model", ""))[:128],
+                "token_usage": deepcopy(response.get("token_usage") or {}),
                 "no_sql_executed": True,
             },
             "current_stage": "classify_intent",
