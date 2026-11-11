@@ -220,3 +220,21 @@ detectada pelo inventário. O status do inventário foi
 `INVENTORY_COMPLETE`, enquanto o preflight de 63 perguntas **permanece
 `REVIEW_REQUIRED`** por 9 rejeições e 16 mudanças de plano. Isso confirma
 que completude estática e equivalência funcional são gates diferentes.
+
+## Integridade de proveniência e isolamento da auditoria
+
+A auditoria de catálogo agora falha fechado se o snapshot não possui versão
+não vazia ou fingerprint hexadecimal bem formado. Esses campos são pré-condição
+para a auditoria; a correspondência efetiva do fingerprint com a origem é
+verificada separadamente no preflight de migração. O auditor não presume que
+um formato válido, isoladamente, prova autenticidade.
+
+Aliases compartilhados entre uma operação e uma métrica geram
+`cross_role_alias_ambiguous`: não se aplica desempate automático nem regra
+específica de cliente. Classes personalizadas de entidades são agregadas
+como `other`, sem divulgação dos nomes de domínio no relatório.
+
+Testes novos cobrem perda de versão, fingerprint inválido, alias com múltiplas
+funções e proteção de metadados particulares. A auditoria permanece
+somente leitura, sem benchmark, geração SQL, chamadas LLM ou aprovação de
+ativação.
