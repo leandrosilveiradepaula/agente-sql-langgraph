@@ -102,6 +102,31 @@ def build_query_plan(
             "selection planned sem selected_pattern."
         )
 
+    # Explicit intent evidence must never be reused for a different
+    # intent, even if that intent has a valid query pattern. This is a
+    # structural authorization boundary; no tenant-specific labels apply.
+    if isinstance(intent_resolution_result, Mapping):
+        evidence_intent = intent_resolution_result.get("intent")
+        if (
+            isinstance(evidence_intent, str)
+            and evidence_intent.strip()
+            and not _same_text(evidence_intent, intent_name)
+        ):
+            failed_selection = deepcopy(selection)
+            failed_selection["status"] = "rejected"
+            failed_selection["error_code"] = "PLANNING_INTENT_EVIDENCE_MISMATCH"
+            failed_selection["error_message"] = (
+                "Evidencia semantica nao pertence a intencao selecionada."
+            )
+            return {
+                "status": "rejected",
+                "query_plan": None,
+                "selection_result": failed_selection,
+                "projection": None,
+                "error_code": "PLANNING_INTENT_EVIDENCE_MISMATCH",
+                "error_message": failed_selection["error_message"],
+            }
+
     # An explicitly selected temporal reference must never be ignored by an
     # intent that is outside the configured temporal-planning scope.
     # This runs after intent/pattern resolution and before any SQL generation.
