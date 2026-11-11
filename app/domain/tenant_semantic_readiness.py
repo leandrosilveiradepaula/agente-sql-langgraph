@@ -63,7 +63,7 @@ def _physical_tables(value: object) -> dict[tuple[str, str], frozenset[str]]:
     return tables
 
 
-def assess_customer_semantic_candidate(
+def assess_tenant_semantic_candidate(
     *,
     raw_context: Mapping[str, Any],
     tenant_id: str,

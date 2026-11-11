@@ -54,8 +54,8 @@ STEPS = [
         [sys.executable, "testar_canonical_context_repository.py"],
     ),
     (
-        "testar_customer_context_readiness.py",
-        [sys.executable, "testar_customer_context_readiness.py"],
+        "testar_tenant_semantic_readiness.py",
+        [sys.executable, "testar_tenant_semantic_readiness.py"],
     ),
     (
         "testar_context_validator.py",

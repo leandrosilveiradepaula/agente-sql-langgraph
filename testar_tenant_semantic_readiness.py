@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from app.domain.customer_context_readiness import (
-    assess_customer_semantic_candidate,
+from app.domain.tenant_semantic_readiness import (
+    assess_tenant_semantic_candidate,
 )
 from testar_canonical_context_repository import client_raw
 
@@ -34,7 +34,7 @@ def test_two_distinct_clients_can_pass_physical_review_without_hardcodes() -> No
         ("first-client", "v4", False),
         ("second-client", "v9", True),
     ):
-        report = assess_customer_semantic_candidate(
+        report = assess_tenant_semantic_candidate(
             **candidate(tenant=t, version=v, other=other)
         )
         assert report["status"] == (
@@ -53,7 +53,7 @@ def test_two_distinct_clients_can_pass_physical_review_without_hardcodes() -> No
 def test_unmapped_column_never_inferred_from_similar_name() -> None:
     values = candidate(tenant="first", version="v1")
     values["physical_catalog"][0]["columns"].remove("amount_minor_units")
-    result = assess_customer_semantic_candidate(**values)
+    result = assess_tenant_semantic_candidate(**values)
     assert result["status"] == "REJECTED"
     assert any(x["code"] == "PHYSICAL_COLUMN_NOT_FOUND" for x in result["issues"])
     assert "amount_minor_units" not in str(result)
@@ -63,7 +63,7 @@ def test_unmapped_column_never_inferred_from_similar_name() -> None:
 def test_missing_table_fails_closed_with_no_schema_disclosure() -> None:
     values = candidate(tenant="first", version="v1")
     values["physical_catalog"][0]["table_name"] = "other_object"
-    result = assess_customer_semantic_candidate(**values)
+    result = assess_tenant_semantic_candidate(**values)
     assert result["verified_semantic_tables"] == 0
     assert result["status"] == "REJECTED"
     assert any(x["code"] == "PHYSICAL_TABLE_NOT_FOUND" for x in result["issues"])
@@ -84,7 +84,7 @@ def test_duplicate_or_injected_physical_catalog_fails_closed() -> None:
         else:
             values["physical_catalog"][0]["schema_name"] = "schema;DELETE"
         try:
-            assess_customer_semantic_candidate(**values)
+            assess_tenant_semantic_candidate(**values)
         except ValueError:
             pass
         else:
@@ -100,7 +100,7 @@ def test_no_attestation_or_version_mismatch_fails_closed() -> None:
         values = candidate(tenant="first", version="v1")
         values[field] = value
         try:
-            assess_customer_semantic_candidate(**values)
+            assess_tenant_semantic_candidate(**values)
         except ValueError:
             pass
         else:
@@ -110,7 +110,7 @@ def test_no_attestation_or_version_mismatch_fails_closed() -> None:
 def test_dre_is_optional_to_generic_physical_review() -> None:
     values = candidate(tenant="first", version="v1")
     values["raw_context"]["dre"] = []
-    result = assess_customer_semantic_candidate(**values)
+    result = assess_tenant_semantic_candidate(**values)
     assert result["status"].startswith("PHYSICALLY_CONSISTENT")
     assert result["approved_for_sql_generation"] is False
 
