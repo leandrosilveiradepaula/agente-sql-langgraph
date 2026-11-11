@@ -1,3 +1,9 @@
+# 11/11/2026 — M1: EVIDÊNCIA DE FORMULAS FINANCEIRAS E GATES TÉCNICOS DO N8N
+
+Foi confirmado no prompt do nó 8: fórmula de percentual do resultado, parâmetros DRE fixos, critérios de orçamento/variação e modelos dimensionais específicos; **não portar esses textos ao código**. IF 25 (`success` do nó 12) e IF 29 (`aprovado` do nó 28) são booleanos derivados de contagem de erros técnicos, não aprovação humana. IF 62 consome preflight; os demais IF não são tratados como autorização. Auditor genérico aprimorado: 10 testes offline PASS; evidência do workflow real 10 IF, SHA privado `e5d6f3886730f16f484d40a1f818fb83d6ec563a5d2b8f2d34270bfb46fe612a`. Chave local GPG não está em cache; conteúdo contábil das 11 versões do G5 **não atestado**. Produto oficial/Shadow intocados, SQL real false, primeira capacidade `NOT_PROVEN`. Ver `docs/audits/LEGACY-N8N-G5-SEMANTIC-COUPLING-20261111.md`.
+
+---
+
 # M1 — EVIDÊNCIA REAL DE ACOPLAMENTO SEMÂNTICO N8N/G5, CONTINUA SEM PROVA FINANCEIRA
 
 Auditor `legacy_semantic_static_coupling_offline.py` executado na VPS sobre 68 nós publicados, 11 versões G5 e 579 hints: nó PostgreSQL 5 possui cinco seletores fixos da mesma versão e carrega SQL patterns históricos (avaliação somente), nó 7 escolhe padrão/intent e passa via contexto texto→prompt nó 8→payload Gemini nó 9. Nó 22 fixa 8 bindings físicos; 4 correspondem textualmente a identificadores G5, todos `AMBIGUOUS_TABLE_NAME`, 4 não correspondem. 4 objetos literais simples/12 bindings no grafo; 4 referências físicas textuais. 8 testes sintéticos PASS; scanner de hardcode e git diff check PASS. Relatório privado SHA `b9fc93f7986020aa4017a9a3641baf770e617eeab0a08d67c8ef36b205c8b179`; `docs/audits/LEGACY-N8N-G5-SEMANTIC-COUPLING-20261111.md`. **Sem validação contábil das 11 versões cifradas, sem SQL financeira real, sem migração funcional comprovada.**

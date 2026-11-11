@@ -28,6 +28,10 @@ Foi feita uma **nova inspeção somente leitura** do export publicado n8n e do m
 
 Auditoria de fonte independente verificou que o nó 5 fixa um mesmo `agent_version` nas cinco consultas e lê padrões SQL históricos, que o nó 7 seleciona por intenção e injeta como texto na cadeia de prompt 8→9 (Gemini), e que no nó 22 **4 de 8 bindings físicos literais** têm match textual nos candidatos G5, **todos ambíguos**. Evidências, linhas, hashes e riscos: `docs/audits/LEGACY-N8N-G5-SEMANTIC-COUPLING-20261111.md`; relatório privado SHA `b9fc93f7986020aa4017a9a3641baf770e617eeab0a08d67c8ef36b205c8b179`. **Não há significado contábil aprovado**. Capacidade permanece `NOT_MIGRATED`/`NOT_PROVEN`; nenhuma SQL financeira executada.
 
+### Gate de autorização e regras explícitas identificadas no prompt
+
+Os IF 25 e 29 do n8n são acionados por verificações técnicas, **não comprovam aprovação humana**: nó 12 `success = validationErrors.length === 0` e nó 28 `aprovado = errors.length === 0`. Reparo e preflight devem permanecer separados de `Execute Approved` sob política Next.js. O prompt do nó 8 contém fórmula de percentual, convenção de sinal de orçamento e grupos DRE fixos, a migrar para contexto financeiro aprovado e **não para código**. Auditor completo: `docs/audits/LEGACY-N8N-G5-SEMANTIC-COUPLING-20261111.md`; relatório privado atualizado SHA `e5d6f3886730f16f484d40a1f818fb83d6ec563a5d2b8f2d34270bfb46fe612a`. Primeira capacidade ainda `NOT_PROVEN`.
+
 ## Matriz de aceite por evidência
 
 | Camada | Prova exigida | Estado atual |
