@@ -17,6 +17,7 @@ from app.domain.planner import (
     _metric_column_allowed,
 )
 from app.domain.search_text import normalize_search_text
+from app.domain.semantic_binding_feasibility import binding_route_feasibility
 from app.domain.semantic_concept_roles import (
     ConceptRoleConfigurationError,
     parse_concept_roles,
@@ -62,6 +63,8 @@ def audit_semantic_catalog(context: Mapping[str, Any]) -> dict[str, Any]:
     alias_kinds: dict[str, set[str]] = defaultdict(set)
     canonical_metrics: set[str] = set()
     binding_metrics: set[str] = set()
+    operation_cardinalities: list[dict[str, Any]] = []
+    valid_binding_records: list[dict[str, Any]] = []
     for entry in entities:
         if not isinstance(entry, Mapping):
             issues["entity_record_invalid"] += 1
@@ -90,6 +93,7 @@ def audit_semantic_catalog(context: Mapping[str, Any]) -> dict[str, Any]:
                 issues["operation_metadata_invalid"] += 1
                 continue
             counts["valid_operations"] += 1
+            operation_cardinalities.append(operation["binding_cardinality"])
             identity = (operation["operation_type"], str(operation.get("direction", "")))
             aliases[(kind, normalized_alias)].add(identity)
             alias_kinds[normalized_alias].add(kind)
@@ -127,6 +131,7 @@ def audit_semantic_catalog(context: Mapping[str, Any]) -> dict[str, Any]:
                 issues["metric_binding_invalid"] += 1
                 continue
             counts["valid_metric_bindings"] += 1
+            valid_binding_records.append(binding)
             binding_metrics.add(binding["metric_concept"].casefold())
             # Multiple condition-scoped bindings for the same alias are
             # legitimate and deliberately not treated as a simple collision.
@@ -153,6 +158,17 @@ def audit_semantic_catalog(context: Mapping[str, Any]) -> dict[str, Any]:
     )
     counts["configured_structural_roles"] = len(roles)
 
+    # Inspect only the configured conditional binding route. It must never
+    # fabricate operands, conclude financial parity, or reject direct aliases.
+    binding_route_counts: Counter[str] = Counter()
+    for cardinality in operation_cardinalities:
+        status = binding_route_feasibility(
+            bindings=valid_binding_records,
+            cardinality=cardinality,
+        )
+        if status != "not_applicable":
+            binding_route_counts[status] += 1
+
     # Lack of optional binding aliases is advisory, not an invented financial
     # requirement: legacy metric aliases and standalone aggregations exist.
     critical = sum(issues.values())
@@ -163,7 +179,13 @@ def audit_semantic_catalog(context: Mapping[str, Any]) -> dict[str, Any]:
         "counts": dict(sorted(counts.items())),
         "entity_types": dict(sorted(kinds.items())),
         "issue_counts": dict(sorted(issues.items())),
+        "binding_route_feasibility_counts": dict(sorted(binding_route_counts.items())),
         "business_binding_review_required": bool(
+            any(
+                binding_route_counts.get(status, 0)
+                for status in ("impossible", "indeterminate", "not_configured")
+            )
+            or
             counts["metric_concepts_without_explicit_bindings"]
             or counts["bindings_without_named_metric_alias"]
         ),
