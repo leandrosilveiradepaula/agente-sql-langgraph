@@ -166,6 +166,10 @@ def test_alias_collision_fails_closed_across_unrelated_tenant_schemas():
         ("finance_beta", "posting_records", "recognized_total"),
     ):
         context = _tenant(schema=schema, table=table, metric=measure)
+        context["intent_resolution"]["config"]["concept_roles"] = {
+            "metric": ["financial_metric"],
+            "operation": ["analytical_operation"],
+        }
         metric_alias = next(
             e["user_term"] for e in context["entities"]
             if e.get("entity_type") == "financial_metric"
