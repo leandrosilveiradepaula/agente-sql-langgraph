@@ -70,6 +70,10 @@ STEPS = [
         [sys.executable, "testar_semantic_catalog_audit.py"],
     ),
     (
+        "testar_semantic_binding_feasibility.py",
+        [sys.executable, "testar_semantic_binding_feasibility.py"],
+    ),
+    (
         "testar_p3_semantic_context_candidate.py",
         [sys.executable, "testar_p3_semantic_context_candidate.py"],
     ),
