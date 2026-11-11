@@ -120,6 +120,13 @@ def prepare_role_migration(
         if isinstance(content, str):
             if len(content.encode("utf-8")) > _MAX_RULE_CONTENT_BYTES:
                 raise SemanticRoleMigrationRefused("source_rule_content_excessive")
+            # Existing versioned catalogs may contain opaque non-JSON business
+            # rules. These are not resolver configuration and must remain
+            # byte-for-byte unchanged. Never skip a malformed config object.
+            if not content.lstrip().startswith("{"):
+                if record.get("rule_group") == "config":
+                    raise SemanticRoleMigrationRefused("source_rule_json_invalid")
+                continue
             try:
                 content = json.loads(content)
             except (TypeError, ValueError) as exc:
