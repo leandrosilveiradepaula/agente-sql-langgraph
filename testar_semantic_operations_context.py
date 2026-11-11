@@ -85,6 +85,7 @@ def _resolver_config_rule() -> dict:
             "applied_confidence": 0.98,
             "fallback_to_previous_intent": False,
             "token_fallback": {"enabled": False},
+            "concept_roles": {"grouping": ["dimension_grouping"]},
         },
         "applies_to_intents": [],
         "validation_hint": None,
