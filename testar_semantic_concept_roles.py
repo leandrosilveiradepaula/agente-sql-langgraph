@@ -339,6 +339,44 @@ def test_incomplete_analytical_metric_bindings_fail_closed() -> None:
     }) is False
 
 
+
+def test_unknown_structural_role_is_rejected_not_silently_ignored() -> None:
+    for invalid in ("unused_projection", "company_specific_metric", "groupings"):
+        try:
+            parse_concept_roles({"config": {"concept_roles": {invalid: ["axis"]}}})
+        except ConceptRoleConfigurationError as exc:
+            assert str(exc) == "concept_role_unsupported"
+        else:
+            raise AssertionError("unimplemented structural role accepted")
+        try:
+            role_concepts({"config": {}}, invalid)
+        except ConceptRoleConfigurationError as exc:
+            assert str(exc) == "requested_role_unsupported"
+        else:
+            raise AssertionError("unimplemented lookup accepted")
+
+
+def test_one_concept_cannot_be_mapped_to_multiple_semantic_roles() -> None:
+    try:
+        parse_concept_roles({"config": {"concept_roles": {
+            "grouping": ["shared_signal"],
+            "metric": [" SHARED_SIGNAL "],
+        }}})
+    except ConceptRoleConfigurationError as exc:
+        assert str(exc) == "concept_role_overlap"
+    else:
+        raise AssertionError("same concept assigned to two structural roles")
+
+
+def test_one_role_can_reference_multiple_distinct_catalog_concepts() -> None:
+    roles = parse_concept_roles({"config": {"concept_roles": {
+        "metric": ["sales_amount", "measure_x"],
+        "operation": ["aggregation_action"],
+    }}})
+    assert roles["metric"] == frozenset({"sales_amount", "measure_x"})
+    assert roles["operation"] == frozenset({"aggregation_action"})
+
+
 if __name__ == "__main__":
     tests = sorted((k, v) for k, v in globals().items() if k.startswith("test_") and callable(v))
     for name, fn in tests:
