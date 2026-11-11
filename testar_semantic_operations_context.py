@@ -89,7 +89,7 @@ def _resolver_config_rule() -> dict:
                 "grouping": ["dimension_grouping"],
                 "operation": ["analytical_operation"],
                 "metric": ["financial_metric"],
-                "period": ["period_reference", "explicit_period_reference"],
+                "period": ["period_reference"],
             },
         },
         "applies_to_intents": [],
