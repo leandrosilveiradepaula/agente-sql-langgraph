@@ -117,3 +117,34 @@ O resultado é `REVIEW_REQUIRED`. O teste não usou SQL histórica, não
 chamou LLM, não executou SQL financeira e não ativou configuração. A causa
 exata de cada vínculo e a correção de negócio devem ser determinadas pelo
 catálogo autorizado, não por perguntas→SQL nem por thresholds artificiais.
+
+
+### Diagnóstico ampliado e decisão de segurança
+
+A auditoria isolada do contexto privado detectou um descompasso **do catálogo
+versionado**, não apenas uma exceção de código: o snapshot possui 17 aliases
+de operações analíticas, quatro entidades de métricas financeiras e dois
+bindings explícitos de métricas. Isso não autoriza inferir a relação entre
+eles; tais relações exigem validação do domínio de cada empresa.
+
+O preflight da candidata conta, de modo agregado, operações sem operandos
+comprovados: 9 operações de comparação e 3 operações de ranking contidas nos
+9 casos que passaram de planejados a rejeitados. Não são 12 casos distintos.
+**Nenhuma das nove comparações tem métricas vinculadas suficientes para
+satisfazer a cardinalidade configurada.** Portanto, a rejeição
+`PLANNING_ANALYTICAL_BINDING_INCOMPLETE` deve continuar ativa. Também
+há 16 planos aceitos cuja projeção difere, e devem ser revisados.
+
+O planejador passou a ignorar `best_candidate` que não corresponda à
+intenção selecionada e a validar os operandos explicitamente vinculados.
+Não foi ampliada a aprovação de comparações sem métricas. A exigência de
+operando obrigatório em rankings historicamente sem operando é um contrato
+separado e versionado, não uma alteração implícita na migração de papéis.
+
+**Não se pode declarar estes problemas resolvidos somente por CI verde.**
+Para remover o bloqueio, é necessário obter mapeamentos de métricas/
+operações/dimensões autorizados para o tenant, versionar o catálogo candidato,
+repetir o preflight e comprovar que os 9 casos têm operandos completos,
+sem inventar métricas. Se novas operações forem legítimas, o planejamento
+pode mudar, mas requer revisão explícita; o benchmark nunca determina
+quais vínculos contábeis devem ser configurados.
