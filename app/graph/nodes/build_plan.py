@@ -323,10 +323,20 @@ def _project_semantic_signals(
         details = term.get("match_details")
         if not isinstance(details, Mapping):
             continue
-        for signal in details.get("semantic_signals", []):
-            projected = _project_semantic_signal(signal)
+        # Both the legacy resolver (singular semantic_signal) and the
+        # optional interpreter (semantic_signals) are valid evidence forms.
+        # Never silently discard a resolver binding during graph projection.
+        one_signal = details.get("semantic_signal")
+        if isinstance(one_signal, Mapping):
+            projected = _project_semantic_signal(one_signal)
             if projected is not None:
                 signals.append(projected)
+        grouped_signals = details.get("semantic_signals")
+        if isinstance(grouped_signals, list):
+            for signal in grouped_signals:
+                projected = _project_semantic_signal(signal)
+                if projected is not None:
+                    signals.append(projected)
     output: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str, tuple[str, ...]]] = set()
     for signal in signals:
