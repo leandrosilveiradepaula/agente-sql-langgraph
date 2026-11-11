@@ -423,6 +423,7 @@ def _intent_metric_operation_dimension_evidence(
 def _dimension_context() -> dict:
     context = _context()
     context["intent_resolution"] = {
+        "config": {"concept_roles": {"grouping": ["dimension_grouping"]}},
         "intent_catalog": [
             {
                 "business_rule": {
