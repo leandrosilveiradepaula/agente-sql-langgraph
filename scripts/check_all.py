@@ -465,6 +465,10 @@ STEPS = [
         "testar_legacy_semantic_static_coupling.py",
         [sys.executable, "testar_legacy_semantic_static_coupling.py"],
     ),
+    (
+        "testar_g5_targeted_financial_review_offline.py",
+        [sys.executable, "testar_g5_targeted_financial_review_offline.py"],
+    ),
     ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
     ("test_switch_shadow_evidence_tenant.py", [sys.executable, "scripts/test_switch_shadow_evidence_tenant.py"]),
     ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),]

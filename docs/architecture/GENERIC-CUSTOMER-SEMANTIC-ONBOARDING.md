@@ -46,6 +46,10 @@ O contrato da relação de metadados pressupõe colunas estruturais \`tenant_id\
 
 Executados em contêiner temporário **sem rede**, usando imagem instalada que contém LangGraph, com permissões não-root para processos de teste. O container temporário foi removido. Nenhuma conexão financeira ou consulta a dados de cliente foi feita. Testes de integração real com dados de dois clientes e prova de equivalência financeira seguem pendentes.
 
+## Fronteira do contexto gerador — proteção adicional em código
+
+O loader canônico (não o reader legado) verifica agora, antes da normalização, os padrões reais presentes no snapshot. Padrões de intenção devem declarar source_use=APPROVED_SEMANTIC_STRUCTURAL, com sql_pattern vazio, business_question_examples vazio e sem notes livres. Ele **não confia apenas** no booleano historical_evaluation_sql_excluded. Isso impede a rota histórica do n8n — padrões SQL serializados no contexto e passados ao prompt — de ser reproduzida acidentalmente. Os exemplos de perguntas podem ser sinais semânticos **somente quando houver cadeia de proveniência independente**; por segurança, o modo canônico atual os bloqueia, enquanto aliases aprovados continuam disponíveis. Essa restrição não altera o loader legado e não substitui aprovação externa, assinatura/controle de origem ou inspeção contábil dos outros campos.
+
 ## Lacunas antes de dizer que o produto está pronto
 
 - **Engenharia reversa completa do comportamento:** analisar conteúdo financeiro das 11 versões G5 cifradas, cruzar todas as regras de negócio do n8n antigo com semântica real e implementar funções faltantes no motor dinâmico. Não criar regras a partir de golden answers.

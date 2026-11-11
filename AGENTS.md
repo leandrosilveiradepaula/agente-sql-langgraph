@@ -1,3 +1,11 @@
+## 11/11/2026 — M1 verificado: versão oficial única + fronteira de avaliação no loader
+
+Foi verificado na VPS que os **cinco SELECTs de contexto do nó 5** fixam a mesma versão semântica, SHA-256 7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485. **Um único pacote do manifesto G5**, índice 10/11, tem exatamente esse hash: **77 registros** (18 regras, 40 aliases, 11 mapeamentos DRE, 8 registros de catálogo) e 48 hints. Na versão correta, **3 dos 8 bindings de tabelas do nó 22** têm match textual, todos AMBIGUOUS_TABLE_NAME; análise agregada entre versões indicava 4/8 e não pode servir de mapeamento contábil. Relatório privado SHA-256 e376d3a3555d67467b57ece1949af4d26e1ca622f54487fc922c7d921521fbea. Nenhum conteúdo contábil cifrado foi aberto ou aprovado.
+
+No modo canônico (não no legado), app/domain/canonical_source_boundary.py bloqueia SQL pronta, exemplos de perguntas, notas livres e padrões sem proveniência estrutural aprovada, mesmo com flag historical_evaluation_sql_excluded=true: **correção efetiva**, não declaração. Testes de isolamento/negativas com dois clientes sintéticos passaram, sem LLM, SQL financeira, mudança n8n ou cutover. O bloqueio GPG real continua: próxima etapa é desbloquear **somente a versão selecionada** no terminal local e revisar seus 77 registros sob custódia. Ver docs/operations/G5-ACTIVE-VERSION-LOCAL-REVIEW.md. Isso não é prova financeira ou produto concluído.
+
+---
+
 # 2026-11-11 21:36 UTC — ORDEM VINCULANTE: PROVAR A MIGRAÇÃO FINANCEIRA REAL
 
 **Missão única:** migrar a inteligência do Agente Financeiro EXISTENTE, estudando juntos o workflow n8n publicado (**68 nós, 78 conexões**) e as **11 versões semânticas do banco/backup G5**, para Produto + n8n (preservado) + LangGraph + Gemini. Não criar outro agente, não confundir com Factory/CRM, não copiar código/SQL/regras casuísticas ou hardcodes financeiros do n8n para Python/TypeScript.

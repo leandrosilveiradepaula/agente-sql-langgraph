@@ -41,6 +41,16 @@
 
 **Relatório privado de gates:** SHA-256 `e5d6f3886730f16f484d40a1f818fb83d6ec563a5d2b8f2d34270bfb46fe612a`; 68 nós/10 IF analisados, aprovação humana não inferida por nenhum IF. A saída sanitizada é apenas evidência estática; não comprova execução, paridade ou equivalência financeira.
 
+## Reconciliação por versão (nova evidência independente)
+
+O seletor literal repetido em cinco consultas no nó PostgreSQL 5 possui hash SHA-256 7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485. Ele corresponde a **exatamente uma** das 11 versões seladas no manifesto: **pacote 10/11, 77 registros** distribuídos em 18 regras, 11 DRE, 40 aliases, 8 catálogos, além de **48 hints não aprovados**. O auditor compara hashes de versões, preserva a distribuição por coleção e bloqueia seleção implícita de outra versão; não lê os campos contábeis cifrados.
+
+**Correção de escopo:** a análise anterior de mapa estático contra **todas as versões** encontrava quatro de oito referências do nó 22. Limitando-se à **versão que o workflow realmente seleciona**, existem **três de oito** matches textuais, classificados como ambíguos. Logo não é válido copiar tabelas/joins do legado como conhecimento universal, nem tratar aliases históricos de outra versão como equivalentes. Relatório privado SHA-256 e376d3a3555d67467b57ece1949af4d26e1ca622f54487fc922c7d921521fbea.
+
+**Procedimento GPG em código, pendente de execução humana local:** scripts/operations/g5_targeted_financial_review_offline.py exige TTY, recebe passphrase apenas via getpass e FD anônimo, verifica ciphertext/plaintext SHA-256 e conteúdo, escreve pacote não aprovado e resumo privado com permissões 0600; não conecta ao banco nem liga o contexto. Sete testes de integridade, isolamento e falha segura passaram. Preflight sem TTY no pacote real falhou de modo esperado, sem criação de arquivo. Ver docs/operations/G5-ACTIVE-VERSION-LOCAL-REVIEW.md.
+
+**Nova barreira do gerador:** app/domain/canonical_source_boundary.py exige padrões estruturais aprovados e vazios de SQL histórica, exemplos de perguntas e texto livre. O antigo leitor continua preservado para Shadow não ativado. Conteúdos financeiros das regras G5 ainda não são semanticamente homologados.
+
 ## Limite explícito desta prova
 
 Esta é **engenharia reversa estrutural e de acoplamento** com achados novos e rastreáveis, não extração contábil final. O G5 preserva 11 pacotes cifrados; o auditor vê **identificadores e proveniência**, não fórmulas/definições dentro do conteúdo cifrado. A leitura detalhada exige desbloqueio sob custódia no terminal da VPS, sem senha no chat/log/GitHub. Também devem ser examinadas todas as funções/branches/SQL e seus efeitos, para classificar cada regra relevante em STRUCTURAL, TRANSITIONAL ou FORBIDDEN. Não colocar a primeira capacidade em `PROVEN` antes de demonstrar o significado financeiro, o contexto aprovado e o pipeline LangGraph generate-only com pergunta inédita.

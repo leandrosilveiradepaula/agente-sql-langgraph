@@ -32,6 +32,12 @@ Auditoria de fonte independente verificou que o nó 5 fixa um mesmo `agent_versi
 
 Os IF 25 e 29 do n8n são acionados por verificações técnicas, **não comprovam aprovação humana**: nó 12 `success = validationErrors.length === 0` e nó 28 `aprovado = errors.length === 0`. Reparo e preflight devem permanecer separados de `Execute Approved` sob política Next.js. O prompt do nó 8 contém fórmula de percentual, convenção de sinal de orçamento e grupos DRE fixos, a migrar para contexto financeiro aprovado e **não para código**. Auditor completo: `docs/audits/LEGACY-N8N-G5-SEMANTIC-COUPLING-20261111.md`; relatório privado atualizado SHA `e5d6f3886730f16f484d40a1f818fb83d6ec563a5d2b8f2d34270bfb46fe612a`. Primeira capacidade ainda `NOT_PROVEN`.
 
+## M1 — Escopo financeiro do workflow oficial reduzido a um pacote
+
+Hash do seletor agent_version do nó 5: **7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485**, único entre as 11 versões do manifesto G5 (pacote 10/11). Esse pacote contém **18 regras, 40 aliases, 11 mapeamentos DRE, 8 registros de catálogo = 77 registros** (sem SQL histórica), com 48 hints físicos. O auditor version-aware mostra **3/8 bindings físicos** do nó 22 com match apenas textual nesse pacote, todos ambíguos; a análise de 4/8 cruzava outras versões e não será utilizada para declarar correspondência. Evidência privada SHA-256 **e376d3a3555d67467b57ece1949af4d26e1ca622f54487fc922c7d921521fbea**.
+
+**Nova barreira em código:** contexto canônico bloqueia SQL examples / sql_pattern não vazio, business_question_examples, notas livres e padrões sem fonte estrutural aprovada mesmo se histórico declarado excluído; loader legado permanece intacto. Ainda não existe prova LangGraph com regra financeira real. Para desbloqueio seguro sob custódia TTY local, veja docs/operations/G5-ACTIVE-VERSION-LOCAL-REVIEW.md. A revisão privada não promove conhecimento automaticamente nem executa SQL financeira.
+
 ## Matriz de aceite por evidência
 
 | Camada | Prova exigida | Estado atual |
