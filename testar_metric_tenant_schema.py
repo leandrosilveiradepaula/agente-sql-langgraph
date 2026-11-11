@@ -64,7 +64,8 @@ def test_direct_metric_is_rejected_when_schema_not_authorized():
     )
     assert result["status"] == "rejected"
     assert result["query_plan"] is None
-    assert result["error_code"] == "PLANNING_METRIC_BINDING_INCOMPLETE"
+    # Tenant table ACL takes precedence over metric-specific error reporting.
+    assert result["error_code"] == "PLANNING_TABLE_SCHEMA_UNAUTHORIZED"
 
 
 def test_unauthorized_metric_binding_cannot_override_direct_alias():
