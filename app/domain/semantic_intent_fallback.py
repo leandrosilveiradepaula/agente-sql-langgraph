@@ -166,7 +166,7 @@ def validate_interpretation(
     )
     if any(
         isinstance(ev, Mapping) and ev.get("intent_name") == name
-        and (ev.get("excluded") is True or ev.get("eligible") is False)
+        and ev.get("excluded") is True
         for ev in evaluations
     ):
         raise SemanticIntentRejected("provider_intent_excluded")
