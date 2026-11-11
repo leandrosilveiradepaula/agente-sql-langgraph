@@ -213,7 +213,7 @@ def test_lexicon_differences_do_not_change_context_of_tenant_schemas():
     base = _base_context()
     for schema, table, term in (
         ("alpha_ledger", "balance_rows", "flow"),
-        ("beta_book", "invoice_facts", "volume"),
+        ("beta_book", "invoice_facts", "book_total"),
     ):
         context = _tenant(schema=schema, table=table, metric=term)
         alias = next(
