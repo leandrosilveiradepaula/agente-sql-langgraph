@@ -224,6 +224,7 @@ def create_shadow_test_runtime(
             langgraph_commit=config.langgraph_commit,
             expected_organization_id=config.expected_organization_id,
             semantic_intent_interpreter=semantic_intent_interpreter,
+            semantic_intent_identity=default_selection,
         ),
         execute_approved_shadow_use_case=ExecuteApprovedSqlShadowUseCase(
             engine_preflight=engine_preflight,
