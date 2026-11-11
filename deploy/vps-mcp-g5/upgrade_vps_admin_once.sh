@@ -122,7 +122,7 @@ with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
 result=json.loads(message)
 assert result.get("status")=="completed",result
 assert result.get("exit_code")==0,result
-assert result.get("output")=="0",result
+assert str(result.get("output","")).strip()=="0",result
 PY
   then ready=1; break; fi
   sleep 1
