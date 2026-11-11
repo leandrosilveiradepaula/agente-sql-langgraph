@@ -281,3 +281,118 @@ def project_metric_source_composition(
             selected, key=lambda d: d["canonical_value"].casefold()
         ),
     }
+
+
+def validate_projected_metric_composition(
+    value: object,
+    *,
+    authorized_tables: list[Mapping[str, Any]],
+    catalog_columns: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Second, pre-provider boundary: reject altered plans and missing ACL."""
+    if not isinstance(value, Mapping) or set(value) != {
+        "composition_ref", "metric_ref", "strategy", "source_use",
+        "sources", "grouping_dimensions",
+    }:
+        raise MetricSourceCompositionError("COMPOSITION_PROVIDER_CONTRACT_INVALID")
+    if (
+        not _valid_ref(value.get("composition_ref"))
+        or not _valid_ref(value.get("metric_ref"))
+        or value.get("strategy") != _STRATEGY
+        or value.get("source_use") != _PROVENANCE
+    ):
+        raise MetricSourceCompositionError("COMPOSITION_PROVIDER_UNAPPROVED")
+    sources = value.get("sources")
+    dimensions = value.get("grouping_dimensions")
+    if (
+        not isinstance(sources, list)
+        or not 2 <= len(sources) <= 24
+        or not isinstance(dimensions, list)
+        or len(dimensions) > 32
+    ):
+        raise MetricSourceCompositionError("COMPOSITION_PROVIDER_SOURCES_INVALID")
+    allowed = {
+        str(table.get("qualified_name", "")).casefold()
+        for table in authorized_tables if isinstance(table, Mapping)
+    }
+    unique_refs: set[str] = set()
+    ref_to_table: dict[str, str] = {}
+    for source in sources:
+        if not isinstance(source, Mapping) or set(source) != (
+            _SOURCE_KEYS - {"dimension_columns"}
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_SOURCE_INVALID")
+        ref = source.get("source_ref")
+        table = source.get("target_table")
+        col = source.get("value_column")
+        if (
+            not _valid_ref(ref)
+            or ref.casefold() in unique_refs
+            or not isinstance(table, str)
+            or table.casefold() not in allowed
+            or not _valid_column(col)
+            or not _valid_ref(source.get("grain_ref"))
+            or type(source.get("sign_multiplier")) is not int
+            or source["sign_multiplier"] not in (-1, 1)
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_BINDING_INVALID")
+        unique_refs.add(ref.casefold())
+        ref_to_table[ref.casefold()] = table.casefold()
+        visible = {
+            str(item.get("name", "")).casefold()
+            for item in catalog_columns.get(table, [])
+            if isinstance(item, Mapping)
+        }
+        if col.casefold() not in visible:
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_COLUMN_UNAUTHORIZED")
+        filters = source.get("source_filters")
+        if not isinstance(filters, list) or len(filters) > 32:
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_FILTERS_INVALID")
+        for predicate in filters:
+            _source_filter(predicate, visible)
+    if len(set(ref_to_table.values())) != len(ref_to_table):
+        raise MetricSourceCompositionError("COMPOSITION_PROVIDER_DUPLICATE_FACT")
+    seen_dims: set[str] = set()
+    for dimension in dimensions:
+        if not isinstance(dimension, Mapping) or set(dimension) != {
+            "canonical_value", "source_bindings",
+        }:
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_GROUPING_INVALID")
+        concept = dimension.get("canonical_value")
+        if not _valid_ref(concept) or concept.casefold() in seen_dims:
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_GROUPING_AMBIGUOUS")
+        seen_dims.add(concept.casefold())
+        bindings = dimension.get("source_bindings")
+        if not isinstance(bindings, list) or len(bindings) != len(sources):
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_GROUPING_INCOMPLETE")
+        present: set[str] = set()
+        for binding in bindings:
+            if not isinstance(binding, Mapping) or set(binding) != {
+                "source_ref", "target_table", "target_column",
+            }:
+                raise MetricSourceCompositionError("COMPOSITION_PROVIDER_GROUPING_INVALID")
+            ref = binding.get("source_ref")
+            table = binding.get("target_table")
+            col = binding.get("target_column")
+            if (
+                not _valid_ref(ref)
+                or ref.casefold() not in ref_to_table
+                or ref.casefold() in present
+                or not isinstance(table, str)
+                or table.casefold() != ref_to_table[ref.casefold()]
+                or not _valid_column(col)
+            ):
+                raise MetricSourceCompositionError("COMPOSITION_PROVIDER_GROUPING_INVALID")
+            present.add(ref.casefold())
+            visible = {
+                str(item.get("name", "")).casefold()
+                for item in catalog_columns.get(table, [])
+                if isinstance(item, Mapping)
+            }
+            if col.casefold() not in visible:
+                raise MetricSourceCompositionError(
+                    "COMPOSITION_PROVIDER_GROUP_COLUMN_UNAUTHORIZED"
+                )
+        if present != unique_refs:
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_GROUPING_INCOMPLETE")
+    return deepcopy(dict(value))

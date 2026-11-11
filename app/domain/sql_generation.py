@@ -8,6 +8,10 @@ from copy import deepcopy
 from typing import Any, Literal, NotRequired, TypedDict
 
 from app.domain.planning import QueryPlan, selected_pattern_for_provider
+from app.domain.metric_source_composition import (
+    MetricSourceCompositionError,
+    validate_projected_metric_composition,
+)
 
 
 SQL_GENERATION_CONTRACT_VERSION = (
@@ -134,6 +138,7 @@ class SqlGenerationContext(TypedDict):
     planned_filters: list[PlannedFilter]
     filter_bindings: list[FilterBinding]
     pattern_metadata: dict[str, Any]
+    metric_source_composition: NotRequired[dict[str, Any]]
 
 
 class SqlGenerationRequest(TypedDict):
@@ -384,6 +389,22 @@ def build_sql_generation_request(
         authorized_tables=authorized_tables,
         catalog_columns=catalog_columns,
     )
+    composition = None
+    if planning_context.get("metric_source_composition") is not None:
+        if planned_metrics or planned_filters or analytical_operations or temporal_series:
+            raise SqlGenerationInputError(
+                "Composição de métricas incompatível com operações do plano."
+            )
+        try:
+            composition = validate_projected_metric_composition(
+                planning_context["metric_source_composition"],
+                authorized_tables=authorized_tables,
+                catalog_columns=catalog_columns,
+            )
+        except MetricSourceCompositionError:
+            raise SqlGenerationInputError(
+                "Fontes e colunas da composição não autorizadas."
+            ) from None
     diagnostics = planning_context.get("diagnostics", {})
     temporal_diagnostic = (
         diagnostics.get("temporal_diagnostic", {})
@@ -497,6 +518,28 @@ def build_sql_generation_request(
             }
         )
 
+    if composition is not None:
+        instructions.append(
+            {
+                "name": "multi_source_metric_composition",
+                "content": (
+                    "Quando metric_source_composition estiver presente, "
+                    "construa um SELECT separado para cada source_ref usando "
+                    "somente target_table, value_column, source_filters e "
+                    "sign_multiplier explicitamente autorizados. Projete "
+                    "cada valor numerico com o sinal declarado e cada "
+                    "grouping_dimension usando source_bindings daquela "
+                    "source_ref. Combine as linhas de todos os SELECTs com "
+                    "UNION ALL, sem JOIN entre fatos brutos; somente depois "
+                    "aplique SUM da metrica composta e GROUP BY das "
+                    "dimensoes solicitadas. Nao use UNION (deduplicante), "
+                    "nao infira fontes, filtros, sinais, dimensoes ou "
+                    "outras metricas da pergunta; nao introduza DRE nem "
+                    "formula financeira nao atestada pelo catalogo."
+                ),
+            }
+        )
+
     if temporal_series is not None:
         instructions.append(
             {
@@ -588,6 +631,8 @@ def build_sql_generation_request(
 
     if temporal_series is not None:
         request["generation_context"]["temporal_series"] = temporal_series
+    if composition is not None:
+        request["generation_context"]["metric_source_composition"] = composition
 
     _validate_request(request)
     return deepcopy(request)
@@ -904,6 +949,13 @@ def _validate_request(
     ):
         raise SqlGenerationInputError(
             "generation_context.temporal_series deve ser objeto."
+        )
+    if (
+        "metric_source_composition" in context
+        and not isinstance(context["metric_source_composition"], Mapping)
+    ):
+        raise SqlGenerationInputError(
+            "generation_context.metric_source_composition deve ser objeto."
         )
 
 
