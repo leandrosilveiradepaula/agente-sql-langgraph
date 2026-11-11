@@ -538,6 +538,171 @@ def test_end_to_end_semantic_alias_reaches_authorized_planner_bindings():
     assert projection["analytical_operations"][0]["operation_type"] == "ranking"
 
 
+
+def _physical_metric_context(*, include_unbacked: bool = True):
+    from testar_planner import _metric_context
+
+    physical = _metric_context()
+    context = _context(
+        "portable_intent", "Interpret one authorized metric",
+        "metric_signal", schema="ledger",
+    )
+    context["entities"] = deepcopy(physical["entities"])
+    context["table_catalog"] = deepcopy(physical["table_catalog"])
+    context["query_patterns"][0]["required_tables"] = [
+        "schema_test.fact_metrics",
+    ]
+    context["intent_resolution"]["config"]["concept_roles"] = {
+        "metric": ["metric_signal"],
+    }
+    terms = ["amount"]
+    if include_unbacked:
+        terms.append("unmapped_business_phrase")
+    rule = context["intent_resolution"]["intent_catalog"][0]["rules"][0]
+    rule["concepts"][0]["terms"] = terms
+    rule["concepts"][0]["normalized_terms"] = terms
+    return context
+
+
+def test_pre_provider_lexicon_excludes_unbound_financial_synonyms():
+    context = _physical_metric_context()
+    request = prepare_interpretation(
+        "How much of the portfolio is active", context,
+    )
+    allowed = request["allowed_intents"][0]["concept_lexicon"][0]["terms"]
+    assert allowed == ["amount"]
+    assert "unmapped_business_phrase" not in repr(request)
+    assert "schema_test" not in repr(request)
+    assert "fact_metrics" not in repr(request)
+    good = _accepted(
+        request, "portable_intent", "metric_signal",
+        "portfolio", catalog_term="amount",
+    )
+    result = validate_interpretation(
+        good, request, {"intent_catalog": {"evaluations": []}},
+    )
+    assert result["bindings"][0]["catalog_term"] == "amount"
+    forged = json.loads(good)
+    forged["bindings"][0]["catalog_term"] = "unmapped_business_phrase"
+    try:
+        validate_interpretation(
+            json.dumps(forged), request,
+            {"intent_catalog": {"evaluations": []}},
+        )
+    except SemanticIntentRejected as exc:
+        assert str(exc) == "provider_catalog_term_not_authorized"
+    else:
+        raise AssertionError("nonphysical metric alias reached the planner")
+
+
+def test_unbound_required_metric_role_blocks_before_provider_call():
+    from unittest.mock import patch
+
+    context = _physical_metric_context(include_unbacked=False)
+    concept = context["intent_resolution"]["intent_catalog"][0]["rules"][0]["concepts"][0]
+    concept["terms"] = ["not_in_physical_catalog"]
+    concept["normalized_terms"] = ["not_in_physical_catalog"]
+    try:
+        prepare_interpretation("Show the metric", context)
+    except SemanticIntentRejected as exc:
+        assert str(exc) == "catalog_no_grounded_intents"
+    else:
+        raise AssertionError("unplannable catalog offered to model")
+
+    class NeverCall:
+        def interpret(self, request):
+            raise AssertionError("model must not see ungrounded catalog")
+    with patch(
+        "app.graph.nodes.semantic_classification.classify_intent",
+        return_value={
+            "final_status": "rejected",
+            "intent_resolution_result": {
+                "reason": "minimum_score_not_reached",
+                "intent_catalog": {"evaluations": []},
+            },
+            "errors": [],
+        },
+    ):
+        result = create_semantic_classification_node(NeverCall())({
+            "question": "Show the metric", "context": context,
+            "errors": [],
+        })
+    assert result["final_status"] == "rejected"
+
+
+def test_conflicting_physical_metrics_are_not_llm_catalog_aliases():
+    from testar_planner import _append_metric_alias
+
+    context = _physical_metric_context(include_unbacked=False)
+    _append_metric_alias(
+        context, user_term="amount", canonical_value="second_measure",
+        metric_concept="second_measure",
+        target_table="schema_test.fact_metrics",
+        target_column="volume_value",
+    )
+    try:
+        prepare_interpretation("How much", context)
+    except SemanticIntentRejected as exc:
+        assert str(exc) == "catalog_no_grounded_intents"
+    else:
+        raise AssertionError("ambiguous physical metric was offered to model")
+
+
+def test_two_physically_different_clients_use_same_pre_provider_guard():
+    from testar_planner import _metric_context
+
+    for schema, table, alias in (
+        ("company_alpha", "journal_entries", "net_flow"),
+        ("company_beta", "operational_events", "settled_volume"),
+    ):
+        context = _physical_metric_context()
+        def replace(value):
+            if isinstance(value, dict):
+                return {key: replace(child) for key, child in value.items()}
+            if isinstance(value, list):
+                return [replace(item) for item in value]
+            if isinstance(value, str):
+                return (value.replace("schema_test", schema)
+                        .replace("fact_metrics", table)
+                        .replace("amount", alias))
+            return value
+        context = replace(context)
+        request = prepare_interpretation("Compute unfamiliar measure", context)
+        assert request["allowed_intents"][0]["concept_lexicon"][0]["terms"] == [
+            alias,
+        ]
+        assert schema not in repr(request)
+        assert table not in repr(request)
+        assert "unmapped_business_phrase" not in repr(request)
+
+
+def test_missing_physical_catalog_refuses_metric_only_llm_request():
+    context = _physical_metric_context()
+    context["table_catalog"] = []
+    try:
+        prepare_interpretation("Metric value", context)
+    except SemanticIntentRejected as exc:
+        assert str(exc) == "catalog_no_grounded_intents"
+    else:
+        raise AssertionError("unknown metric table was considered authorized")
+
+
+def test_invalid_structural_role_configuration_refuses_before_model():
+    context = _physical_metric_context()
+    for invalid in (
+        {"metric": "metric_signal"},
+        {"metric": ["metric_signal", "metric_signal"]},
+        {"client_specific_rule": ["metric_signal"]},
+    ):
+        context["intent_resolution"]["config"]["concept_roles"] = invalid
+        try:
+            prepare_interpretation("Give authorized metric", context)
+        except SemanticIntentRejected as exc:
+            assert str(exc) == "semantic_role_config_invalid"
+        else:
+            raise AssertionError("invalid structural role was tolerated")
+
+
 if __name__ == "__main__":
     # The repository uses explicit script entrypoints, not pytest discovery.
     # Ensure this module actually runs in scripts/check_all.py and CI.
