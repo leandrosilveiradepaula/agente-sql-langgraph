@@ -191,3 +191,32 @@ determinístico.
 Esta proteção é complementar, não substitui a checagem da cardinalidade
 e das relações entre operações e métricas. Os mapeamentos contábeis ainda
 precisam ser definidos pelo contexto autorizado de cada tenant.
+
+
+## Auditoria de completude do catálogo — independente do benchmark
+
+`app/domain/semantic_catalog_audit.py` inventaria em memória os metadados
+estruturais de operações, aliases de métricas e bindings físicos. Usa os
+validadores do planejador e a tabela de colunas autorizadas; não usa perguntas,
+SQLs históricas, métricas específicas, dados financeiros nem dependências de
+rede. Os relatórios contêm apenas contagens agregadas e códigos de erro.
+
+A falta de `metric_binding` explícito é **indicador de revisão, não prova
+automática de erro**: alguns catálogos utilizam aliases diretos de métricas.
+O auditor não exige DRE, IMD ou número fixo de métricas, e não considera cada
+operação uma relação contábil necessariamente incompleta. Ambiguidade entre
+aliases ou alvos físicos inválidos exige revisão. Mesmo
+`INVENTORY_COMPLETE` nunca significa paridade financeira ou aprovação de
+ativação.
+
+O resultado integra o preflight de migração e é avaliado **em paralelo** à
+comparação cega das projeções de plano. É possível ter inventário consistente,
+mas perguntas cujo planejamento muda por associação semântica insuficiente.
+
+No snapshot privado G5 desta etapa: 17 aliases de operações válidos, quatro
+aliases de métricas válidos representando **um único conceito contábil**, dois
+bindings explícitos do mesmo conceito, nenhuma inconsistência estrutural
+detectada pelo inventário. O status do inventário foi
+`INVENTORY_COMPLETE`, enquanto o preflight de 63 perguntas **permanece
+`REVIEW_REQUIRED`** por 9 rejeições e 16 mudanças de plano. Isso confirma
+que completude estática e equivalência funcional são gates diferentes.
