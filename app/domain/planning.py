@@ -14,7 +14,7 @@ from app.domain.context import (
 )
 
 
-PLANNER_VERSION = "v1.4.0-semantic-alias-integrity"
+PLANNER_VERSION = "v1.5.0-tenant-metric-gate"
 
 PlanningDecisionReason = Literal[
     "single_pattern_selected",
@@ -37,6 +37,7 @@ PlanningErrorCode = Literal[
     "PLANNING_REQUIRED_TABLE_NOT_FOUND",
     "PLANNING_CONTEXT_INVALID",
     "PLANNING_ANALYTICAL_BINDING_INCOMPLETE",
+    "PLANNING_METRIC_BINDING_INCOMPLETE",
     "PLANNING_METRIC_ALIAS_AMBIGUOUS",
     "PLANNING_OPERATION_ALIAS_AMBIGUOUS",
     "PLANNING_SEMANTIC_BINDING_INCOMPLETE",
