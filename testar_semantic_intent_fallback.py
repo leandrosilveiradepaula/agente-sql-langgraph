@@ -66,12 +66,23 @@ def _context(intent: str, description: str, concept: str, *, schema: str) -> dic
     }
 
 
-def _accepted(req: dict, intent: str, concept: str, span: str) -> str:
+def _accepted(
+    req: dict, intent: str, concept: str, span: str,
+    *, catalog_term: str | None = None,
+) -> str:
+    target = next(entry for entry in req["allowed_intents"]
+                  if entry["intent_name"] == intent)
+    lexicon = next(item for item in target["concept_lexicon"]
+                   if item["concept_name"] == concept)
+    alias = catalog_term if catalog_term is not None else lexicon["terms"][0]
     return json.dumps({
         "status": "selected",
         "intent_name": intent,
         "context_fingerprint": req["context_fingerprint"],
-        "bindings": [{"concept_name": concept, "question_span": span}],
+        "bindings": [{
+            "concept_name": concept, "question_span": span,
+            "catalog_term": alias,
+        }],
     })
 
 
@@ -119,12 +130,12 @@ def test_rejects_forged_intent_evidence_context_or_requirements():
     variants = [
         {**good, "intent_name": "forged_intent"},
         {**good, "context_fingerprint": "0" * 64},
-        {**good, "bindings": [{"concept_name": "forged_concept", "question_span": "cash"}]},
-        {**good, "bindings": [{"concept_name": "op", "question_span": "unseen phrase"}]},
+        {**good, "bindings": [{"concept_name": "forged_concept", "question_span": "cash", "catalog_term": "op"}]},
+        {**good, "bindings": [{"concept_name": "op", "question_span": "unseen phrase", "catalog_term": "op"}]},
         {**good, "bindings": []},
         {**good, "status": "insufficient"},
         {**good, "bindings": [{"concept_name": "op", "question_span": "cash",
-                              "target_table": "untrusted.facts"}]},
+                              "catalog_term": "op", "target_table": "untrusted.facts"}]},
     ]
     for bad in variants:
         try:
@@ -264,8 +275,8 @@ def test_two_concepts_cannot_use_same_span_as_independent_evidence():
         "status": "selected", "intent_name": "intent_x",
         "context_fingerprint": request["context_fingerprint"],
         "bindings": [
-            {"concept_name": "op", "question_span": "cash"},
-            {"concept_name": "different_concept", "question_span": "cash"},
+            {"concept_name": "op", "question_span": "cash", "catalog_term": "op"},
+            {"concept_name": "different_concept", "question_span": "cash", "catalog_term": "different"},
         ],
     }
     try:
@@ -339,7 +350,7 @@ def test_gemini_adapter_serializes_semantic_context_only():
                 configuration=GoogleGeminiConfiguration(model_id="test-model"),
             ))
             prompt = json.loads(payload["contents"][0]["parts"][0]["text"])
-            assert prompt["contract_version"] == "semantic-intent-v1"
+            assert prompt["contract_version"] == "semantic-intent-v2"
             assert "table_catalog" not in prompt
             assert "official_sql" not in prompt
             assert prompt["allowed_intents"][0]["intent_name"] == "intent_x"
@@ -364,7 +375,7 @@ def test_gemini_adapter_refuses_provider_failure():
         client=Failing(), configuration=GoogleGeminiConfiguration(),
     )
     try:
-        adapter.interpret({"contract_version": "semantic-intent-v1"})
+        adapter.interpret({"contract_version": "semantic-intent-v2"})
     except RuntimeError:
         return
     raise AssertionError("Gemini infrastructure failure was silently accepted")
@@ -424,6 +435,101 @@ def test_oversized_tenant_catalog_fails_closed_before_provider():
         assert str(exc) == "semantic_prompt_too_large"
         return
     raise AssertionError("unbounded semantic catalog was accepted")
+
+
+
+def test_catalog_alias_is_independent_of_user_quote_and_protected_from_forgery():
+    context = _context("intent_x", "Rank metric", "action", schema="ledger")
+    request = prepare_interpretation("Top income", context)
+    output = _accepted(
+        request, "intent_x", "action", "Top", catalog_term="action",
+    )
+    accepted = validate_interpretation(
+        output, request, {"intent_catalog": {"evaluations": []}},
+    )
+    assert accepted["bindings"][0] == {
+        "concept_name": "action", "question_span": "Top",
+        "catalog_term": "action",
+    }
+    for forged in ("forged_metric", "incoming", "", "action OR 1=1"):
+        wrong = json.loads(output)
+        wrong["bindings"][0]["catalog_term"] = forged
+        try:
+            validate_interpretation(
+                json.dumps(wrong), request,
+                {"intent_catalog": {"evaluations": []}},
+            )
+        except SemanticIntentRejected:
+            continue
+        raise AssertionError("forged catalog alias was accepted")
+
+
+def test_end_to_end_semantic_alias_reaches_authorized_planner_bindings():
+    from testar_planner import _metric_context
+    from app.graph.nodes.build_plan import build_plan
+    from app.domain.intent_resolver import resolve_intent
+
+    context = _metric_context()
+    context["component_configs"]["semantic_intent_fallback"] = {
+        "component": "semantic_intent_fallback", "enabled": True,
+        "applied_confidence": 0.75,
+    }
+    context["intent_resolution"] = deepcopy(
+        _context("generic_test_intent", "Rank metric", "analytical_operation",
+                 schema="ledger")["intent_resolution"]
+    )
+    rules = context["intent_resolution"]["intent_catalog"][0]["rules"]
+    first = rules[0]["concepts"][0]
+    first["terms"] = ["highest"]
+    first["normalized_terms"] = ["highest"]
+    metric = deepcopy(first)
+    metric["concept_name"] = "financial_metric"
+    metric["terms"] = ["amount"]
+    metric["normalized_terms"] = ["amount"]
+    rules[0]["concepts"].append(metric)
+    rules[0]["minimum_concept_matches"] = 2
+    question = "Top amount"
+    assert resolve_intent(question, context["intent_resolution"])["applied"] is False
+
+    class FakeModel:
+        def interpret(self, request):
+            return {
+                "output_text": json.dumps({
+                    "status": "selected",
+                    "intent_name": "generic_test_intent",
+                    "context_fingerprint": request["context_fingerprint"],
+                    "bindings": [
+                        {"concept_name": "analytical_operation",
+                         "question_span": "Top", "catalog_term": "highest"},
+                        {"concept_name": "financial_metric",
+                         "question_span": "amount", "catalog_term": "amount"},
+                    ],
+                }),
+                "provider_name": "fake", "provider_model": "fake",
+                "token_usage": {},
+            }
+
+    state = {
+        "question": question,
+        "normalized_question": question.lower(),
+        "context": context,
+        "errors": [],
+    }
+    classified = create_semantic_classification_node(FakeModel())(state)
+    assert classified["final_status"] == "processing"
+    evidence = classified["intent_resolution_result"]["best_candidate"]
+    signals = [
+        x["semantic_signals"][0]
+        for x in evidence["matches"][0]["match_details"]["concepts"]
+    ]
+    assert [x["normalized_term"] for x in signals] == ["highest", "amount"]
+    assert signals[0]["question_span"] == "Top"
+    planned = build_plan({**state, **classified})
+    assert planned["final_status"] == "processing", planned.get("errors")
+    projection = planned["query_plan"]["planning_context"]
+    assert [m["matched_user_term"] for m in projection["planned_metrics"]] == ["amount"]
+    assert [op["matched_user_term"] for op in projection["analytical_operations"]] == ["highest"]
+    assert projection["analytical_operations"][0]["operation_type"] == "ranking"
 
 
 if __name__ == "__main__":
