@@ -20,6 +20,7 @@ import sqlite3
 import socket
 import stat
 import subprocess
+import time
 
 DB = Path(
     "/home/cia-probe/agent/j1-rest-m3-20261109/canary/"
@@ -36,6 +37,9 @@ _SYM = re.compile(r"[A-Z0-9]{1,28}USDT\Z")
 _DECIMAL = re.compile(r"(?:0|[1-9][0-9]{0,29})(?:\.[0-9]{1,24})?(?:[eE][+-]?[0-9]{1,3})?\Z")
 MAX_DB_BYTES = 8 * 1024 * 1024
 MAX_JOURNAL_BYTES = 256 * 1024
+MAX_RECURRING_HOURS = 4096  # Bounded owner-only replay (~170 days), never arbitrary scan
+MAX_PUBLICATIONS = 26 + MAX_RECURRING_HOURS
+MAX_RECONCILE_GAP_HOURS = 48
 
 
 class Rejected(Exception):
@@ -215,7 +219,11 @@ def _verify_candle(symbol: str, row: tuple, expected_open: int) -> None:
 
 
 def sqlite_audit() -> dict:
-    """Read SQLite URI only in read-only mode, replay all candle digests."""
+    """Owner-only SQLite replay: immutable 26-checkpoint pilot + recurrent tail.
+
+    Check every real candle and every actual publication without fabricating
+    historical PIT during downtime. This is NOT an identity/Top50 proof.
+    """
     try:
         _private_file()
         with closing(sqlite3.connect(
@@ -233,44 +241,77 @@ def sqlite_audit() -> dict:
             scope_hash, members_json, initial, halted = scope
             if (type(scope_hash) is not str or _SHA.fullmatch(scope_hash) is None
                     or type(members_json) is not str or type(initial) is not int
-                    or initial % HOUR_MS or halted is not None):
+                    or initial != EXPECT[0] - 3 * HOUR_MS or halted is not None):
                 raise Rejected
             members = json.loads(members_json)
             if (type(members) is not list or len(members) != 2
                     or any(type(s) is not str or _SYM.fullmatch(s) is None
                            for s in members) or len(set(members)) != 2):
                 raise Rejected
-            expected_publications = [
-                (initial, 2), (initial + HOUR_MS, 2),
-                *[(end, 2) for end in EXPECT],
-            ]
-            if initial != EXPECT[0] - 3 * HOUR_MS:
-                raise Rejected
-            pubs = db.execute(
-                "SELECT end_ms,observed_contracts FROM published_hour ORDER BY end_ms"
+            raw_pubs = db.execute(
+                "SELECT end_ms,observed_at_ms,scope_digest,observed_contracts "
+                "FROM published_hour ORDER BY end_ms LIMIT ?",
+                (MAX_PUBLICATIONS + 1,),
             ).fetchall()
-            if pubs != expected_publications:
+            expected_prefix = [
+                initial, initial + HOUR_MS, *EXPECT,
+            ]
+            if not len(expected_prefix) <= len(raw_pubs) <= MAX_PUBLICATIONS:
+                raise Rejected
+            if [r[0] for r in raw_pubs[:26]] != expected_prefix:
+                raise Rejected
+            prev = None
+            now_ms = time.time_ns() // 1_000_000
+            for end, observed, digest, count in raw_pubs:
+                if (type(end) is not int or end % HOUR_MS
+                        or type(observed) is not int
+                        or not end + 60_000 <= observed <= end + 900_000
+                        or observed > now_ms + 60_000
+                        or digest != scope_hash or type(count) is not int
+                        or count != 2):
+                    raise Rejected
+                if prev is not None:
+                    delta = end - prev
+                    if (delta < HOUR_MS or delta % HOUR_MS
+                            or delta > MAX_RECONCILE_GAP_HOURS * HOUR_MS):
+                        raise Rejected
+                prev = end
+            last = raw_pubs[-1][0]
+            if last < EXPECT[-1] or last > now_ms:
+                raise Rejected
+            tail_hours = (last - EXPECT[-1]) // HOUR_MS
+            if tail_hours > MAX_RECURRING_HOURS:
+                raise Rejected
+            if len(raw_pubs) > 26 + tail_hours:
+                raise Rejected
+            expected_per_member = 50 + tail_hours
+            if (db.execute("SELECT COUNT(*) FROM cursor").fetchone() != (2,)
+                    or db.execute("SELECT COUNT(*) FROM candles").fetchone()
+                    != (2 * expected_per_member,)):
                 raise Rejected
             for symbol in members:
                 cursor = db.execute(
                     "SELECT next_open_ms FROM cursor WHERE symbol=?", (symbol,)
                 ).fetchone()
-                if cursor != (EXPECT[-1],):
+                if cursor != (last,):
                     raise Rejected
                 rows = db.execute(
                     "SELECT open_ms,open,high,low,close,base_volume,quote_turnover,"
                     "received_at_ms,digest_sha256 FROM candles WHERE symbol=? "
                     "ORDER BY open_ms", (symbol,),
                 ).fetchall()
-                if len(rows) != 50:
+                if len(rows) != expected_per_member:
                     raise Rejected
                 start = initial - 24 * HOUR_MS
                 for i, row in enumerate(rows):
                     _verify_candle(symbol, row, start + i * HOUR_MS)
+                    if row[7] > now_ms + 60_000:
+                        raise Rejected
             return {
-                "status": "pass", "contracts": 2, "stored_candles": 100,
-                "published_checkpoints": len(pubs),
-                "last_published_end_ms": EXPECT[-1],
+                "status": "pass", "contracts": 2,
+                "stored_candles": 2 * expected_per_member,
+                "published_checkpoints": len(raw_pubs),
+                "last_published_end_ms": last,
                 "sqlite_integrity": True, "contiguous_candles": True,
                 "digest_replay": True, "halted": False,
                 "trading_enabled": False, "marketwide_top50_verified": False,
@@ -278,7 +319,6 @@ def sqlite_audit() -> dict:
     except (Rejected, OSError, sqlite3.Error, ValueError, TypeError,
             OverflowError, UnicodeError):
         return _fail("sqlite_audit_unavailable")
-
 
 # The financial broker deliberately has no DAC capabilities and cannot enter
 # the owner-only data tree. All DB reading happens in the separate cia-probe
@@ -306,16 +346,33 @@ def sqlite_audit_via_owner() -> dict:
                 or report.get("marketwide_top50_verified") is not False):
             raise Rejected
         if report.get("status") == "pass":
-            expected = {
-                "status": "pass", "contracts": 2, "stored_candles": 100,
-                "published_checkpoints": 26, "last_published_end_ms": EXPECT[-1],
-                "sqlite_integrity": True, "contiguous_candles": True,
-                "digest_replay": True, "halted": False,
-                "trading_enabled": False, "marketwide_top50_verified": False,
+            # Exact ten-field response only; dynamically validate the
+            # recurrent tail without granting the sidecar arbitrary fields.
+            fields = {
+                "status", "contracts", "stored_candles",
+                "published_checkpoints", "last_published_end_ms",
+                "sqlite_integrity", "contiguous_candles", "digest_replay",
+                "halted", "trading_enabled", "marketwide_top50_verified",
             }
-            if report != expected:
+            last = report.get("last_published_end_ms")
+            candles = report.get("stored_candles")
+            pubs = report.get("published_checkpoints")
+            if (set(report) != fields
+                    or report.get("contracts") != 2
+                    or type(last) is not int
+                    or last < EXPECT[-1] or last % HOUR_MS
+                    or last > time.time_ns() // 1_000_000
+                    or (last - EXPECT[-1]) // HOUR_MS > MAX_RECURRING_HOURS
+                    or type(candles) is not int
+                    or candles != 100 + 2 * ((last - EXPECT[-1]) // HOUR_MS)
+                    or type(pubs) is not int
+                    or not 26 <= pubs <= 26 + ((last - EXPECT[-1]) // HOUR_MS)
+                    or report.get("sqlite_integrity") is not True
+                    or report.get("contiguous_candles") is not True
+                    or report.get("digest_replay") is not True
+                    or report.get("halted") is not False):
                 raise Rejected
-            return expected
+            return report
         if report.get("status") == "blocked":
             return _fail("sqlite_owner_audit_blocked")
         raise Rejected
