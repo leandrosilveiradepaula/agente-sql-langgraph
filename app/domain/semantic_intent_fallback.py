@@ -16,6 +16,7 @@ from app.domain.planner import (
     _metric_column_allowed,
     _metric_metadata,
     _operation_metadata,
+    _qualified_table_name,
 )
 
 CONTRACT_VERSION = "semantic-intent-v2"
@@ -211,6 +212,7 @@ def _verified_role_aliases(
     if not isinstance(raw, Mapping) or len(raw) > 4:
         raise SemanticIntentRejected("semantic_role_config_invalid")
     roles: dict[str, set[str]] = {}
+    ownership: dict[str, str] = {}
     for role, names in raw.items():
         if role not in {"grouping", "period", "metric", "operation"} or (
             not isinstance(names, list) or not 1 <= len(names) <= 128
@@ -223,12 +225,29 @@ def _verified_role_aliases(
         ]
         if len(normalized) != len(names) or len(set(normalized)) != len(normalized):
             raise SemanticIntentRejected("semantic_role_config_invalid")
+        for name in normalized:
+            current = ownership.get(name)
+            if current is not None and current != role:
+                raise SemanticIntentRejected("semantic_role_config_invalid")
+            ownership[name] = role
         roles[role] = set(normalized)
 
     entities = context.get("entities")
     tables = context.get("table_catalog")
     if not isinstance(entities, list) or not isinstance(tables, list):
         return {}, roles
+    schemas = context.get("allowed_schemas")
+    allowed_schemas = {
+        name.strip().casefold()
+        for name in schemas if isinstance(name, str) and name.strip()
+    } if isinstance(schemas, list) else set()
+    authorized_tables = {
+        _qualified_table_name(table).casefold()
+        for table in tables
+        if isinstance(table, Mapping)
+        and isinstance(table.get("schema_name"), str)
+        and table["schema_name"].strip().casefold() in allowed_schemas
+    }
     # Alias identities are deliberately based on the planner's own physical
     # validation contracts, not independent definitions of accounting facts.
     signatures: dict[str, dict[str, set[str]]] = {
@@ -251,6 +270,7 @@ def _verified_role_aliases(
                 or metric["metric_concept"] != entity.get("canonical_value")
                 or metric["target_table"] != entity.get("target_table")
                 or metric["target_column"] != entity.get("target_column")
+                or metric["target_table"].casefold() not in authorized_tables
                 or not _metric_column_allowed(
                     tables, target_table=metric["target_table"],
                     target_column=metric["target_column"],
