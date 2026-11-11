@@ -39,7 +39,8 @@ class AdminArguments(unittest.TestCase):
 
     def test_job_ids_are_strict(self):
         with tempfile.TemporaryDirectory() as work:
-            with mock.patch.object(admin, "BASE", Path(work)):
+            with mock.patch.object(admin, "BASE", Path(work)), \
+                 mock.patch.object(admin, "_state", return_value=Path(work)):
                 with self.assertRaises(admin.Refused):
                     admin._job_dir("../../etc/passwd")
                 with self.assertRaises(admin.Refused):
@@ -90,7 +91,8 @@ class PrivateState(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
             root.chmod(0o700)
-            with mock.patch.object(admin, "BASE", root):
+            with mock.patch.object(admin, "BASE", root), \
+                 mock.patch.object(admin, "_state", return_value=root):
                 result = admin.execute(
                     [sys.executable, "-c", "print('SAFE_STATUS=PASS')"],
                     cwd=str(root), timeout_seconds=10,
@@ -109,7 +111,8 @@ class PrivateState(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
             root.chmod(0o700)
-            with mock.patch.object(admin, "BASE", root):
+            with mock.patch.object(admin, "BASE", root), \
+                 mock.patch.object(admin, "_state", return_value=root):
                 self.assertEqual(admin.status("a"*32)["status"], "blocked")
                 self.assertEqual(admin.cancel("a"*32)["status"], "blocked")
                 (root/("b"*32)).mkdir(mode=0o700)
@@ -127,6 +130,7 @@ class PrivateState(unittest.TestCase):
             root.chmod(0o700)
             process = types.SimpleNamespace(returncode=0)
             with mock.patch.object(admin, "BASE", root), \
+                 mock.patch.object(admin, "_state", return_value=root), \
                  mock.patch.object(admin.subprocess, "run", return_value=process) as run:
                 result = admin.start(
                     [sys.executable, "-c", "print('hello')"],
