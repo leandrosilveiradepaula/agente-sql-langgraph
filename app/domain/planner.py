@@ -173,6 +173,22 @@ def build_query_plan(
             "error_message": rejection.message,
         }
 
+    if not _explicit_metric_bindings_complete(projection):
+        failed_selection = deepcopy(selection)
+        failed_selection["status"] = "rejected"
+        failed_selection["error_code"] = "PLANNING_METRIC_BINDING_INCOMPLETE"
+        failed_selection["error_message"] = (
+            "Metrica financeira solicitada sem vinculo fisico completo."
+        )
+        return {
+            "status": "rejected",
+            "query_plan": None,
+            "selection_result": failed_selection,
+            "projection": projection,
+            "error_code": "PLANNING_METRIC_BINDING_INCOMPLETE",
+            "error_message": failed_selection["error_message"],
+        }
+
     if not _analytical_operand_bindings_complete(projection):
         failed_selection = deepcopy(selection)
         failed_selection["status"] = "rejected"
@@ -229,6 +245,39 @@ def build_query_plan(
         "error_code": None,
         "error_message": None,
     }
+
+
+def _explicit_metric_bindings_complete(
+    projection: Mapping[str, Any],
+) -> bool:
+    """No accepted plan may silently drop an explicitly requested metric.
+
+    This is independent of analytical-operation cardinality: even an
+    operation that does not require operands cannot authorize an incorrect
+    metric projection. Optional implicit inference is handled separately.
+    """
+    diagnostics = projection.get("diagnostics")
+    if not isinstance(diagnostics, Mapping):
+        return False
+    metric = diagnostics.get("planned_metric_diagnostic")
+    if not isinstance(metric, Mapping):
+        return False
+    requested = metric.get("metric_requested")
+    if type(requested) is not bool:
+        return False
+    if not requested:
+        return True
+    planned = projection.get("planned_metrics")
+    if not isinstance(planned, list) or not planned:
+        return False
+    count = metric.get("projected_count")
+    if type(count) is not int or count != len(planned):
+        return False
+    for field in ("unresolved_terms", "invalid_metadata_terms", "binding_failures"):
+        failures = metric.get(field)
+        if not isinstance(failures, list) or failures:
+            return False
+    return True
 
 
 def _temporal_bindings_complete(projection: Mapping[str, Any]) -> bool:
