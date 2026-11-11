@@ -160,7 +160,9 @@ def create_shadow_test_runtime(
             client=private_client, configuration=compatible,
         )
         semantic_intent_interpreter = OpenAiCompatibleSemanticIntentInterpreter(
-            private_client
+            private_client,
+            provider_name=compatible.provider_key,
+            provider_model=compatible.model_id,
         )
         sql_repairer = OpenAiCompatibleSqlRepairerAdapter(
             client=private_client, configuration=compatible,
