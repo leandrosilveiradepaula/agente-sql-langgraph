@@ -116,6 +116,51 @@ def test_context_and_question_data_never_enter_reports():
     assert result["metric_binding_policy_inferred"] is False
 
 
+
+def test_catalog_without_version_or_fingerprint_fails_closed():
+    for key, invalid, reason in (
+        ("version", "", "context_version_missing"),
+        ("fingerprint", None, "context_fingerprint_invalid"),
+        ("fingerprint", "invalid", "context_fingerprint_invalid"),
+    ):
+        context = _base_context()
+        context[key] = invalid
+        report = audit_semantic_catalog(context)
+        assert report["status"] == "BLOCKED"
+        assert report["reason"] == reason
+        assert report["automated_activation_authorized"] is False
+
+
+def test_same_alias_for_metric_and_operation_requires_review():
+    context = _base_context()
+    operation = next(
+        entry for entry in context["entities"]
+        if entry.get("entity_type") == "analytical_operation"
+    )
+    metric = next(
+        entry for entry in context["entities"]
+        if entry.get("entity_type") == "financial_metric"
+    )
+    operation["user_term"] = metric["user_term"]
+    report = audit_semantic_catalog(context)
+    assert report["status"] == "REVIEW_REQUIRED"
+    assert report["issue_counts"]["cross_role_alias_ambiguous"] == 1
+    assert "user_term" not in repr(report)
+
+
+def test_custom_entity_type_is_not_disclosed():
+    context = _base_context()
+    context["entities"].append({
+        "entity_type": "internal_customer_secret_taxonomy",
+        "user_term": "confidential_marker",
+    })
+    report = audit_semantic_catalog(context)
+    assert report["status"] == "INVENTORY_COMPLETE"
+    assert report["entity_types"]["other"] >= 1
+    assert "internal_customer_secret_taxonomy" not in repr(report)
+    assert "confidential_marker" not in repr(report)
+
+
 if __name__ == "__main__":
     tests = sorted(
         (name, value) for name, value in globals().items()
