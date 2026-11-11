@@ -109,6 +109,7 @@ STEPS = [
     ("testar_blind_shadow_benchmark.py", [sys.executable, "testar_blind_shadow_benchmark.py"]),
     ("testar_blind_shadow_batch.py", [sys.executable, "testar_blind_shadow_batch.py"]),
     ("testar_blind_gemini_shadow_quality.py", [sys.executable, "testar_blind_gemini_shadow_quality.py"]),
+    ("testar_blind_langgraph_current_provider.py", [sys.executable, "testar_blind_langgraph_current_provider.py"]),
     ("testar_shadow_read_organization_scope.py", [sys.executable, "testar_shadow_read_organization_scope.py"]),
     ("testar_shadow_context_portability_e2e.py", [sys.executable, "testar_shadow_context_portability_e2e.py"]),
     ("testar_n8n_workflow_export_audit.py", [sys.executable, "testar_n8n_workflow_export_audit.py"]),
