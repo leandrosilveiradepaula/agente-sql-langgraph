@@ -1,8 +1,8 @@
 """Private, least-privilege MCP gateway for Agente Financeiro.
 
-Runs as agente-mcp under the existing Secure MCP Tunnel.  The root broker
-accepts only a fixed set of named operations through a local Unix socket.
-There is no shell, SQL, network target, or command parameter exposed to MCP.
+Runs as agente-mcp under the existing Secure MCP Tunnel. The root broker
+accepts typed operations via a local Unix socket. Administrator-approved
+command/long-job execution is available alongside legacy fixed diagnostics.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ SOCKET = "/run/agente-financeiro-mcp/operations.sock"
 
 def _read(operation: str, expected_sha: str | None = None,
           params: dict[str, object] | None = None) -> dict[str, object]:
-    """Only fixed operations can be sent; no dynamic commands or arguments."""
+    """Send only typed, explicitly advertised broker operations."""
     if operation not in {"runtime_status", "revision", "n8n_inventory", "import_evidence", "audit_evidence",
                          "repo_sync", "benchmark_plan", "benchmark_recover", "benchmark_status",
                          "cia_timer", "cia_journal", "cia_sqlite",
