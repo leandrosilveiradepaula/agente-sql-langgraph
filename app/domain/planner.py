@@ -173,7 +173,14 @@ def build_query_plan(
             "error_message": rejection.message,
         }
 
-    if not _explicit_metric_bindings_complete(projection):
+    if not _explicit_metric_bindings_complete(
+        projection,
+        strict_grounding=(
+            isinstance(intent_resolution_result, Mapping)
+            and intent_resolution_result.get("reason")
+            == "semantic_interpretation_selected"
+        ),
+    ):
         failed_selection = deepcopy(selection)
         failed_selection["status"] = "rejected"
         failed_selection["error_code"] = "PLANNING_METRIC_BINDING_INCOMPLETE"
@@ -249,12 +256,17 @@ def build_query_plan(
 
 def _explicit_metric_bindings_complete(
     projection: Mapping[str, Any],
+    *,
+    strict_grounding: bool,
 ) -> bool:
-    """No accepted plan may silently drop an explicitly requested metric.
+    """Prevent invalid metric targets and guard opt-in semantic interpretation.
 
-    This is independent of analytical-operation cardinality: even an
-    operation that does not require operands cannot authorize an incorrect
-    metric projection. Optional implicit inference is handled separately.
+    Invalid physical metric metadata must never pass regardless of caller.
+    The stricter no-partial-binding requirement is applied to the new
+    LLM interpretation path in Shadow. Historical deterministic catalogs
+    may recognize metric words without physical aliases; preserve their
+    existing planning behavior until a reviewed tenant context is migrated.
+    This is transitional compatibility, not certification of a valid metric.
     """
     diagnostics = projection.get("diagnostics")
     if not isinstance(diagnostics, Mapping):
@@ -267,13 +279,20 @@ def _explicit_metric_bindings_complete(
         return False
     if not requested:
         return True
+    invalid = metric.get("invalid_metadata_terms")
+    if not isinstance(invalid, list) or invalid:
+        # A known alias with invalid physical metadata (including a schema
+        # outside the tenant allowlist) cannot be accepted in either mode.
+        return False
+    if not strict_grounding:
+        return True
     planned = projection.get("planned_metrics")
     if not isinstance(planned, list) or not planned:
         return False
     count = metric.get("projected_count")
     if type(count) is not int or count != len(planned):
         return False
-    for field in ("unresolved_terms", "invalid_metadata_terms", "binding_failures"):
+    for field in ("unresolved_terms", "binding_failures"):
         failures = metric.get(field)
         if not isinstance(failures, list) or failures:
             return False
