@@ -245,6 +245,63 @@ def test_lexicon_differences_do_not_change_context_of_tenant_schemas():
         assert table not in repr(report)
 
 
+
+def test_missing_schema_allowlist_blocks_catalog_audit():
+    for value in (None, [], "tenant_schema", [None]):
+        context = _base_context()
+        context["allowed_schemas"] = value
+        report = audit_semantic_catalog(context)
+        assert report["status"] == "BLOCKED"
+        assert report["reason"] == "schema_allowlist_invalid"
+        assert report["automated_activation_authorized"] is False
+
+
+def test_disallowed_metric_schema_is_not_accepted_as_complete():
+    context = _base_context()
+    context["allowed_schemas"] = ["unrelated_schema"]
+    report = audit_semantic_catalog(context)
+    assert report["status"] == "REVIEW_REQUIRED"
+    assert report["issue_counts"]["metric_physical_binding_invalid"] == 2
+    assert report["counts"].get("valid_metric_aliases", 0) == 0
+    assert report["automated_activation_authorized"] is False
+
+
+def test_disallowed_conditional_binding_is_excluded_from_valid_routes():
+    context = _base_context()
+    table = next(
+        entry for entry in context["table_catalog"]
+        if entry.get("table_name") == "fact_metrics"
+    )
+    other_table = deepcopy(table)
+    other_table["schema_name"] = "unrelated_schema"
+    context["table_catalog"].append(other_table)
+    _append_metric_binding(
+        context, target_table="unrelated_schema.fact_metrics",
+        when_present=["synthetic_predicate"],
+    )
+    report = audit_semantic_catalog(context)
+    assert report["status"] == "REVIEW_REQUIRED", report
+    assert report["issue_counts"]["metric_binding_schema_unauthorized"] == 1
+    assert report["counts"].get("valid_metric_bindings", 0) == 0
+    assert report["counts"]["valid_metric_aliases"] == 2
+    assert "unrelated_schema" not in repr(report)
+
+
+def test_allowed_schemas_are_independent_for_two_client_catalogs():
+    for schema, table, metric in (
+        ("accounting_alpha", "journal_facts", "gross_margin"),
+        ("erp_beta", "settlement_rows", "received_total"),
+    ):
+        context = _tenant(schema=schema, table=table, metric=metric)
+        assert context["allowed_schemas"] == [schema]
+        result = audit_semantic_catalog(context)
+        assert result["status"] == "INVENTORY_COMPLETE", result
+        assert result["counts"]["valid_metric_aliases"] == 2
+        assert schema not in repr(result)
+        assert table not in repr(result)
+
+
+
 if __name__ == "__main__":
     tests = sorted(
         (name, value) for name, value in globals().items()
