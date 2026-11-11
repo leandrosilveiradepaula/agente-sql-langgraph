@@ -358,3 +358,22 @@ Isso é uma **lacuna de contexto**, não evidência suficiente para inventar
 um significado contábil. A execução do relatório ampliado sobre o snapshot
 privado ainda depende de acesso autorizado; não afirmar que esse
 `rejected_case_cause_counts` já foi medido nas 63 perguntas.
+## Fronteira física de autorização por tenant
+
+A auditoria não deve certificar como completo um catálogo apenas porque
+seus nomes de tabelas e colunas são fisicamente válidos. Em adição a
+`table_catalog`, exige a allowlist `allowed_schemas` versionada do
+tenant. Se ausente ou malformada, retorna `BLOCKED` antes de qualquer
+inspeção física. Um alias `financial_metric` que aponta para schema fora
+da allowlist é classificado como `metric_physical_binding_invalid`;
+um `metric_binding` condicional nessas condições é classificado como
+`metric_binding_schema_unauthorized` e não conta como rota válida de
+métrica.
+
+Esses checks utilizam apenas schema/tabela/coluna fornecidos pelo próprio
+tenant, sem nomes conhecidos de empresas nem semântica contábil no motor.
+Relatórios públicos permanecem agregados, sem revelar nomes físicos.
+Testes com dois esquemas independentes e com destinos de outro schema
+confirmam que a auditoria não permite uma migração baseada em metadados
+de fora da autorização declarada. Isso é diagnóstico estático, não
+substitui RBAC, RLS, SQL Gate ou testes de isolamento entre tenants reais.
