@@ -183,7 +183,6 @@ def build_generate_shadow_record(
     )
     langgraph_evidence = {
         "intent": state.get("intent"),
-        "semantic_interpretation_result": state.get("semantic_interpretation_result"),
         "plan": state.get("query_plan"),
         "generated_sql": generated_sql,
         "current_sql": current_sql,
@@ -201,6 +200,13 @@ def build_generate_shadow_record(
         "provider_metadata": _provider_metadata(state),
         "response": response,
     }
+    # Preserve the legacy evidence fingerprint when opt-in is absent.
+    # Add provenance only for a real semantic interpretation attempt.
+    semantic_diagnostic = state.get("semantic_interpretation_result")
+    if isinstance(semantic_diagnostic, Mapping):
+        langgraph_evidence["semantic_interpretation_result"] = deepcopy(
+            dict(semantic_diagnostic)
+        )
     return _build_record(
         shadow_record_id=shadow_record_id,
         agent_run_id=agent_run_id,
