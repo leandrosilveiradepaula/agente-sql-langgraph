@@ -102,6 +102,154 @@ def test_deterministic_plans_are_unchanged_without_llm_interpretation():
     ) == []
 
 
+
+def _period_fixture(*, schema: str, table: str, date_column: str):
+    context, evidence = _fixture()
+    context["intent_resolution"]["config"]["concept_roles"] = {
+        "period": ["period_concept"],
+    }
+    evidence["best_candidate"]["matches"][0]["match_details"]["concepts"].append({
+        "concept_name": "period_concept",
+        "satisfied": True,
+        "semantic_signals": [{
+            "concept_name": "period_concept",
+            "normalized_term": "during closing cycle",
+        }],
+    })
+    context["table_catalog"].append({
+        "schema_name": schema,
+        "table_name": table,
+        "date_columns": [date_column],
+        "columns": [{"name": date_column}, {"name": "product_code"}],
+    })
+    return context, evidence, schema + "." + table
+
+
+def test_unrelated_filter_cannot_satisfy_semantic_period_role():
+    context, evidence, qualified = _period_fixture(
+        schema="ledger_a", table="entries", date_column="period_day",
+    )
+    plan = {
+        "planning_context": {
+            "temporal_series": None,
+            "planned_filters": [{
+                "binding_ref": "filter-x",
+                "matched_user_term": "during closing cycle",
+            }],
+            "resolved_filter_bindings": [{
+                "binding_ref": "filter-x",
+                "target_table": qualified,
+                "target_column": "product_code",
+            }],
+        },
+    }
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
+    # Simply appending an unrelated filter is never time authorization.
+    plan["planning_context"]["planned_filters"].append({
+        "binding_ref": "other",
+        "matched_user_term": "product",
+    })
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
+
+
+def test_period_filter_must_match_both_alias_and_authorized_date_target():
+    context, evidence, qualified = _period_fixture(
+        schema="ledger_b", table="transactions", date_column="posting_date",
+    )
+    plan = {
+        "planning_context": {
+            "temporal_series": None,
+            "planned_filters": [{
+                "binding_ref": "f-date",
+                "matched_user_term": "wrong-period-alias",
+            }],
+            "resolved_filter_bindings": [{
+                "binding_ref": "f-date",
+                "target_table": qualified,
+                "target_column": "posting_date",
+            }],
+        },
+    }
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
+    plan["planning_context"]["planned_filters"][0][
+        "matched_user_term"
+    ] = "during closing cycle"
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == []
+    plan["planning_context"]["resolved_filter_bindings"][0][
+        "target_column"
+    ] = "unregistered_date"
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
+
+
+def test_temporal_series_needs_authorized_date_and_cited_period():
+    context, evidence, qualified = _period_fixture(
+        schema="bookkeeping_x", table="period_movements",
+        date_column="settlement_date",
+    )
+    plan = {
+        "planning_context": {
+            "temporal_series": {
+                "date_table": qualified, "date_column": "settlement_date",
+                "period_reference_terms": [],
+            },
+        },
+    }
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
+    plan["planning_context"]["temporal_series"][
+        "period_reference_terms"
+    ] = ["during closing cycle"]
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == []
+    plan["planning_context"]["temporal_series"][
+        "date_column"
+    ] = "some_other_field"
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
+
+
+def test_period_validation_ports_without_date_field_hardcoding():
+    for schema, table, column in (
+        ("client_one", "ledger", "posted_at"),
+        ("client_two", "payables", "clearing_day"),
+    ):
+        context, evidence, qualified = _period_fixture(
+            schema=schema, table=table, date_column=column,
+        )
+        plan = {
+            "planning_context": {
+                "planned_filters": [{
+                    "binding_ref": "date-binding",
+                    "matched_user_term": "during closing cycle",
+                }],
+                "resolved_filter_bindings": [{
+                    "binding_ref": "date-binding",
+                    "target_table": qualified,
+                    "target_column": column,
+                }],
+            },
+        }
+        assert missing_semantic_plan_bindings(
+            context=context, interpretation=evidence, query_plan=plan,
+        ) == []
+        assert schema not in str(missing_semantic_plan_bindings(
+            context=context, interpretation=evidence, query_plan=plan,
+        ))
+
+
 if __name__ == "__main__":
     import inspect
     tests = sorted(
