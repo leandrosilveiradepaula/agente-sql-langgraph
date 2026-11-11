@@ -1,3 +1,9 @@
+# 11/11/2026 — CENSO ESTRUTURAL N8N+G5 VERIFICADO; REVISAO FUNCIONAL AINDA PENDENTE
+
+Na PR #233 (draft, ainda sem merge), a engenharia reversa verificou em memória a versão n8n ativa (`versionId == activeVersionId`) com 68 nós, 78 conexões, 60 nós alcançáveis pelo webhook e 8 fora desse caminho. G5: 11 versões cifradas, 5 coleções/1.381 registros e 579 candidatos de referência física ainda não aprovados. O auditor genérico produziu o índice sanitizado `docs/audits/LEGACY-N8N-G5-TRACE-20261111.md`, com 20 nós que possuem ocorrências textuais de identificadores do backup (4.813 coocorrências). **Nenhuma associação contábil foi aprovada**; conteúdo de JS/prompts/SQL e regras G5 por versão ainda exigem investigação conjunta. O snapshot Shadow não foi equiparado a uma versão G5 e a rota Produto→n8n não está atestada. Esse progresso NÃO certifica migracao, geração SQL dinâmica, paridade ou cutover.
+
+---
+
 # 2026-11-11 — FOCO OPERACIONAL MAIS RECENTE: MIGRAÇÃO INTEGRAL DO N8N + BANCO EXISTENTES
 
 O operador reafirmou: **engenharia reversa do sistema financeiro atual**, analisando conjuntamente o n8n **publicado** (workflow observado com 68 nós) e **todo o conhecimento e dependências pertinentes do banco/backup G5**, para migrar comportamento à arquitetura **n8n + LangGraph** preservando n8n e zero hardcodes de negócio no novo motor. A análise de seis aliases, scoring, SQL histórica ou CI é insuficiente para declarar migração. Matriz por nó/branch/SQL/prompt→objetos/versões do banco→comportamento financeiro→destino e provas é a entrega prioritária. **Ainda não foi concluída**. Ver `AGENTS.md`, `MEMORY.md` e `docs/operations/LEGACY-N8N-DATABASE-MIGRATION-MAP.md`.

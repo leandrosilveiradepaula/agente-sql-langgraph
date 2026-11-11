@@ -30,3 +30,10 @@ A matriz obrigatória é: **nó/branch/JS/prompt/SQL legado ↔ esquema/tabelas/
 ## Continuar sem desvio
 
 Consultar `docs/operations/LEGACY-N8N-DATABASE-MIGRATION-MAP.md` para o backlog rastreável por fonte e capacidade; `docs/architecture/PORTABILITY-AND-CUTOVER-CONTRACT.md` e `ORCHESTRATION-STRATEGY.md` para arquitetura; `PROJECT-STATUS.md` e issue #155 para pendências. A primeira entrega substantiva pendente é a **matriz integral do workflow e do banco**, não outra versão de scoring.
+
+## Evidência objetiva posterior ao contrato (11/11/2026)
+
+- PR #233 em draft `docs/legacy-reverse-engineering-contract-20261111`: auditor `scripts/operations/legacy_migration_source_crosswalk_offline.py` e seis testes sintéticos. Inventário do fluxo n8n publicado: 68 nós, 78 arestas, 60 alcançáveis do webhook, 8 não alcançáveis. Banco/backup G5: cinco coleções, 11 versões cifradas e 1.381 linhas, 106 SQL patterns restritos a avaliação.
+- Evidência sanitizada por nó e por versão: `docs/audits/LEGACY-N8N-G5-TRACE-20261111.md`; relatório privado completo em /tmp, SHA-256 `e33a1b93f25a0809a644e5e83a9f7a82a360f73adb146511772d19d6181edbff`. Somente 20 nós têm coocorrência textual com identificadores G5; NÃO há regras financeiras homologadas, e todo conteúdo por versão ainda requer revisão.
+- SHA do contexto antigo do Shadow não coincide diretamente com as 11 versões G5 pelos hashes verificados; não misturar as fontes para produzir SQL. A rota Produto→workflow n8n ainda precisa de testemunha real.
+- **Próxima ação:** inspecionar efetivamente corpo dos 68 nós e fontes cifradas por versão; extrair regras, SQL, filtros, transações e seus efeitos e provar dependências em matriz, antes de decidir mapeamentos/implementação. Não se contentar com índice de nomes e indicadores textuais.
