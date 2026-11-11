@@ -2399,8 +2399,6 @@ def _resolve_planned_metrics(
             invalid_seen = True
             continue
         canonical_value = str(entity.get("canonical_value", "")).strip()
-        if canonical_value:
-            metric_concepts.add(canonical_value)
         target_table = str(entity.get("target_table", "")).strip()
         target_column = str(entity.get("target_column", "")).strip()
         if not (
@@ -2410,6 +2408,7 @@ def _resolve_planned_metrics(
             and target_column
             and metric["target_table"] == target_table
             and metric["target_column"] == target_column
+            and _metric_target_schema_authorized(context, target_table)
             and _metric_column_allowed(
                 table_catalog,
                 target_table=target_table,
@@ -2418,6 +2417,9 @@ def _resolve_planned_metrics(
         ):
             invalid_seen = True
             continue
+        # An invalid alias must not seed a concept that could be selected
+        # through a separate conditional binding.
+        metric_concepts.add(canonical_value)
         priority = _optional_int(entity.get("priority"))
         legacy_candidates.append(
             (
@@ -2607,6 +2609,14 @@ def _resolve_metric_bindings(
                 )
             continue
         if not _same_text(binding["metric_concept"], metric_concept):
+            continue
+        if not _metric_target_schema_authorized(
+            context, binding["target_table"]
+        ):
+            rejected.append({
+                "binding_ref": binding["binding_ref"],
+                "reason": "schema_not_authorized",
+            })
             continue
         configured.append(binding)
         missing_present = sorted(
@@ -2919,6 +2929,36 @@ def _metric_metadata(
         "target_table": target_table,
         "target_column": target_column,
     }
+
+
+def _metric_target_schema_authorized(
+    context: Mapping[str, Any],
+    target_table: str,
+) -> bool:
+    """A physical metric route must belong to this tenant's schema allowlist.
+
+    The table catalog confirms physical existence; that is not sufficient
+    authorization. Derive schema ownership from the same versioned catalog,
+    never from a table-name string or any client-specific conditional.
+    """
+    schemas = context.get("allowed_schemas")
+    catalog = context.get("table_catalog")
+    if not isinstance(schemas, list) or not isinstance(catalog, list):
+        return False
+    if any(not isinstance(name, str) or not name.strip() for name in schemas):
+        return False
+    authorized = {name.strip().casefold() for name in schemas}
+    for entry in catalog:
+        if not isinstance(entry, Mapping):
+            continue
+        schema = entry.get("schema_name")
+        if (
+            isinstance(schema, str)
+            and schema.strip().casefold() in authorized
+            and _same_text(_qualified_table_name(entry), target_table)
+        ):
+            return True
+    return False
 
 
 def _metric_column_allowed(
