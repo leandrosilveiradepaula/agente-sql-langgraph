@@ -275,3 +275,96 @@ def test_two_concepts_cannot_use_same_span_as_independent_evidence():
     except SemanticIntentRejected:
         return
     raise AssertionError("conflicting evidence was accepted")
+
+
+def test_explicit_matching_model_uses_same_interpreter():
+    context = _context("intent_x", "An operation", "op", schema="ledger")
+    identity = {"provider_key": "private", "model_key": "model-x", "config_version": "cfg-1"}
+    class Model:
+        def __init__(self):
+            self.calls = 0
+        def interpret(self, request):
+            self.calls += 1
+            return {
+                "output_text": _accepted(request, "intent_x", "op", "cash"),
+                "provider_name": "private",
+                "provider_model": "model-x",
+                "token_usage": {"prompt_tokens": 3, "total_tokens": 5},
+            }
+    model = Model()
+    output = create_semantic_classification_node(
+        model, interpreter_identity=identity,
+    )({
+        "question": "Display cash movements", "context": context,
+        "llm_selection": dict(identity),
+    })
+    assert output["final_status"] == "processing"
+    assert model.calls == 1
+    assert output["intent"] == "intent_x"
+
+
+def test_explicit_model_mismatch_blocks_request_before_call():
+    context = _context("intent_x", "An operation", "op", schema="ledger")
+    identity = {"provider_key": "private", "model_key": "model-x", "config_version": "cfg-1"}
+    class Model:
+        calls = 0
+        def interpret(self, request):
+            self.calls += 1
+            raise AssertionError("mismatched model was called")
+    model = Model()
+    for item in (
+        {**identity, "config_version": "cfg-2"},
+        {**identity, "provider_key": "another"},
+        {**identity, "model_key": "different"},
+    ):
+        outcome = create_semantic_classification_node(
+            model, interpreter_identity=identity,
+        )({
+            "question": "Display cash movements", "context": context,
+            "llm_selection": item,
+        })
+        assert outcome["final_status"] == "rejected"
+    assert model.calls == 0
+
+
+def test_gemini_adapter_serializes_semantic_context_only():
+    from app.integrations.google_gemini.configuration import GoogleGeminiConfiguration
+    from app.integrations.google_gemini.semantic_intent_interpreter import GeminiSemanticIntentInterpreter
+    context = _context("intent_x", "An operation", "op", schema="ledger")
+    request = prepare_interpretation("Display cash movements", context)
+    class GeminiFake:
+        def generate_content(self, request, *, payload_builder):
+            payload = json.loads(payload_builder(
+                request=request,
+                configuration=GoogleGeminiConfiguration(model_id="test-model"),
+            ))
+            prompt = json.loads(payload["contents"][0]["parts"][0]["text"])
+            assert prompt["contract_version"] == "semantic-intent-v1"
+            assert "table_catalog" not in prompt
+            assert "official_sql" not in prompt
+            assert prompt["allowed_intents"][0]["intent_name"] == "intent_x"
+            return {"status": "success", "output_text": _accepted(
+                request, "intent_x", "op", "cash"
+            ), "token_usage": {"prompt_tokens": 3, "total_tokens": 7}}
+    adapter = GeminiSemanticIntentInterpreter(
+        client=GeminiFake(), configuration=GoogleGeminiConfiguration(model_id="test-model"),
+    )
+    result = adapter.interpret(request)
+    assert result["provider_model"] == "test-model"
+    assert result["token_usage"]["total_tokens"] == 7
+
+
+def test_gemini_adapter_refuses_provider_failure():
+    from app.integrations.google_gemini.configuration import GoogleGeminiConfiguration
+    from app.integrations.google_gemini.semantic_intent_interpreter import GeminiSemanticIntentInterpreter
+    class Failing:
+        def generate_content(self, request, *, payload_builder):
+            return {"status": "provider_unavailable"}
+    adapter = GeminiSemanticIntentInterpreter(
+        client=Failing(), configuration=GoogleGeminiConfiguration(),
+    )
+    try:
+        adapter.interpret({"contract_version": "semantic-intent-v1"})
+    except RuntimeError:
+        return
+    raise AssertionError("Gemini infrastructure failure was silently accepted")
