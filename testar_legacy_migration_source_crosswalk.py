@@ -115,6 +115,12 @@ def test_two_different_tenants_without_code_special_cases() -> None:
         assert report["counts"]["nodes_on_webhook_to_response_path"] == 3
         assert report["counts"]["textual_reference_links"] == 1
         assert report["counts"]["g5_identifier_hints"] == 1
+        assert report["counts"]["distinct_source_table_column_pairs"] == 1
+        assert report["counts"]["deduplicated_node_reference_patterns"] == 1
+        assert report["counts"]["physical_schema_candidate_records"] == 0
+        assert report["counts"]["source_candidate_status_counts"] == {
+            "UNDECLARED_OR_REDACTED": 1,
+        }
         assert report["nodes"][1]["query_shape"] == "READ_STATEMENT"
         assert report["nodes"][1]["has_credential_reference"] is True
         assert report["business_mapping_approved"] is False
@@ -213,6 +219,50 @@ def test_no_historical_sql_history_cannot_masquerade_as_unreviewed_sql() -> None
     args["lineage"]["source_row_count"] = 1
     args["inventory"]["sql_patterns_classification"] = "ALLOW_GENERATOR"
     denied(args, "HISTORICAL_SQL_NOT_ISOLATED")
+
+
+
+def test_multiple_versions_do_not_inflate_distinct_physical_references() -> None:
+    args = fixtures("historical_versions")
+    candidate = args["hints"]["candidates"][0]
+    version2 = sha("distinct-history-version")
+    args["hints"]["candidates"].append(
+        {**candidate, "source_version_sha256": version2,
+         "source_record_sha256": sha("distinct-history-record")}
+    )
+    collection = args["inventory"]["source_collections"][0]
+    collection["rows"] = 2
+    args["lineage"]["source_row_count"] = 3
+    args["manifest"]["versions"].append({
+        "source_version_sha256": version2,
+        "row_counts": {collection["name"]: 1},
+    })
+    candidate["candidate_status"] = "AMBIGUOUS_TABLE_NAME"
+    args["hints"]["candidates"][1]["candidate_status"] = "COLUMN_UNRESOLVED"
+    report = build_legacy_migration_inventory(**args)
+    counts = report["counts"]
+    assert counts["g5_identifier_hints"] == 2
+    assert counts["textual_reference_links"] == 2
+    assert counts["deduplicated_node_reference_patterns"] == 1
+    assert counts["distinct_source_table_column_pairs"] == 1
+    assert counts["source_candidate_status_counts"] == {
+        "AMBIGUOUS_TABLE_NAME": 1,
+        "COLUMN_UNRESOLVED": 1,
+    }
+    assert report["business_mapping_approved"] is False
+
+
+def test_malicious_status_values_are_not_exposed_in_report() -> None:
+    args = fixtures("tenant_status_redaction")
+    args["hints"]["candidates"][0]["candidate_status"] = (
+        "customer-specific-account-name-DO-NOT-LEAK"
+    )
+    report = build_legacy_migration_inventory(**args)
+    assert report["counts"]["source_candidate_status_counts"] == {
+        "UNDECLARED_OR_REDACTED": 1,
+    }
+    assert "customer-specific-account-name" not in json.dumps(report)
+
 
 if __name__ == "__main__":
     tests = sorted(

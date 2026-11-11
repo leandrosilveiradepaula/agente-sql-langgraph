@@ -323,11 +323,41 @@ def build_legacy_migration_inventory(
     matched_source = set()
     matched_versions = set()
     matched_nodes = set()
+    # Every G5 version may repeat the same physical reference. Report both
+    # the versioned occurrences and the deduplicated reference patterns.
+    node_reference_patterns = set()
+    source_reference_pairs = set()
+    source_candidate_status: Counter[str] = Counter()
+    source_column_status: Counter[str] = Counter()
+    physical_schema_candidate_count = 0
     reference_counts: Counter[str] = Counter()
     total_links = 0
     for candidate in candidates:
         ver = candidate["source_version_sha256"]
         source_sha = candidate["source_record_sha256"]
+        table_ref = candidate.get("source_table_ref")
+        column_ref = candidate.get("source_column_ref")
+        source_reference_pairs.add(
+            (table_ref if isinstance(table_ref, str) else None,
+             column_ref if isinstance(column_ref, str) else None)
+        )
+        for field, output in (
+            ("candidate_status", source_candidate_status),
+            ("column_status", source_column_status),
+        ):
+            value = candidate.get(field)
+            # Preserve only generic structural reason codes, never arbitrary
+            # user- or business-controlled strings in the report.
+            if isinstance(value, str) and re.fullmatch(
+                r"[A-Z][A-Z0-9_]{0,63}", value
+            ):
+                output[value] += 1
+            else:
+                output["UNDECLARED_OR_REDACTED"] += 1
+        if isinstance(candidate.get("physical_schema_candidate"), str) and (
+            candidate["physical_schema_candidate"].strip()
+        ):
+            physical_schema_candidate_count += 1
         for i in range(1, len(nodes) + 1):
             content = text_by_node[i]
             table_hit = _table_or_column_mentioned(
@@ -344,6 +374,11 @@ def build_legacy_migration_inventory(
             matched_nodes.add(i)
             matched_source.add((ver, source_sha))
             matched_versions.add(ver)
+            node_reference_patterns.add(
+                (i,
+                 table_ref if isinstance(table_ref, str) else None,
+                 column_ref if isinstance(column_ref, str) else None)
+            )
             label = (
                 "TABLE_AND_COLUMN_TEXT" if table_hit and column_hit
                 else "TABLE_TEXT" if table_hit else "COLUMN_TEXT"
@@ -388,6 +423,15 @@ def build_legacy_migration_inventory(
             "source_records_with_textual_reference": len(matched_source),
             "source_versions_with_textual_reference": len(matched_versions),
             "textual_reference_links": total_links,
+            "deduplicated_node_reference_patterns": len(node_reference_patterns),
+            "distinct_source_table_column_pairs": len(source_reference_pairs),
+            "physical_schema_candidate_records": physical_schema_candidate_count,
+            "source_candidate_status_counts": dict(
+                sorted(source_candidate_status.items())
+            ),
+            "source_column_status_counts": dict(
+                sorted(source_column_status.items())
+            ),
             "reference_categories": dict(sorted(reference_counts.items())),
             "financial_business_rules_reviewed": 0,
         },
