@@ -69,6 +69,7 @@ class GenerateSqlUseCase:
         langgraph_commit: str | None = None,
         expected_organization_id: str | None = None,
         semantic_intent_interpreter: SemanticIntentInterpreter | None = None,
+        semantic_intent_identity: Mapping[str, str] | None = None,
     ) -> None:
         if context_repository is None:
             raise RuntimeError("context_repository deve ser injetado.")
@@ -94,7 +95,8 @@ class GenerateSqlUseCase:
         self._receive_question = receive_question
         self._load_context = create_load_context_node(context_repository)
         self._classify_intent = create_semantic_classification_node(
-            semantic_intent_interpreter
+            semantic_intent_interpreter,
+            interpreter_identity=semantic_intent_identity,
         )
         self._build_plan = build_plan
         self._security_gate = security_gate
