@@ -182,7 +182,7 @@ def _planner_intent_evidence(
                     and item.get("concept_name", "").strip()
                 )
             ]
-    best_candidate = _project_dimension_grouping_candidate(
+    best_candidate = _project_intent_concept_candidate(
         intent_resolution_result.get("best_candidate")
     )
     if best_candidate is not None:
@@ -193,7 +193,7 @@ def _planner_intent_evidence(
         projected_candidates = [
             candidate
             for candidate in (
-                _project_dimension_grouping_candidate(candidate)
+                _project_intent_concept_candidate(candidate)
                 for candidate in candidates
             )
             if candidate is not None
@@ -206,7 +206,7 @@ def _planner_intent_evidence(
     return projected
 
 
-def _project_dimension_grouping_candidate(
+def _project_intent_concept_candidate(
     candidate: Any,
 ) -> dict[str, Any] | None:
     if not isinstance(candidate, Mapping):
