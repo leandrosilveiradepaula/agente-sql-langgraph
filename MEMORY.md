@@ -14,6 +14,10 @@
 
 ---
 
+### Evidência inicial independente (G5↔n8n, sem homologação)
+
+Export ativo da VPS SHA-256 `19dd24c29d81c61b12dc383f2124ca2e7ba77625776ee161f3be1996d2f09c68`; nó 22 (planner) SHA-256 `113ce61f0e6c57b2cf260f70c6e04af1530e92876f4c6d10d5fbaa9c242f5d5f`, com funções `planConsultaMetricaFinanceira` (linha 2030), `factGrainContract` (1073), `comparativeFactContract` (1054) e `commonManagerialRules` (1105). Nó 5 consulta 5 coleções semânticas do G5; existem 11 pacotes de versão cifrados. Relatório privado SHA-256 `e9c23d9e4b8dddd313359742546aa16eea0a2eab0bb40ae50ee1699ae6abe1d6`. Isso **prova localização da origem, não semântica contábil nem SQL LangGraph**: primeira capacidade `NOT_MIGRATED`; revisão por versão/validação financeira pendentes. Detalhes em `docs/operations/FIRST-FINANCIAL-CAPABILITY-PROOF.md`.
+
 ## Missão invariável
 
 **Fazer engenharia reversa do agente financeiro EXISTENTE** — n8n publicado (observado com 68 nós) **E** banco/backup G5 recuperado — para reconstruir suas capacidades no fluxo **Produto + n8n + LangGraph + LLM configurável**. Não criar agente do zero nem tentar ensinar o legado por 63 SQLs/respostas prontas. Migrar o comportamento, não copiar hardcodes. Conhecimento de cliente pertence a contexto semântico versionado por tenant; o motor é agnóstico.

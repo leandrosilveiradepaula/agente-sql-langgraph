@@ -12,6 +12,18 @@ O nó legado 22 contém funções estruturais com nomes `planConsultaMetricaFina
 
 **Seleção final:** somente escolher a pergunta inédita e a capacidade após identificar significado financeiro, registro/versão e mapeamento físico autorizados. Não aproveitar SQL de exemplos, baseline do n8n, 63 perguntas ou golden answers.
 
+## Primeiro vínculo de origem verificado na VPS — ainda sem significado contábil aprovado
+
+Foi feita uma **nova inspeção somente leitura** do export publicado n8n e do manifesto G5, com relatório privado em `/tmp` (não entregue ao gerador). Evidência:
+
+- Export n8n publicado e ativo, 68 nós: SHA-256 `19dd24c29d81c61b12dc383f2124ca2e7ba77625776ee161f3be1996d2f09c68`.
+- Nó 22 de planejamento financeiro: SHA-256 do código `113ce61f0e6c57b2cf260f70c6e04af1530e92876f4c6d10d5fbaa9c242f5d5f`; função `planConsultaMetricaFinanceira` na linha 2030 com uso na 2347; `factGrainContract` na 1073 e usos; `comparativeFactContract` na 1054 e usos; `commonManagerialRules` na 1105 e outras referências. Essas identificações comprovam **origem do código**, não correção da interpretação financeira.
+- Nó 5 de leitura do contexto referencia as cinco coleções históricas: `ai_ducklake_agent_rules`, `ai_ducklake_dre_mapping`, `ai_ducklake_entity_aliases`, `ai_ducklake_sql_patterns` e `ai_ducklake_table_catalog`.
+- Manifesto G5: **11 arquivos cifrados de versão presentes**. Conteúdo e significado contábil ainda **não comprovados nem aprovados**. Não usar os 106 padrões históricos como contexto de geração.
+- SHA-256 do relatório privado de observação de origem: `e9c23d9e4b8dddd313359742546aa16eea0a2eab0bb40ae50ee1699ae6abe1d6`.
+
+**Status:** `SOURCE_CODE_VERIFIED_G5_ACCOUNTING_NOT_ATTESTED` → capacidade continua `NOT_MIGRATED`, primeira prova real continua `NOT_PROVEN`. A próxima etapa não é criar novo parser: é estabelecer o vínculo contábil exato com a versão G5 e então gerar SQL com contexto aprovado. Leitura detalhada dos 11 pacotes exige desbloqueio local por TTY e custódia segura; jamais transmitir senha no chat/GitHub.
+
 ## Matriz de aceite por evidência
 
 | Camada | Prova exigida | Estado atual |
