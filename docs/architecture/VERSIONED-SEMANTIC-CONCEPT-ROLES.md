@@ -377,3 +377,37 @@ Testes com dois esquemas independentes e com destinos de outro schema
 confirmam que a auditoria não permite uma migração baseada em metadados
 de fora da autorização declarada. Isso é diagnóstico estático, não
 substitui RBAC, RLS, SQL Gate ou testes de isolamento entre tenants reais.
+## Planejamento v1.5 — autorização de schema em runtime e métricas explícitas
+
+A etapa de planejamento verifica a allowlist `allowed_schemas` do tenant
+**também em runtime**, antes da geração SQL, em ambos os caminhos:
+`financial_metric` (alias direto) e `metric_binding` (condicional).
+A existência de tabela e coluna em `table_catalog` **não implica
+autorização**. Um alias físico inválido não pode introduzir um
+`metric_concept` para posterior inferência por binding condicional.
+Essa proteção vale para qualquer tenant, sem condições por empresa.
+
+A versão `PLANNER_VERSION=v1.5.0-tenant-metric-gate` acrescenta
+`PLANNING_METRIC_BINDING_INCOMPLETE`. O novo caminho de interpretação
+por LLM (`semantic_interpretation_selected`) falha fechado quando
+a pergunta tem métrica explícita sem vínculo, com vínculo parcialmente
+resolvido, com metadados inválidos ou com condições de binding
+incompletas. O gate é independente da cardinalidade de operações:
+não pode haver `planned` apenas por o motor ter reconhecido
+a operação quando a métrica não foi vinculada.
+
+**Compatibilidade transitória documentada:** os resolvedores determinísticos
+legados ainda podem produzir planos com termos de métrica lexicalmente
+reconhecidos, porém sem alias físico conhecido. Isso evita alterar a
+resposta oficial do n8n durante Shadow, **não certifica** esses planos como
+financeiramente corretos e deve ser externalizado/retirado apenas após
+paridade e ativação controlada por tenant. Metadados físicos comprovadamente
+inválidos, inclusive schemas não autorizados, são rejeitados mesmo nesse
+caminho legado. Não se alteram expectativas históricas do benchmark nem se
+criam mapeamentos para fazê-lo passar.
+
+A regressão valida planos completos, metadados inválidos, aliases físicos
+de outro schema, bindings condicionais fora da allowlist, impedimento de
+inferência a partir de alias inválido, métrica parcialmente resolvida pela
+LLM e comportamento determinístico legado. Também testa dois contextos
+materialmente distintos, sem acesso a dados financeiros.
