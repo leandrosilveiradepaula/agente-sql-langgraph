@@ -58,7 +58,7 @@ Consultar `docs/operations/LEGACY-N8N-DATABASE-MIGRATION-MAP.md` para o backlog 
 
 **Decisão do operador:** migrar a inteligência financeira real do legado n8n (68 nós) e G5 para n8n+LangGraph, mas o motor deve atender clientes com qualquer nomenclatura/esquema mediante configurações, acesso e definições fornecidas/validadas. **Nenhum hardcode de cliente no código**; as 63 perguntas históricas **somente controle de qualidade posterior**.
 
-**Implementação nesta branch ainda sem merge/cutover:** 
+**Implementação nesta branch ainda sem merge/cutover:**
 - `app/adapters/postgres/physical_catalog_reader.py` inspeciona apenas `information_schema.columns` em transação READ ONLY e lista explícita de schemas, sem ler dados financeiros;
 - `app/domain/tenant_semantic_readiness.py` faz pré-validação física sem inferir semântica, nunca promove mapeamento automaticamente;
 - `app/adapters/postgres/canonical_context_repository.py` carrega JSONB de contexto versionado, já aprovado, vinculado a tenant/versão/fingerprint e exclusivo de SQL de avaliação;
