@@ -78,6 +78,10 @@ STEPS = [
         [sys.executable, "testar_semantic_alias_integrity.py"],
     ),
     (
+        "testar_metric_tenant_schema.py",
+        [sys.executable, "testar_metric_tenant_schema.py"],
+    ),
+    (
         "testar_p3_semantic_context_candidate.py",
         [sys.executable, "testar_p3_semantic_context_candidate.py"],
     ),
