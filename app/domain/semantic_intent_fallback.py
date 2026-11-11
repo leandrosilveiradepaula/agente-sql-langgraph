@@ -13,7 +13,7 @@ from typing import Any
 
 from app.domain.search_text import normalize_search_text
 
-CONTRACT_VERSION = "semantic-intent-v1"
+CONTRACT_VERSION = "semantic-intent-v2"
 MAX_INTERPRETATION_REQUEST_BYTES = 65_536
 
 
@@ -129,14 +129,18 @@ def prepare_interpretation(
         "task": (
             "Interpret the user's financial question; do not generate SQL. "
             "Choose precisely one intent from allowed_intents only if supported "
-            "by quoted spans from the question. Associate each quoted span with "
-            "a concept from that intent's allowed_concepts. Respect every "
-            "required_concept_group. Otherwise return insufficient. "
+            "by quoted spans from the question. Bind each quote to a "
+            "concept_name and an EXACT catalog_term from that concept's "
+            "concept_lexicon; the catalog_term may differ from the user quote. "
+            "Never generate an alias or metric that is not present in the "
+            "catalog. Respect every required_concept_group. Return "
+            "insufficient if no authorized catalog term preserves the meaning. "
             "Return only JSON with exactly keys: status ('selected' or "
             "'insufficient'), intent_name (name or null), context_fingerprint "
             "(exact supplied value), bindings (list of objects with exactly "
-            "concept_name and question_span). Do not invent vocabulary, "
-            "use historical answers or infer unknown accounting mappings."
+            "concept_name, question_span and catalog_term). Do not invent "
+            "vocabulary, use historical answers or infer unknown accounting "
+            "mappings."
         ),
         "question": question,
         "context_version": version,
@@ -203,13 +207,33 @@ def validate_interpretation(
     safe: list[dict[str, str]] = []
     for item in bindings:
         if not isinstance(item, dict) or set(item) != {
-            "concept_name", "question_span"
+            "concept_name", "question_span", "catalog_term"
         }:
             raise SemanticIntentRejected("provider_binding_invalid")
         concept, span = item["concept_name"], item["question_span"]
+        catalog_term = item["catalog_term"]
         if (not isinstance(concept, str) or concept not in allowed
                 or not isinstance(span, str) or not 0 < len(span) <= 256):
             raise SemanticIntentRejected("provider_binding_unknown")
+        if not isinstance(catalog_term, str) or not 0 < len(catalog_term) <= 256:
+            raise SemanticIntentRejected("provider_catalog_term_invalid")
+        lexicons = target.get("concept_lexicon")
+        if not isinstance(lexicons, list):
+            raise SemanticIntentRejected("catalog_lexicon_invalid")
+        permitted_terms = {
+            normalize_search_text(term): term
+            for entry in lexicons
+            if isinstance(entry, Mapping) and entry.get("concept_name") == concept
+            for term in entry.get("terms", [])
+            if isinstance(term, str) and term.strip()
+        }
+        normalized_catalog_term = normalize_search_text(catalog_term)
+        if (
+            not normalized_catalog_term
+            or normalized_catalog_term not in permitted_terms
+        ):
+            raise SemanticIntentRejected("provider_catalog_term_not_authorized")
+        authorized_catalog_term = permitted_terms[normalized_catalog_term]
         normalized_span = normalize_search_text(span)
         if not normalized_span or not re.search(
             r"(?<!\w)" + re.escape(normalized_span) + r"(?!\w)", question
@@ -223,7 +247,11 @@ def validate_interpretation(
         if previous_owner != concept:
             raise SemanticIntentRejected("provider_span_concept_conflict")
         observed.add(concept)
-        safe.append({"concept_name": concept, "question_span": span})
+        safe.append({
+            "concept_name": concept,
+            "question_span": span,
+            "catalog_term": authorized_catalog_term,
+        })
     for requirement in target["required_concept_groups"]:
         required = requirement["concept_names"]
         minimum = requirement["minimum_concept_matches"]
