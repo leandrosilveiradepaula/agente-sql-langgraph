@@ -18,20 +18,24 @@ mcp = MCPServer("Agente Financeiro VPS")
 SOCKET = "/run/agente-financeiro-mcp/operations.sock"
 
 
-def _read(operation: str, expected_sha: str | None = None) -> dict[str, object]:
+def _read(operation: str, expected_sha: str | None = None,
+          params: dict[str, object] | None = None) -> dict[str, object]:
     """Only fixed operations can be sent; no dynamic commands or arguments."""
     if operation not in {"runtime_status", "revision", "n8n_inventory", "import_evidence", "audit_evidence",
                          "repo_sync", "benchmark_plan", "benchmark_recover", "benchmark_status",
-                         "cia_timer", "cia_journal", "cia_sqlite"}:
+                         "cia_timer", "cia_journal", "cia_sqlite",
+                         "admin_exec", "admin_start", "admin_status", "admin_cancel"}:
         return {"status": "rejected", "reason": "operation_not_allowed"}
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(3700 if operation == "benchmark_recover" else
-                              150 if operation in ("repo_sync", "import_evidence") else 90)
+                              150 if operation in ("repo_sync", "import_evidence", "admin_exec") else 90)
             client.connect(SOCKET)
             payload = {"op": operation}
             if operation == "repo_sync":
                 payload["expected_sha"] = expected_sha
+            if operation.startswith("admin_") and isinstance(params, dict):
+                payload.update(params)
             client.sendall((json.dumps(payload) + "\n").encode("ascii"))
             data = bytearray()
             while b"\n" not in data:
@@ -56,6 +60,35 @@ def _fixed_command(*argv: str) -> tuple[bool, str]:
     except (OSError, subprocess.TimeoutExpired):
         return False, "unavailable"
     return result.returncode == 0, result.stdout.strip()[:160]
+
+
+@mcp.tool()
+def vps_exec(argv: list[str], cwd: str = "/docker/agente-sql-langgraph-repo",
+             timeout_seconds: int = 60, show_output: bool = True) -> dict[str, object]:
+    """Run an administrator-approved local executable; bounded time/output, audited."""
+    return _read("admin_exec", params={"argv": argv, "cwd": cwd,
+                    "timeout_seconds": timeout_seconds, "show_output": show_output})
+
+
+@mcp.tool()
+def vps_start_job(argv: list[str], cwd: str = "/docker/agente-sql-langgraph-repo",
+                  timeout_seconds: int = 3600) -> dict[str, object]:
+    """Start an auditable long-running VPS job and return a persistent job ID."""
+    return _read("admin_start", params={"argv": argv, "cwd": cwd,
+                    "timeout_seconds": timeout_seconds})
+
+
+@mcp.tool()
+def vps_job_status(job_id: str, show_output: bool = True) -> dict[str, object]:
+    """Inspect status/output of a previously started VPS administrator job."""
+    return _read("admin_status", params={"job_id": job_id,
+                    "show_output": show_output})
+
+
+@mcp.tool()
+def vps_cancel_job(job_id: str) -> dict[str, object]:
+    """Cancel one specific VPS administrator job by ID."""
+    return _read("admin_cancel", params={"job_id": job_id})
 
 
 @mcp.tool()
