@@ -140,6 +140,7 @@ class PrivateState(unittest.TestCase):
             self.assertEqual(len(result["job_id"]),32)
             cmd = run.call_args.args[0]
             self.assertEqual(cmd[0],admin.SYSTEMD_RUN)
+            self.assertIn("--no-block", cmd)
             self.assertIn("--property=Type=oneshot", cmd)
             self.assertIn("--property=TimeoutStartSec=180", cmd)
             self.assertEqual(run.call_args.kwargs["shell"],False)
