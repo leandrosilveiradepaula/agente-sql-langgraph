@@ -549,6 +549,7 @@ def _physical_metric_context(*, include_unbacked: bool = True):
     )
     context["entities"] = deepcopy(physical["entities"])
     context["table_catalog"] = deepcopy(physical["table_catalog"])
+    context["allowed_schemas"] = deepcopy(physical["allowed_schemas"])
     context["query_patterns"][0]["required_tables"] = [
         "schema_test.fact_metrics",
     ]
@@ -765,6 +766,32 @@ def test_analytical_operation_requires_real_metadata_before_provider():
     else:
         raise AssertionError("conflicting operation alias offered to model")
 
+
+
+
+def test_schema_not_authorized_for_tenant_never_reaches_model():
+    context = _physical_metric_context(include_unbacked=False)
+    context["allowed_schemas"] = ["not_the_metric_schema"]
+    try:
+        prepare_interpretation("How much is available", context)
+    except SemanticIntentRejected as exc:
+        assert str(exc) == "catalog_no_grounded_intents"
+    else:
+        raise AssertionError("unauthorized schema exposed via metric grounding")
+
+
+def test_same_semantic_concept_cannot_have_two_structural_roles():
+    context = _physical_metric_context(include_unbacked=False)
+    context["intent_resolution"]["config"]["concept_roles"] = {
+        "metric": ["metric_signal"],
+        "operation": ["METRIC_SIGNAL"],
+    }
+    try:
+        prepare_interpretation("How much is available", context)
+    except SemanticIntentRejected as exc:
+        assert str(exc) == "semantic_role_config_invalid"
+    else:
+        raise AssertionError("overlapping roles accepted before provider")
 
 
 if __name__ == "__main__":
