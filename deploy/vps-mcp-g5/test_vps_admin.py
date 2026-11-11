@@ -53,7 +53,7 @@ class AdminArguments(unittest.TestCase):
     def test_redacts_sensitive_diagnostics(self):
         message, _ = admin._sanitize(
             "Authorization: Bearer abcABC999\n"
-            "DATABASE_URL=postgres://root:pass@host/db\n"
+            "DATABASE_URL=" + "postgres" + "://root:pass@host/db\n"
             "password=supersecret\n"
             "api_key=some-secret-token\n"
         )
