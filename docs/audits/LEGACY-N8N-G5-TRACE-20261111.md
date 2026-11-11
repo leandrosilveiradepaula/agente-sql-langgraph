@@ -120,4 +120,3 @@ Legenda: `G5` = coocorrencias textuais nao homologadas; `flags` = sinais de revi
 4. **Homologacao real**: rota Produto/n8n certificada, 2 clientes distintos, SQL dinamica para perguntas ineditas, Shadow Gemini correlacionado; benchmark 63 somente avaliacao posterior; teste financeiro read-only apenas com autorizacao especifica.
 
 Controles: `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. Nenhum merge, deploy ou cutover implicado por este censo.
-
