@@ -129,8 +129,10 @@ Quando a configuração versionada declara os papéis estruturais `metric`
 ou `operation`, o projetor do contexto apresentado à LLM só mantém os
 aliases do léxico de intenções que correspondem a entidades de métrica/
 operação efetivamente autorizadas no catálogo do próprio tenant. A
-verificação reutiliza os validadores físicos do planejador; não envia nomes
-de tabelas, colunas nem SQL ao modelo.
+verificação reutiliza os validadores físicos do planejador e exige
+que o alvo de métrica pertença ao `table_catalog` **e** a um schema da
+allowlist `allowed_schemas` do tenant. Recusa também conceitos com papéis
+sobrepostos. Nenhuma tabela, coluna ou SQL é enviada ao modelo.
 
 Aliases de métricas com destinos físicos diferentes ou de operações com
 significados incompatíveis **não são oferecidos**. Registros equivalentes
@@ -150,4 +152,3 @@ benchmark ou por suposição da LLM.
 Os testes usam dois contextos sintéticos de esquemas e métricas diferentes,
 intenção parcialmente indisponível, alias ambíguo e falta de coluna física.
 São verificações offline, sem SQL financeira, rede ou chamada real ao modelo.
-
