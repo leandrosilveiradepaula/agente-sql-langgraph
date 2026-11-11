@@ -2541,9 +2541,11 @@ def _resolve_metric_bindings(
     cardinality: dict[str, Any],
 ) -> tuple[list[ProjectedPlannedMetric], dict[str, Any]]:
     concepts_present = {
-        item["concept_name"].casefold()
+        item["concept_name"].strip().casefold()
         for item in binding_context_concepts
-        if isinstance(item.get("concept_name"), str)
+        if isinstance(item, Mapping)
+        and isinstance(item.get("concept_name"), str)
+        and item["concept_name"].strip()
     }
     configured: list[dict[str, Any]] = []
     configured_count = 0
@@ -2577,11 +2579,17 @@ def _resolve_metric_bindings(
             continue
         configured.append(binding)
         missing_present = sorted(
-            set(binding["when_present"]) - concepts_present,
+            (
+                name for name in binding["when_present"]
+                if name.casefold() not in concepts_present
+            ),
             key=str.casefold,
         )
         blocked_absent = sorted(
-            set(binding["when_absent"]) & concepts_present,
+            (
+                name for name in binding["when_absent"]
+                if name.casefold() in concepts_present
+            ),
             key=str.casefold,
         )
         if missing_present or blocked_absent:
@@ -2707,7 +2715,9 @@ def _metric_binding_rule(
         binding.get("required_filter_concepts", []),
         allow_empty=True,
     )
-    if set(when_present) & set(when_absent):
+    if {item.casefold() for item in when_present} & {
+        item.casefold() for item in when_absent
+    }:
         return None
     if required_filter_concepts is None:
         return None
@@ -2921,8 +2931,8 @@ def _binding_ref(
             metric_concept,
             target_table,
             target_column,
-            ",".join(sorted(when_present, key=str.casefold)),
-            ",".join(sorted(when_absent, key=str.casefold)),
+            ",".join(sorted({item.casefold() for item in when_present})),
+            ",".join(sorted({item.casefold() for item in when_absent})),
         )
     )
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
