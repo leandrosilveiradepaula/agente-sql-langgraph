@@ -96,3 +96,30 @@ ainda precisa de homologação.
 
 A branch e a PR desta proposta não habilitam configuração, não executam
 migrações, não alteram n8n, não fazem deploy e não habilitam SQL.
+
+## Contrato semantic-intent-v2 — trecho do usuário versus alias autorizado
+
+O interpretador não pode enviar diretamente um sinônimo novo ao planejador.
+A resposta deve conter um vínculo com **três campos**: nome do conceito
+existente no catálogo, `question_span` literalmente presente na pergunta
+e `catalog_term` pertencente ao léxico versionado desse mesmo conceito.
+
+O validador verifica o termo contra `concept_lexicon` e preserva separadamente
+a citação do usuário. Na projeção para o planejador, somente o alias validado
+é empregado na resolução das entidades/métricas. São recusados termos
+inventados, conceitos inexistentes, citações fora da pergunta, fingerprints
+diferentes e spans conflitantes.
+
+A PR #231 acrescenta o gate complementar de **integridade pós-planejamento**:
+uma interpretação por LLM não pode passar como `planned` se os aliases
+prometidos não aparecem nas operações, métricas ou dimensões realmente
+projetadas e autorizadas. O gate usa os papéis versionados do tenant,
+não nomenclaturas de clientes. Os caminhos determinísticos continuam
+independentes dessa verificação específica.
+
+Um teste integrado, sem rede, demonstra a passagem de um sinônimo
+inédito para um alias autorizado e sua vinculação física; os testes de
+segurança demonstram rejeição quando há alias inventado ou vínculo perdido.
+A prova não demonstra ainda qualidade no benchmark ou equivalência
+financeira, que exigem seus próprios gates.
+
