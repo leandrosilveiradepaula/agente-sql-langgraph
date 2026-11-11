@@ -368,3 +368,37 @@ def test_gemini_adapter_refuses_provider_failure():
     except RuntimeError:
         return
     raise AssertionError("Gemini infrastructure failure was silently accepted")
+
+
+def test_selected_interpretation_clears_transient_deterministic_error():
+    """A successful grounded fallback must not keep the prior rejection."""
+    from app.graph.nodes.classify_intent import classify_intent
+    context = _context("intent_x", "An operation", "op", schema="ledger")
+    state = {
+        "question": "Display cash movements",
+        "context": context,
+        "errors": [],
+    }
+    initial = classify_intent(state)
+    assert initial["final_status"] == "rejected"
+    assert initial["errors"][0]["code"] == "INTENT_RESOLUTION_MINIMUM_SCORE_NOT_REACHED"
+
+    class Fake:
+        def interpret(self, request):
+            return {
+                "output_text": _accepted(request, "intent_x", "op", "cash"),
+                "provider_name": "test",
+                "provider_model": "test",
+                "token_usage": {},
+            }
+
+    accepted = create_semantic_classification_node(Fake())(state)
+    assert accepted["final_status"] == "processing"
+    assert accepted["errors"] == []
+
+    preceding = {
+        **state,
+        "errors": [{"code": "PREEXISTING", "stage": "receive_question"}],
+    }
+    accepted_with_previous = create_semantic_classification_node(Fake())(preceding)
+    assert accepted_with_previous["errors"] == preceding["errors"]
