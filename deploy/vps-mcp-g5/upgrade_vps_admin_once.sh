@@ -129,19 +129,55 @@ PY
 done
 [[ "$ready" == 1 ]] || reject ADMIN_BROKER_PROBE_FAILED
 
+# Independently exercise the durable systemd job boundary before success.
+/usr/sbin/runuser -u agente-mcp -- /usr/bin/python3 -B - <<'PY' >/dev/null 2>&1 || reject ADMIN_JOB_PROBE_FAILED
+import json, socket, time
+
+def request(message):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+        conn.settimeout(10)
+        conn.connect("/run/agente-financeiro-mcp/operations.sock")
+        conn.sendall(json.dumps(message).encode("ascii")+b"\n")
+        data=bytearray()
+        while not data.endswith(b"\n") and len(data)<16384:
+            part=conn.recv(2048)
+            if not part: break
+            data.extend(part)
+    return json.loads(bytes(data))
+start=request({
+    "op":"admin_start", "argv":["/usr/bin/true"],"cwd":"/",
+    "timeout_seconds":30
+})
+assert start.get("status")=="queued", start
+job_id=start["job_id"]
+for _ in range(40):
+    state=request({
+        "op":"admin_status","job_id":job_id,"show_output":False
+    })
+    if state.get("status")=="completed":
+        assert state.get("exit_code")==0, state
+        break
+    assert state.get("status") in ("queued","running"),state
+    time.sleep(0.25)
+else:
+    raise RuntimeError("job_not_completed")
+PY
+
 /usr/bin/systemctl restart "$TUNNEL_SVC"
+tunnel_ready=0
 for _attempt in $(seq 1 20); do
   if /usr/bin/systemctl is-active --quiet "$TUNNEL_SVC" && \
      /usr/bin/curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8080/readyz >/dev/null 2>&1; then
-    done_ok=1
+    tunnel_ready=1
     break
   fi
   sleep 1
 done
-[[ "$done_ok" == 1 ]] || reject TUNNEL_PROBE_FAILED
+[[ "$tunnel_ready" == 1 ]] || reject TUNNEL_PROBE_FAILED
 [[ "$(/usr/bin/git hash-object "$TARGET/mcp_server.py")" == "$NEW_GATEWAY" ]] || reject INSTALLED_GATEWAY_DRIFT
 [[ "$(/usr/bin/git hash-object "$TARGET/operations_broker.py")" == "$NEW_BROKER" ]] || reject INSTALLED_BROKER_DRIFT
 [[ "$(/usr/bin/git hash-object "$TARGET/vps_admin.py")" == "$NEW_ADMIN" ]] || reject INSTALLED_ADMIN_DRIFT
+done_ok=1
 echo "MCP_ADMIN_INSTALL=PASS"
 echo "MCP_ADMIN_EXEC=PASS"
 echo "MCP_ADMIN_JOBS=AVAILABLE"
