@@ -14,6 +14,7 @@ from typing import Any
 from app.domain.search_text import normalize_search_text
 
 CONTRACT_VERSION = "semantic-intent-v1"
+MAX_INTERPRETATION_REQUEST_BYTES = 65_536
 
 
 class SemanticIntentRejected(ValueError):
@@ -123,7 +124,7 @@ def prepare_interpretation(
             ],
             "required_concept_groups": required,
         })
-    return {
+    request = {
         "contract_version": CONTRACT_VERSION,
         "task": (
             "Interpret the user's financial question; do not generate SQL. "
@@ -142,6 +143,12 @@ def prepare_interpretation(
         "context_fingerprint": fingerprint,
         "allowed_intents": intents,
     }
+    # Structural bound: prevent unbounded catalog/model costs for any tenant.
+    # Refuse before making a provider request rather than truncating rules.
+    serialized = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
+    if len(serialized.encode("utf-8")) > MAX_INTERPRETATION_REQUEST_BYTES:
+        raise SemanticIntentRejected("semantic_prompt_too_large")
+    return request
 
 
 def validate_interpretation(
