@@ -198,6 +198,66 @@ def test_alias_collision_fails_closed_across_unrelated_tenant_schemas():
         assert result["query_plan"] is None
 
 
+
+def test_mismatched_intent_evidence_is_rejected_before_planning():
+    context = _metric_context()
+    evidence = _intent_metric_evidence(
+        term="amount", operation_term="highest",
+    )
+    evidence["intent"] = "another_selected_intent"
+    original = deepcopy(evidence)
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.9,
+        normalized_question="highest amount",
+        intent_resolution_result=evidence,
+    )
+    assert evidence == original
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "PLANNING_INTENT_EVIDENCE_MISMATCH"
+    assert result["projection"] is None
+    assert result["query_plan"] is None
+
+
+def test_selected_intent_evidence_still_plans_without_shortcuts():
+    context = _metric_context()
+    evidence = _intent_metric_evidence(
+        term="amount", operation_term="highest",
+    )
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.9,
+        normalized_question="highest amount",
+        intent_resolution_result=evidence,
+    )
+    assert result["status"] == "planned", result.get("error_code")
+    assert result["query_plan"]["planning_context"]["planned_metrics"]
+
+
+def test_mismatched_intent_evidence_is_rejected_in_two_tenants():
+    from testar_semantic_catalog_audit import _tenant
+    for schema, table, metric in (
+        ("bookkeeping", "ledger_rows", "gross_margin"),
+        ("payments", "settled_events", "net_receipts"),
+    ):
+        context = _tenant(schema=schema, table=table, metric=metric)
+        evidence = _intent_metric_evidence(
+            term=metric, operation_term="highest",
+        )
+        evidence["intent"] = "foreign_intent"
+        result = build_query_plan(
+            context=context,
+            intent_name="generic_test_intent",
+            intent_confidence=0.9,
+            normalized_question="highest " + metric,
+            intent_resolution_result=evidence,
+        )
+        assert result["status"] == "rejected"
+        assert result["error_code"] == "PLANNING_INTENT_EVIDENCE_MISMATCH"
+        assert result["query_plan"] is None
+
 if __name__ == "__main__":
     tests = sorted(
         (name, fn) for name, fn in globals().items()
