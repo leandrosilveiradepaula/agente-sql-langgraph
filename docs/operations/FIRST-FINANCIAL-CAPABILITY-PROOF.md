@@ -24,6 +24,10 @@ Foi feita uma **nova inspeção somente leitura** do export publicado n8n e do m
 
 **Status:** `SOURCE_CODE_VERIFIED_G5_ACCOUNTING_NOT_ATTESTED` → capacidade continua `NOT_MIGRATED`, primeira prova real continua `NOT_PROVEN`. A próxima etapa não é criar novo parser: é estabelecer o vínculo contábil exato com a versão G5 e então gerar SQL com contexto aprovado. Leitura detalhada dos 11 pacotes exige desbloqueio local por TTY e custódia segura; jamais transmitir senha no chat/GitHub.
 
+### Revisão de acoplamento físico/semântico — nova evidência, ainda NÃO PROVEN
+
+Auditoria de fonte independente verificou que o nó 5 fixa um mesmo `agent_version` nas cinco consultas e lê padrões SQL históricos, que o nó 7 seleciona por intenção e injeta como texto na cadeia de prompt 8→9 (Gemini), e que no nó 22 **4 de 8 bindings físicos literais** têm match textual nos candidatos G5, **todos ambíguos**. Evidências, linhas, hashes e riscos: `docs/audits/LEGACY-N8N-G5-SEMANTIC-COUPLING-20261111.md`; relatório privado SHA `b9fc93f7986020aa4017a9a3641baf770e617eeab0a08d67c8ef36b205c8b179`. **Não há significado contábil aprovado**. Capacidade permanece `NOT_MIGRATED`/`NOT_PROVEN`; nenhuma SQL financeira executada.
+
 ## Matriz de aceite por evidência
 
 | Camada | Prova exigida | Estado atual |

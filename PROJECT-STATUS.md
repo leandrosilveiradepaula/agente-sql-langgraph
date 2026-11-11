@@ -1,3 +1,9 @@
+# M1 — EVIDÊNCIA REAL DE ACOPLAMENTO SEMÂNTICO N8N/G5, CONTINUA SEM PROVA FINANCEIRA
+
+Auditor `legacy_semantic_static_coupling_offline.py` executado na VPS sobre 68 nós publicados, 11 versões G5 e 579 hints: nó PostgreSQL 5 possui cinco seletores fixos da mesma versão e carrega SQL patterns históricos (avaliação somente), nó 7 escolhe padrão/intent e passa via contexto texto→prompt nó 8→payload Gemini nó 9. Nó 22 fixa 8 bindings físicos; 4 correspondem textualmente a identificadores G5, todos `AMBIGUOUS_TABLE_NAME`, 4 não correspondem. 4 objetos literais simples/12 bindings no grafo; 4 referências físicas textuais. 8 testes sintéticos PASS; scanner de hardcode e git diff check PASS. Relatório privado SHA `b9fc93f7986020aa4017a9a3641baf770e617eeab0a08d67c8ef36b205c8b179`; `docs/audits/LEGACY-N8N-G5-SEMANTIC-COUPLING-20261111.md`. **Sem validação contábil das 11 versões cifradas, sem SQL financeira real, sem migração funcional comprovada.**
+
+---
+
 # 2026-11-11 21:36 UTC — ORDEM VINCULANTE: PROVAR A MIGRAÇÃO FINANCEIRA REAL
 
 **Missão única:** migrar a inteligência do Agente Financeiro EXISTENTE, estudando juntos o workflow n8n publicado (**68 nós, 78 conexões**) e as **11 versões semânticas do banco/backup G5**, para Produto + n8n (preservado) + LangGraph + Gemini. Não criar outro agente, não confundir com Factory/CRM, não copiar código/SQL/regras casuísticas ou hardcodes financeiros do n8n para Python/TypeScript.
