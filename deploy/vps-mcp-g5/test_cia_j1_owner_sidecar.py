@@ -116,6 +116,7 @@ class SidecarTests(unittest.TestCase):
         samples = [
             {**valid_recurring_report(), "stored_candles": 140},
             {**valid_recurring_report(), "published_checkpoints": 48},
+            {**valid_recurring_report(), "published_checkpoints": 26},
             {**valid_recurring_report(), "last_published_end_ms": reader.EXPECT[-1]},
             {**valid_recurring_report(), "last_published_end_ms":
                 reader.EXPECT[-1] + 49*reader.HOUR_MS, "stored_candles": 142},
