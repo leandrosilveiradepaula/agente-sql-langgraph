@@ -12,6 +12,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.domain.search_text import normalize_search_text
+from app.domain.planner import (
+    _metric_column_allowed,
+    _metric_metadata,
+    _operation_metadata,
+)
 
 CONTRACT_VERSION = "semantic-intent-v2"
 MAX_INTERPRETATION_REQUEST_BYTES = 65_536
@@ -63,6 +68,9 @@ def prepare_interpretation(
         for p in patterns if isinstance(p, Mapping)
         and isinstance(p.get("intent_name"), str)
     }
+    # Only physically resolvable aliases may be offered for configured
+    # metric/operation roles. No business alias is hardcoded or invented.
+    role_aliases, concept_roles = _verified_role_aliases(context, resolution)
     catalog = resolution.get("intent_catalog")
     if not isinstance(catalog, list) or not 1 <= len(catalog) <= 128:
         raise SemanticIntentRejected("catalog_invalid")
@@ -102,8 +110,20 @@ def prepare_interpretation(
                                    or not 0 < len(term.strip()) <= 256
                                    for term in terms)):
                         raise SemanticIntentRejected("catalog_terms_invalid")
+                    normalized_concept = cname.strip().casefold()
+                    physical_role = next(
+                        (
+                            role for role in ("metric", "operation")
+                            if normalized_concept in concept_roles.get(role, set())
+                        ),
+                        None,
+                    )
+                    approved = role_aliases.get(physical_role, set())
                     lexicon.setdefault(cname, set()).update(
                         term.strip() for term in terms
+                        if physical_role is None or (
+                            normalize_search_text(term) in approved
+                        )
                     )
             if effect in {"require", "positive_score"}:
                 concepts.update(names)
@@ -114,16 +134,32 @@ def prepare_interpretation(
                 })
         if not concepts:
             raise SemanticIntentRejected("catalog_without_groundable_concepts")
+        available = {
+            cname for cname in concepts if lexicon.get(cname)
+        }
+        if not available or any(
+            type(group["minimum_concept_matches"]) is not int
+            or len(available.intersection(group["concept_names"])) < (
+                group["minimum_concept_matches"]
+            )
+            for group in required
+        ):
+            # An intent whose mandatory concepts have no physical backing
+            # cannot become valid through an LLM response. Other intents
+            # remain available without weakening any scoring threshold.
+            continue
         intents.append({
             "intent_name": name,
             "semantic_description": description,
-            "allowed_concepts": sorted(concepts),
+            "allowed_concepts": sorted(available),
             "concept_lexicon": [
-                {"concept_name": name, "terms": sorted(lexicon.get(name, set()))}
-                for name in sorted(concepts)
+                {"concept_name": cname, "terms": sorted(lexicon[cname])}
+                for cname in sorted(available)
             ],
             "required_concept_groups": required,
         })
+    if not intents:
+        raise SemanticIntentRejected("catalog_no_grounded_intents")
     request = {
         "contract_version": CONTRACT_VERSION,
         "task": (
@@ -153,6 +189,93 @@ def prepare_interpretation(
     if len(serialized.encode("utf-8")) > MAX_INTERPRETATION_REQUEST_BYTES:
         raise SemanticIntentRejected("semantic_prompt_too_large")
     return request
+
+
+def _verified_role_aliases(
+    context: Mapping[str, Any],
+    resolution: Mapping[str, Any],
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """Physical aliases, by structural role, from this tenant's catalog only.
+
+    This verifies planner metadata *before* an optional provider call. It does
+    not decide which business concept a new question means, nor does it infer
+    relations between different aliases. Conditional metric bindings are
+    still evaluated only at the physical planning stage.
+    """
+    config = resolution.get("config")
+    if not isinstance(config, Mapping):
+        raise SemanticIntentRejected("semantic_role_config_invalid")
+    raw = config.get("concept_roles")
+    if raw is None:
+        return {}, {}
+    if not isinstance(raw, Mapping) or len(raw) > 4:
+        raise SemanticIntentRejected("semantic_role_config_invalid")
+    roles: dict[str, set[str]] = {}
+    for role, names in raw.items():
+        if role not in {"grouping", "period", "metric", "operation"} or (
+            not isinstance(names, list) or not 1 <= len(names) <= 128
+        ):
+            raise SemanticIntentRejected("semantic_role_config_invalid")
+        normalized = [
+            name.strip().casefold()
+            for name in names
+            if isinstance(name, str) and 0 < len(name.strip()) <= 256
+        ]
+        if len(normalized) != len(names) or len(set(normalized)) != len(normalized):
+            raise SemanticIntentRejected("semantic_role_config_invalid")
+        roles[role] = set(normalized)
+
+    entities = context.get("entities")
+    tables = context.get("table_catalog")
+    if not isinstance(entities, list) or not isinstance(tables, list):
+        return {}, roles
+    # Alias identities are deliberately based on the planner's own physical
+    # validation contracts, not independent definitions of accounting facts.
+    signatures: dict[str, dict[str, set[str]]] = {
+        "metric": {}, "operation": {},
+    }
+    for entity in entities:
+        if not isinstance(entity, Mapping):
+            continue
+        kind = entity.get("entity_type")
+        user_term = entity.get("user_term")
+        if not isinstance(user_term, str):
+            continue
+        alias = normalize_search_text(user_term)
+        if not alias:
+            continue
+        if kind == "financial_metric" and roles.get("metric"):
+            metric = _metric_metadata(entity.get("business_rule"))
+            if (
+                metric is None
+                or metric["metric_concept"] != entity.get("canonical_value")
+                or metric["target_table"] != entity.get("target_table")
+                or metric["target_column"] != entity.get("target_column")
+                or not _metric_column_allowed(
+                    tables, target_table=metric["target_table"],
+                    target_column=metric["target_column"],
+                )
+            ):
+                continue
+            signature = json.dumps(metric, sort_keys=True)
+            signatures["metric"].setdefault(alias, set()).add(signature)
+        elif kind == "analytical_operation" and roles.get("operation"):
+            operation = _operation_metadata(entity.get("business_rule"))
+            if operation is None or operation["operation_type"] != entity.get(
+                "canonical_value"
+            ):
+                continue
+            signature = json.dumps(operation, sort_keys=True)
+            signatures["operation"].setdefault(alias, set()).add(signature)
+    shared = set(signatures["metric"]).intersection(signatures["operation"])
+    aliases = {
+        role: {
+            alias for alias, physical in signatures[role].items()
+            if len(physical) == 1 and alias not in shared
+        }
+        for role in ("metric", "operation")
+    }
+    return aliases, roles
 
 
 def validate_interpretation(
