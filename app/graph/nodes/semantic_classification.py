@@ -109,6 +109,10 @@ def create_semantic_classification_node(
             "second_candidate": None,
         })
         return {
+            # The deterministic rejection was superseded by a newly verified
+            # interpretation, not by a successful SQL generation. Preserve
+            # pre-existing errors but remove the transient classifier failure.
+            "errors": deepcopy(state.get("errors", [])),
             "intent": chosen,
             "intent_confidence": float(policy["applied_confidence"]),
             "intent_resolution_result": cast(IntentResolutionResult, evidence),
