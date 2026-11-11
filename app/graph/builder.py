@@ -5,8 +5,8 @@ from app.graph.nodes.build_application_response import (
     create_build_application_response_node,
 )
 from app.graph.nodes.build_run_record import build_run_record_node
-from app.graph.nodes.classify_intent import (
-    classify_intent,
+from app.graph.nodes.semantic_classification import (
+    create_semantic_classification_node,
 )
 from app.graph.nodes.contract_gate import (
     contract_gate,
@@ -71,6 +71,7 @@ from app.ports.context_repository import (
     ContextRepository,
 )
 from app.ports.engine_preflight import EnginePreflight
+from app.ports.semantic_intent_interpreter import SemanticIntentInterpreter
 from app.ports.sql_generator import SqlGenerator
 from app.ports.sql_executor import SqlExecutor
 from app.ports.sql_repairer import SqlRepairer
@@ -88,6 +89,7 @@ def create_graph(
     run_repository: RunRepository,
     audit_sink: AuditSink,
     observability_sink: ObservabilitySink,
+    semantic_intent_interpreter: SemanticIntentInterpreter | None = None,
 ):
     """
     Monta e compila o grafo-base do agente.
@@ -133,7 +135,7 @@ def create_graph(
 
     builder.add_node(
         "classify_intent",
-        classify_intent,
+        create_semantic_classification_node(semantic_intent_interpreter),
     )
 
     builder.add_node(
