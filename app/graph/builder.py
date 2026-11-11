@@ -90,6 +90,7 @@ def create_graph(
     audit_sink: AuditSink,
     observability_sink: ObservabilitySink,
     semantic_intent_interpreter: SemanticIntentInterpreter | None = None,
+    semantic_intent_identity: dict[str, str] | None = None,
 ):
     """
     Monta e compila o grafo-base do agente.
@@ -135,7 +136,10 @@ def create_graph(
 
     builder.add_node(
         "classify_intent",
-        create_semantic_classification_node(semantic_intent_interpreter),
+        create_semantic_classification_node(
+            semantic_intent_interpreter,
+            interpreter_identity=semantic_intent_identity,
+        ),
     )
 
     builder.add_node(
