@@ -217,6 +217,7 @@ def audit_role_migration_questions(
     planned_projection_changes = 0
     rejection_codes: dict[str, int] = {}
     changed_fields: dict[str, int] = {}
+    missing_operand_operations: dict[str, int] = {}
     projected_fields = (
         "detected_dimensions",
         "planned_metrics",
@@ -252,6 +253,44 @@ def audit_role_migration_questions(
             code = new_plan.get("error_code")
             if isinstance(code, str) and code:
                 rejection_codes[code] = rejection_codes.get(code, 0) + 1
+            # Aggregate only structural proof gaps. Never disclose individual
+            # questions, tenant tables, aliases, metrics or binding names.
+            projection = new_plan.get("projection")
+            if isinstance(projection, Mapping):
+                metrics = projection.get("planned_metrics")
+                operations = projection.get("analytical_operations")
+                if isinstance(metrics, list) and isinstance(operations, list):
+                    present = {
+                        metric.get("metric_ref")
+                        for metric in metrics if isinstance(metric, Mapping)
+                        and isinstance(metric.get("metric_ref"), str)
+                    }
+                    for operation in operations:
+                        if not isinstance(operation, Mapping):
+                            continue
+                        kind = operation.get("operation_type")
+                        if kind == "comparison":
+                            refs = operation.get("operand_metric_refs")
+                            cardinality = operation.get("binding_cardinality")
+                            minimum = cardinality.get("minimum") if isinstance(
+                                cardinality, Mapping
+                            ) else None
+                            incomplete = (
+                                type(minimum) is not int
+                                or not isinstance(refs, list)
+                                or len(refs) < minimum
+                                or any(ref not in present for ref in refs)
+                            )
+                        elif kind == "ranking":
+                            ref = operation.get("metric_ref")
+                            incomplete = not isinstance(ref, str) or ref not in present
+                        else:
+                            incomplete = True
+                        if incomplete:
+                            label = kind if kind in {"comparison", "ranking"} else "other"
+                            missing_operand_operations[label] = (
+                                missing_operand_operations.get(label, 0) + 1
+                            )
         if old_status == "rejected" and new_status == "planned":
             rejected_to_planned += 1
         if changed and old_status == "planned" and new_status == "planned":
@@ -287,6 +326,9 @@ def audit_role_migration_questions(
         "planned_projection_changes": planned_projection_changes,
         "rejection_code_counts": dict(sorted(rejection_codes.items())),
         "changed_projection_field_counts": dict(sorted(changed_fields.items())),
+        "incomplete_analytical_operand_counts": dict(
+            sorted(missing_operand_operations.items())
+        ),
         "sql_generated": False,
         "sql_executed": False,
         "provider_calls": 0,
