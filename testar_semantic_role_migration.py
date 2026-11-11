@@ -148,6 +148,51 @@ def test_two_different_tenant_contexts_reuse_same_migration_engine() -> None:
         assert report["automated_activation_authorized"] is False
 
 
+
+def test_audit_classifies_plan_loss_and_planned_projection_changes() -> None:
+    from unittest.mock import patch
+
+    staged = _prepare()
+    calls = iter([
+        {"status": "planned", "query_plan": {"planning_context": {
+            "planned_metrics": [{"metric_ref": "ref-a"}],
+            "detected_dimensions": [], "analytical_operations": [],
+            "authorized_joins": [],
+        }}},
+        {"status": "rejected", "error_code": "PLANNING_ANALYTICAL_BINDING_INCOMPLETE"},
+        {"status": "planned", "query_plan": {"planning_context": {
+            "planned_metrics": [{"metric_ref": "ref-a"}],
+            "detected_dimensions": [], "analytical_operations": [],
+            "authorized_joins": [],
+        }}},
+        {"status": "planned", "query_plan": {"planning_context": {
+            "planned_metrics": [{"metric_ref": "ref-a"}],
+            "detected_dimensions": [], "analytical_operations": [{"operation_type": "aggregation"}],
+            "authorized_joins": [],
+        }}},
+    ])
+    from app.domain import semantic_role_migration as migration
+
+    with patch.object(migration, "_safe_plan", side_effect=lambda *args: next(calls)):
+        result = audit_role_migration_questions(
+            staged, ["synthetic first question", "synthetic second question"],
+        )
+    assert result["status"] == "REVIEW_REQUIRED"
+    assert result["intent_decisions_changed"] == 0
+    assert result["planning_projections_changed"] == 2
+    assert result["planned_to_rejected"] == 1
+    assert result["planned_projection_changes"] == 1
+    assert result["rejected_to_planned"] == 0
+    assert result["rejection_code_counts"] == {
+        "PLANNING_ANALYTICAL_BINDING_INCOMPLETE": 1
+    }
+    assert result["changed_projection_field_counts"] == {
+        "analytical_operations": 1,
+    }
+    assert result["automated_activation_authorized"] is False
+    assert "synthetic first question" not in repr(result)
+
+
 if __name__ == "__main__":
     import inspect
     tests = sorted(
