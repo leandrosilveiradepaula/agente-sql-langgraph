@@ -15,6 +15,7 @@ from app.domain.planner import (
     _metric_metadata,
     _operation_metadata,
     _metric_column_allowed,
+    _qualified_table_name,
 )
 from app.domain.search_text import normalize_search_text
 from app.domain.semantic_binding_feasibility import binding_route_feasibility
@@ -46,6 +47,24 @@ def audit_semantic_catalog(context: Mapping[str, Any]) -> dict[str, Any]:
     intent = context.get("intent_resolution")
     if not isinstance(entities, list) or not isinstance(tables, list):
         return _refused("catalog_missing")
+    schemas = context.get("allowed_schemas")
+    if (
+        not isinstance(schemas, list)
+        or not schemas
+        or any(
+            not isinstance(value, str) or not value.strip()
+            for value in schemas
+        )
+    ):
+        return _refused("schema_allowlist_invalid")
+    approved_schemas = {value.strip().casefold() for value in schemas}
+    approved_tables = {
+        _qualified_table_name(table).casefold()
+        for table in tables
+        if isinstance(table, Mapping)
+        and isinstance(table.get("schema_name"), str)
+        and table["schema_name"].strip().casefold() in approved_schemas
+    }
     if not isinstance(intent, Mapping):
         return _refused("intent_catalog_missing")
     try:
@@ -108,6 +127,7 @@ def audit_semantic_catalog(context: Mapping[str, Any]) -> dict[str, Any]:
                 or metric["metric_concept"] != canonical
                 or metric["target_table"] != entry.get("target_table")
                 or metric["target_column"] != entry.get("target_column")
+                or metric["target_table"].casefold() not in approved_tables
                 or not _metric_column_allowed(
                     tables,
                     target_table=metric["target_table"],
@@ -129,6 +149,9 @@ def audit_semantic_catalog(context: Mapping[str, Any]) -> dict[str, Any]:
             )
             if binding is None:
                 issues["metric_binding_invalid"] += 1
+                continue
+            if binding["target_table"].casefold() not in approved_tables:
+                issues["metric_binding_schema_unauthorized"] += 1
                 continue
             counts["valid_metric_bindings"] += 1
             valid_binding_records.append(binding)
