@@ -229,6 +229,53 @@ def test_missing_roles_never_infer_metric_or_operation_from_concept_name() -> No
     assert projection["analytical_operations"] == []
 
 
+
+def test_period_role_matches_selected_tenant_concepts_only() -> None:
+    from app.domain.planner import _matched_temporal_period_terms
+
+    for concept_name in ("period_reference", "fiscal_time_axis"):
+        evidence = {
+            "intent": "tenant_query",
+            "best_candidate": {
+                "intent_name": "tenant_query",
+                "matches": [{
+                    "match_details": {
+                        "concepts": [{
+                            "concept_name": concept_name,
+                            "satisfied": True,
+                            "terms": [{
+                                "matched": True,
+                                "normalized_term": "last closed period",
+                            }],
+                        }],
+                    },
+                }],
+            },
+            "candidates": [],
+        }
+        assert _matched_temporal_period_terms(
+            evidence, period_concepts=frozenset({concept_name}),
+        ) == ["last closed period"]
+        assert _matched_temporal_period_terms(
+            evidence, period_concepts=frozenset(),
+        ) == []
+
+
+def test_context_role_reference_integrity_is_generic_across_multiple_roles() -> None:
+    resolution = deepcopy(_semantic_metric_context())
+    resolution["config"]["concept_roles"] = {
+        "grouping": ["dimension_grouping"],
+        "operation": ["operation"],
+        "metric": ["metric"],
+        "period": ["period"],
+    }
+    assert unknown_role_concepts(resolution) == {}
+    resolution["config"]["concept_roles"]["period"] = ["missing_time_concept"]
+    assert unknown_role_concepts(resolution) == {
+        "period": ["missing_time_concept"],
+    }
+
+
 if __name__ == "__main__":
     tests = sorted((k, v) for k, v in globals().items() if k.startswith("test_") and callable(v))
     for name, fn in tests:
