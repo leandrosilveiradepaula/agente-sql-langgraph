@@ -592,7 +592,12 @@ def _project_temporal_series(
         }
 
     grain = next(iter(matches))
-    period_terms = _matched_temporal_period_terms(intent_resolution_result)
+    period_terms = _matched_temporal_period_terms(
+        intent_resolution_result,
+        period_concepts=role_concepts(
+            context.get("intent_resolution", {}), "period",
+        ),
+    )
     return {
         "operation_type": "time_series",
         "time_grain": grain,
@@ -614,6 +619,8 @@ def _project_temporal_series(
 
 def _matched_temporal_period_terms(
     intent_resolution_result: Mapping[str, Any] | None,
+    *,
+    period_concepts: frozenset[str],
 ) -> list[str]:
     if not isinstance(intent_resolution_result, Mapping):
         return []
@@ -624,9 +631,9 @@ def _matched_temporal_period_terms(
         selected_intent=selected_intent,
     ):
         for concept in _concepts_from_candidate(candidate):
-            if str(concept.get("concept_name", "")).casefold() not in {
-                "period_reference", "explicit_period_reference"
-            }:
+            if str(concept.get("concept_name", "")).casefold() not in (
+                period_concepts
+            ):
                 continue
             if not concept.get("satisfied"):
                 continue
@@ -1442,8 +1449,12 @@ def _detect_analytical_operations(
     normalized_question: str = "",
     intent_resolution_result: Mapping[str, Any] | None = None,
 ) -> tuple[list[ProjectedAnalyticalOperation], dict[str, Any]]:
+    operation_concepts = role_concepts(
+        context.get("intent_resolution", {}), "operation",
+    )
     evidence_terms = _operation_terms_from_intent_evidence(
         intent_resolution_result,
+        operation_concepts=operation_concepts,
     )
     operations: list[ProjectedAnalyticalOperation] = []
     unresolved: list[str] = []
@@ -1504,7 +1515,9 @@ def _detect_analytical_operations(
             selected_intent=selected_intent,
         ):
             for concept in _concepts_from_candidate(candidate):
-                if str(concept.get("concept_name", "")).casefold() != "analytical_operation":
+                if str(concept.get("concept_name", "")).casefold() not in (
+                    operation_concepts
+                ):
                     continue
                 for evidence in concept.get("terms", []):
                     if not isinstance(evidence, Mapping) or not evidence.get("matched"):
@@ -1574,6 +1587,8 @@ def _detect_analytical_operations(
 
 def _operation_terms_from_intent_evidence(
     intent_resolution_result: Mapping[str, Any] | None,
+    *,
+    operation_concepts: frozenset[str],
 ) -> list[str]:
     if not isinstance(intent_resolution_result, Mapping):
         return []
@@ -1586,8 +1601,8 @@ def _operation_terms_from_intent_evidence(
     matches: list[str] = []
     for candidate in candidates:
         for concept in _concepts_from_candidate(candidate):
-            if str(concept.get("concept_name", "")).casefold() != (
-                "analytical_operation"
+            if str(concept.get("concept_name", "")).casefold() not in (
+                operation_concepts
             ):
                 continue
             if not concept.get("satisfied"):
@@ -1653,8 +1668,12 @@ def _detect_planned_metrics(
     normalized_question: str = "",
     dimension_terms: list[str] | None = None,
 ) -> tuple[list[ProjectedPlannedMetric], dict[str, Any]]:
+    metric_concepts = role_concepts(
+        context.get("intent_resolution", {}), "metric",
+    )
     raw_evidence_terms = _metric_terms_from_intent_evidence(
         intent_resolution_result,
+        metric_concepts=metric_concepts,
     )
     evidence_terms = [
         term for term in raw_evidence_terms
@@ -1774,6 +1793,8 @@ def _detect_planned_metrics(
 
 def _metric_terms_from_intent_evidence(
     intent_resolution_result: Mapping[str, Any] | None,
+    *,
+    metric_concepts: frozenset[str],
 ) -> list[str]:
     if not isinstance(intent_resolution_result, Mapping):
         return []
@@ -1786,8 +1807,8 @@ def _metric_terms_from_intent_evidence(
     matches: list[str] = []
     for candidate in candidates:
         for concept in _concepts_from_candidate(candidate):
-            if str(concept.get("concept_name", "")).casefold() != (
-                "financial_metric"
+            if str(concept.get("concept_name", "")).casefold() not in (
+                metric_concepts
             ):
                 continue
             if not concept.get("satisfied"):
@@ -2260,6 +2281,9 @@ def _metric_binding_cardinality_from_operations(
 ) -> dict[str, Any]:
     evidence_terms = _operation_terms_from_intent_evidence(
         intent_resolution_result,
+        operation_concepts=role_concepts(
+            context.get("intent_resolution", {}), "operation",
+        ),
     )
     cardinalities: list[dict[str, Any]] = []
     for matched_user_term in evidence_terms:
