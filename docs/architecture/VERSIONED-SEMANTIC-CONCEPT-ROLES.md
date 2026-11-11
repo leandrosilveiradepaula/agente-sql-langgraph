@@ -238,3 +238,52 @@ Testes novos cobrem perda de versão, fingerprint inválido, alias com múltipla
 funções e proteção de metadados particulares. A auditoria permanece
 somente leitura, sem benchmark, geração SQL, chamadas LLM ou aprovação de
 ativação.
+
+## Cobertura física do vocabulário semântico e viabilidade de bindings
+
+O catálogo versionado é a única fonte de nomes e significados de métricas.
+Um termo que o classificador reconhece para o papel estrutural `metric`
+não deve ser presumido uma métrica física. A auditoria cruza os termos dos
+conceitos declarados nas regras de intenção (`require` e `positive_score`)
+com os aliases físicos já validados pelo planejador.
+
+Os relatórios retornam somente **contagens agregadas**, por papel
+`metric` e `operation`: `catalog_alias_terms`,
+`physically_resolved_terms` e `unbound_alias_terms`. Uma lacuna sinaliza
+`semantic_fallback_binding_review_required=true`, **sem fabricar uma
+associação contábil**. A ação correta é revisar cada alias na origem
+autorizada e publicar novo catálogo versionado, não criar um `if` por
+pergunta nem inserir uma SQL histórica no gerador.
+
+A nova `semantic_binding_feasibility.py` avalia apenas a viabilidade
+*teórica* das combinações de bindings declarados, respeitando
+cardinalidades, condições `when_present`/`when_absent`, conceito comum
+quando exigido e referências físicas distintas. A busca tem limite
+estrutural; quando não é possível provar o resultado dentro do orçamento
+retorna `indeterminate`, nunca `impossible` por aproximação. Rotas
+alternativas de métricas diretas não são consideradas impossíveis só por
+não haver `metric_binding`.
+
+O planejador também compara identificadores de conceitos de forma
+case-insensitive nos predicados; condições contraditórias com diferenças
+de caixa são recusadas e predicados equivalentes produzem referências
+consistentes. Nenhum valor financeiro ou coluna foi configurado pelo código.
+
+### Evidência diagnóstica privada (não autorização de migração)
+
+No snapshot G5 verificado por fingerprint, o preflight em memória mediu
+dez termos semânticos de métricas, dos quais **quatro** têm alias físico
+diretamente correspondente e **seis** não têm; operações: **16/16** termos
+com correspondência. As dez declarações de operação de comparação
+possuem uma combinação de bindings teoricamente viável. Isso não prova
+que todas as perguntas fornecem as condições necessárias.
+
+Na avaliação separada das 63 perguntas, continuaram **nove**
+`planned → rejected` (`PLANNING_ANALYTICAL_BINDING_INCOMPLETE`) e
+**16** projeções aceitas alteradas; nenhuma decisão de intenção mudou.
+A diferença entre cobertura lexical, viabilidade dos bindings e
+equivalência por pergunta é intencional: são gates independentes.
+
+Sem chamadas de LLM, execução financeira, leitura da SQL histórica,
+ativação de catálogo ou mudança na operação oficial.
+
