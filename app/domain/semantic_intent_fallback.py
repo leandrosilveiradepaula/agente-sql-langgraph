@@ -81,6 +81,7 @@ def prepare_interpretation(
         used.add(name.casefold())
         required: list[dict[str, Any]] = []
         concepts: set[str] = set()
+        lexicon: dict[str, set[str]] = {}
         for rule in rules:
             if not isinstance(rule, Mapping):
                 raise SemanticIntentRejected("catalog_rule_invalid")
@@ -93,6 +94,16 @@ def prepare_interpretation(
                 if not isinstance(cname, str) or not cname.strip():
                     raise SemanticIntentRejected("catalog_concept_invalid")
                 names.append(cname)
+                if effect in {"require", "positive_score"}:
+                    terms = concept.get("terms")
+                    if (not isinstance(terms, list) or len(terms) > 128
+                            or any(not isinstance(term, str)
+                                   or not 0 < len(term.strip()) <= 256
+                                   for term in terms)):
+                        raise SemanticIntentRejected("catalog_terms_invalid")
+                    lexicon.setdefault(cname, set()).update(
+                        term.strip() for term in terms
+                    )
             if effect in {"require", "positive_score"}:
                 concepts.update(names)
             if effect == "require":
@@ -106,6 +117,10 @@ def prepare_interpretation(
             "intent_name": name,
             "semantic_description": description,
             "allowed_concepts": sorted(concepts),
+            "concept_lexicon": [
+                {"concept_name": name, "terms": sorted(lexicon.get(name, set()))}
+                for name in sorted(concepts)
+            ],
             "required_concept_groups": required,
         })
     return {
@@ -176,6 +191,8 @@ def validate_interpretation(
     allowed = set(target["allowed_concepts"])
     question = normalize_search_text(request["question"])
     observed: set[str] = set()
+    seen_bindings: set[tuple[str, str]] = set()
+    span_owner: dict[str, str] = {}
     safe: list[dict[str, str]] = []
     for item in bindings:
         if not isinstance(item, dict) or set(item) != {
@@ -191,6 +208,13 @@ def validate_interpretation(
             r"(?<!\w)" + re.escape(normalized_span) + r"(?!\w)", question
         ):
             raise SemanticIntentRejected("provider_span_not_in_question")
+        key = (concept, normalized_span)
+        if key in seen_bindings:
+            raise SemanticIntentRejected("provider_duplicate_binding")
+        seen_bindings.add(key)
+        previous_owner = span_owner.setdefault(normalized_span, concept)
+        if previous_owner != concept:
+            raise SemanticIntentRejected("provider_span_concept_conflict")
         observed.add(concept)
         safe.append({"concept_name": concept, "question_span": span})
     for requirement in target["required_concept_groups"]:
