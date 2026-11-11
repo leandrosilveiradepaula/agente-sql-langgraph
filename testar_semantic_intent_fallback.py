@@ -194,3 +194,84 @@ def test_excluded_catalog_intent_cannot_be_reinstated():
     except SemanticIntentRejected:
         return
     raise AssertionError("excluded intent incorrectly reinstated")
+
+
+def test_real_resolver_low_score_can_use_grounded_catalog_without_threshold_change():
+    """Exercises the actual deterministic node and optional semantic node."""
+    context = _context("intent_x", "A generic operation", "op", schema="ledger")
+    from app.domain.intent_resolver import resolve_intent
+    deterministic = resolve_intent(
+        "Display cash movements", context["intent_resolution"]
+    )
+    assert deterministic["reason"] == "minimum_score_not_reached"
+    assert deterministic["applied"] is False
+    assert deterministic["intent_catalog"]["evaluations"][0]["eligible"] is False
+
+    class FakeModel:
+        def interpret(self, request):
+            return {
+                "output_text": _accepted(
+                    request, "intent_x", "op", "cash"
+                ),
+                "provider_name": "fake_provider",
+                "provider_model": "fake_model",
+                "token_usage": {"total_tokens": 8},
+            }
+
+    state = {
+        "question": "Display cash movements",
+        "normalized_question": "display cash movements",
+        "context": context,
+        "errors": [],
+    }
+    result = create_semantic_classification_node(FakeModel())(state)
+    assert result["final_status"] == "processing"
+    assert result["intent"] == "intent_x"
+    assert result["semantic_interpretation_result"]["token_usage"]["total_tokens"] == 8
+    assert result["semantic_interpretation_result"]["provider_model"] == "fake_model"
+    assert result["intent_resolution_result"]["reason"] == "semantic_interpretation_selected"
+    # The classifier does not create SQL, plan, execute privileges or approvals.
+    assert "query_plan" not in result and "generated_sql" not in result
+
+
+def test_explicit_llm_override_never_uses_unrelated_default_interpreter():
+    context = _context("intent_x", "An operation", "op", schema="ledger")
+    class NeverCall:
+        def interpret(self, request):
+            raise AssertionError("wrong model used")
+    outcome = create_semantic_classification_node(NeverCall())({
+        "question": "Display cash movements",
+        "context": context,
+        "llm_selection": {
+            "provider_key": "another-provider",
+            "model_key": "other-model",
+            "config_version": "v2",
+        },
+    })
+    assert outcome["final_status"] == "rejected"
+
+
+def test_two_concepts_cannot_use_same_span_as_independent_evidence():
+    context = _context("intent_x", "An operation", "op", schema="ledger")
+    c = context["intent_resolution"]["intent_catalog"][0]["rules"][0]
+    other = deepcopy(c["concepts"][0])
+    other["concept_name"] = "different_concept"
+    other["terms"] = ["different"]
+    other["normalized_terms"] = ["different"]
+    c["concepts"].append(other)
+    request = prepare_interpretation("Cash movement detail", context)
+    value = {
+        "status": "selected", "intent_name": "intent_x",
+        "context_fingerprint": request["context_fingerprint"],
+        "bindings": [
+            {"concept_name": "op", "question_span": "cash"},
+            {"concept_name": "different_concept", "question_span": "cash"},
+        ],
+    }
+    try:
+        validate_interpretation(
+            json.dumps(value), request, {"intent_catalog": {"evaluations": []}},
+        )
+    except SemanticIntentRejected:
+        return
+    raise AssertionError("conflicting evidence was accepted")
