@@ -324,3 +324,37 @@ Regressões: testes de aliases ambíguos e equivalentes, isolamento de
 intenções, datas não autorizadas, filtros sem relação temporal e dois
 esquemas sintéticos materialmente distintos. Estas verificações não
 certificam paridade numérica nem autorizam cutover.
+
+
+## Isolamento da intenção escolhida e diagnóstico de causas
+
+O planejador recusa `PLANNING_INTENT_EVIDENCE_MISMATCH` quando a evidência
+de interpretação declara uma intenção diferente daquela selecionada. O
+bloqueio ocorre **antes da projeção física** e vale para qualquer tenant,
+mesmo que ambas as intenções possuam `query_pattern` válido. As evidências
+sem intenção explícita continuam submetidas aos filtros de candidatos já
+existentes; essa mudança não autoriza interpretações cruzadas.
+
+A auditoria cega de migração agora retorna
+`rejected_case_cause_counts`, com **classes puramente estruturais** para
+os planos antes aceitos e agora rejeitados. Entre elas estão: aliases de
+métricas sem resolução, metadados inválidos, requisitos de bindings ausentes,
+predicados que impedem um binding, conflito de conceito métrico e
+incompatibilidade de dimensão. Os valores são contados **uma vez por causa,
+por pergunta rejeitada**, e podem se sobrepor: a soma das causas não equivale
+ao número de perguntas distintas. Não são divulgados termos, filtros,
+identificadores de tabelas, SQLs, nomes de métricas ou textos das perguntas.
+
+Essa saída destina-se somente à avaliação **posterior** de planejamento:
+não é um catálogo de respostas, não alimenta o interpretador/gerador e não
+repara SQL automaticamente. Qualquer associação financeira ou novo sinônimo
+deve ser comprovado na origem autorizada do tenant e publicado como nova
+versão sem alterar o motor.
+
+O contexto G5 anterior indicou seis termos de métricas sem alias físico
+direto. A análise independente do catálogo mostrou que cinco não aparecem
+como aliases de nenhuma entidade e um pertence a outra classe de entidade.
+Isso é uma **lacuna de contexto**, não evidência suficiente para inventar
+um significado contábil. A execução do relatório ampliado sobre o snapshot
+privado ainda depende de acesso autorizado; não afirmar que esse
+`rejected_case_cause_counts` já foi medido nas 63 perguntas.
