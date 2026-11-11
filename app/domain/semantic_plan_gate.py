@@ -109,12 +109,11 @@ def missing_semantic_plan_bindings(
     missing: list[str] = []
     for role, aliases in expected.items():
         if role == "period":
-            # Temporal semantics must be bound by an explicit projector.
-            # No invented date or implicit default is allowed here.
-            series = projection.get("temporal_series")
-            filters = projection.get("planned_filters")
-            if not isinstance(series, Mapping) and not (
-                isinstance(filters, list) and filters
+            # A generic filter is not proof of temporal grounding.
+            # Require the cited period alias to survive through a date
+            # column explicitly authorized by this tenant's table catalog.
+            if not aliases.issubset(
+                _authorized_temporal_aliases(context, projection)
             ):
                 missing.append(role)
             continue
@@ -132,3 +131,87 @@ def missing_semantic_plan_bindings(
         if not aliases.issubset(actual):
             missing.append(role)
     return sorted(missing)
+
+
+def _authorized_temporal_aliases(
+    context: Mapping[str, Any],
+    projection: Mapping[str, Any],
+) -> set[str]:
+    """Period aliases with a genuine catalog-authorized physical date target."""
+    catalog = context.get("table_catalog")
+    if not isinstance(catalog, list):
+        return set()
+    dates: dict[str, set[str]] = {}
+    for table in catalog:
+        if not isinstance(table, Mapping):
+            continue
+        name = table.get("qualified_name")
+        if not isinstance(name, str) or not name.strip():
+            schema, local = table.get("schema_name"), table.get("table_name")
+            if not isinstance(schema, str) or not isinstance(local, str):
+                continue
+            name = f"{schema}.{local}"
+        candidates = table.get("date_columns")
+        columns = table.get("columns")
+        if not isinstance(candidates, list) or not isinstance(columns, list):
+            continue
+        available = {
+            col["name"].strip().casefold()
+            for col in columns
+            if isinstance(col, Mapping) and isinstance(col.get("name"), str)
+            and col["name"].strip()
+        }
+        allowed = {
+            col.strip().casefold()
+            for col in candidates
+            if isinstance(col, str) and col.strip()
+            and col.strip().casefold() in available
+        }
+        if allowed:
+            dates[name.strip().casefold()] = allowed
+
+    def date_target_valid(table: Any, column: Any) -> bool:
+        return (
+            isinstance(table, str) and isinstance(column, str)
+            and column.strip().casefold()
+            in dates.get(table.strip().casefold(), set())
+        )
+
+    grounded: set[str] = set()
+    series = projection.get("temporal_series")
+    if isinstance(series, Mapping) and date_target_valid(
+        series.get("date_table"), series.get("date_column")
+    ):
+        terms = series.get("period_reference_terms")
+        if isinstance(terms, list):
+            grounded.update(
+                normalize_search_text(term)
+                for term in terms
+                if isinstance(term, str) and term.strip()
+            )
+
+    filters = projection.get("planned_filters")
+    bindings = projection.get("resolved_filter_bindings")
+    if not isinstance(filters, list) or not isinstance(bindings, list):
+        return grounded
+    approved_refs = {
+        binding["binding_ref"].strip().casefold()
+        for binding in bindings
+        if isinstance(binding, Mapping)
+        and isinstance(binding.get("binding_ref"), str)
+        and binding["binding_ref"].strip()
+        and date_target_valid(
+            binding.get("target_table"), binding.get("target_column")
+        )
+    }
+    for planned in filters:
+        if not isinstance(planned, Mapping):
+            continue
+        ref = planned.get("binding_ref")
+        alias = planned.get("matched_user_term")
+        if (
+            isinstance(ref, str) and ref.strip().casefold() in approved_refs
+            and isinstance(alias, str) and alias.strip()
+        ):
+            grounded.add(normalize_search_text(alias))
+    return grounded
