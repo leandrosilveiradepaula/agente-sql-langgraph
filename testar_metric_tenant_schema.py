@@ -151,6 +151,9 @@ def test_partially_resolved_explicit_metric_is_not_silently_dropped():
     evidence = _intent_metric_evidence(
         term="amount", operation_term="highest",
     )
+    # The strict no-partial-binding contract applies to optional semantic
+    # interpretation, not to unchanged legacy deterministic snapshots.
+    evidence["reason"] = "semantic_interpretation_selected"
     metric_concept = next(
         c for c in evidence["best_candidate"]["matches"][0][
             "match_details"
