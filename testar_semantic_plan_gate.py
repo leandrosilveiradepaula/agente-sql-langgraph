@@ -116,6 +116,7 @@ def _period_fixture(*, schema: str, table: str, date_column: str):
             "normalized_term": "during closing cycle",
         }],
     })
+    context["allowed_schemas"].append(schema)
     context["table_catalog"].append({
         "schema_name": schema,
         "table_name": table,
@@ -248,6 +249,106 @@ def test_period_validation_ports_without_date_field_hardcoding():
         assert schema not in str(missing_semantic_plan_bindings(
             context=context, interpretation=evidence, query_plan=plan,
         ))
+
+
+def test_period_binding_is_rejected_when_schema_is_other_tenant():
+    context, evidence, qualified = _period_fixture(
+        schema="other_tenant", table="journal", date_column="posted_at",
+    )
+    context["allowed_schemas"] = ["schema_test"]
+    plan = {"planning_context": {
+        "planned_filters": [{
+            "binding_ref": "date-1",
+            "matched_user_term": "during closing cycle",
+        }],
+        "resolved_filter_bindings": [{
+            "binding_ref": "date-1",
+            "target_table": qualified,
+            "target_column": "posted_at",
+        }],
+    }}
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
+    plan["planning_context"]["temporal_series"] = {
+        "date_table": qualified, "date_column": "posted_at",
+        "period_reference_terms": ["during closing cycle"],
+    }
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
+
+
+def test_missing_or_malformed_schema_scope_never_authorizes_date():
+    context, evidence, qualified = _period_fixture(
+        schema="tenant_one", table="transactions", date_column="settled_at",
+    )
+    plan = {"planning_context": {"temporal_series": {
+        "date_table": qualified, "date_column": "settled_at",
+        "period_reference_terms": ["during closing cycle"],
+    }}}
+    for malformed in (None, [], "tenant_one", ["tenant_one", None], [""]):
+        context["allowed_schemas"] = malformed
+        assert missing_semantic_plan_bindings(
+            context=context, interpretation=evidence, query_plan=plan,
+        ) == ["period"]
+
+
+def test_contradictory_or_duplicate_table_catalog_cannot_ground_date():
+    context, evidence, qualified = _period_fixture(
+        schema="tenant_two", table="payments", date_column="processed_on",
+    )
+    plan = {"planning_context": {"temporal_series": {
+        "date_table": qualified, "date_column": "processed_on",
+        "period_reference_terms": ["during closing cycle"],
+    }}}
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == []
+    table = context["table_catalog"][-1]
+    table["qualified_name"] = "other_tenant.payments"
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
+    del table["qualified_name"]
+    context["table_catalog"].append(deepcopy(table))
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
+
+
+def test_conflicting_filter_reference_never_satisfies_period_role():
+    context, evidence, qualified = _period_fixture(
+        schema="tenant_three", table="events", date_column="event_day",
+    )
+    projection = {
+        "planned_filters": [{
+            "binding_ref": "shared-date-ref",
+            "matched_user_term": "during closing cycle",
+        }],
+        "resolved_filter_bindings": [{
+            "binding_ref": "shared-date-ref",
+            "target_table": qualified,
+            "target_column": "event_day",
+        }],
+    }
+    plan = {"planning_context": projection}
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == []
+    projection["resolved_filter_bindings"].append({
+        "binding_ref": "shared-date-ref",
+        "target_table": "other_tenant.events",
+        "target_column": "event_day",
+    })
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
+    projection["resolved_filter_bindings"][-1]["target_table"] = qualified
+    projection["resolved_filter_bindings"][-1]["target_column"] = "not_a_date"
+    assert missing_semantic_plan_bindings(
+        context=context, interpretation=evidence, query_plan=plan,
+    ) == ["period"]
 
 
 if __name__ == "__main__":

@@ -137,20 +137,46 @@ def _authorized_temporal_aliases(
     context: Mapping[str, Any],
     projection: Mapping[str, Any],
 ) -> set[str]:
-    """Period aliases with a genuine catalog-authorized physical date target."""
+    """Ground period aliases in unambiguous, tenant-authorized date bindings.
+
+    A physical table must be listed under an explicitly allowed schema.
+    Duplicate or contradictory catalog entries and filter references never
+    become temporal evidence for an optional semantic interpretation.
+    """
     catalog = context.get("table_catalog")
-    if not isinstance(catalog, list):
+    schemas = context.get("allowed_schemas")
+    if (
+        not isinstance(catalog, list)
+        or not isinstance(schemas, list)
+        or not schemas
+        or any(not isinstance(item, str) or not item.strip() for item in schemas)
+    ):
         return set()
+    approved = {schema.strip().casefold() for schema in schemas}
     dates: dict[str, set[str]] = {}
+    seen_tables: set[str] = set()
+    duplicate_tables: set[str] = set()
     for table in catalog:
         if not isinstance(table, Mapping):
             continue
-        name = table.get("qualified_name")
-        if not isinstance(name, str) or not name.strip():
-            schema, local = table.get("schema_name"), table.get("table_name")
-            if not isinstance(schema, str) or not isinstance(local, str):
-                continue
-            name = f"{schema}.{local}"
+        schema, local = table.get("schema_name"), table.get("table_name")
+        if (
+            not isinstance(schema, str) or not schema.strip()
+            or not isinstance(local, str) or not local.strip()
+            or schema.strip().casefold() not in approved
+        ):
+            continue
+        name = f"{schema.strip()}.{local.strip()}".casefold()
+        declared = table.get("qualified_name")
+        if declared is not None and (
+            not isinstance(declared, str)
+            or declared.strip().casefold() != name
+        ):
+            # A contradictory shortcut must not override physical identity.
+            continue
+        if name in seen_tables:
+            duplicate_tables.add(name)
+        seen_tables.add(name)
         candidates = table.get("date_columns")
         columns = table.get("columns")
         if not isinstance(candidates, list) or not isinstance(columns, list):
@@ -168,7 +194,9 @@ def _authorized_temporal_aliases(
             and col.strip().casefold() in available
         }
         if allowed:
-            dates[name.strip().casefold()] = allowed
+            dates[name] = allowed
+    for name in duplicate_tables:
+        dates.pop(name, None)
 
     def date_target_valid(table: Any, column: Any) -> bool:
         return (
@@ -194,23 +222,37 @@ def _authorized_temporal_aliases(
     bindings = projection.get("resolved_filter_bindings")
     if not isinstance(filters, list) or not isinstance(bindings, list):
         return grounded
-    approved_refs = {
-        binding["binding_ref"].strip().casefold()
-        for binding in bindings
-        if isinstance(binding, Mapping)
-        and isinstance(binding.get("binding_ref"), str)
-        and binding["binding_ref"].strip()
-        and date_target_valid(
-            binding.get("target_table"), binding.get("target_column")
-        )
-    }
+
+    # A reference is trusted only when all occurrences resolve to the same
+    # authorized physical date column. Mixing an allowed and forbidden
+    # target under one ref is ambiguity, not a permitted alternative.
+    ref_targets: dict[str, tuple[str, str]] = {}
+    invalid_refs: set[str] = set()
+    for binding in bindings:
+        if not isinstance(binding, Mapping):
+            continue
+        raw_ref = binding.get("binding_ref")
+        if not isinstance(raw_ref, str) or not raw_ref.strip():
+            continue
+        ref = raw_ref.strip().casefold()
+        table, column = binding.get("target_table"), binding.get("target_column")
+        if not date_target_valid(table, column):
+            invalid_refs.add(ref)
+            continue
+        target = (table.strip().casefold(), column.strip().casefold())
+        if ref in ref_targets and ref_targets[ref] != target:
+            invalid_refs.add(ref)
+        else:
+            ref_targets[ref] = target
+
     for planned in filters:
         if not isinstance(planned, Mapping):
             continue
         ref = planned.get("binding_ref")
         alias = planned.get("matched_user_term")
         if (
-            isinstance(ref, str) and ref.strip().casefold() in approved_refs
+            isinstance(ref, str) and ref.strip().casefold() in ref_targets
+            and ref.strip().casefold() not in invalid_refs
             and isinstance(alias, str) and alias.strip()
         ):
             grounded.add(normalize_search_text(alias))
