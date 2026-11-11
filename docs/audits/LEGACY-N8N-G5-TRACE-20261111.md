@@ -137,3 +137,7 @@ O codigo/parametros de cada um dos 68 nos foi inspecionado **somente em memoria*
 Indicadores de busca (somente triagem): 9 Code nodes mencionam provider LLM, 10 contem estrutura associada a prompts, 16 contem formatos associados a SQL, 32 contem logica condicional; os 2 HTTP nodes usam endereco estatico de API Google. **Sinais lexicais nao provam papel funcional nem que sejam todos os caminhos efetivamente executados.** Em particular, queries PostgreSQL dinamicas e nodos de escrita nao devem ser desligados apenas por aparecerem nessa lista.
 
 A sequencia de revisao deve combinar cada item P1/P2 com sua cadeia de conexoes e respectivos objetos G5; em seguida analisar todas as condicoes P3 e efeitos P4, cobrindo tambem 8 nos fora da rota iniciada pelo webhook. Revisao completa permanece **PENDENTE**.
+
+## Síntese corrigida da multiplicação por versão
+
+Os 4.813 links por ocorrência dos 579 hints de 11 versões **não** representam dependências financeiras independentes. A auditoria em `scripts/operations/legacy_migration_source_crosswalk_offline.py` agora distingue **11 pares únicos tabela/coluna** e **58 pares únicos nó/referência**. Há 447 candidatos com tabela ambígua, 110 sem correspondência, 22 somente com nome de tabela e 481 com coluna não resolvida. Nenhuma associação está homologada. Credenciais PostgreSQL da exportação pertencem a 2 grupos de IDs: nós 5/18/21/36/42/46/49/51/63 versus 66/67 (nenhum segredo acessado). Confirmação do banco físico e isolamento por tenant pendentes.

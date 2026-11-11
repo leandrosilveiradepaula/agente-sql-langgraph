@@ -138,3 +138,24 @@ No repositório `leandrosilveiradepaula/Agente-Financeiro` (main observado em `5
 ## Critério de conclusão deste documento
 
 **Concluído:** enumeração funcional preliminar 68/68, análise das 78 arestas, identificação dos caminhos de geração, reparo e executor, vínculo direto do nó 5 às cinco coleções e revisão do roteamento do Produto. **Ainda não concluído:** extração de todas as regras contábeis dos scripts, de todas as versões G5 criptografadas, assinatura/aprovação financeira dos vínculos, identificação da rota real em produção, implementação da migração e certificação de paridade. Nenhuma mutação de n8n/banco/Produto/Shadow, nenhuma execução financeira real e nenhum cutover nesta etapa.
+
+
+## Evidência física e operacional complementar — inspeção de novembro/2026
+
+**Inventário de código efetivamente lido em memória:** 41 nós Code, **14.440 linhas JavaScript** em conjunto (maior nó com 2.492 linhas), mais 11 parâmetros de query PostgreSQL. As configurações e conexões dos 68 nós foram percorridas e seus fingerprints confrontados com a exportação publicada. Os indicadores lexicais são triagem de **potencial conhecimento hardcoded** e não comprovação de que todos os ramos e regras financeiras foram semanticamente compreendidos: 16 nós Code contêm termos contábeis, 17 referem regras/aliases, 8 têm menções a métricas, 8 a dimensões, 26 a períodos e 15 a operação de execução. Investigação prioritária do conteúdo e efeitos: nós 6, 7, 8, 11, 12, 22, 23, 24, 28, 32, 34, 54, 55, 57, 59 e 64. Hash do relatório privado estático: `f7b38d44196995456647e0b75cdefb8384f959b1b3e65850c9fba8aea1329cd2`.
+
+**Credenciais operacionais sem expor segredos:** 11 nós PostgreSQL referenciam **2 identidades de credencial distintas**:
+- Grupo A: nós **5, 18, 21, 36, 42, 46, 49, 51, 63** — contexto/configuração, cache, logs e fila;
+- Grupo B: nós **66, 67** — preflight e executor financeiro.
+
+A igualdade foi verificada exclusivamente pelos hashes dos IDs de referência; **não foram lidos hosts, DSNs, senhas ou contas de autenticação nem atestadas permissões efetivas**. Isso comprova separação de IDs, **não** necessariamente separação física de servidores; confirmar banco, escopo, grants e leitura por tenant antes do cutover.
+
+**Correspondência com esquema físico recuperado, sem inflar duplicatas:** os 579 registros de hints G5 de 11 versões representam apenas **11 pares distintos** de tabela/coluna; há **58** pares distintos (ordinal do nó, referência) que coincidem textualmente na exportação, contra 4.813 registros multiplicados por versão. Classes da evidência G5: 447 `AMBIGUOUS_TABLE_NAME`, 110 `NO_PHYSICAL_NAME_MATCH`, 22 `TABLE_NAME_ONLY` e 481 `COLUMN_UNRESOLVED` (categorias têm denominadores e sobreposições distintas). Somente 22 candidatos incluem schema físico sugerido. **Aprovação contábil zero**; nenhuma dessas evidências autoriza geração SQL.
+
+**Metadados do Supabase lidos sem SQL financeira:** SOURCE `nywxpvzhlpqjtcafpdfe` está **INACTIVE** e recusa a listagem de tabelas; DEMO `cenhadslwxgykqtuobgc` está **ACTIVE_HEALTHY**, com **13 tabelas em `public`**, principalmente Produto, políticas, históricos, Shadow e governança. Não deduzir que a DEMO possui o conteúdo semântico histórico completo. Arquivos G5 permanecem fonte auditada e cifrada para análise do legado. A leitura dos 11 pacotes detalhados requer o procedimento de desbloqueio offline apropriado; não tentar exportar, duplicar ou registrar segredos no GitHub.
+
+**Risco de geração versus execução:** a topologia prova que o ramo da geração e o ramo de SQL reparada podem alcançar o mesmo executor PostgreSQL dos eventos explicitamente solicitados. O Produto possui política de geração e execução distintas, mas a SQL retornada do n8n pode ser pós-limpeza/execução; isso exige validação de comportamento em Shadow e um contrato de **aprovação por SQL fingerprint**, sempre invalidada após repair. Essa diferenciação não pode ser presumida apenas pelo nome `SQL Aprovada` de um IF.
+
+**Risco da integração HTTP:** o fallback compilado em `lib/n8n-endpoint.ts` não coincide com o path publicado do nó Webhook; as variáveis `N8N_GENERATE_SQL_WEBHOOK_URL` e `N8N_EXECUTE_WATSON_WEBHOOK_URL` podem substituí-lo. Atestar binding efetivo no ambiente do Produto (sem revelar URL privada ou token), não modificar produção com base em código estático.
+
+**Regra das 63 perguntas reafirmada:** congeladas como *somente controle de qualidade de respostas e SQL* entre n8n+Gemini oficial e n8n+LangGraph+Gemini Shadow; não são requisitos da SQL, dados para prompts, corpus de respostas, fonte de regras contábeis nem algo para elevar artificialmente um score.
