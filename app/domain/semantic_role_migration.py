@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
+from app.domain.semantic_catalog_audit import audit_semantic_catalog
 from app.domain.context_normalizer import normalize_context_snapshot
 from app.domain.context_validator import validate_context_snapshot
 from app.domain.intent_resolver import resolve_intent
@@ -307,7 +308,14 @@ def audit_role_migration_questions(
                 ):
                     changed_fields[field] = changed_fields.get(field, 0) + 1
 
-    requires_review = bool(intent_changes or plan_changes)
+    source_catalog_audit = audit_semantic_catalog(source)
+    candidate_catalog_audit = audit_semantic_catalog(candidate)
+    requires_review = bool(
+        intent_changes
+        or plan_changes
+        or source_catalog_audit["status"] != "INVENTORY_COMPLETE"
+        or candidate_catalog_audit["status"] != "INVENTORY_COMPLETE"
+    )
     return {
         "status": "REVIEW_REQUIRED" if requires_review else "NO_DETECTED_DRIFT",
         "source_version": source["version"],
@@ -315,6 +323,8 @@ def audit_role_migration_questions(
         "candidate_version": candidate["version"],
         "candidate_fingerprint": candidate["fingerprint"],
         "question_count": len(questions),
+        "source_catalog_audit": source_catalog_audit,
+        "candidate_catalog_audit": candidate_catalog_audit,
         "intent_decisions_changed": intent_changes,
         "planning_projections_changed": plan_changes,
         "rejected_source": rejected_source,
