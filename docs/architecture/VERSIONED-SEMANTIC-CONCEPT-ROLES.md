@@ -18,7 +18,10 @@ catálogo de intenções do tenant:
 ```json
 {
   "concept_roles": {
-    "grouping": ["some_tenant_defined_concept"]
+    "grouping": ["some_tenant_defined_concept"],
+    "operation": ["another_tenant_concept"],
+    "metric": ["a_third_tenant_concept"],
+    "period": ["a_tenant_date_concept"]
   }
 }
 ```
@@ -31,6 +34,13 @@ colunas e os vínculos de métricas pertencem ao catálogo do cliente.
   de agrupamento contra inferência indevida de outras métricas ou conceitos.
 - Planejador: aceita evidência e termos apenas desses conceitos e resolve a
   dimensão nas entidades/tabelas físicas **autorizadas** do mesmo snapshot.
+- Outros papéis estruturais: `operation`, `metric` e `period` selecionam
+  evidência de conceitos do catálogo do mesmo tenant. Nenhum nome de
+  conceito específico é embutido nas etapas de detecção semântica.
+  Os tipos de *entidade* `analytical_operation` e `financial_metric`
+  ainda são contratos de adaptação legados separados; sua revisão de
+  portabilidade é um trabalho distinto, não deve ser confundida com
+  a eliminação dos nomes de **conceitos** desta mudança.
 - Validador: rejeita configuração malformada, duplicada ou que referencie
   conceitos inexistentes. Chamadas diretas ao resolvedor também falham fechado.
 - Sem o campo opcional, não existe fallback implícito para o nome legado nem
