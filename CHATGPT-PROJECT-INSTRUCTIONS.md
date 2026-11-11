@@ -1,3 +1,13 @@
+# INSTRUÇÃO PRIORITÁRIA — 11/11/2026: MIGRAÇÃO INTEGRAL DO LEGADO
+
+**A tarefa não é desenvolver outro agente financeiro.** É analisar profundamente e **em conjunto** o workflow n8n publicado com 68 nós e o banco/backup G5 (todas as versões, tabelas, regras, entidades, semântica, relacionamentos e dados pertinentes) para migrar integralmente o comportamento do sistema existente para **n8n + LangGraph**. n8n continua como orquestrador; só a inteligência antiga deixa o n8n depois de provar paridade e autorização humana. Business rules ficam em catálogos semânticos versionados por tenant, sem hardcodes de cliente.
+
+**Sequência:** verificar fontes reais e hashes → inventariar cada nó/prompt/JS/SQL/branch e cada objeto relevante do banco → cruzar evidências em matriz nó→regra/dado→capacidade→destino → migrar comportamento sem copiar SQL hardcoded → gerar SQL dinamicamente para perguntas inéditas → avaliar cegamente as 63 perguntas e casos extras → validar 2 tenants distintos → Shadow auditável/paridade/execução read-only separadamente autorizada → cutover humano → só então Gemini × SQL-InfoDive. Não perseguir pontuação/bugs laterais em detrimento dessa jornada, não classificar 6 aliases ou 63 casos como inventário integral.
+
+**Obrigatório em toda retomada:** `AGENTS.md`, `MEMORY.md`, `docs/operations/LEGACY-N8N-DATABASE-MIGRATION-MAP.md` e contratos atuais, além de HEAD/PRs/CI/VPS verificados. `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`; zero SQL financeira real sem autorização isolada, zero ativação/migração/merge/cutover implícitos. Benchmark é somente avaliação posterior, nunca contexto de geração.
+
+---
+
 # ATUALIZAÇÃO OPERACIONAL 27/10/2026 — P3/G1 pós-PUT, não repetir API nem rollout
 
 **Status real comprovado pela VPS:** P1/P2 já foram comprovados nas fases

@@ -1,3 +1,11 @@
+# 2026-11-11 — FOCO OPERACIONAL MAIS RECENTE: MIGRAÇÃO INTEGRAL DO N8N + BANCO EXISTENTES
+
+O operador reafirmou: **engenharia reversa do sistema financeiro atual**, analisando conjuntamente o n8n **publicado** (workflow observado com 68 nós) e **todo o conhecimento e dependências pertinentes do banco/backup G5**, para migrar comportamento à arquitetura **n8n + LangGraph** preservando n8n e zero hardcodes de negócio no novo motor. A análise de seis aliases, scoring, SQL histórica ou CI é insuficiente para declarar migração. Matriz por nó/branch/SQL/prompt→objetos/versões do banco→comportamento financeiro→destino e provas é a entrega prioritária. **Ainda não foi concluída**. Ver `AGENTS.md`, `MEMORY.md` e `docs/operations/LEGACY-N8N-DATABASE-MIGRATION-MAP.md`.
+
+**Não aprovado:** merge, ativação de contexto, alterações de n8n/banco/produto, execução SQL financeira real, mudança de provider/cutover. O curso obrigatório é Shadow n8n+Gemini vs n8n+LangGraph+Gemini, read-only financeiro somente em autorização separada, cutover humano controlado, depois Gemini×SQL-InfoDive.
+
+---
+
 # 29/10/2026 — G3: APROVAÇÃO PERSISTIDA NA DEMO; SHADOW WITNESS EM PR; EXECUÇÃO REAL BLOQUEADA
 
 **SUPABASE REAL (verificado por conector):** SOURCE `nywxpvzhlpqjtcafpdfe` = `INACTIVE` (pausa reversível, NÃO apagada nem aposentada); DEMO `cenhadslwxgykqtuobgc` = `ACTIVE_HEALTHY`. Migrações efetivamente registradas na DEMO:
