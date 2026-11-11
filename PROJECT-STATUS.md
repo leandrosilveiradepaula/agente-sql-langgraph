@@ -1,3 +1,9 @@
+# 11/11/2026 — MATRIZ DE 14 CAPACIDADES E DÍVIDAS DE PORTABILIDADE
+
+Adicionada `docs/audits/LEGACY-N8N-LANGGRAPH-CAPABILITY-GAP-20261111.md`: 14 capacidades inventariadas n8n→Produto/LangGraph, status verdadeiro do código, provas pendentes e source gate. Scan seguro 41 Code nodes (14.440 linhas JS, 3.403 literais) preservado com hash; **nem literais nem coocorrências são regras contábeis atestadas**. Portabilidade requer resolver adapter com defaults DuckLake/DRE e vínculo de contexto versionado por tenant. G5 cifrado e SOURCE inativo ainda impedem avaliação completa dos 11 pacotes. Os 63 casos são somente controle posterior de qualidade, sem alimentar gerador. Nenhuma mudança de dados, n8n, permissões, credenciais, runtime ou cutover.
+
+---
+
 # 11/11/2026 — REVISÃO FUNCIONAL DO LEGADO, PRODUTO E LIMITES DO G5
 
 A PR #233 documenta 68/68 nós funcionais com destinos provisórios e revisou as 78 arestas. Comprovado estaticamente: 41 Code (~14.440 linhas), 2 referências de credenciais PostgreSQL separando 9 nós de contexto/cache/log/config e 2 nós de preflight/execução; os ramos de SQL gerada e reparada podem alcançar o executor. Produto Next.js efetivo possui `/api/generate-sql` e `/api/execute-watson` com políticas e eventos Shadow distintos; o webhook fallback do código não coincide com o path do n8n publicado (variáveis efetivas ainda não verificadas). Source Supabase INACTIVE; DEMO ACTIVE com 13 tabelas públicas. No G5, 579 hints por 11 versões equivalem a 11 pares tabela/coluna e 58 pares nó/referência textuais; 447 status de ambiguidade, 110 sem correspondência, 481 colunas não resolvidas. NADA disso equivale a semântica contábil aprovada, migração concluída ou paridade. Os pacotes cifrados exigem revisão por versão e o benchmark de 63 perguntas é **apenas controle de qualidade posterior**.
