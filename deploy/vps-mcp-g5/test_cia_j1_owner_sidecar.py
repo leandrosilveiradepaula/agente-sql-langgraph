@@ -63,6 +63,15 @@ def valid_report():
     }
 
 
+
+def valid_recurring_report():
+    report = valid_report()
+    report["stored_candles"] = 142
+    report["published_checkpoints"] = 27
+    report["last_published_end_ms"] = reader.EXPECT[-1] + 21 * reader.HOUR_MS
+    return report
+
+
 class SidecarTests(unittest.TestCase):
     def test_literal_allowlisted_request_only_from_root_broker(self):
         ok = b'{"op":"cia_sqlite"}\n'
@@ -94,8 +103,25 @@ class SidecarTests(unittest.TestCase):
         self.assertEqual(fake.sent, b'{"op": "cia_sqlite"}\n')
         self.assertFalse(report["trading_enabled"])
 
+    def test_broker_accepts_recurring_only_with_consistent_count_and_no_extra_data(self):
+        fake = FakeSocket(valid_recurring_report())
+        with patch.object(reader.socket, "socket", return_value=fake):
+            actual = reader.sqlite_audit_via_owner()
+        self.assertEqual(actual, valid_recurring_report())
+        self.assertEqual(actual["last_published_end_ms"],
+                         reader.EXPECT[-1] + 21*reader.HOUR_MS)
+        self.assertNotIn("BTCUSDT", json.dumps(actual))
+
     def test_broker_rejects_extra_fields_and_misleading_passes(self):
         samples = [
+            {**valid_recurring_report(), "stored_candles": 140},
+            {**valid_recurring_report(), "published_checkpoints": 48},
+            {**valid_recurring_report(), "published_checkpoints": 26},
+            {**valid_recurring_report(), "last_published_end_ms": reader.EXPECT[-1]},
+            {**valid_recurring_report(), "last_published_end_ms":
+                reader.EXPECT[-1] + 49*reader.HOUR_MS, "stored_candles": 142},
+            {**valid_recurring_report(), "digest_replay": False},
+            {**valid_recurring_report(), "trading_enabled": True},
             {**valid_report(), "prices": [100, 200]},
             {**valid_report(), "orders_sent": True},
             {**valid_report(), "stored_candles": 99},
