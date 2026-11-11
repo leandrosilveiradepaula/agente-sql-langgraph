@@ -66,6 +66,10 @@ STEPS = [
         [sys.executable, "testar_semantic_plan_gate.py"],
     ),
     (
+        "testar_semantic_catalog_audit.py",
+        [sys.executable, "testar_semantic_catalog_audit.py"],
+    ),
+    (
         "testar_p3_semantic_context_candidate.py",
         [sys.executable, "testar_p3_semantic_context_candidate.py"],
     ),
