@@ -157,6 +157,11 @@ def audit_semantic_catalog(context: Mapping[str, Any]) -> dict[str, Any]:
         binding_metrics - canonical_metrics
     )
     counts["configured_structural_roles"] = len(roles)
+    role_lexicon_coverage = _role_lexicon_coverage(
+        intent=intent,
+        roles=roles,
+        valid_aliases=aliases,
+    )
 
     # Inspect only the configured conditional binding route. It must never
     # fabricate operands, conclude financial parity, or reject direct aliases.
@@ -180,6 +185,11 @@ def audit_semantic_catalog(context: Mapping[str, Any]) -> dict[str, Any]:
         "entity_types": dict(sorted(kinds.items())),
         "issue_counts": dict(sorted(issues.items())),
         "binding_route_feasibility_counts": dict(sorted(binding_route_counts.items())),
+        "semantic_role_lexicon_coverage": role_lexicon_coverage,
+        "semantic_fallback_binding_review_required": any(
+            report["unbound_alias_terms"] > 0
+            for report in role_lexicon_coverage.values()
+        ),
         "business_binding_review_required": bool(
             any(
                 binding_route_counts.get(status, 0)
@@ -196,6 +206,74 @@ def audit_semantic_catalog(context: Mapping[str, Any]) -> dict[str, Any]:
         "sql_executed": False,
         "provider_calls": 0,
     }
+
+
+def _role_lexicon_coverage(
+    *,
+    intent: Mapping[str, Any],
+    roles: Mapping[str, frozenset[str]],
+    valid_aliases: Mapping[tuple[str, str], Any],
+) -> dict[str, dict[str, int]]:
+    """Advisory physical-alias coverage for the existing planner adapters.
+
+    A synonym in an intent catalog need not be a physical alias. The
+    interpreter must never treat it as a resolved metric or operation
+    without an explicit tenant catalog mapping. This audit reports only
+    aggregate coverage, not the terms or any customer identifiers.
+    """
+    supported_adapters = {
+        "operation": "analytical_operation",
+        "metric": "financial_metric",
+    }
+    catalog = intent.get("intent_catalog")
+    if not isinstance(catalog, list):
+        return {}
+    result: dict[str, dict[str, int]] = {}
+    for role, entity_type in supported_adapters.items():
+        names = roles.get(role)
+        if not names:
+            continue
+        catalog_terms: set[str] = set()
+        for entry in catalog:
+            if not isinstance(entry, Mapping):
+                continue
+            rules = entry.get("rules")
+            if not isinstance(rules, list):
+                continue
+            for rule in rules:
+                if not isinstance(rule, Mapping) or rule.get("effect") not in (
+                    "require", "positive_score"
+                ):
+                    continue
+                concepts = rule.get("concepts")
+                if not isinstance(concepts, list):
+                    continue
+                for concept in concepts:
+                    if not isinstance(concept, Mapping):
+                        continue
+                    concept_name = concept.get("concept_name")
+                    if not isinstance(concept_name, str) or (
+                        concept_name.casefold() not in names
+                    ):
+                        continue
+                    terms = concept.get("terms")
+                    if isinstance(terms, list):
+                        for term in terms:
+                            if isinstance(term, str):
+                                normalized = normalize_search_text(term)
+                                if normalized:
+                                    catalog_terms.add(normalized)
+        backed = {
+            alias for kind, alias in valid_aliases
+            if kind == entity_type
+        }
+        matched = catalog_terms & backed
+        result[role] = {
+            "catalog_alias_terms": len(catalog_terms),
+            "physically_resolved_terms": len(matched),
+            "unbound_alias_terms": len(catalog_terms - matched),
+        }
+    return dict(sorted(result.items()))
 
 
 def _refused(code: str) -> dict[str, Any]:
