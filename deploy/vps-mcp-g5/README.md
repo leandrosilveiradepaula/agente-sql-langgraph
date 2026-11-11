@@ -96,3 +96,61 @@ chamadas à LLM durante a recuperação.
 - Backup anterior mantido em
   `/opt/agente-financeiro-mcp/backup-before-g5-mcp/` para rollback controlado;
   não eliminar esse diretório sem revisão operacional.
+
+## Administrator-enabled MCP — one-time upgrade
+
+The operator authorized broad VPS administration from ChatGPT so day-to-day
+work does not require copy/pasting SSH commands. This extends the **existing**
+tunnel and Unix-socket broker; no second tunnel, agent or third-party host.
+
+After the PR containing this feature is reviewed and merged, the current MCP
+**cannot bootstrap itself** because its previously installed source only
+recognizes a fixed command allowlist. The bridge must be upgraded **once**
+from an authorized VPS console, using the tracked main checkout:
+
+\`\`\`bash
+cd /docker/agente-sql-langgraph-repo &&
+git fetch -q origin main &&
+git merge --ff-only origin/main &&
+bash deploy/vps-mcp-g5/upgrade_vps_admin_once.sh
+\`\`\`
+
+This is not a recurring workflow. It preserves unrelated local untracked
+files, verifies the currently installed MCP gateway and broker blob identities,
+backs up the originals, installs only the broker + gateway + admin module +
+service-unit upgrade, restarts the existing broker and tunnel, probes both
+short commands and a durable \`systemd-run\` job, and rolls back on failure.
+
+Then refresh the **Agente Financeiro VPS** plugin tools in ChatGPT. These four
+new tools should appear:
+
+| Tool | Purpose |
+|---|---|
+| \`vps_exec(argv, cwd, timeout_seconds, show_output)\` | Execute a named absolute-path binary with a bounded runtime (maximum 120 seconds), sanitised tail output and command hash |
+| \`vps_start_job(argv, cwd, timeout_seconds)\` | Launch longer operations through transient systemd units, up to 4 hours, with a root-private durable job ID |
+| \`vps_job_status(job_id, show_output)\` | Retrieve completion code and bounded output, including after MCP reconnect |
+| \`vps_cancel_job(job_id)\` | Stop a specific running job, preserving its audit receipt |
+
+The plugin exposes **administrative privilege on the VPS**. Use only in the
+operator-owned project and never share this connection with another tenant.
+Its root broker verifies the local \`agente-mcp\` UID over \`SO_PEERCRED\`;
+command argv and output are **not included in the audit log**, which records
+only digests, timestamps and exit codes. Output is redacted and bounded, but
+arbitrary command output is not guaranteed secret-free, so commands that
+print tokens, DSNs, cookies or private SQL must not be requested. Job
+records and output are root-only under
+\`/var/lib/agente-financeiro-mcp-admin\`.
+
+The administrative privilege is **not** an implicit authorization to do
+production cutover, destructive SQL, schema/credential migration, expanded
+cloud cost, security-policy change or deployment. Such actions still require
+the corresponding explicit operator gate. The main financial engine safety
+flag remains \`LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false\` until separately
+approved, and \`OFFICIAL=n8n\` is unchanged.
+
+After upgrade, ChatGPT should use \`vps_exec\` to refresh \`main\` without
+deleting the untracked \`p3_migrate_shadow_evidence.py\`, verify the exact
+tenant/provider/model for the LangGraph SQL-InfoDive replay and run the
+offline preflight. Only with explicit private-model call authorization
+should it invoke the 63-case benchmark as a persistent job. Never rerun
+the 63 historic official n8n/Gemini calls.
