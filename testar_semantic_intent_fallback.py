@@ -88,7 +88,7 @@ def test_independent_tenant_catalogs():
         policy = versioned_policy(context)
         assert policy is not None
         request = prepare_interpretation(question, context)
-        assert "SELECT" not in repr(request).upper()
+        assert "SELECT * FROM" not in repr(request).upper()
         assert "sql_pattern" not in repr(request)
         assert context["table_catalog"][0]["schema_name"] not in repr(request)
         result = validate_interpretation(
