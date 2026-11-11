@@ -197,6 +197,10 @@ def decrypt_local_gpg(cipher: Path, passphrase: str) -> bytes:
 
 
 def write_private_once(output: Path, content: bytes) -> None:
+    # Windows cannot attest POSIX 0700/0600 modes: refuse persistence.
+    # Never weaken the protection to accommodate a CI filesystem.
+    if os.name != "posix":
+        raise ReviewBlocked("PRIVATE_REVIEW_POSIX_FILESYSTEM_REQUIRED")
     if not output.is_absolute() or output.exists() or output.is_symlink():
         raise ReviewBlocked("PRIVATE_REVIEW_OUTPUT_UNSAFE")
     if not output.parent.is_dir() or stat.S_IMODE(
@@ -221,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--output-dir", required=True, type=Path)
     args = p.parse_args(argv)
     try:
+        if os.name != "posix":
+            raise ReviewBlocked("G5_REVIEW_POSIX_ONLY")
         manifest_path = args.manifest.resolve(strict=True)
         if manifest_path.is_symlink() or stat.S_IMODE(
             manifest_path.stat().st_mode

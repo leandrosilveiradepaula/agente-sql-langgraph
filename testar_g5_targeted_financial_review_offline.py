@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -120,6 +121,11 @@ def test_private_review_creation_is_exclusive_and_permissions_restrictive():
     with TemporaryDirectory() as directory:
         root = Path(directory)
         output = root / "test-review.json"
+        if os.name != "posix":
+            # Windows CI must fail closed: cannot prove POSIX 0600.
+            denied(write_private_once, output, b'{"ok":true}\n')
+            assert not output.exists()
+            return
         write_private_once(output, b'{"ok":true}\n')
         assert output.read_bytes() == b'{"ok":true}\n'
         assert output.stat().st_mode & 0o077 == 0
