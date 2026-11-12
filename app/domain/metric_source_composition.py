@@ -26,6 +26,7 @@ _COMPOSITION_KEYS = {
     "source_use", "accounting_definition_attested", "sources",
 }
 _TEMPORAL_GRAINS = {"day", "week", "month", "quarter", "year"}
+_NUMERIC_TYPES = {"numeric", "decimal", "smallint", "integer", "bigint"}
 _TEMPORAL_KEYS = {"require_explicit_grain", "granularities", "source_dates"}
 _SOURCE_KEYS = {
     "source_ref", "target_table", "value_column", "grain_ref",
@@ -163,6 +164,23 @@ def normalize_metric_source_compositions(
                 }
             ) or value_column.casefold() not in available:
                 raise MetricSourceCompositionError("COMPOSITION_METRIC_NOT_AUTHORIZED")
+            numeric_col = next((
+                col for col in declared_columns
+                if isinstance(col, Mapping)
+                and str(col.get("name", "")).casefold() == value_column.casefold()
+            ), None)
+            if (
+                not isinstance(numeric_col, Mapping)
+                or str(numeric_col.get("data_type", "")).casefold()
+                not in _NUMERIC_TYPES
+            ):
+                raise MetricSourceCompositionError("COMPOSITION_METRIC_TYPE_UNSAFE")
+            declared_grain = table.get("grain")
+            if (
+                not isinstance(declared_grain, Mapping)
+                or declared_grain.get("grain_ref") != grain
+            ):
+                raise MetricSourceCompositionError("COMPOSITION_GRAIN_UNATTESTED")
             sign = source.get("sign_multiplier")
             if type(sign) is not int or sign not in (-1, 1):
                 raise MetricSourceCompositionError("COMPOSITION_SIGN_UNATTESTED")
@@ -345,6 +363,10 @@ def validate_projected_metric_composition(
         str(table.get("qualified_name", "")).casefold()
         for table in authorized_tables if isinstance(table, Mapping)
     }
+    table_index = {
+        str(item.get("qualified_name", "")).casefold(): item
+        for item in authorized_tables if isinstance(item, Mapping)
+    }
     unique_refs: set[str] = set()
     ref_to_table: dict[str, str] = {}
     for source in sources:
@@ -375,6 +397,30 @@ def validate_projected_metric_composition(
         }
         if col.casefold() not in visible:
             raise MetricSourceCompositionError("COMPOSITION_PROVIDER_COLUMN_UNAUTHORIZED")
+        declared = table_index.get(table.casefold(), {})
+        declared_measures = declared.get("metric_columns", [])
+        declared_grain = declared.get("grain")
+        if (
+            not isinstance(declared_measures, list)
+            or col.casefold() not in {
+                str(item).casefold() for item in declared_measures
+            }
+            or not isinstance(declared_grain, Mapping)
+            or declared_grain.get("grain_ref") != source["grain_ref"]
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_GRAIN_OR_METRIC_UNAUTHORIZED")
+        column_definitions = catalog_columns.get(table, [])
+        if (
+            not isinstance(column_definitions, list)
+            or not any(
+                isinstance(item, Mapping)
+                and str(item.get("name", "")).casefold() == col.casefold()
+                and str(item.get("data_type", "")).casefold()
+                in _NUMERIC_TYPES
+                for item in column_definitions
+            )
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_METRIC_TYPE_INVALID")
         filters = source.get("source_filters")
         if not isinstance(filters, list) or len(filters) > 32:
             raise MetricSourceCompositionError("COMPOSITION_PROVIDER_FILTERS_INVALID")

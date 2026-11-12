@@ -54,6 +54,8 @@ def _tenant(
     second_table["description"] = "Second independent fact stream, test-only"
     second_table["metric_columns"] = [value_b]
     second_table["columns"][1]["name"] = value_b
+    first_table["grain"] = {"grain_ref": "fact_grain_A", "unit": "event"}
+    second_table["grain"] = {"grain_ref": "fact_grain_B", "unit": "event"}
     raw["table_catalog"] = [first_table, second_table]
     one, two = f"{schema}.{first}", f"{schema}.{second}"
     raw["query_patterns"][0]["required_tables"] = [one, two]
@@ -167,7 +169,10 @@ def test_sign_flip_changes_context_fingerprint_not_code():
 
 
 def test_missing_physical_table_or_measure_rejected_pre_planning():
-    for kind in ("table", "column", "metric_column", "grain", "negative_sign"):
+    for kind in (
+        "table", "column", "metric_column", "grain",
+        "grain_catalog", "metric_type", "negative_sign",
+    ):
         raw = fixture_a()
         source = raw["metric_source_compositions"][0]["sources"][1]
         if kind == "table":
@@ -178,6 +183,10 @@ def test_missing_physical_table_or_measure_rejected_pre_planning():
             raw["table_catalog"][1]["metric_columns"] = []
         elif kind == "grain":
             source["grain_ref"] = ""
+        elif kind == "grain_catalog":
+            raw["table_catalog"][1]["grain"]["grain_ref"] = "unapproved_grain"
+        elif kind == "metric_type":
+            raw["table_catalog"][1]["columns"][1]["data_type"] = "text"
         elif kind == "negative_sign":
             source["sign_multiplier"] = -9
         try:
@@ -300,13 +309,17 @@ def test_modified_query_plan_rejected_before_sql_provider():
     raw = fixture_a()
     _, result = _plan(raw)
     assert result["status"] == "planned", result
-    for case in ("table", "metric", "filter", "dim"):
+    for case in ("table", "metric", "non_metric_column", "grain", "filter", "dim"):
         plan = deepcopy(result["query_plan"])
         comp = plan["planning_context"]["metric_source_composition"]
         if case == "table":
             comp["sources"][0]["target_table"] = "other.private"
         elif case == "metric":
             comp["sources"][0]["value_column"] = "private"
+        elif case == "non_metric_column":
+            comp["sources"][0]["value_column"] = "event_id"
+        elif case == "grain":
+            comp["sources"][0]["grain_ref"] = "false_grain"
         elif case == "filter":
             comp["sources"][0]["source_filters"][0]["column"] = "private"
         else:
