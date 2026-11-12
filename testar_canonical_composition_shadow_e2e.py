@@ -15,6 +15,10 @@ from app.adapters.postgres.canonical_context_repository import (
 from app.adapters.postgres.metric_source_composition_sql import (
     build_postgres_metric_source_sql,
 )
+from app.adapters.postgres.catalog_composition_sql_generator import (
+    CatalogCompositionSqlGenerator,
+)
+from app.domain.sql_generation import SqlGenerationProviderError
 from app.adapters.testing.fake_shadow_evidence_repository import (
     FakeShadowEvidenceRepository,
 )
@@ -29,7 +33,14 @@ from testar_shadow_test_runtime import _env, _run_asgi
 
 
 class OfflineDynamicSqlGenerator:
-    def __init__(self) -> None:
+    """Spy around the production opt-in provider, not a mock SQL answer."""
+
+    def __init__(self, *, version: str, fingerprint: str) -> None:
+        self._adapter = CatalogCompositionSqlGenerator(
+            source_mode="canonical_snapshot",
+            expected_context_version=version,
+            expected_context_fingerprint=fingerprint,
+        )
         self.calls = 0
         self.request_fingerprints = []
 
@@ -37,11 +48,7 @@ class OfflineDynamicSqlGenerator:
         from app.domain.sql_generation import request_fingerprint
         self.calls += 1
         self.request_fingerprints.append(request_fingerprint(request))
-        return {
-            "provider_name": "offline_contract_renderer",
-            "provider_model": "non_llm_test_adapter",
-            "output_text": build_postgres_metric_source_sql(request),
-        }
+        return self._adapter.generate(request)
 
 
 def _canonical_payload(raw: dict, tenant: str) -> dict:
@@ -84,7 +91,9 @@ def _instance(raw: dict, tenant: str, *, pin: str | None = None):
         context_table="versioned_snapshots",
         connect=fake_db,
     )
-    generator = OfflineDynamicSqlGenerator()
+    generator = OfflineDynamicSqlGenerator(
+        version=payload["semantic_agent_version"], fingerprint=expected,
+    )
     evidence = FakeShadowEvidenceRepository()
     env = _env(
         SEMANTIC_AGENT_VERSION=payload["semantic_agent_version"],
@@ -204,6 +213,56 @@ def test_http_shadow_monthly_composition_for_two_unrelated_tenants():
         assert result["sql"].count("date_trunc('month',") == 2
         assert generator.calls == 1
         assert evidence.create_calls >= 1
+
+
+
+def test_opt_in_compiler_rejects_legacy_mode_or_wrong_version_and_request():
+    raw = fixture_temporal(fixture_a())
+    payload = _canonical_payload(raw, "tenant-C1")
+    fp = normalize_context_snapshot(payload)["fingerprint"]
+    for mode, version, fingerprint in (
+        ("legacy_tables", payload["semantic_agent_version"], fp),
+        ("canonical_snapshot", payload["semantic_agent_version"], ""),
+    ):
+        try:
+            CatalogCompositionSqlGenerator(
+                source_mode=mode,
+                expected_context_version=version,
+                expected_context_fingerprint=fingerprint,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Compiler started without a secure pin")
+    from app.domain.sql_generation import build_sql_generation_request
+    from testar_metric_source_composition_e2e import _plan
+    _, planned = _plan(raw, "synthetic report monthly")
+    assert planned["status"] == "planned"
+    request = build_sql_generation_request(planned["query_plan"])
+    compiler = CatalogCompositionSqlGenerator(
+        source_mode="canonical_snapshot",
+        expected_context_version=payload["semantic_agent_version"],
+        expected_context_fingerprint=fp,
+    )
+    generated = compiler.generate(request)
+    assert generated["output_text"].count("date_trunc('month',") == 2
+    assert generated["token_usage"]["total_tokens"] == 0
+    wrong = deepcopy(request)
+    wrong["generation_context"]["context_fingerprint"] = "a" * 64
+    try:
+        compiler.generate(wrong)
+    except SqlGenerationProviderError as err:
+        assert err.reason == "compiler_context_pin_mismatch"
+    else:
+        raise AssertionError("Wrong tenant context pin was accepted")
+    no_composition = deepcopy(request)
+    no_composition["generation_context"].pop("metric_source_composition")
+    try:
+        compiler.generate(no_composition)
+    except SqlGenerationProviderError as err:
+        assert err.reason == "compiler_composition_not_selected"
+    else:
+        raise AssertionError("SQL compiler guessed missing composition")
 
 
 def main():
