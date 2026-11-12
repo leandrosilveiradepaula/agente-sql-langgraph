@@ -379,6 +379,39 @@ def test_compiler_fails_closed_on_unconfigured_source_and_escaped_literals():
     assert "'O''Brien'" in sql
     assert "O'Brien" not in sql
 
+
+def test_contract_rejects_wrong_sign_dedup_or_missing_scoped_filter():
+    _, result = _plan(fixture_a())
+    assert result["status"] == "planned"
+    plan = result["query_plan"]
+    req = build_sql_generation_request(plan)
+    approved = build_postgres_metric_source_sql(req)
+    assert run_sql_contract_gate(current_sql=approved, query_plan=plan)[0][
+        "status"
+    ] == "approved"
+    for name, sql in (
+        ("dedup_union", approved.replace("UNION ALL", "UNION")),
+        ("wrong_sign", approved.replace('* -1', '* 1')),
+        ("omit_filter", approved.replace(
+            '"source_1"."flag" = \x27approved\x27',
+            '"source_1"."flag" <> \x27approved\x27',
+        )),
+        ("extra_table", approved.replace('"funding"."outflows"', '"other"."private"')),
+    ):
+        contract = run_sql_contract_gate(
+            current_sql=sql, query_plan=plan,
+        )[0]
+        assert contract["status"] == "rejected", (name, contract["errors"])
+        assert any(
+            error["code"] == "SQL_CONTRACT_METRIC_COMPOSITION_MISMATCH"
+            or error["code"] in (
+                "SQL_CONTRACT_UNPLANNED_TABLE",
+                "SQL_CONTRACT_REQUIRED_TABLE_MISSING",
+            )
+            for error in contract["errors"]
+        ), (name, contract["errors"])
+
+
 def main() -> None:
     tests = sorted(
         (name, obj) for name, obj in globals().items()

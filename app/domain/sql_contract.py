@@ -6,6 +6,14 @@ from time import perf_counter
 from typing import Any, Literal, TypedDict
 
 from app.domain.planning import QueryPlan
+from app.domain.sql_generation import (
+    SqlGenerationInputError,
+    build_sql_generation_request,
+)
+from app.adapters.postgres.metric_source_composition_sql import (
+    PostgresCompositionSqlError,
+    build_postgres_metric_source_sql,
+)
 from app.domain.sql_analysis import (
     SQL_ANALYZER_VERSION,
     SqlAnalysisError,
@@ -44,6 +52,7 @@ SqlContractErrorCode = Literal[
     "SQL_CONTRACT_REQUIRED_FILTER_VIOLATED",
     "SQL_CONTRACT_FILTER_BINDING_INVALID",
     "SQL_CONTRACT_FILTER_UNVERIFIABLE",
+    "SQL_CONTRACT_METRIC_COMPOSITION_MISMATCH",
 ]
 
 
@@ -263,6 +272,11 @@ def run_sql_contract_gate(
     )
     join_results = _verify_joins(sql_analysis, query_plan, findings)
     filter_results = _verify_planned_filters(sql_analysis, query_plan, policy, findings)
+    source_composition_check = _verify_metric_source_composition(
+        current_sql=current_sql,
+        query_plan=query_plan,
+        findings=findings,
+    )
     rule_results = _verify_rules(
         sql_token_norms=sql_token_norms,
         analysis=sql_analysis,
@@ -302,6 +316,11 @@ def run_sql_contract_gate(
             ),
             _check("filters", _check_status(filter_results), {"count": len(filter_results)}),
             _check(
+                "metric_source_composition",
+                source_composition_check,
+                {"present": source_composition_check != "not_applicable"},
+            ),
+            _check(
                 "rules",
                 _check_status(rule_results),
                 {"count": len(rule_results)},
@@ -334,6 +353,54 @@ def run_sql_contract_gate(
         ),
         deepcopy(sql_analysis),
     )
+
+
+def _verify_metric_source_composition(
+    *,
+    current_sql: str,
+    query_plan: QueryPlan,
+    findings: list[SqlContractFinding],
+) -> Literal["passed", "failed", "not_applicable"]:
+    """Conservative proof for an explicitly planned fact-stream composition.
+
+    The current SQL analyzer has no complete AST-level proof of UNION ALL
+    lineages, signs, filters, grouping, and post-union aggregation. Until that
+    exists, require semantic-source SQL to match the deterministic,
+    catalog-driven reference renderer token-for-token. This is *not* a
+    benchmark/golden answer: the reference is computed from the current
+    approved tenant plan on every invocation. No unknown vendor SQL accepted.
+    """
+    projection = query_plan.get("planning_context", {})
+    if not isinstance(projection, Mapping):
+        return "not_applicable"
+    if projection.get("metric_source_composition") is None:
+        return "not_applicable"
+    try:
+        request = build_sql_generation_request(query_plan)
+        expected = build_postgres_metric_source_sql(request)
+        candidate_tokens = normalized_sql_tokens(
+            current_sql, include_string_values=True,
+        )
+        expected_tokens = normalized_sql_tokens(
+            expected, include_string_values=True,
+        )
+        if candidate_tokens == expected_tokens:
+            return "passed"
+    except (
+        SqlGenerationInputError,
+        PostgresCompositionSqlError,
+        SqlAnalysisError,
+        ValueError,
+        TypeError,
+        KeyError,
+    ):
+        pass
+    findings.append(_finding(
+        "SQL_CONTRACT_METRIC_COMPOSITION_MISMATCH",
+        "A SQL nao comprova a composicao autorizada de fontes e sinais.",
+        details={"reason": "composition_lineage_not_verifiable"},
+    ))
+    return "failed"
 
 
 def _verify_tables(
