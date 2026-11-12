@@ -47,7 +47,10 @@ def _safe_scalar(value: object) -> bool:
     return (
         (isinstance(value, (str, int, float, bool)) or value is None)
         and not isinstance(value, complex)
-        and (not isinstance(value, str) or len(value) <= 250)
+        and (not isinstance(value, str) or (
+            len(value) <= 250
+            and all(ord(character) >= 32 for character in value)
+        ))
         and (not isinstance(value, float) or (
             value == value and value not in (float("inf"), float("-inf"))
         ))
