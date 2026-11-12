@@ -55,8 +55,8 @@ def _literal(value: object) -> str:
     raise PostgresCompositionSqlError("UNSUPPORTED_FILTER_LITERAL")
 
 
-def _predicate(entry: Mapping[str, Any]) -> str:
-    column = _ident(entry["column"])
+def _predicate(entry: Mapping[str, Any], table_alias: str) -> str:
+    column = _ident(table_alias) + "." + _ident(entry["column"])
     op = entry["operator"]
     if op not in ("=", "<>", "<", "<=", ">", ">=", "IN", "NOT IN"):
         raise PostgresCompositionSqlError("UNAUTHORIZED_FILTER_OPERATOR")
@@ -95,7 +95,8 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
     dimensions = value["grouping_dimensions"]
     aliases = [f"group_{index+1}" for index in range(len(dimensions))]
     subqueries = []
-    for source in value["sources"]:
+    for source_index, source in enumerate(value["sources"], 1):
+        table_alias = f"source_{source_index}"
         columns = []
         for index, dim in enumerate(dimensions):
             matching = [
@@ -105,18 +106,23 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
             if len(matching) != 1:
                 raise PostgresCompositionSqlError("GROUPING_NOT_BOUND")
             columns.append(
-                f'{_ident(matching[0]["target_column"])} AS {_ident(aliases[index])}'
+                f'{_ident(table_alias)}.{_ident(matching[0]["target_column"])} AS {_ident(aliases[index])}'
             )
         val = _ident(source["value_column"])
         multiplier = source["sign_multiplier"]
-        columns.append(f"({val} * {multiplier}) AS \"measure_value\"")
+        columns.append(
+            f'({_ident(table_alias)}.{val} * {multiplier}) AS "measure_value"'
+        )
         subquery = (
             "SELECT " + ", ".join(columns) + "\n"
             + "FROM " + _table(source["target_table"])
+            + " AS " + _ident(table_alias)
         )
         filters = source["source_filters"]
         if filters:
-            subquery += "\nWHERE " + " AND ".join(_predicate(f) for f in filters)
+            subquery += "\nWHERE " + " AND ".join(
+                _predicate(f, table_alias) for f in filters
+            )
         subqueries.append(subquery)
     outer = [f'"{name}"' for name in aliases]
     outer.append('SUM("measure_value") AS "metric_value"')
