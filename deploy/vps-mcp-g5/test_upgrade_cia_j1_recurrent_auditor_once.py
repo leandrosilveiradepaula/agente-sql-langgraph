@@ -54,7 +54,9 @@ class RecurringAuditorReleaseTests(unittest.TestCase):
         self.assertIn('RELEASE_AUTHORIZATION_REQUIRED=true', source)
         self.assertIn('MODIFICATIONS=none', source)
         self.assertIn('trap cleanup EXIT', source)
-        self.assertIn('ROLLED_BACK', source)
+        self.assertIn("ROLLED_BACK_VERIFIED", source)
+        self.assertIn("ROLLBACK_UNVERIFIED_MANUAL_INTERVENTION_REQUIRED", source)
+        self.assertIn('hash_is "$AUDIT" "$OLD_AUDIT"', source)
         self.assertIn('BACKUP_PATH_ALREADY_PRESENT', source)
 
     def test_only_auditor_writes_and_restarts_two_readers(self):
