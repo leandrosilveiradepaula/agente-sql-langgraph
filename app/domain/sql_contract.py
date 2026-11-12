@@ -10,10 +10,6 @@ from app.domain.sql_generation import (
     SqlGenerationInputError,
     build_sql_generation_request,
 )
-from app.adapters.postgres.metric_source_composition_sql import (
-    PostgresCompositionSqlError,
-    build_postgres_metric_source_sql,
-)
 from app.domain.sql_analysis import (
     SQL_ANALYZER_VERSION,
     SqlAnalysisError,
@@ -376,6 +372,12 @@ def _verify_metric_source_composition(
     if projection.get("metric_source_composition") is None:
         return "not_applicable"
     try:
+        # Import only inside the opt-in gate: the PostgreSQL adapter package
+        # initializes configuration modules that also import sql_contract.
+        from app.adapters.postgres.metric_source_composition_sql import (
+            PostgresCompositionSqlError,
+            build_postgres_metric_source_sql,
+        )
         request = build_sql_generation_request(query_plan)
         expected = build_postgres_metric_source_sql(request)
         candidate_tokens = normalized_sql_tokens(
