@@ -200,6 +200,13 @@ def build_generate_shadow_record(
         "provider_metadata": _provider_metadata(state),
         "response": response,
     }
+    # Preserve the legacy evidence fingerprint when opt-in is absent.
+    # Add provenance only for a real semantic interpretation attempt.
+    semantic_diagnostic = state.get("semantic_interpretation_result")
+    if isinstance(semantic_diagnostic, Mapping):
+        langgraph_evidence["semantic_interpretation_result"] = deepcopy(
+            dict(semantic_diagnostic)
+        )
     return _build_record(
         shadow_record_id=shadow_record_id,
         agent_run_id=agent_run_id,
@@ -469,6 +476,7 @@ def _lineage_from_state(state: Mapping[str, Any]) -> dict[str, Any]:
 def _provider_metadata(state: Mapping[str, Any]) -> dict[str, Any]:
     output: dict[str, Any] = {}
     for source in (
+        "semantic_interpretation_result",
         "sql_generation_result",
         "sql_repair_result",
         "generation_result",

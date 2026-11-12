@@ -34,7 +34,7 @@ from app.application.internal_sql_agent_v1_types import (
 )
 from app.domain.shadow_evidence_types import build_generate_shadow_record
 from app.graph.nodes.build_plan import build_plan
-from app.graph.nodes.classify_intent import classify_intent
+from app.graph.nodes.semantic_classification import create_semantic_classification_node
 from app.graph.nodes.contract_gate import contract_gate
 from app.graph.nodes.engine_preflight import create_engine_preflight_node
 from app.graph.nodes.generate_sql import create_generate_sql_node
@@ -46,6 +46,7 @@ from app.graph.state import GraphState
 from app.ports.context_repository import ContextRepository
 from app.ports.engine_preflight import EnginePreflight
 from app.ports.shadow_evidence_repository import ShadowEvidenceRepository
+from app.ports.semantic_intent_interpreter import SemanticIntentInterpreter
 from app.ports.sql_generator import SqlGenerator
 from app.ports.sql_generator_resolver import SqlGeneratorResolver
 from app.ports.sql_repairer import SqlRepairer
@@ -67,6 +68,8 @@ class GenerateSqlUseCase:
         langgraph_version: str | None = None,
         langgraph_commit: str | None = None,
         expected_organization_id: str | None = None,
+        semantic_intent_interpreter: SemanticIntentInterpreter | None = None,
+        semantic_intent_identity: Mapping[str, str] | None = None,
     ) -> None:
         if context_repository is None:
             raise RuntimeError("context_repository deve ser injetado.")
@@ -91,7 +94,10 @@ class GenerateSqlUseCase:
         )
         self._receive_question = receive_question
         self._load_context = create_load_context_node(context_repository)
-        self._classify_intent = classify_intent
+        self._classify_intent = create_semantic_classification_node(
+            semantic_intent_interpreter,
+            interpreter_identity=semantic_intent_identity,
+        )
         self._build_plan = build_plan
         self._security_gate = security_gate
         self._contract_gate = contract_gate
