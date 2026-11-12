@@ -139,12 +139,12 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
     sock.connect("/run/cia-j1-owner/readonly.sock")
     sock.sendall(b'{"op":"cia_sqlite"}\n')
     chunks = bytearray()
-    while b"\\n" not in chunks and len(chunks) < 4096:
+    while b"\n" not in chunks and len(chunks) < 4096:
         part = sock.recv(min(1024, 4096 - len(chunks)))
         if not part:
             break
         chunks.extend(part)
-raw = bytes(chunks).split(b"\\n", 1)[0]
+raw = bytes(chunks).split(b"\n", 1)[0]
 report = json.loads(raw)
 expected = {
     "status", "contracts", "stored_candles", "published_checkpoints",
