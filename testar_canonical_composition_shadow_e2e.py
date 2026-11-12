@@ -27,7 +27,7 @@ from app.test_runtime.composition import create_shadow_test_runtime
 from app.test_runtime.offline_adapters import ShadowTestSqlRepairer
 from testar_metric_source_composition_e2e import (
     fixture_a, fixture_b, fixture_temporal, fixture_calendar_year,
-    fixture_attested_ratio,
+    fixture_attested_ratio, fixture_versioned_ranking, fixture_calendar_range,
 )
 from testar_postgres_context_repository import FakeConnect
 from testar_shadow_test_runtime import _env, _run_asgi
@@ -200,6 +200,37 @@ def test_canonical_shadow_ratio_rule_is_external_and_context_fingerprinted():
     )
     assert not (http == 200 and result.get("status") == "success")
     assert generator.calls == 0
+
+
+def test_canonical_shadow_configured_ranking_two_tenants_and_drift():
+    for tenant, base in (("ranking-tenant-one",fixture_a()),("ranking-tenant-two",fixture_b())):
+        raw=fixture_versioned_ranking(fixture_calendar_range(base))
+        runtime, db, generator, evidence=_instance(raw,tenant)
+        http,result=_run_asgi(
+            runtime.app, "POST", "/v1/internal/sql-agent/generate",
+            _request(
+                tenant, "ranking-" + tenant,
+                question="synthetic report monthly highest 2 between 2025 and 2026",
+            ),
+        )
+        assert http==200,(http,result)
+        assert result["status"]=="success",result
+        assert 'ORDER BY "metric_value" DESC NULLS LAST' in result["sql"]
+        assert 'LIMIT 2' in result["sql"]
+        assert generator.calls==1
+        assert db.cursor.executed_parameters["tenant_id"]==tenant
+        assert evidence.create_calls>=1
+    raw=fixture_versioned_ranking(fixture_calendar_range(fixture_a()))
+    pinned=normalize_context_snapshot(_canonical_payload(raw,"ranking-tenant-one"))["fingerprint"]
+    raw["metric_source_compositions"][0]["ranking"]["maximum_limit"]=6
+    runtime,_,generator,_=_instance(raw,"ranking-tenant-one",pin=pinned)
+    status,response=_run_asgi(
+        runtime.app,"POST","/v1/internal/sql-agent/generate",
+        _request("ranking-tenant-one","ranking-version-drift",
+                 question="synthetic report monthly highest 2 between 2025 and 2026"),
+    )
+    assert not (status==200 and response.get("status")=="success")
+    assert generator.calls==0
 
 def test_mismatched_principal_cannot_reuse_another_tenants_catalog():
     runtime, _, generator, _ = _instance(fixture_a(), "tenant-C1")

@@ -1,3 +1,13 @@
+## 12/11/2026 - Ranking externo por contexto sem copiar inteligencia de cliente
+
+O campo opcional ranking em metric_source_compositions possui terms, default_limit e maximum_limit. Cada term tem palavra normalizada e direction ascending/descending. A selecao do top/bottom so ocorre quando a pergunta corresponde a um termo versionado, com grao temporal ou dimensao de agrupamento aprovado. Limite numerico imediatamente apos o termo, se houver, deve respeitar limite por tenant e teto estrutural 100; sem numero, usa default_limit. Pedidos ambiguos, fora da faixa e negativos rejeitados. Sem termo, ranking nao e inserido; o sistema nao inventa a operacao.
+
+O compilador PostgreSQL utiliza UNION ALL de fontes aprovadas, SUM com grao autoritativo, opcional ratio_of_sums, ORDER BY metric_value (direcao selecionada), NULLS LAST e desempate pelo agrupamento, com LIMIT validado. Nenhuma regra DRE/conta/marca, filtro ou SQL historica entra no Python. Alterar termos, escala ou limites altera o fingerprint do contexto. O validador SQL reconhece os modificadores NULLS FIRST/LAST sem esconder colunas fisicas first e last.
+
+Validacao: 38 testes de composicao, 8 testes HTTP Canonical Shadow, PostgreSQL 16 sintético descartavel com 16 SELECTs read-only entre dois esquemas e 2 bloqueios cross-tenant. O recurso nao equivale a ranking particionado/window, G5 aprovado nem ativacao do Shadow real.
+
+---
+
 ## 12/11/2026 - Fonte real n8n ancorada e formula generica externalizada
 
 TAREFA 1 (ORIGEM): no workflow n8n publicado, **41 Code indexados e 24 pontos classificados por SHA-256 de linha em 10 nos** (inclui PostgreSQL 5), indicando destinos: versionamento, aliases/intencoes, metricas, formula de razao, mapa fisico, regras gerenciais e relatorio. Auditor fail-closed compara corpos e 78 arestas ao baseline privado, sem publicar SQL, prompts, valores de negocio ou credenciais. Evidencias: docs/audits/LEGACY-N8N-BUSINESS-RULE-SITES-20261112.md e JSON sanitizado. 24 pontos NAO sao classificacao final de todos os 3.403 literais; o G5 da versao oficial (77 registros) permanece cifrado e nao homologado.

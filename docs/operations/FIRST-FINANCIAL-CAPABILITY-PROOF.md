@@ -1,3 +1,11 @@
+## 12/11/2026 - Censo de strings e externalizacao estrutural
+
+Inventario n8n publicado: 24 sites concretos anteriores + 1.987 literais longos individualmente indexados, com triagem candidata F=1.144, T=187, S=424, U=232. As 1.416 strings curtas ainda nao foram ancoradas uma a uma. Nao equivale a aprovacao contabil das 3.403 ocorrencias, nem indica que todas sejam regras financeiras. Relatorio e politica exclusivamente audit-only em docs/audits/LEGACY-N8N-LONG-LITERAL-TRIAGE-20261112.md e JSON.
+
+Capacidade generica nova: ranking por termos/direcao/limites do catalogo versionado por tenant sobre fontes assinadas e filtros aprovados, com numerador/denominador opcionais, periodo, agrupamento e contrato SQL. PostgreSQL 16 descartavel em 2 contextos sintéticos PASS (16 SELECTs somente leitura), sem Gemini, SQL financeira real ou benchmarks. G5 ainda requer reconciliacao de regra e significado financeiro homologado antes de ativacao; paridade real pertence ao Shadow posterior.
+
+---
+
 ## 12/11/2026 - Evidencia atualizada de fonte e formula parametrica (sem homologacao G5)
 
 O novo inventario docs/audits/LEGACY-N8N-BUSINESS-RULE-SITES-20261112.md comprova 24 trechos exatos no n8n publicado (linhas e hash, sem SQL/prompts/valores) em 10 nos, com 41 codigos indexados. Identifica dependencia de formula percentual e regras gerenciais antigas, **sem importar metricas ou constantes contabeis** do legado ao runtime. Nao sao 3.403 literais individualmente homologados. A origem G5 (77 registros da versao ativa) continua sem significado contabil aprovado.

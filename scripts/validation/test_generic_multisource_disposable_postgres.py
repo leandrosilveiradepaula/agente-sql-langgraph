@@ -30,6 +30,7 @@ from app.domain.sql_generation import build_sql_generation_request
 from app.domain.sql_security import run_sql_security_gate
 from testar_metric_source_composition_e2e import (
     _plan, fixture_a, fixture_b, fixture_calendar_range, fixture_attested_ratio,
+    fixture_versioned_ranking,
 )
 
 EXPECTED_ENV = {
@@ -243,6 +244,28 @@ def main() -> None:
                 Decimal("76.923"), Decimal("62.500"),
                 Decimal("85.714"), Decimal("66.667"),
             ], ratio_rows
+            ranked=fixture_versioned_ranking(raw)
+            best=_query(
+                ranked,"synthetic report monthly highest 2 between 2025 and 2026"
+            )
+            worst=_query(
+                ranked,"synthetic report monthly lowest 1 between 2025 and 2026"
+            )
+            assert _actual(_readonly_query(connection,role,best))==[
+                ("2025-02-01",Decimal(100)),("2026-01-01",Decimal(78)),
+            ]
+            assert _actual(_readonly_query(connection,role,worst))==[
+                ("2026-02-01",Decimal(10)),
+            ]
+            combined_policy=fixture_versioned_ranking(fixture_attested_ratio(raw))
+            ranked_ratio=_query(
+                combined_policy,
+                "synthetic report monthly highest 1 between 2025 and 2026",
+            )
+            ratio_best=_actual(_readonly_query(connection,role,ranked_ratio))
+            assert ratio_best[0][0]=="2026-01-01"
+            assert ratio_best[0][1].quantize(Decimal("0.001"))==Decimal("85.714")
+            assert len(ratio_best)==1
             # Deliberately introduce a group containing only a denominator-
             # absent stream in this disposable database. A missing approved
             # denominator must be NULL, never a fabricated zero or infinity.
@@ -284,7 +307,9 @@ def main() -> None:
         _forbidden_cross_tenant(connection, queries[1][0], queries[0][1])
     print("DISPOSABLE_POSTGRES_COMPOSITION=PASS")
     print("TENANT_CONTEXTS=2")
-    print("READONLY_GENERATED_SELECTS=10")
+    print("READONLY_GENERATED_SELECTS=16")
+    print("COMBINED_RANKING_AND_RATIO=PASS")
+    print("TENANT_VERSIONED_RANKING=PASS")
     print("ZERO_DENOMINATOR_RETURNS_NULL=PASS")
     print("ATTESTED_GENERIC_RATIO_OF_SUMS=PASS")
     print("CROSS_TENANT_ACL_REJECTIONS=2")

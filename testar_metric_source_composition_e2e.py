@@ -1176,6 +1176,162 @@ def test_attested_ratio_opt_in_preserves_existing_snapshots():
     assert all("calculation" not in d for d in without["metric_source_compositions"])
     assert with_calc["metric_source_compositions"][0]["calculation"]["operation"] == "ratio_of_sums"
 
+
+def fixture_versioned_ranking(raw: dict) -> dict:
+    candidate = deepcopy(raw)
+    candidate["metric_source_compositions"][0]["ranking"] = {
+        "terms": [
+            {"term": "highest", "direction": "descending"},
+            {"term": "lowest", "direction": "ascending"},
+        ],
+        "default_limit": 2,
+        "maximum_limit": 5,
+    }
+    return candidate
+
+
+def test_versioned_ranking_on_period_buckets_two_distinct_tenants():
+    for base in (fixture_a(), fixture_b()):
+        raw = fixture_versioned_ranking(fixture_calendar_range(base))
+        context, plan = _plan(
+            raw, "synthetic report monthly highest 2 between 2025 and 2026"
+        )
+        assert plan["status"] == "planned", plan
+        bound = plan["query_plan"]["planning_context"]["metric_source_composition"]
+        assert bound["result_ranking"] == {
+            "direction": "descending", "limit": 2, "maximum_limit": 5,
+            "source_use": "APPROVED_SEMANTIC_MAPPING",
+        }
+        generated = build_postgres_metric_source_sql(
+            build_sql_generation_request(plan["query_plan"])
+        )
+        assert 'ORDER BY "metric_value" DESC NULLS LAST' in generated
+        assert 'LIMIT 2' in generated
+        assert 'GROUP BY "time_bucket"' in generated
+        security, analysis = run_sql_security_gate(
+            current_sql=generated, query_plan=plan["query_plan"]
+        )
+        contract, _ = run_sql_contract_gate(
+            current_sql=generated, query_plan=plan["query_plan"], analysis=analysis
+        )
+        assert security["status"] == "approved", security
+        assert contract["status"] == "approved", contract
+        for altered in (
+            generated.replace("LIMIT 2", "LIMIT 3"),
+            generated.replace("DESC NULLS LAST", "ASC NULLS LAST"),
+            generated.replace('ORDER BY "metric_value"', 'ORDER BY "time_bucket"'),
+        ):
+            denied, _ = run_sql_contract_gate(
+                current_sql=altered, query_plan=plan["query_plan"], analysis=analysis
+            )
+            assert denied["status"] != "approved", denied
+        assert context["fingerprint"]
+        _, lowest = _plan(raw, "synthetic report monthly lowest 1 between 2025 and 2026")
+        assert lowest["status"] == "planned", lowest
+        rank = lowest["query_plan"]["planning_context"]["metric_source_composition"]["result_ranking"]
+        assert rank["limit"] == 1 and rank["direction"] == "ascending"
+
+
+def test_ranking_policy_rejects_ambiguous_limits_and_unauthorized_plan():
+    raw = fixture_versioned_ranking(fixture_calendar_range(fixture_a()))
+    for question in (
+        "synthetic report monthly highest 0 between 2025 and 2026",
+        "synthetic report monthly highest 6 between 2025 and 2026",
+        "synthetic report monthly highest 123456789 between 2025 and 2026",
+        "synthetic report monthly highest -2 between 2025 and 2026",
+        "synthetic report monthly highest 2 3 between 2025 and 2026",
+        "synthetic report monthly highest 2 lowest 1 between 2025 and 2026",
+        "synthetic report highest 2",  # Missing grouping and time grain
+    ):
+        _, plan = _plan(raw,question)
+        assert plan["status"] == "rejected", (question,plan)
+    for case in (
+        {"default_limit": 0},
+        {"maximum_limit": 101},
+        {"default_limit": True},
+        {"terms": [{"term": "top\nSELECT", "direction": "descending"}]},
+        {"terms": [{"term": "highest", "direction": "ascending"}, {"term": "highest", "direction": "descending"}]},
+        {"terms": [{"term": "highest", "direction": "wrong"}]},
+    ):
+        changed = deepcopy(raw)
+        changed["metric_source_compositions"][0]["ranking"].update(case)
+        try:
+            normalize_context_snapshot(changed)
+        except ContextNormalizationError:
+            pass
+        else:
+            raise AssertionError(case)
+    _, planned = _plan(raw, "synthetic report monthly highest 2 between 2025 and 2026")
+    assert planned["status"] == "planned", planned
+    request = build_sql_generation_request(planned["query_plan"])
+    for invalid in (
+        {"limit": 10},
+        {"limit": False},
+        {"direction": "DROP"},
+        {"source_use": "HISTORICAL_BENCHMARK"},
+        {"sql_fragment": "SELECT 1"},
+    ):
+        attempt=deepcopy(request)
+        attempt["generation_context"]["metric_source_composition"]["result_ranking"].update(invalid)
+        try:
+            build_postgres_metric_source_sql(attempt)
+        except PostgresCompositionSqlError:
+            pass
+        else:
+            raise AssertionError(invalid)
+
+
+
+def test_null_ordering_lexing_does_not_hide_columns_named_first_or_last():
+    from app.domain.sql_analysis import analyze_sql
+    statement=(
+        "SELECT first, last FROM generic.events "
+        "ORDER BY last DESC NULLS LAST, first ASC NULLS FIRST"
+    )
+    evidence=analyze_sql(statement)
+    names=[x["column"] for x in evidence["column_references"]]
+    assert "first" in names and "last" in names,names
+    assert "nulls" not in names,names
+
+
+def test_versioned_ranking_combines_with_approved_ratio():
+    for base in (fixture_a(),fixture_b()):
+        raw=fixture_versioned_ranking(
+            fixture_attested_ratio(fixture_calendar_range(base))
+        )
+        context,planned=_plan(raw,"synthetic report monthly highest 1 between 2025 and 2026")
+        assert planned["status"]=="planned",planned
+        sql=build_postgres_metric_source_sql(
+            build_sql_generation_request(planned["query_plan"])
+        )
+        assert "NULLIF" in sql and "CASE WHEN" in sql
+        assert 'ORDER BY "metric_value" DESC NULLS LAST' in sql and "LIMIT 1" in sql
+        security,analysis=run_sql_security_gate(
+            current_sql=sql,query_plan=planned["query_plan"]
+        )
+        contract,_=run_sql_contract_gate(
+            current_sql=sql,query_plan=planned["query_plan"],analysis=analysis
+        )
+        assert security["status"]=="approved",security
+        assert contract["status"]=="approved",contract
+        assert context["fingerprint"]
+
+def test_opt_in_ranking_preserves_old_plan_and_changes_version_fingerprint():
+    unranked = fixture_calendar_range(fixture_a())
+    ranked = fixture_versioned_ranking(unranked)
+    baseline, _ = _plan(unranked)
+    opt_in, _ = _plan(ranked)
+    assert "ranking" not in baseline["metric_source_compositions"][0]
+    assert "ranking" in opt_in["metric_source_compositions"][0]
+    assert baseline["fingerprint"] != opt_in["fingerprint"]
+    _, no_rank_requested = _plan(
+        ranked, "synthetic report monthly between 2025 and 2026"
+    )
+    assert no_rank_requested["status"] == "planned",no_rank_requested
+    bound = no_rank_requested["query_plan"]["planning_context"]["metric_source_composition"]
+    assert "result_ranking" not in bound
+
+
 def main() -> None:
     tests = sorted(
         (name, obj) for name, obj in globals().items()

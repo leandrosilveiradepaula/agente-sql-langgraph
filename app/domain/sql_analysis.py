@@ -850,6 +850,13 @@ def _extract_columns(
             current_clause in {"select", "where", "on", "group", "order", "having"}
             and _is_identifier(tokens[index])
             and norm not in _RESERVED_WORDS
+            and not (
+                current_clause == "order"
+                and (
+                    (norm == "nulls" and _norm_at(tokens, index + 1) in {"first", "last"})
+                    or (norm in {"first", "last"} and _norm_at(tokens, index - 1) == "nulls")
+                )
+            )
             # An output alias is a declaration only at AS <identifier>.
             # The same identifier may also be a genuine source column in
             # SUM(column) AS column; hiding every spelling match destroys

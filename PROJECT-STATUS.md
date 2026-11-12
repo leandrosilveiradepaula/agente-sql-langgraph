@@ -1,3 +1,15 @@
+## 12/11/2026 - Triagem ampla dos literais e ranking generico versionado
+
+Fonte n8n: export publicado e ativo, auditado somente em ambiente privado. Todos os 41 Code conferidos por SHA no baseline de 68 identidades/78 arestas. Dos 3.403 literais registrados, **1.987 longos possuem indice e linha**, 1.416 curtos NAO possuem ancora individual. Manifesto audit-only aponta CANDIDATOS: 1.144 FORBIDDEN, 187 TRANSITIONAL, 424 STRUCTURAL e 232 INDETERMINADOS. Triagem por linha/familia de funcao, NAO aprovacao contabil individual; falsos positivos/negativos sao possiveis. Politica de termos versionada em docs/audits/legacy-n8n-review-signal-policy-v1.json, fora do runtime. Relatorio completo: docs/audits/LEGACY-N8N-LONG-LITERAL-TRIAGE-20261112.md e JSON sanitizado de ocorrencias sem palavras, valores, SQL, prompts ou hashes dos valores das strings.
+
+Externalizacao: contrato opcional metric_source_compositions[].ranking com termos e direcao asc/desc, default_limit e maximum_limit configurados pelo contexto versionado do tenant. Planejador interpreta perguntas ineditas sem termos hardcoded, exige grao/dimensao autorizada e rejeita ambiguidades, numeros fora da politica, sinais invalidos e planos alterados. Gerador PostgreSQL soma fontes/razoes antes do ORDER BY metric_value e LIMIT, com empate deterministico, NULLS LAST e SQL Contract Gate. Sem regra topN fixa por cliente, DRE, conta, marca ou SQL historica. Ajuste no parser SQL para NULLS FIRST/LAST em ordenacao preserva colunas homonimas.
+
+Prova local: 38 testes E2E de composicao, 8 HTTP Canonical Shadow, 4 testes de triagem; hardcode/secret scanners PASS. PostgreSQL 16 descartavel em dois contextos sinteticos diferentes: 16 SELECTs read-only, 2 tentativas cross-tenant negadas, agregacao, razao, ranking e ranking+razao numericamente corretos. Nenhuma SQL financeira real, G5 plaintext, benchmark, n8n modificado, merge, producao ou cutover. PR #233 unica. OFFICIAL=n8n; SHADOW=LangGraph; LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false.
+
+Pendencias: certificacao contabil das regras, ancora individual dos 1.416 curtos, revisao humana dos 1.987 candidatos, mapeamentos G5 homologados e equivalencia oficial/Shadow. Nao declarar financeiramente completo.
+
+---
+
 ## 12/11/2026 - Fonte real n8n ancorada e formula generica externalizada
 
 TAREFA 1 (ORIGEM): no workflow n8n publicado, **41 Code indexados e 24 pontos classificados por SHA-256 de linha em 10 nos** (inclui PostgreSQL 5), indicando destinos: versionamento, aliases/intencoes, metricas, formula de razao, mapa fisico, regras gerenciais e relatorio. Auditor fail-closed compara corpos e 78 arestas ao baseline privado, sem publicar SQL, prompts, valores de negocio ou credenciais. Evidencias: docs/audits/LEGACY-N8N-BUSINESS-RULE-SITES-20261112.md e JSON sanitizado. 24 pontos NAO sao classificacao final de todos os 3.403 literais; o G5 da versao oficial (77 registros) permanece cifrado e nao homologado.

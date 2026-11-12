@@ -197,4 +197,15 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
     group_aliases = (["time_bucket"] if temporal is not None else []) + aliases
     if group_aliases:
         sql += "\nGROUP BY " + ", ".join(f'"{alias}"' for alias in group_aliases)
+    result_ranking = value.get("result_ranking")
+    if result_ranking is not None:
+        direction = "DESC" if result_ranking["direction"] == "descending" else "ASC"
+        # Stable tie-breakers are derived from authorized projected grouping,
+        # not arbitrary user SQL or copied business-specific ranking rules.
+        ties = [f'"{alias}" ASC NULLS LAST' for alias in group_aliases]
+        sql += (
+            '\nORDER BY "metric_value" ' + direction + " NULLS LAST"
+            + (", " + ", ".join(ties) if ties else "")
+            + "\nLIMIT " + str(result_ranking["limit"])
+        )
     return sql

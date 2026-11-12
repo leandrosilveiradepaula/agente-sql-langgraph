@@ -25,6 +25,11 @@ _COMPOSITION_KEYS = {
     "composition_ref", "intent_name", "metric_ref", "strategy",
     "source_use", "accounting_definition_attested", "sources",
 }
+_RANKING_KEYS = {"terms", "default_limit", "maximum_limit"}
+_RANKING_TERM_KEYS = {"term", "direction"}
+_RANKING_DIRECTIONS = {"ascending", "descending"}
+_RANKING_OPERATIONAL_CEILING = 100
+
 _CALCULATION_KEYS = {
     "operation", "numerator_source_refs", "denominator_source_refs",
     "scale", "zero_denominator",
@@ -136,6 +141,95 @@ def _approved_source_ratio(
     }
 
 
+
+def _normalize_ranking_policy(raw: object) -> dict[str, Any]:
+    """Versioned tenant-owned ranking terms, not hardcoded NL→SQL phrases."""
+    if not isinstance(raw, Mapping) or set(raw) != _RANKING_KEYS:
+        raise MetricSourceCompositionError("COMPOSITION_RANKING_INVALID")
+    default_limit = raw.get("default_limit")
+    maximum_limit = raw.get("maximum_limit")
+    if (
+        type(default_limit) is not int
+        or type(maximum_limit) is not int
+        or not 1 <= default_limit <= maximum_limit <= _RANKING_OPERATIONAL_CEILING
+    ):
+        raise MetricSourceCompositionError("COMPOSITION_RANKING_LIMIT_INVALID")
+    terms = raw.get("terms")
+    if not isinstance(terms, list) or not 1 <= len(terms) <= 16:
+        raise MetricSourceCompositionError("COMPOSITION_RANKING_TERMS_INVALID")
+    result = []
+    seen = set()
+    for raw_term in terms:
+        if not isinstance(raw_term, Mapping) or set(raw_term) != _RANKING_TERM_KEYS:
+            raise MetricSourceCompositionError("COMPOSITION_RANKING_TERM_INVALID")
+        word = raw_term.get("term")
+        direction = raw_term.get("direction")
+        if (
+            not isinstance(word, str) or not 1 <= len(word.strip()) <= 64
+            or any(ord(ch) < 32 for ch in word)
+            or not all(ch.isalpha() or ch in " -_" for ch in word)
+            or direction not in _RANKING_DIRECTIONS
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_RANKING_TERM_INVALID")
+        normalized = normalize_search_text(word)
+        if not normalized or normalized in seen:
+            raise MetricSourceCompositionError("COMPOSITION_RANKING_TERM_AMBIGUOUS")
+        seen.add(normalized)
+        result.append({"term": normalized, "direction": direction})
+    return {
+        "terms": sorted(result, key=lambda v:v["term"]),
+        "default_limit": default_limit,
+        "maximum_limit": maximum_limit,
+    }
+
+
+def _select_ranking(
+    policy: object,
+    normalized_question: str,
+    *,
+    has_group: bool,
+) -> dict[str, Any] | None:
+    if policy is None:
+        return None
+    if not isinstance(policy, Mapping) or not isinstance(normalized_question, str):
+        raise MetricSourceCompositionError("COMPOSITION_RANKING_INVALID")
+    # Normalization removes minus/plus signs. Reject signed quantities before
+    # normalization instead of silently treating "-5" as a valid "5".
+    if re.search(r"(?<!\w)[+-]\s*[0-9]", normalized_question):
+        raise MetricSourceCompositionError("COMPOSITION_RANKING_SIGNED_NUMBER_UNBOUND")
+    question = normalize_search_text(normalized_question)
+    matches = []
+    for entry in policy["terms"]:
+        term = entry["term"]
+        for match in re.finditer(
+            r"(?<!\w)" + re.escape(term) + r"(?!\w)", question
+        ):
+            matches.append((match, entry))
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise MetricSourceCompositionError("COMPOSITION_RANKING_AMBIGUOUS")
+    if not has_group:
+        raise MetricSourceCompositionError("COMPOSITION_RANKING_NO_GROUP")
+    match, entry = matches[0]
+    remainder = question[match.end():]
+    specified = re.match(r"\s+([0-9]+)", remainder)
+    if specified and (
+        len(specified.group(1)) > 5
+        or re.match(r"\s+[0-9]+", remainder[specified.end():])
+    ):
+        raise MetricSourceCompositionError("COMPOSITION_RANKING_LIMIT_UNBOUND")
+    limit = int(specified.group(1)) if specified else policy["default_limit"]
+    if not 1 <= limit <= policy["maximum_limit"]:
+        raise MetricSourceCompositionError("COMPOSITION_RANKING_LIMIT_EXCEEDED")
+    return {
+        "direction": entry["direction"],
+        "limit": limit,
+        "maximum_limit": policy["maximum_limit"],
+        "source_use": _PROVENANCE,
+    }
+
+
 def normalize_metric_source_compositions(
     raw: object, table_catalog: list[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -164,7 +258,7 @@ def normalize_metric_source_compositions(
         if (
             not isinstance(raw_item, Mapping)
             or not _COMPOSITION_KEYS <= set(raw_item)
-            or set(raw_item) - _COMPOSITION_KEYS - {"temporal", "calculation"}
+            or set(raw_item) - _COMPOSITION_KEYS - {"temporal", "calculation", "ranking"}
         ):
             raise MetricSourceCompositionError("COMPOSITION_DEFINITION_INVALID")
         identity = raw_item.get("composition_ref")
@@ -284,7 +378,11 @@ def normalize_metric_source_compositions(
                 raw_item["calculation"],
                 {source["source_ref"].casefold() for source in sources},
             )
+        ranking = None
+        if "ranking" in raw_item:
+            ranking = _normalize_ranking_policy(raw_item["ranking"])
         output.append({
+            **({"ranking": ranking} if ranking is not None else {}),
             **({"calculation": calculation} if calculation is not None else {}),
             **({"temporal": temporal} if temporal is not None else {}),
             "composition_ref": identity,
@@ -367,7 +465,12 @@ def project_metric_source_composition(
     temporal_grouping = _select_composition_temporal(
         source.get("temporal"), normalized_question
     )
+    result_ranking = _select_ranking(
+        source.get("ranking"), normalized_question,
+        has_group=bool(selected) or temporal_grouping is not None,
+    )
     return {
+        **({"result_ranking": result_ranking} if result_ranking is not None else {}),
         **(
             {"calculation": deepcopy(source["calculation"])}
             if "calculation" in source else {}
@@ -405,7 +508,7 @@ def validate_projected_metric_composition(
     if (
         not isinstance(value, Mapping)
         or not expected <= set(value)
-        or set(value) - expected - {"temporal_grouping", "calculation"}
+        or set(value) - expected - {"temporal_grouping", "calculation", "result_ranking"}
     ):
         raise MetricSourceCompositionError("COMPOSITION_PROVIDER_CONTRACT_INVALID")
     if (
@@ -497,6 +600,19 @@ def validate_projected_metric_composition(
         )
         if value["calculation"] != approved_calculation:
             raise MetricSourceCompositionError("COMPOSITION_CALCULATION_NOT_CANONICAL")
+    if "result_ranking" in value:
+        ranking = value["result_ranking"]
+        if (
+            not isinstance(ranking, Mapping)
+            or set(ranking) != {"direction", "limit", "maximum_limit", "source_use"}
+            or ranking.get("direction") not in _RANKING_DIRECTIONS
+            or ranking.get("source_use") != _PROVENANCE
+            or type(ranking.get("limit")) is not int
+            or type(ranking.get("maximum_limit")) is not int
+            or not 1 <= ranking["limit"] <= ranking["maximum_limit"] <= _RANKING_OPERATIONAL_CEILING
+            or (not dimensions and "temporal_grouping" not in value)
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_RANKING_INVALID")
     if len(set(ref_to_table.values())) != len(ref_to_table):
         raise MetricSourceCompositionError("COMPOSITION_PROVIDER_DUPLICATE_FACT")
     seen_dims: set[str] = set()
