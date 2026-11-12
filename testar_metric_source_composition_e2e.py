@@ -598,9 +598,15 @@ def test_temporal_plan_tampering_and_semantic_drift_fail_closed():
     context, result = _plan(raw, "synthetic report monthly")
     assert result["status"] == "planned", result
     original = context["fingerprint"]
+    raw["table_catalog"][0]["date_columns"].append("alternate_day")
+    raw["table_catalog"][0]["columns"].append({
+        "name": "alternate_day",
+        "data_type": "date",
+        "nullable": False,
+    })
     raw["metric_source_compositions"][0]["temporal"]["source_dates"][0][
         "target_column"
-    ] = "clearing_day"
+    ] = "alternate_day"
     assert normalize_context_snapshot(raw)["fingerprint"] != original
     for field in ("grain", "date_column", "source_ref", "missing_source"):
         plan = deepcopy(result["query_plan"])
