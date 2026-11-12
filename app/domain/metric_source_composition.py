@@ -11,6 +11,7 @@ accountant's verification of real source records.
 from __future__ import annotations
 
 import re
+from decimal import Decimal, InvalidOperation
 from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
@@ -29,6 +30,11 @@ _RANKING_KEYS = {"terms", "default_limit", "maximum_limit"}
 _RANKING_TERM_KEYS = {"term", "direction"}
 _RANKING_DIRECTIONS = {"ascending", "descending"}
 _RANKING_OPERATIONAL_CEILING = 100
+
+_WEIGHTED_CALCULATION_KEYS = {"operation", "terms"}
+_WEIGHTED_TERM_KEYS = {"source_ref", "coefficient"}
+_WEIGHT_DECIMAL = re.compile(r"^-?(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,6})?$")
+_WEIGHT_ABSOLUTE_LIMIT = Decimal("1000000")
 
 _CALCULATION_KEYS = {
     "operation", "numerator_source_refs", "denominator_source_refs",
@@ -140,6 +146,55 @@ def _approved_source_ratio(
         "zero_denominator": "null",
     }
 
+
+
+
+def _approved_source_calculation(
+    raw: object, source_refs: set[str],
+) -> dict[str, Any]:
+    """Arithmetic DSL; all client accounting signs and weights are tenant data.
+
+    Every authorized source participates once, with a coefficient explicitly
+    attested in the versioned context; no source has a built-in business role.
+    """
+    if not isinstance(raw, Mapping):
+        raise MetricSourceCompositionError("COMPOSITION_CALCULATION_INVALID")
+    if raw.get("operation") != "weighted_sum_of_sums":
+        return _approved_source_ratio(raw, source_refs)
+    if set(raw) != _WEIGHTED_CALCULATION_KEYS:
+        raise MetricSourceCompositionError("COMPOSITION_WEIGHTED_DEFINITION_INVALID")
+    terms = raw.get("terms")
+    if not isinstance(terms, list) or not 2 <= len(terms) <= 24:
+        raise MetricSourceCompositionError("COMPOSITION_WEIGHTED_TERMS_INVALID")
+    result = []
+    seen: set[str] = set()
+    for term in terms:
+        if not isinstance(term, Mapping) or set(term) != _WEIGHTED_TERM_KEYS:
+            raise MetricSourceCompositionError("COMPOSITION_WEIGHTED_TERM_INVALID")
+        ref, coefficient = term.get("source_ref"), term.get("coefficient")
+        if (
+            not _valid_ref(ref)
+            or ref.casefold() not in source_refs
+            or ref.casefold() in seen
+            or not isinstance(coefficient, str)
+            or _WEIGHT_DECIMAL.fullmatch(coefficient) is None
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_WEIGHTED_BINDING_INVALID")
+        try:
+            numeric = Decimal(coefficient)
+        except InvalidOperation:
+            raise MetricSourceCompositionError("COMPOSITION_WEIGHTED_COEFFICIENT_INVALID") from None
+        if not numeric.is_finite() or numeric == 0 or abs(numeric) > _WEIGHT_ABSOLUTE_LIMIT:
+            raise MetricSourceCompositionError("COMPOSITION_WEIGHTED_COEFFICIENT_INVALID")
+        seen.add(ref.casefold())
+        canonical = format(numeric.normalize(), "f")
+        result.append({"source_ref": ref.casefold(), "coefficient": canonical})
+    if seen != source_refs:
+        raise MetricSourceCompositionError("COMPOSITION_UNUSED_SOURCE")
+    return {
+        "operation": "weighted_sum_of_sums",
+        "terms": sorted(result, key=lambda item: item["source_ref"]),
+    }
 
 
 def _normalize_ranking_policy(raw: object) -> dict[str, Any]:
@@ -374,7 +429,7 @@ def normalize_metric_source_compositions(
             )
         calculation = None
         if "calculation" in raw_item:
-            calculation = _approved_source_ratio(
+            calculation = _approved_source_calculation(
                 raw_item["calculation"],
                 {source["source_ref"].casefold() for source in sources},
             )
@@ -595,7 +650,7 @@ def validate_projected_metric_composition(
         for predicate in filters:
             _source_filter(predicate, visible)
     if "calculation" in value:
-        approved_calculation = _approved_source_ratio(
+        approved_calculation = _approved_source_calculation(
             value["calculation"], unique_refs,
         )
         if value["calculation"] != approved_calculation:

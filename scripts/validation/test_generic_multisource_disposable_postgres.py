@@ -30,7 +30,7 @@ from app.domain.sql_generation import build_sql_generation_request
 from app.domain.sql_security import run_sql_security_gate
 from testar_metric_source_composition_e2e import (
     _plan, fixture_a, fixture_b, fixture_calendar_range, fixture_attested_ratio,
-    fixture_versioned_ranking,
+    fixture_versioned_ranking, fixture_weighted_source_sum,
 )
 
 EXPECTED_ENV = {
@@ -244,6 +244,44 @@ def main() -> None:
                 Decimal("76.923"), Decimal("62.500"),
                 Decimal("85.714"), Decimal("66.667"),
             ], ratio_rows
+            weighted = fixture_weighted_source_sum(raw)
+            weighted_sql = _query(
+                weighted,
+                "synthetic report monthly between 2025 and 2026",
+            )
+            weighted_rows = _actual(_readonly_query(connection,role,weighted_sql))
+            assert weighted_rows == [
+                ("2025-02-01",Decimal(160)),
+                ("2025-08-01",Decimal(55)),
+                ("2026-01-01",Decimal(104)),
+                ("2026-02-01",Decimal(20)),
+            ], weighted_rows
+
+            # Fractional tenant-declared coefficients remain decimal and
+            # do not inherit any assumed revenue/budget accounting meaning.
+            fractional=fixture_weighted_source_sum(raw)
+            fractional["metric_source_compositions"][0]["calculation"]["terms"][1]["coefficient"]="-0.5"
+            fractional_sql=_query(
+                fractional,
+                "synthetic report monthly between 2025 and 2026",
+            )
+            fractional_rows=_actual(_readonly_query(connection,role,fractional_sql))
+            assert fractional_rows == [
+                ("2025-02-01",Decimal("145.0")),
+                ("2025-08-01",Decimal("47.5")),
+                ("2026-01-01",Decimal("97.5")),
+                ("2026-02-01",Decimal("17.5")),
+            ], fractional_rows
+
+            combined=fixture_versioned_ranking(fixture_weighted_source_sum(raw))
+            ranked_weighted=_query(
+                combined,
+                "synthetic report monthly highest 1 between 2025 and 2026",
+            )
+            assert _actual(_readonly_query(connection,role,ranked_weighted))==[
+                ("2025-02-01",Decimal(160))
+            ]
+
             ranked=fixture_versioned_ranking(raw)
             best=_query(
                 ranked,"synthetic report monthly highest 2 between 2025 and 2026"
@@ -307,7 +345,9 @@ def main() -> None:
         _forbidden_cross_tenant(connection, queries[1][0], queries[0][1])
     print("DISPOSABLE_POSTGRES_COMPOSITION=PASS")
     print("TENANT_CONTEXTS=2")
-    print("READONLY_GENERATED_SELECTS=16")
+    print("READONLY_GENERATED_SELECTS=22")
+    print("WEIGHTED_SOURCE_ARITHMETIC=PASS")
+    print("FRACTIONAL_COEFFICIENT_ACCURACY=PASS")
     print("COMBINED_RANKING_AND_RATIO=PASS")
     print("TENANT_VERSIONED_RANKING=PASS")
     print("ZERO_DENOMINATOR_RETURNS_NULL=PASS")

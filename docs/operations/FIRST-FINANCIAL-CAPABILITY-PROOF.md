@@ -1,3 +1,13 @@
+## 12/11/2026 - Censo AST reconciliado e motor de cálculo portável
+
+A fonte publicada do n8n foi relida e os 41 Code validados por hash no crosswalk 68 nós/78 conexões. Censo sintático Acorn: 3.698 strings/templates, 1.719 curtos, 1.979 longos, discrepância +295 contra o heurístico 3.403 (18 nós diferem). O relatório docs/audits/LEGACY-N8N-AST-LITERAL-RECONCILIATION-20261112.md substitui o contador antigo para localização sintática. Classificações por fonte são **candidatos automatizados** F=1.732, T=371, S=830, U=765; não atestam significado financeiro real. O parsing usou imagem n8n descartável sem rede, sem executar corpos JS, SQL, Gemini ou benchmark.
+
+Operação genérica weighted_sum_of_sums com todos os coeficientes e fontes no catálogo tenant, normalizados e verificados antes do planejador/gerador, preservando fonte, versão, fingerprint, aprovação externa e gates. SQL PostgreSQL sintética comprovada, 22 SELECTs read-only em dois contextos distintos, aritmética com frações e ranking+ponderação, 2 ACL cross-tenant bloqueadas. Nada foi inferido dos 77 registros G5 cifrados; aprovação contábil, portabilidade em dois clientes reais e paridade oficial/Shadow não demonstradas.
+
+Operação continua OFFICIAL=n8n, SHADOW=LangGraph, LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false; sem merge, deploy, modificação n8n, banco cliente, permissões ou cutover.
+
+---
+
 ## 12/11/2026 - Censo de strings e externalizacao estrutural
 
 Inventario n8n publicado: 24 sites concretos anteriores + 1.987 literais longos individualmente indexados, com triagem candidata F=1.144, T=187, S=424, U=232. As 1.416 strings curtas ainda nao foram ancoradas uma a uma. Nao equivale a aprovacao contabil das 3.403 ocorrencias, nem indica que todas sejam regras financeiras. Relatorio e politica exclusivamente audit-only em docs/audits/LEGACY-N8N-LONG-LITERAL-TRIAGE-20261112.md e JSON.

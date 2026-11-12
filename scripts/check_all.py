@@ -489,6 +489,10 @@ STEPS = [
         "testar_legacy_long_literal_triage_offline.py",
         [sys.executable, "testar_legacy_long_literal_triage_offline.py"],
     ),
+    (
+        "testar_legacy_ast_literal_evidence.py",
+        [sys.executable, "testar_legacy_ast_literal_evidence.py"],
+    ),
     ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
     ("test_switch_shadow_evidence_tenant.py", [sys.executable, "scripts/test_switch_shadow_evidence_tenant.py"]),
     ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),]

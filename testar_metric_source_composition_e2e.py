@@ -1332,6 +1332,155 @@ def test_opt_in_ranking_preserves_old_plan_and_changes_version_fingerprint():
     assert "result_ranking" not in bound
 
 
+
+def fixture_weighted_source_sum(raw: dict) -> dict:
+    candidate=deepcopy(raw)
+    candidate["metric_source_compositions"][0]["calculation"]={
+        "operation":"weighted_sum_of_sums",
+        "terms":[
+            {"source_ref":"A","coefficient":"1.000"},
+            {"source_ref":"B","coefficient":"-1"},
+        ],
+    }
+    return candidate
+
+
+def test_weighted_source_formula_dynamic_sql_two_schemas_and_gates():
+    for base in (fixture_a(),fixture_b()):
+        configured=fixture_weighted_source_sum(fixture_calendar_range(base))
+        context,planned=_plan(configured,"synthetic report monthly between 2025 and 2026")
+        assert planned["status"]=="planned",planned
+        composition=planned["query_plan"]["planning_context"]["metric_source_composition"]
+        assert composition["calculation"]=={
+            "operation":"weighted_sum_of_sums",
+            "terms":[
+                {"source_ref":"a","coefficient":"1"},
+                {"source_ref":"b","coefficient":"-1"},
+            ]
+        }
+        sql=build_postgres_metric_source_sql(
+            build_sql_generation_request(planned["query_plan"])
+        )
+        assert "CASE WHEN" in sql and '"source_ref"' in sql
+        assert "NULLIF" not in sql
+        security,analysis=run_sql_security_gate(
+            current_sql=sql,query_plan=planned["query_plan"]
+        )
+        contract,_=run_sql_contract_gate(
+            current_sql=sql,query_plan=planned["query_plan"],analysis=analysis
+        )
+        assert security["status"]=="approved",security
+        assert contract["status"]=="approved",contract
+        for tamper in (
+            sql.replace("* (-1)", "* (1)"),
+            sql.replace("* (1)", "* (2)"),
+            sql.replace("'a'","'b'"),
+            sql.replace("UNION ALL","UNION"),
+        ):
+            assert tamper!=sql
+            denied,_=run_sql_contract_gate(
+                current_sql=tamper,query_plan=planned["query_plan"],analysis=analysis
+            )
+            assert denied["status"]!="approved",denied
+        assert context["fingerprint"]
+
+
+def test_weighted_source_formula_invalid_coefficients_rejected():
+    raw=fixture_weighted_source_sum(fixture_a())
+    invalid=[
+        "0","-0","1e7","nan","inf","-Infinity","1); DROP TABLE x;--",
+        "1000001","0.0000001",".5","1.0000000","--1",
+    ]
+    for value in invalid+[1,True,None]:
+        changed=deepcopy(raw)
+        changed["metric_source_compositions"][0]["calculation"]["terms"][1]["coefficient"]=value
+        try:
+            normalize_context_snapshot(changed)
+        except ContextNormalizationError:
+            pass
+        else:
+            raise AssertionError(value)
+    for change in (
+        [{"source_ref":"A","coefficient":"1"},{"source_ref":"A","coefficient":"-1"}],
+        [{"source_ref":"A","coefficient":"1"},{"source_ref":"UNKNOWN","coefficient":"-1"}],
+        [{"source_ref":"A","coefficient":"1"}],
+        [{"source_ref":"A","coefficient":"1"},{"source_ref":"B","coefficient":"-1","sql":"SELECT"}],
+    ):
+        altered=deepcopy(raw)
+        altered["metric_source_compositions"][0]["calculation"]["terms"]=change
+        try:
+            normalize_context_snapshot(altered)
+        except ContextNormalizationError:
+            pass
+        else:
+            raise AssertionError(change)
+    _,planned=_plan(raw)
+    assert planned["status"]=="planned",planned
+    request=build_sql_generation_request(planned["query_plan"])
+    original=request["generation_context"]["metric_source_composition"]["calculation"]
+    assert original["terms"][1]["coefficient"]=="-1"
+    for changed in (
+        {"coefficient":"1000001"},
+        {"coefficient":"1); --"},
+        {"source_ref":"foreign"},
+        {"coefficient":"0"},
+    ):
+        request_bad=deepcopy(request)
+        request_bad["generation_context"]["metric_source_composition"]["calculation"]["terms"][1].update(changed)
+        try:
+            build_postgres_metric_source_sql(request_bad)
+        except PostgresCompositionSqlError:
+            pass
+        else:
+            raise AssertionError(changed)
+
+
+def test_weighted_source_formula_ranking_and_semantic_fingerprint():
+    for base in (fixture_a(),fixture_b()):
+        composed=fixture_versioned_ranking(
+            fixture_weighted_source_sum(fixture_calendar_range(base))
+        )
+        initial,planned=_plan(
+            composed,"synthetic report monthly highest 1 between 2025 and 2026"
+        )
+        assert planned["status"]=="planned",planned
+        sql=build_postgres_metric_source_sql(
+            build_sql_generation_request(planned["query_plan"])
+        )
+        assert 'ORDER BY "metric_value" DESC NULLS LAST' in sql and "LIMIT 1" in sql
+        assert 'CASE WHEN "source_ref"' in sql
+        gate,analysis=run_sql_security_gate(
+            current_sql=sql,query_plan=planned["query_plan"]
+        )
+        contract,_=run_sql_contract_gate(
+            current_sql=sql,query_plan=planned["query_plan"],analysis=analysis
+        )
+        assert gate["status"]=="approved",gate
+        assert contract["status"]=="approved",contract
+        edited=deepcopy(composed)
+        edited["metric_source_compositions"][0]["calculation"]["terms"][1]["coefficient"]="-0.5"
+        revised,plan=_plan(
+            edited,"synthetic report monthly highest 1 between 2025 and 2026"
+        )
+        assert plan["status"]=="planned",plan
+        assert revised["fingerprint"]!=initial["fingerprint"]
+        revised_sql=build_postgres_metric_source_sql(
+            build_sql_generation_request(plan["query_plan"])
+        )
+        assert revised_sql!=sql and "* (-0.5)" in revised_sql
+
+
+def test_weighted_source_formula_requires_explicit_context_approval():
+    configured=fixture_weighted_source_sum(fixture_a())
+    configured["metric_source_compositions"][0]["accounting_definition_attested"]=False
+    try:
+        normalize_context_snapshot(configured)
+    except ContextNormalizationError:
+        pass
+    else:
+        raise AssertionError("Unapproved arithmetic context accepted")
+
+
 def main() -> None:
     tests = sorted(
         (name, obj) for name, obj in globals().items()

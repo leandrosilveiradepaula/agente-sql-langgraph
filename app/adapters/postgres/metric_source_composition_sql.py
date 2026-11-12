@@ -172,6 +172,18 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
     ) + [f'"{name}"' for name in aliases]
     if calculation is None:
         outer.append('SUM("measure_value") AS "metric_value"')
+    elif calculation["operation"] == "weighted_sum_of_sums":
+        terms = []
+        for term in calculation["terms"]:
+            # Coefficient is a canonical bounded decimal approved in tenant
+            # context. Never raw SQL, a client-specific sign or a hardcode.
+            ref = _literal(term["source_ref"])
+            terms.append(
+                'SUM(CASE WHEN "source_ref" = ' + ref
+                + ' THEN "measure_value" * (' + term["coefficient"]
+                + ') ELSE 0 END)'
+            )
+        outer.append('(' + ' + '.join(terms) + ') AS "metric_value"')
     else:
         def operand(key: str) -> str:
             refs = calculation[key]

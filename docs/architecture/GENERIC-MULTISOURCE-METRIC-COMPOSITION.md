@@ -1,3 +1,18 @@
+## Extensão versionada (12/11/2026) - Soma ponderada de fontes
+
+Novo cálculo opcional em metric_source_compositions[].calculation com operação weighted_sum_of_sums e termos de formato:
+
+- source_ref: identidade da fonte pertencente ao catálogo versionado do tenant;
+- coefficient: string decimal assinada e canonizada, por exemplo 1 ou -0.5.
+
+**Exemplo sem significado contábil real:** fonte alfa tem coeficiente 1 e fonte beta -0.5. Cada source_ref deve aparecer EXATAMENTE uma vez e estar autorizada. Coeficiente não é float nem fragmento SQL. Sinais por fonte declarados em sign_multiplier são aplicados antes do coeficiente; o motor não supõe realizado/orçado, receita/despesa, DRE ou centro de custo. Referências desconhecidas/ambíguas e coeficientes inválidos são rejeitados antes do provedor. Alterar o coeficiente altera contexto/fingerprint e exige nova aprovação do snapshot, não reutilizando autorização anterior.
+
+Renderer PostgreSQL usa SUM(CASE WHEN source_ref = valor_autorizado THEN measure_value * coeficiente_decimal ELSE 0 END) por termo, agrega antes de ranking opcional. Lista de fontes e números vêm do snapshot autenticado e versionado, nunca de SQL do cliente. SQL Security/Contract Gate exige equivalência do plano compilado. Sem cálculo, o comportamento anterior é preservado.
+
+Verificação: 42 testes de composição, 9 HTTP Canonical Shadow e PostgreSQL 16 descartável com **22 SELECTs read-only**, dois esquemas sintéticos distintos, coeficiente decimal e sinal, ranking composto, 2 rejeições cross-tenant. Não equivale a homologação financeira G5.
+
+---
+
 ## 12/11/2026 - Ranking externo por contexto sem copiar inteligencia de cliente
 
 O campo opcional ranking em metric_source_compositions possui terms, default_limit e maximum_limit. Cada term tem palavra normalizada e direction ascending/descending. A selecao do top/bottom so ocorre quando a pergunta corresponde a um termo versionado, com grao temporal ou dimensao de agrupamento aprovado. Limite numerico imediatamente apos o termo, se houver, deve respeitar limite por tenant e teto estrutural 100; sem numero, usa default_limit. Pedidos ambiguos, fora da faixa e negativos rejeitados. Sem termo, ranking nao e inserido; o sistema nao inventa a operacao.

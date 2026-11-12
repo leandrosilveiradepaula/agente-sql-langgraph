@@ -1,3 +1,9 @@
+## Atualização de 12/11/2026: censo anterior substituído para fins sintáticos
+
+**ATENÇÃO:** esta triagem histórica foi construída sobre 3.403 strings do scanner anterior. Nova auditoria independente AST Acorn 8.15.0 encontrou **3.698** ocorrências sintáticas (1.719 curtas, 1.979 longas) no MESMO código publicado. Há 18 nós com diferença, portanto os 3.403/1.987/1.416 NÃO são totais sintáticos finais e não podem ser apresentados como cobertura literal concluída. A trilha fonte-vinculada atual é docs/audits/LEGACY-N8N-AST-LITERAL-RECONCILIATION-20261112.md e JSON correspondente; todas as categorias continuam candidatas sem aprovação contábil. A trilha de 24 sites por linha segue válida como evidência de pontos particulares, independente da contagem.
+
+---
+
 # Triagem da fonte publicada: 3.403 literais JS
 
 **Escopo e limite:** 41/41 codigos JS do workflow publicado conferidos por SHA de corpo com baseline privado, 68 nos e 78 arestas conferidos. Inventario anterior: 3.403 ocorrencias; so 1.987 acima de 10 caracteres tinham hash/linha individuais. Outras 1.416 permanecem agregadas por no, NAO classificadas individualmente.

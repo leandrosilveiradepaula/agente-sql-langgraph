@@ -28,6 +28,7 @@ from app.test_runtime.offline_adapters import ShadowTestSqlRepairer
 from testar_metric_source_composition_e2e import (
     fixture_a, fixture_b, fixture_temporal, fixture_calendar_year,
     fixture_attested_ratio, fixture_versioned_ranking, fixture_calendar_range,
+    fixture_weighted_source_sum,
 )
 from testar_postgres_context_repository import FakeConnect
 from testar_shadow_test_runtime import _env, _run_asgi
@@ -231,6 +232,48 @@ def test_canonical_shadow_configured_ranking_two_tenants_and_drift():
     )
     assert not (status==200 and response.get("status")=="success")
     assert generator.calls==0
+
+
+def test_weighted_source_arithmetic_canonical_shadow_two_tenants_and_drift():
+    for tenant, fixture in (
+        ("weight-source-one", fixture_a()),
+        ("weight-source-two", fixture_b()),
+    ):
+        raw=fixture_weighted_source_sum(fixture_calendar_range(fixture))
+        runtime,db,generator,evidence=_instance(raw,tenant)
+        status,response=_run_asgi(
+            runtime.app,"POST","/v1/internal/sql-agent/generate",
+            _request(
+                tenant,"weighted-arithmetic-"+tenant,
+                question="synthetic report monthly between 2025 and 2026",
+            ),
+        )
+        assert status==200,(status,response)
+        assert response["status"]=="success",response
+        assert "CASE WHEN" in response["sql"]
+        assert '"measure_value" * (-1)' in response["sql"]
+        assert generator.calls==1
+        assert db.cursor.executed_parameters["tenant_id"]==tenant
+        assert evidence.create_calls>=1
+
+    raw=fixture_weighted_source_sum(fixture_calendar_range(fixture_a()))
+    approved=normalize_context_snapshot(
+        _canonical_payload(raw,"weight-source-one")
+    )["fingerprint"]
+    raw["metric_source_compositions"][0]["calculation"]["terms"][1]["coefficient"]="-0.5"
+    runtime,_,generator,_=_instance(
+        raw,"weight-source-one",pin=approved
+    )
+    status,response=_run_asgi(
+        runtime.app,"POST","/v1/internal/sql-agent/generate",
+        _request(
+            "weight-source-one","weighted-arithmetic-drift",
+            question="synthetic report monthly between 2025 and 2026",
+        ),
+    )
+    assert not (status==200 and response.get("status")=="success")
+    assert generator.calls==0
+
 
 def test_mismatched_principal_cannot_reuse_another_tenants_catalog():
     runtime, _, generator, _ = _instance(fixture_a(), "tenant-C1")
