@@ -20,6 +20,11 @@ from app.domain.metric_source_composition import (
 from app.domain.sql_generation import (
     SqlGenerationInputError, build_sql_generation_request,
 )
+from app.adapters.postgres.metric_source_composition_sql import (
+    PostgresCompositionSqlError, build_postgres_metric_source_sql,
+)
+from app.domain.sql_security import run_sql_security_gate
+from app.domain.sql_contract import run_sql_contract_gate
 from testar_planned_filters_e2e import _raw_context
 
 
@@ -324,6 +329,55 @@ def test_legacy_snapshots_without_compositions_keep_old_fingerprint():
     assert "metric_source_compositions" not in ctx
     assert ctx["fingerprint"] == normalize_context_snapshot(deepcopy(raw))["fingerprint"]
 
+
+
+def test_generated_postgres_sql_has_dynamic_sources_and_no_raw_fact_join():
+    for raw in (fixture_a(), fixture_b()):
+        _, result = _plan(raw)
+        assert result["status"] == "planned"
+        plan = result["query_plan"]
+        req = build_sql_generation_request(plan)
+        sql = build_postgres_metric_source_sql(req)
+        print("GENERATED_READ_ONLY_SQL_SHA256", __import__("hashlib").sha256(
+            sql.encode()).hexdigest())
+        assert "UNION ALL" in sql
+        assert "JOIN" not in sql
+        assert 'SUM("measure_value") AS "metric_value"' in sql
+        assert sql.startswith('WITH "combined_sources" AS (')
+        assert raw["metric_source_compositions"][0]["sources"][0]["value_column"] in sql
+        assert raw["metric_source_compositions"][0]["sources"][1]["value_column"] in sql
+        security, analysis = run_sql_security_gate(
+            current_sql=sql, query_plan=plan,
+        )
+        assert security["status"] == "approved", security["errors"]
+        contract, _ = run_sql_contract_gate(
+            current_sql=sql, query_plan=plan, analysis=analysis,
+        )
+        assert contract["status"] == "approved", contract["errors"]
+
+
+def test_compiler_fails_closed_on_unconfigured_source_and_escaped_literals():
+    raw = fixture_a()
+    _, planned = _plan(raw)
+    req = build_sql_generation_request(planned["query_plan"])
+    changed = deepcopy(req)
+    changed["generation_context"]["metric_source_composition"]["sources"][0][
+        "target_table"
+    ] = "other.private"
+    try:
+        build_postgres_metric_source_sql(changed)
+    except PostgresCompositionSqlError:
+        pass
+    else:
+        raise AssertionError("Unapproved source included")
+
+    escaped = deepcopy(req)
+    escaped["generation_context"]["metric_source_composition"]["sources"][0][
+        "source_filters"
+    ][0]["value"] = "O'Brien"
+    sql = build_postgres_metric_source_sql(escaped)
+    assert "'O''Brien'" in sql
+    assert "O'Brien" not in sql
 
 def main() -> None:
     tests = sorted(
