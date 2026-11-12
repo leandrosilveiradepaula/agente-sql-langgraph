@@ -759,6 +759,33 @@ def test_monthly_and_yearly_totals_from_real_sql_engine_with_synthetic_rows():
             conn.close()
 
 
+
+def test_unbound_explicit_year_or_period_reference_cannot_be_silently_ignored():
+    raw = fixture_temporal(fixture_a())
+    raw["metric_source_compositions"][0]["temporal"]["unhandled_period_terms"] = [
+        "last quarter", "trimestre anterior"
+    ]
+    for question in (
+        "synthetic report monthly in 2026",
+        "synthetic report per year 2025",
+        "synthetic report monthly last quarter",
+        "synthetic report monthly trimestre anterior",
+    ):
+        _, result = _plan(raw, question)
+        assert result["status"] == "rejected", (question, result)
+        assert result["error_code"] == "PLANNING_METRIC_COMPOSITION_INVALID"
+    invalid = deepcopy(raw)
+    invalid["metric_source_compositions"][0]["temporal"][
+        "unhandled_period_terms"
+    ] = ["monthly"]
+    try:
+        normalize_context_snapshot(invalid)
+    except ContextNormalizationError:
+        pass
+    else:
+        raise AssertionError("Overlapping period/grain signals accepted")
+
+
 def main() -> None:
     tests = sorted(
         (name, obj) for name, obj in globals().items()

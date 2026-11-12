@@ -28,6 +28,7 @@ _COMPOSITION_KEYS = {
 _TEMPORAL_GRAINS = {"day", "week", "month", "quarter", "year"}
 _NUMERIC_TYPES = {"numeric", "decimal", "smallint", "integer", "bigint"}
 _TEMPORAL_KEYS = {"require_explicit_grain", "granularities", "source_dates"}
+_TEMPORAL_OPTIONAL_KEYS = {"unhandled_period_terms"}
 _SOURCE_KEYS = {
     "source_ref", "target_table", "value_column", "grain_ref",
     "sign_multiplier", "dimension_columns", "source_filters",
@@ -532,7 +533,11 @@ def _normalize_composition_temporal(
     table_index: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Bind all calendar dates to the catalog; refuse implicit timezone casts."""
-    if not isinstance(raw, Mapping) or set(raw) != _TEMPORAL_KEYS:
+    if (
+        not isinstance(raw, Mapping)
+        or not _TEMPORAL_KEYS <= set(raw)
+        or set(raw) - _TEMPORAL_KEYS - _TEMPORAL_OPTIONAL_KEYS
+    ):
         raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_INVALID")
     if type(raw.get("require_explicit_grain")) is not bool:
         raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_REQUIRED_FLAG_INVALID")
@@ -572,6 +577,22 @@ def _normalize_composition_temporal(
             "grain": grain,
             "terms": sorted(normalized_terms),
         })
+    raw_periods = raw.get("unhandled_period_terms", [])
+    if not isinstance(raw_periods, list) or len(raw_periods) > 64:
+        raise MetricSourceCompositionError("COMPOSITION_UNHANDLED_PERIODS_INVALID")
+    period_terms = set()
+    for raw_term in raw_periods:
+        if (
+            not isinstance(raw_term, str)
+            or not raw_term.strip()
+            or len(raw_term) > 80
+            or any(ord(ch) < 32 for ch in raw_term)
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_UNHANDLED_PERIOD_INVALID")
+        term = normalize_search_text(raw_term)
+        if not term or term in period_terms or term in term_to_grain:
+            raise MetricSourceCompositionError("COMPOSITION_UNHANDLED_PERIOD_AMBIGUOUS")
+        period_terms.add(term)
     bindings = raw.get("source_dates")
     if not isinstance(bindings, list) or len(bindings) != len(sources):
         raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_DATES_INCOMPLETE")
@@ -621,6 +642,7 @@ def _normalize_composition_temporal(
         "require_explicit_grain": raw["require_explicit_grain"],
         "granularities": sorted(grains, key=lambda x: x["grain"]),
         "source_dates": sorted(parsed, key=lambda x: x["source_ref"].casefold()),
+        "unhandled_period_terms": sorted(period_terms),
     }
 
 
@@ -632,6 +654,16 @@ def _select_composition_temporal(
     if not isinstance(temporal, Mapping) or not isinstance(question, str):
         raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_INVALID")
     normalized = normalize_search_text(question)
+    # Do not return an all-years or wrong-period total when the question
+    # includes an explicit year or a versioned but unimplemented reference.
+    # A later typed interval-binding contract may support these safely.
+    if re.search(r"(?<!\w)[0-9]{4}(?!\w)", normalized):
+        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_PERIOD_UNBOUND")
+    if any(
+        re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", normalized)
+        for term in temporal["unhandled_period_terms"]
+    ):
+        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_PERIOD_UNBOUND")
     matches = {
         item["grain"] for item in temporal["granularities"]
         if any(
