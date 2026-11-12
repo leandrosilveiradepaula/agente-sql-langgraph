@@ -651,6 +651,101 @@ def test_contract_rejects_wrong_calendar_grain_date_and_no_time_bucket():
         ), (case, contract["errors"])
 
 
+
+def test_monthly_and_yearly_totals_from_real_sql_engine_with_synthetic_rows():
+    """Evaluate the generated SQL on an isolated, in-memory SQL engine.
+
+    SQLite's date_trunc stub emulates PostgreSQL DATE-only bucketing. This
+    proves numeric signs + filter lineage + UNION aggregation across two
+    fictional schemas; it does NOT prove PostgreSQL dialect nor real G5.
+    """
+    import sqlite3
+    from datetime import date
+    for raw_base in (fixture_a(), fixture_b()):
+        raw = fixture_temporal(raw_base)
+        schema = raw["table_catalog"][0]["schema_name"]
+        definition = raw["metric_source_compositions"][0]
+        facts = definition["sources"]
+        temporal = definition["temporal"]
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.create_function("date_trunc", 2, lambda grain, value: (
+                date.fromisoformat(value).replace(
+                    month=1 if grain == "year" else (
+                        ((date.fromisoformat(value).month - 1) // 3 * 3 + 1)
+                        if grain == "quarter" else
+                        date.fromisoformat(value).month
+                    ),
+                    day=1 if grain in ("year", "month", "quarter") else
+                    date.fromisoformat(value).day,
+                ).isoformat() + " 00:00:00"
+            ))
+            conn.execute(f'ATTACH DATABASE \':memory:\' AS "{schema}"')
+            for fact, dates in zip(facts, temporal["source_dates"]):
+                assert dates["source_ref"] == fact["source_ref"]
+                table = fact["target_table"].split(".")[1]
+                value_col = fact["value_column"]
+                date_col = dates["target_column"]
+                conn.execute(
+                    f'CREATE TABLE "{schema}"."{table}" '
+                    f'("event_id" INTEGER, "{value_col}" NUMERIC, '
+                    f'"zone_code" TEXT, "flag" TEXT, "{date_col}" DATE)'
+                )
+            positive, negative = facts
+            positive_date = temporal["source_dates"][0]["target_column"]
+            negative_date = temporal["source_dates"][1]["target_column"]
+            pos_rows = (
+                (1, 100, "north", "approved", "2026-01-03"),
+                (2, 50, "south", "approved", "2026-01-20"),
+                (3, 70, "north", "approved", "2026-02-06"),
+                (4, 1000, "north", "blocked", "2026-01-25"),
+            )
+            neg_rows = (
+                (1, 20, "north", "approved", "2026-01-09"),
+                (2, 15, "north", "verified", "2026-02-12"),
+                (3, 5, "south", "approved", "2026-03-16"),
+                (4, 1000, "north", "blocked", "2026-01-21"),
+            )
+            for table, metric, dt, rows in (
+                (positive["target_table"].split(".")[1], positive["value_column"],
+                 positive_date, pos_rows),
+                (negative["target_table"].split(".")[1], negative["value_column"],
+                 negative_date, neg_rows),
+            ):
+                statement = (
+                    f'INSERT INTO "{schema}"."{table}" '
+                    f'("event_id", "{metric}", "zone_code", "flag", "{dt}") '
+                    'VALUES (?, ?, ?, ?, ?)'
+                )
+                conn.executemany(statement, rows)
+            for grain, expected in (
+                ("month", [
+                    ("2026-01-01 00:00:00", 130),
+                    ("2026-02-01 00:00:00", 55),
+                    ("2026-03-01 00:00:00", -5),
+                ]),
+                ("year", [("2026-01-01 00:00:00", 180)]),
+            ):
+                _, result = _plan(raw, f"synthetic report per {grain}")
+                assert result["status"] == "planned", result
+                plan = result["query_plan"]
+                sql = build_postgres_metric_source_sql(
+                    build_sql_generation_request(plan)
+                )
+                actual = conn.execute(sql).fetchall()
+                assert actual == expected, (grain, actual, expected)
+                security, analysis = run_sql_security_gate(
+                    current_sql=sql, query_plan=plan,
+                )
+                contract, _ = run_sql_contract_gate(
+                    current_sql=sql, query_plan=plan, analysis=analysis,
+                )
+                assert security["status"] == "approved", security["errors"]
+                assert contract["status"] == "approved", contract["errors"]
+        finally:
+            conn.close()
+
+
 def main() -> None:
     tests = sorted(
         (name, obj) for name, obj in globals().items()
