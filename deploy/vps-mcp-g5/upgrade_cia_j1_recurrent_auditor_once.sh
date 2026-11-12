@@ -96,10 +96,18 @@ cleanup() {
   code=$?
   trap - EXIT
   if test "$changed" = 1 && test "$completed" != 1; then
-    /usr/bin/install -o root -g root -m 0644 "$BACKUP/crypto_j1_readonly.py" "$AUDIT" || true
-    /usr/bin/systemctl restart "$OWNER_SERVICE" || true
-    /usr/bin/systemctl restart "$OPS_SERVICE" || true
-    printf 'CIA_J1_RECURRENT_AUDIT_RELEASE=ROLLED_BACK\n' >&2
+    rollback_ok=1
+    /usr/bin/install -o root -g root -m 0644 "$BACKUP/crypto_j1_readonly.py" "$AUDIT" || rollback_ok=0
+    /usr/bin/systemctl restart "$OWNER_SERVICE" || rollback_ok=0
+    /usr/bin/systemctl restart "$OPS_SERVICE" || rollback_ok=0
+    if test "$rollback_ok" = 1 &&
+       hash_is "$AUDIT" "$OLD_AUDIT" &&
+       /usr/bin/systemctl is-active --quiet "$OWNER_SERVICE" &&
+       /usr/bin/systemctl is-active --quiet "$OPS_SERVICE"; then
+      printf 'CIA_J1_RECURRENT_AUDIT_RELEASE=ROLLED_BACK_VERIFIED\n' >&2
+    else
+      printf 'CIA_J1_RECURRENT_AUDIT_RELEASE=ROLLBACK_UNVERIFIED_MANUAL_INTERVENTION_REQUIRED\n' >&2
+    fi
   fi
   /usr/bin/rm -rf -- "$TMP"
   exit "$code"
