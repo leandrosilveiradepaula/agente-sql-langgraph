@@ -412,6 +412,59 @@ def test_contract_rejects_wrong_sign_dedup_or_missing_scoped_filter():
         ), (name, contract["errors"])
 
 
+
+def test_grouping_is_bound_for_each_source_and_verified_post_union():
+    for raw in (fixture_a(), fixture_b()):
+        snapshot, result = _plan(raw)
+        assert result["status"] == "planned"
+        plan = deepcopy(result["query_plan"])
+        projection = plan["planning_context"]
+        source = raw["metric_source_compositions"][0]["sources"][0]
+        dims = [{
+            "canonical_value": "region",
+            "target_table": source["target_table"],
+            "target_column": "zone_code",
+            "grouping_requested": True,
+            "source": "semantic_alias",
+        }]
+        projection["detected_dimensions"] = dims
+        projection["metric_source_composition"] = project_metric_source_composition(
+            definitions=snapshot["metric_source_compositions"],
+            intent_name="synthetic_intent",
+            required_tables=projection["required_tables"],
+            detected_dimensions=dims,
+            planned_metrics=[], planned_filters=[],
+            analytical_operations=[], temporal_series=None,
+        )
+        request = build_sql_generation_request(plan)
+        sql = build_postgres_metric_source_sql(request)
+        assert 'AS "group_1"' in sql
+        assert 'GROUP BY "group_1"' in sql
+        assert sql.count('AS "group_1"') == 2
+        assert "UNION ALL" in sql
+        security, analysis = run_sql_security_gate(
+            current_sql=sql, query_plan=plan
+        )
+        assert security["status"] == "approved", security["errors"]
+        contract, _ = run_sql_contract_gate(
+            current_sql=sql, query_plan=plan, analysis=analysis,
+        )
+        assert contract["status"] == "approved", contract["errors"]
+        # A changed planned grouping target is rejected even when the SQL
+        # still matches the original composed source SQL.
+        plan["planning_context"]["detected_dimensions"][0][
+            "target_column"
+        ] = "flag"
+        mismatch, _ = run_sql_contract_gate(
+            current_sql=sql, query_plan=plan,
+        )
+        assert mismatch["status"] == "rejected"
+        assert any(
+            item["code"] == "SQL_CONTRACT_GROUPING_DIMENSION_MISMATCH"
+            for item in mismatch["errors"]
+        )
+
+
 def main() -> None:
     tests = sorted(
         (name, obj) for name, obj in globals().items()
