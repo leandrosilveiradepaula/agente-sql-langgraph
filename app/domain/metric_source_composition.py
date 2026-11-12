@@ -15,6 +15,8 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
+from app.domain.search_text import normalize_search_text
+
 _REFERENCE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _COLUMN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _STRATEGY = "union_all_then_aggregate"
@@ -23,6 +25,8 @@ _COMPOSITION_KEYS = {
     "composition_ref", "intent_name", "metric_ref", "strategy",
     "source_use", "accounting_definition_attested", "sources",
 }
+_TEMPORAL_GRAINS = {"day", "week", "month", "quarter", "year"}
+_TEMPORAL_KEYS = {"require_explicit_grain", "granularities", "source_dates"}
 _SOURCE_KEYS = {
     "source_ref", "target_table", "value_column", "grain_ref",
     "sign_multiplier", "dimension_columns", "source_filters",
@@ -102,7 +106,11 @@ def normalize_metric_source_compositions(
     output = []
     intents: set[str] = set()
     for raw_item in raw:
-        if not isinstance(raw_item, Mapping) or set(raw_item) != _COMPOSITION_KEYS:
+        if (
+            not isinstance(raw_item, Mapping)
+            or not _COMPOSITION_KEYS <= set(raw_item)
+            or set(raw_item) - _COMPOSITION_KEYS - {"temporal"}
+        ):
             raise MetricSourceCompositionError("COMPOSITION_DEFINITION_INVALID")
         identity = raw_item.get("composition_ref")
         intent = raw_item.get("intent_name")
@@ -193,7 +201,13 @@ def normalize_metric_source_compositions(
                     ),
                 ),
             })
+        temporal = None
+        if "temporal" in raw_item:
+            temporal = _normalize_composition_temporal(
+                raw_item["temporal"], sources, table_index
+            )
         output.append({
+            **({"temporal": temporal} if temporal is not None else {}),
             "composition_ref": identity,
             "intent_name": intent,
             "metric_ref": metric_ref,
@@ -217,6 +231,7 @@ def project_metric_source_composition(
     planned_filters: list[Mapping[str, Any]],
     analytical_operations: list[Mapping[str, Any]],
     temporal_series: Mapping[str, Any] | None,
+    normalized_question: str = "",
 ) -> dict[str, Any] | None:
     if not isinstance(definitions, list):
         raise MetricSourceCompositionError("COMPOSITIONS_INVALID")
@@ -270,7 +285,14 @@ def project_metric_source_composition(
             "canonical_value": concept,
             "source_bindings": bindings,
         })
+    temporal_grouping = _select_composition_temporal(
+        source.get("temporal"), normalized_question
+    )
     return {
+        **(
+            {"temporal_grouping": temporal_grouping}
+            if temporal_grouping is not None else {}
+        ),
         "composition_ref": source["composition_ref"],
         "metric_ref": source["metric_ref"],
         "strategy": source["strategy"],
@@ -293,10 +315,15 @@ def validate_projected_metric_composition(
     catalog_columns: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Second, pre-provider boundary: reject altered plans and missing ACL."""
-    if not isinstance(value, Mapping) or set(value) != {
+    expected = {
         "composition_ref", "metric_ref", "strategy", "source_use",
         "sources", "grouping_dimensions",
-    }:
+    }
+    if (
+        not isinstance(value, Mapping)
+        or not expected <= set(value)
+        or set(value) - expected - {"temporal_grouping"}
+    ):
         raise MetricSourceCompositionError("COMPOSITION_PROVIDER_CONTRACT_INVALID")
     if (
         not _valid_ref(value.get("composition_ref"))
@@ -398,4 +425,181 @@ def validate_projected_metric_composition(
                 )
         if present != unique_refs:
             raise MetricSourceCompositionError("COMPOSITION_PROVIDER_GROUPING_INCOMPLETE")
+    if "temporal_grouping" in value:
+        temporal = value["temporal_grouping"]
+        if (
+            not isinstance(temporal, Mapping)
+            or set(temporal) != {"grain", "source_bindings"}
+            or temporal.get("grain") not in _TEMPORAL_GRAINS
+            or not isinstance(temporal.get("source_bindings"), list)
+            or len(temporal["source_bindings"]) != len(sources)
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_TEMPORAL_INVALID")
+        dates: set[str] = set()
+        allowed_by_table = {
+            str(table.get("qualified_name", "")).casefold(): table
+            for table in authorized_tables if isinstance(table, Mapping)
+        }
+        for binding in temporal["source_bindings"]:
+            if not isinstance(binding, Mapping) or set(binding) != {
+                "source_ref", "target_table", "target_column"
+            }:
+                raise MetricSourceCompositionError("COMPOSITION_PROVIDER_DATE_INVALID")
+            ref = binding.get("source_ref")
+            table = binding.get("target_table")
+            col = binding.get("target_column")
+            if (
+                not _valid_ref(ref)
+                or ref.casefold() not in ref_to_table
+                or ref.casefold() in dates
+                or not isinstance(table, str)
+                or table.casefold() != ref_to_table[ref.casefold()]
+                or not _valid_column(col)
+            ):
+                raise MetricSourceCompositionError("COMPOSITION_PROVIDER_DATE_INVALID")
+            dates.add(ref.casefold())
+            declared = allowed_by_table.get(table.casefold(), {})
+            date_fields = declared.get("date_columns", [])
+            if not isinstance(date_fields, list) or col.casefold() not in {
+                str(item if isinstance(item, str) else item.get("name", "")).casefold()
+                for item in date_fields
+                if isinstance(item, (str, Mapping))
+            }:
+                raise MetricSourceCompositionError("COMPOSITION_PROVIDER_DATE_NOT_CATALOGED")
+            columns = catalog_columns.get(table, [])
+            if not isinstance(columns, list) or not any(
+                isinstance(item, Mapping)
+                and str(item.get("name", "")).casefold() == col.casefold()
+                and str(item.get("data_type", "")).casefold() == "date"
+                for item in columns
+            ):
+                raise MetricSourceCompositionError("COMPOSITION_PROVIDER_DATE_TYPE_INVALID")
+        if dates != unique_refs:
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_DATES_INCOMPLETE")
     return deepcopy(dict(value))
+
+
+
+def _normalize_composition_temporal(
+    raw: object,
+    sources: list[dict[str, Any]],
+    table_index: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Bind all calendar dates to the catalog; refuse implicit timezone casts."""
+    if not isinstance(raw, Mapping) or set(raw) != _TEMPORAL_KEYS:
+        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_INVALID")
+    if type(raw.get("require_explicit_grain")) is not bool:
+        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_REQUIRED_FLAG_INVALID")
+    raw_grains = raw.get("granularities")
+    if not isinstance(raw_grains, list) or not 1 <= len(raw_grains) <= 5:
+        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_GRAINS_INVALID")
+    seen_grains: set[str] = set()
+    term_to_grain: dict[str, str] = {}
+    grains = []
+    for item in raw_grains:
+        if not isinstance(item, Mapping) or set(item) != {"grain", "terms"}:
+            raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_GRAIN_INVALID")
+        grain, terms = item["grain"], item["terms"]
+        if (
+            grain not in _TEMPORAL_GRAINS
+            or grain in seen_grains
+            or not isinstance(terms, list)
+            or not 1 <= len(terms) <= 32
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_GRAIN_INVALID")
+        seen_grains.add(grain)
+        normalized_terms = []
+        for term in terms:
+            if not isinstance(term, str) or not term.strip() or len(term) > 80:
+                raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_TERM_INVALID")
+            if any(ord(c) < 32 for c in term):
+                raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_TERM_INVALID")
+            normalized = normalize_search_text(term)
+            if (
+                not normalized
+                or normalized in term_to_grain
+            ):
+                raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_TERM_AMBIGUOUS")
+            term_to_grain[normalized] = grain
+            normalized_terms.append(normalized)
+        grains.append({
+            "grain": grain,
+            "terms": sorted(normalized_terms),
+        })
+    bindings = raw.get("source_dates")
+    if not isinstance(bindings, list) or len(bindings) != len(sources):
+        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_DATES_INCOMPLETE")
+    by_ref = {source["source_ref"].casefold(): source for source in sources}
+    seen_refs: set[str] = set()
+    parsed = []
+    for binding in bindings:
+        if not isinstance(binding, Mapping) or set(binding) != {
+            "source_ref", "target_column"
+        }:
+            raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_DATE_INVALID")
+        ref, col = binding["source_ref"], binding["target_column"]
+        if (
+            not _valid_ref(ref)
+            or ref.casefold() not in by_ref
+            or ref.casefold() in seen_refs
+            or not _valid_column(col)
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_DATE_INVALID")
+        seen_refs.add(ref.casefold())
+        fact = by_ref[ref.casefold()]
+        table = table_index[fact["target_table"].casefold()]
+        date_fields = table.get("date_columns", [])
+        if not isinstance(date_fields, list) or col.casefold() not in {
+            str(item if isinstance(item, str) else item.get("name", "")).casefold()
+            for item in date_fields if isinstance(item, (str, Mapping))
+        }:
+            raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_DATE_NOT_ALLOWED")
+        metadata = table.get("columns", [])
+        # Only DATE is accepted until tenant timezone/coercion semantics
+        # are explicitly validated. TIMESTAMPTZ would change months by zone.
+        if not isinstance(metadata, list) or not any(
+            isinstance(item, Mapping)
+            and str(item.get("name", "")).casefold() == col.casefold()
+            and str(item.get("data_type", "")).casefold() == "date"
+            for item in metadata
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_DATE_TYPE_INVALID")
+        parsed.append({
+            "source_ref": fact["source_ref"],
+            "target_table": fact["target_table"],
+            "target_column": col,
+        })
+    if seen_refs != set(by_ref):
+        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_DATES_INCOMPLETE")
+    return {
+        "require_explicit_grain": raw["require_explicit_grain"],
+        "granularities": sorted(grains, key=lambda x: x["grain"]),
+        "source_dates": sorted(parsed, key=lambda x: x["source_ref"].casefold()),
+    }
+
+
+def _select_composition_temporal(
+    temporal: object, question: str,
+) -> dict[str, Any] | None:
+    if temporal is None:
+        return None
+    if not isinstance(temporal, Mapping) or not isinstance(question, str):
+        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_INVALID")
+    normalized = normalize_search_text(question)
+    matches = {
+        item["grain"] for item in temporal["granularities"]
+        if any(
+            re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", normalized)
+            for term in item["terms"]
+        )
+    }
+    if len(matches) > 1:
+        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_GRAIN_AMBIGUOUS")
+    if not matches:
+        if temporal["require_explicit_grain"]:
+            raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_GRAIN_REQUIRED")
+        return None
+    return {
+        "grain": next(iter(matches)),
+        "source_bindings": deepcopy(temporal["source_dates"]),
+    }
