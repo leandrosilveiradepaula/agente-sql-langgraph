@@ -1,3 +1,13 @@
+## DECISÃO DO OPERADOR — CONTINUIDADE AUTÔNOMA E SÓ RESULTADO FINAL (11/11/2026 23:56 UTC)
+
+**Não interromper uma execução substancial com mensagens de progresso, desculpas ou pedido de `prossiga`.** O operador quer **somente o resultado final**, depois de completar todo o trabalho técnico seguro executável naquele turno. Não alegar trabalho em segundo plano, prometer entrega futura ou fazer alterações sujeitas a gate humano; continuar autonomamente com GitHub e VPS até haver uma entrega funcional ou bloqueio externo incontornável. Se houver pausa técnica, resolver sem enviar relatório intermediário. Consultar o código e evidências reais a cada retomada.
+
+**Entrega funcional desta execução:** implementado o mecanismo universal *multi-source fact stream → `UNION ALL` → aggregate* encontrado estruturalmente no nó n8n 22, com contexto versionado por tenant, granularidade, sinais, filtros, dimensões, SQL dinâmica e contrato SQL que **não aceita** semântica de união alterada. **Dois contextos sintéticos diferentes passaram** no LangGraph HTTP real em contêiner sem rede com adaptador estrutural injetado; nenhum LLM, DB financeira ou benchmark foi chamado. A documentação de mecanismo/evidências está em `docs/architecture/GENERIC-MULTISOURCE-METRIC-COMPOSITION.md`; `testar_metric_source_composition_e2e.py` (15) + `testar_canonical_composition_shadow_e2e.py` (3) e regressões aprovados. Evidência privada SHA `7d072603f211ad1fde940d809c366246bfa3c2cfdfda77a7b328ea89e6dc2db6`.
+
+**Estado honesto:** capacidade **estrutural demonstrada somente em cenários sintéticos**; a migração financeira real permanece `IMPLEMENTED_UNPROVEN`/`NOT_PROVEN` porque o pacote G5 original da versão oficial contém 77 registros cifrados sem aprovação contábil. Não usar a DEMO como substituto, não inventar signo, fórmula, join ou coluna, não declarar paridade com n8n+Gemini. Sem deploy/migration/merge, n8n oficial não alterado, SQL real Shadow false. Expandir para outros comportamentos com a mesma abordagem, sem hardcode. O código do renderer está isolado, **não** substituiu o provider Gemini em produção.
+
+---
+
 # 2026-11-11 21:36 UTC — ORDEM VINCULANTE: PROVAR A MIGRAÇÃO FINANCEIRA REAL
 
 **Missão única:** migrar a inteligência do Agente Financeiro EXISTENTE, estudando juntos o workflow n8n publicado (**68 nós, 78 conexões**) e as **11 versões semânticas do banco/backup G5**, para Produto + n8n (preservado) + LangGraph + Gemini. Não criar outro agente, não confundir com Factory/CRM, não copiar código/SQL/regras casuísticas ou hardcodes financeiros do n8n para Python/TypeScript.

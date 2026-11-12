@@ -1,3 +1,11 @@
+## Estado: mecanismo de composição estrutural executado, contabilidade G5 não comprovada
+
+Os nós 22/8 do legado revelaram uma operação estrutural genérica: combinar lançamentos de diferentes fontes antes de somar, com grão, sinais, filtros e agrupamentos. Foi implementado contrato `metric_source_compositions` por tenant e **comprovada** a interpretação/planejamento/SQL dinâmica/validação e HTTP LangGraph com **dois contextos sintéticos independentes** (sem SQL financeira executada). Ver `docs/architecture/GENERIC-MULTISOURCE-METRIC-COMPOSITION.md`, testes E2E e relatório privado SHA `7d072603f211ad1fde940d809c366246bfa3c2cfdfda77a7b328ea89e6dc2db6`.
+
+**Não elevar para `PROVEN` no legado.** Falta vincular os filtros, fórmulas, sinais e dados físicos à **versão oficial G5** e obter significado financeiro aprovado; 77 registros cifrados permanecem sem revisão. Gemini real, paridade numérica, segundo cliente real, execução SQL read-only e integração n8n+Shadow oficial não foram homologados. O teste usa adapter SQL estrutural injetado, sem LLM e sem respostas do benchmark. Não reivindicar conclusão da migração.
+
+---
+
 # Primeira prova obrigatória — capacidade financeira real n8n/G5 → LangGraph
 
 **Estado inicial: `NOT_MIGRATED` / evidência funcional `NOT_PROVEN`.** Contrato operacional vinculante de 11/11/2026 21:36 UTC. Não é autorização de executar SQL financeira, acessar dados sem permissão, publicar contexto, alterar n8n ou fazer cutover.

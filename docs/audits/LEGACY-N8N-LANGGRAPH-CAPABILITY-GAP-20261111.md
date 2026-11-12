@@ -1,3 +1,11 @@
+## Atualização de lacuna — mecanismo de composição de fatos (11/11/2026)
+
+**Lacuna estrutural reduzida:** nó 22, `planDreMensalAnalitica` (1973–2027), prescreve `UNION ALL` de fatos antes de somar. O novo mecanismo `metric_source_compositions` seleciona fontes/medidas/sinais/grãos/filters por catálogo sem código cliente e compila SQL dinâmica de leitura; o SQL Contract exige equivalência estrutural exata por token ao plano derivado, e os dois cenários sintéticos passaram inclusive pelo LangGraph HTTP isolado (gerador injetado). `docs/architecture/GENERIC-MULTISOURCE-METRIC-COMPOSITION.md` detalha evidência e limites.
+
+**Permanece ABERTO:** transferência dos significados contábeis, dos 77 registros G5 da versão oficial cifrada, prova com Gemini real, operação n8n Shadow correlacionada e igualdade numérica autorizada. Estado da capacidade do legado = `IMPLEMENTED_UNPROVEN`, não `PROVEN`. Dois catálogos sintéticos não substituem dois clientes reais.
+
+---
+
 ## 11/11/2026 — FONTE DEMO NÃO É A SEMÂNTICA DO LEGADO (VERIFICAÇÃO REAL)
 
 **Sem perguntar ao operador nem executar SQL financeira**, foram verificadas as duas fontes Supabase já conectadas. O projeto SOURCE original do Agente Financeiro está `INACTIVE` e sua API de esquema retorna indisponível. A DEMO está `ACTIVE_HEALTHY` e, além das 13 tabelas do schema `public` anteriormente examinadas, **possui as cinco coleções `ai_ducklake_*` no schema `semantic_context`** (regra, aliases, DRE, catálogo e padrões históricos). Na DEMO, SELECT agregado **somente de hashes de versão e contagens** sobre as quatro coleções de conhecimento — sem tocar as linhas de `sql_patterns` ou consultar valores financeiros — confirmou **10 versões**, totalizando 110 regras, 605 aliases, 130 DRE e 80 registros de catálogo. Os 10 hashes foram comparados ao manifesto G5 original na VPS: **0/10 versões comuns às 11 versões do G5**. A versão selecionada pelo workflow oficial permanece **somente no G5** (`7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485`).
