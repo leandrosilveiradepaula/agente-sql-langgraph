@@ -21,7 +21,9 @@ from app.adapters.testing.fake_shadow_evidence_repository import (
 from app.domain.context_normalizer import normalize_context_snapshot
 from app.test_runtime.composition import create_shadow_test_runtime
 from app.test_runtime.offline_adapters import ShadowTestSqlRepairer
-from testar_metric_source_composition_e2e import fixture_a, fixture_b
+from testar_metric_source_composition_e2e import (
+    fixture_a, fixture_b, fixture_temporal,
+)
 from testar_postgres_context_repository import FakeConnect
 from testar_shadow_test_runtime import _env, _run_asgi
 
@@ -100,11 +102,14 @@ def _instance(raw: dict, tenant: str, *, pin: str | None = None):
     return runtime, fake_db, generator, evidence
 
 
-def _request(tenant: str, run_id: str) -> dict:
+def _request(
+    tenant: str, run_id: str,
+    question: str = "synthetic report about two combined streams",
+) -> dict:
     return {
         "contract_version": "1",
         "agent_run_id": run_id,
-        "question": "synthetic report about two combined streams",
+        "question": question,
         "principal": {
             "id": "operator-fixture",
             "profile": "sql_generation",
@@ -177,6 +182,28 @@ def test_changed_sign_requires_new_fingerprint_before_generator():
     )
     assert not (http == 200 and response.get("status") == "success")
     assert generator.calls == 0
+
+
+
+def test_http_shadow_monthly_composition_for_two_unrelated_tenants():
+    for name, data in (
+        ("temporal-tenant-a", fixture_a()),
+        ("temporal-tenant-b", fixture_b()),
+    ):
+        runtime, _, generator, evidence = _instance(
+            fixture_temporal(data), name,
+        )
+        http, result = _run_asgi(
+            runtime.app, "POST", "/v1/internal/sql-agent/generate",
+            _request(
+                name, f"temporal-composition-{name}",
+                question="synthetic report monthly",
+            ),
+        )
+        assert http == 200 and result["status"] == "success", (http, result)
+        assert result["sql"].count("date_trunc('month',") == 2
+        assert generator.calls == 1
+        assert evidence.create_calls >= 1
 
 
 def main():
