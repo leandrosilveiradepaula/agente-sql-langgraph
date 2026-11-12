@@ -28,7 +28,7 @@ _COMPOSITION_KEYS = {
 _TEMPORAL_GRAINS = {"day", "week", "month", "quarter", "year"}
 _NUMERIC_TYPES = {"numeric", "decimal", "smallint", "integer", "bigint"}
 _TEMPORAL_KEYS = {"require_explicit_grain", "granularities", "source_dates"}
-_TEMPORAL_OPTIONAL_KEYS = {"unhandled_period_terms"}
+_TEMPORAL_OPTIONAL_KEYS = {"unhandled_period_terms", "period_year"}
 _SOURCE_KEYS = {
     "source_ref", "target_table", "value_column", "grain_ref",
     "sign_multiplier", "dimension_columns", "source_filters",
@@ -476,7 +476,14 @@ def validate_projected_metric_composition(
         temporal = value["temporal_grouping"]
         if (
             not isinstance(temporal, Mapping)
-            or set(temporal) != {"grain", "source_bindings"}
+            or not {"grain", "source_bindings"} <= set(temporal)
+            or set(temporal) - {"grain", "source_bindings", "period_year"}
+            or (
+                "period_year" in temporal and (
+                    type(temporal["period_year"]) is not int
+                    or not 1 <= temporal["period_year"] <= 9998
+                )
+            )
             or temporal.get("grain") not in _TEMPORAL_GRAINS
             or not isinstance(temporal.get("source_bindings"), list)
             or len(temporal["source_bindings"]) != len(sources)
@@ -577,6 +584,41 @@ def _normalize_composition_temporal(
             "grain": grain,
             "terms": sorted(normalized_terms),
         })
+    period_year = None
+    if "period_year" in raw:
+        year_policy = raw["period_year"]
+        if (
+            not isinstance(year_policy, Mapping)
+            or set(year_policy) != {
+                "calendar_year_attested", "allow_bare_year",
+                "require_year", "year_terms"
+            }
+            or year_policy["calendar_year_attested"] is not True
+            or type(year_policy["allow_bare_year"]) is not bool
+            or type(year_policy["require_year"]) is not bool
+            or not isinstance(year_policy["year_terms"], list)
+            or not 1 <= len(year_policy["year_terms"]) <= 32
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_YEAR_POLICY_INVALID")
+        prefixes = set()
+        for item in year_policy["year_terms"]:
+            if (
+                not isinstance(item, str)
+                or not item.strip()
+                or len(item) > 80
+                or any(ord(char) < 32 for char in item)
+            ):
+                raise MetricSourceCompositionError("COMPOSITION_YEAR_TERM_INVALID")
+            normalized = normalize_search_text(item)
+            if not normalized or normalized in prefixes:
+                raise MetricSourceCompositionError("COMPOSITION_YEAR_TERM_INVALID")
+            prefixes.add(normalized)
+        period_year = {
+            "calendar_year_attested": True,
+            "allow_bare_year": year_policy["allow_bare_year"],
+            "require_year": year_policy["require_year"],
+            "year_terms": sorted(prefixes),
+        }
     raw_periods = raw.get("unhandled_period_terms", [])
     if not isinstance(raw_periods, list) or len(raw_periods) > 64:
         raise MetricSourceCompositionError("COMPOSITION_UNHANDLED_PERIODS_INVALID")
@@ -643,6 +685,7 @@ def _normalize_composition_temporal(
         "granularities": sorted(grains, key=lambda x: x["grain"]),
         "source_dates": sorted(parsed, key=lambda x: x["source_ref"].casefold()),
         "unhandled_period_terms": sorted(period_terms),
+        **({"period_year": period_year} if period_year is not None else {}),
     }
 
 
@@ -654,11 +697,36 @@ def _select_composition_temporal(
     if not isinstance(temporal, Mapping) or not isinstance(question, str):
         raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_INVALID")
     normalized = normalize_search_text(question)
-    # Do not return an all-years or wrong-period total when the question
-    # includes an explicit year or a versioned but unimplemented reference.
-    # A later typed interval-binding contract may support these safely.
-    if re.search(r"(?<!\w)[0-9]{4}(?!\w)", normalized):
-        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_PERIOD_UNBOUND")
+    # A four-digit date reference never becomes an all-years total.
+    # Calendar-year semantics are opt-in, explicitly versioned and approved.
+    year_values = {
+        int(match) for match in re.findall(r"(?<!\w)[0-9]{4}(?!\w)", normalized)
+    }
+    year = None
+    if len(year_values) > 1:
+        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_YEAR_AMBIGUOUS")
+    if year_values:
+        policy = temporal.get("period_year")
+        year = next(iter(year_values))
+        if (
+            not isinstance(policy, Mapping)
+            or policy.get("calendar_year_attested") is not True
+            or not 1 <= year <= 9998
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_PERIOD_UNBOUND")
+        if not policy["allow_bare_year"] and not any(
+            re.search(
+                r"(?<!\w)" + re.escape(term) + r"\s+"
+                + str(year) + r"(?!\w)", normalized,
+            )
+            for term in policy["year_terms"]
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_YEAR_UNSCOPED")
+    elif (
+        isinstance(temporal.get("period_year"), Mapping)
+        and temporal["period_year"]["require_year"]
+    ):
+        raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_YEAR_REQUIRED")
     if any(
         re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", normalized)
         for term in temporal["unhandled_period_terms"]
@@ -674,10 +742,11 @@ def _select_composition_temporal(
     if len(matches) > 1:
         raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_GRAIN_AMBIGUOUS")
     if not matches:
-        if temporal["require_explicit_grain"]:
+        if temporal["require_explicit_grain"] or year is not None:
             raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_GRAIN_REQUIRED")
         return None
     return {
         "grain": next(iter(matches)),
         "source_bindings": deepcopy(temporal["source_dates"]),
+        **({"period_year": year} if year is not None else {}),
     }
