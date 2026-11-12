@@ -116,9 +116,16 @@ def test_role_parser_requires_exact_index_coverage():
 
 def test_public_review_has_68_nodes_and_all_ports():
     report = json.loads(PUBLIC.read_text())
-    import hashlib
+    # Compare the actual 68 role bindings, not the entire Markdown file hash.
+    # New editorial notes are not functional workflow/role changes.
     role_text = (ROOT / "docs/audits/LEGACY-N8N-PRODUCT-FUNCTIONAL-MAP-20261111.md").read_text(encoding="utf-8")
-    assert report["role_source_sha256"] == hashlib.sha256(role_text.encode("utf-8")).hexdigest()
+    current_roles = parse_roles(role_text)
+    assert len(current_roles) == 68
+    assert all(
+        (node["functional_role"], node["proposed_owner"])
+        == current_roles[node["ordinal"]]
+        for node in report["nodes"]
+    )
     assert report["node_count"] == 68
     assert report["edge_count"] == 78
     assert report["identities_configs_bodies_and_edges_matched_baseline"] is True
