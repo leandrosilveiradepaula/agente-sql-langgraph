@@ -1,3 +1,11 @@
+## 12/11/2026 - Prova funcional de filtros aprovados sem omissao silenciosa
+
+Nova integracao planner -> composicao -> gerador -> SQL Contract Gate aplica resolved_filter_bindings a todos os fact streams por conceito e dimension_columns declarado pelo tenant. Corrigiu lacuna critica: no HTTP Canonical Shadow os matched terms do resolvedor desapareciam se o campo semantic_signals opcional faltasse, gerando SQL geral apesar de filtro solicitado. O termo agora cruza com segurança a fronteira do classificador, e cada fonte deve comprovar coluna correspondente. Termos sem binding, tipos incompativeis, joins nao aprovados e alteracao de plano rejeitam antes de gerar SQL. Evidencia: dois schemas diferentes, perguntas sinonimas, filtros =/IN/NOT IN, verificacoes de SQL, 28 SELECTs sinteticos read-only no PostgreSQL 16 descartavel e 2 ACL cross-tenant bloqueadas. Sem SQL cliente, Gemini, n8n editado, G5 plaintext ou benchmark usado no gerador.
+
+G5 original ainda requer mapeamentos contabeis aprovados a partir de 77 registros cifrados, e paridade real n8n+Gemini x LangGraph+Gemini. OFFICIAL=n8n; SHADOW=LangGraph; LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false. PR #233 draft, sem merge.
+
+---
+
 ## Extensão de calendário e prova numérica — 12/11/2026
 
 **Contrato opcional versionado:** cada `metric_source_compositions[]` pode incluir `temporal` com `require_explicit_grain` boolean, `granularities` (granularidade `day/week/month/quarter/year` e `terms` arbitrários do tenant) e `source_dates` (um `source_ref` e uma `target_column` DATE por fonte). `unhandled_period_terms` opcional declara referências que, se solicitadas, **não podem ser ignoradas** enquanto falta uma projeção de intervalo. A ausência de `temporal` preserva a SQL e o fingerprint de snapshots legados sem composição temporal.

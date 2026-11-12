@@ -1481,6 +1481,147 @@ def test_weighted_source_formula_requires_explicit_context_approval():
         raise AssertionError("Unapproved arithmetic context accepted")
 
 
+
+def fixture_approved_question_filter(
+    raw: dict, *,
+    operator: str = "=", value: object = "north",
+) -> dict:
+    from testar_planned_filters_e2e import _binding
+    candidate=deepcopy(raw)
+    sources=candidate["metric_source_compositions"][0]["sources"]
+    approved=_binding(
+        target_table=sources[0]["target_table"],
+        target_column="zone_code",
+        operator=operator,
+        value=value,
+    )
+    candidate["entities"]=_raw_context(binding=approved)["entities"]
+    for source in sources:
+        source["dimension_columns"]["category_alpha"]="zone_code"
+    return candidate
+
+
+def test_resolved_semantic_filter_applies_to_every_source_tenant():
+    for base in (fixture_a(),fixture_b()):
+        raw=fixture_approved_question_filter(fixture_calendar_range(base))
+        question="synthetic report for alpha class monthly between 2025 and 2026"
+        snapshot,planned=_plan(raw,question)
+        assert planned["status"]=="planned",planned
+        context=planned["query_plan"]["planning_context"]
+        assert len(context["planned_filters"])==1
+        composed=context["metric_source_composition"]
+        assert len(composed["user_filter_bindings"])==1
+        mapped=composed["user_filter_bindings"][0]
+        assert {v["source_ref"] for v in mapped["source_bindings"]}=={"A","B"}
+        sql=build_postgres_metric_source_sql(
+            build_sql_generation_request(planned["query_plan"])
+        )
+        assert sql.count('"zone_code" = \'north\'')==2,sql
+        sec,analysis=run_sql_security_gate(current_sql=sql,query_plan=planned["query_plan"])
+        contract,_=run_sql_contract_gate(
+            current_sql=sql,query_plan=planned["query_plan"],analysis=analysis,
+        )
+        assert sec["status"]=="approved",sec
+        assert contract["status"]=="approved",contract
+        altered=sql.replace('"zone_code" = \'north\'', 'TRUE',1)
+        denied,_=run_sql_contract_gate(
+            current_sql=altered,query_plan=planned["query_plan"],analysis=analysis,
+        )
+        assert denied["status"]!="approved",denied
+        assert snapshot["fingerprint"]
+
+
+def test_unresolved_semantic_filter_rejects_instead_of_total():
+    for kind in (
+        "absent_second", "origin_wrong", "origin_table", "mixed_types",
+        "unsafe_operator", "unsafe_value",
+    ):
+        raw=fixture_approved_question_filter(fixture_a())
+        sources=raw["metric_source_compositions"][0]["sources"]
+        if kind=="absent_second":
+            del sources[1]["dimension_columns"]["category_alpha"]
+        if kind=="origin_wrong":
+            raw["entities"][-1]["business_rule"]["filter_binding"]["target_column"]="flag"
+        if kind=="origin_table":
+            raw["entities"][-1]["business_rule"]["filter_binding"]["target_table"]="unknown.other"
+        if kind=="mixed_types":
+            raw["table_catalog"][1]["columns"][2]["data_type"]="integer"
+        if kind=="unsafe_operator":
+            raw["entities"][-1]["business_rule"]["filter_binding"]["operator"]=">"
+        if kind=="unsafe_value":
+            raw["entities"][-1]["business_rule"]["filter_binding"]["value"]=7
+        try:
+            _,planned=_plan(raw,"synthetic report for alpha class")
+            assert planned["status"]=="rejected",(kind,planned)
+        except ContextNormalizationError:
+            pass
+
+
+def test_semantic_filter_and_weighted_ranking_are_composable():
+    for base in (fixture_a(),fixture_b()):
+        raw=fixture_approved_question_filter(
+            fixture_versioned_ranking(
+                fixture_weighted_source_sum(fixture_calendar_range(base))
+            )
+        )
+        _,planned=_plan(
+            raw,"synthetic report for alpha class monthly highest 2 between 2025 and 2026"
+        )
+        assert planned["status"]=="planned",planned
+        request=build_sql_generation_request(planned["query_plan"])
+        sql=build_postgres_metric_source_sql(request)
+        assert "CASE WHEN" in sql
+        assert sql.count('"zone_code" = \'north\'')==2
+        assert 'ORDER BY "metric_value" DESC NULLS LAST' in sql
+        sec,analysis=run_sql_security_gate(current_sql=sql,query_plan=planned["query_plan"])
+        contract,_=run_sql_contract_gate(
+            current_sql=sql,query_plan=planned["query_plan"],analysis=analysis
+        )
+        assert sec["status"]=="approved",sec
+        assert contract["status"]=="approved",contract
+        for value in ("west", "missing"):
+            tampered=deepcopy(planned["query_plan"])
+            tampered["planning_context"]["metric_source_composition"]["user_filter_bindings"][0]["value"]=value
+            try:
+                build_sql_generation_request(tampered)
+            except SqlGenerationInputError:
+                pass
+            else:
+                raise AssertionError("User filter changed after resolution")
+        changed=deepcopy(raw)
+        changed["entities"][-1]["business_rule"]["filter_binding"]["value"]="west"
+        original=normalize_context_snapshot(raw)
+        new=normalize_context_snapshot(changed)
+        assert original["fingerprint"]!=new["fingerprint"]
+
+
+
+def test_filter_portable_across_different_column_names_and_aliases():
+    raw=fixture_approved_question_filter(fixture_b())
+    other=raw["metric_source_compositions"][0]["sources"][1]
+    other["dimension_columns"]["category_alpha"]="district_key"
+    raw["table_catalog"][1]["columns"].append({
+        "name":"district_key","data_type":"text","nullable":False,
+    })
+    for question in (
+        "synthetic report for alpha class",
+        "synthetic report about primary group",
+    ):
+        _,planned=_plan(raw,question)
+        assert planned["status"]=="planned",planned
+        sql=build_postgres_metric_source_sql(
+            build_sql_generation_request(planned["query_plan"])
+        )
+        assert '"source_1"."zone_code" = \'north\'' in sql
+        assert '"source_2"."district_key" = \'north\'' in sql
+        sec,analysis=run_sql_security_gate(current_sql=sql,query_plan=planned["query_plan"])
+        contract,_=run_sql_contract_gate(
+            current_sql=sql,query_plan=planned["query_plan"],analysis=analysis
+        )
+        assert sec["status"]=="approved",sec
+        assert contract["status"]=="approved",contract
+
+
 def main() -> None:
     tests = sorted(
         (name, obj) for name, obj in globals().items()

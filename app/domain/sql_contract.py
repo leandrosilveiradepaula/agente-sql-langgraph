@@ -717,7 +717,7 @@ def _valid_filter_binding(
     column = _clean_text(binding.get("target_column")).casefold()
     return bool(
         table in allowed and column in allowed[table]
-        and _clean_text(binding.get("operator")).casefold() in {"=", "<>", "<", "<=", ">", ">=", "in"}
+        and _clean_text(binding.get("operator")).casefold() in {"=", "<>", "<", "<=", ">", ">=", "in", "not in"}
         and _clean_text(binding.get("filter_concept")) == _clean_text(obligation.get("filter_concept"))
         and _clean_text(binding.get("scope")) == _clean_text(obligation.get("scope"))
         and binding.get("required") is True
@@ -848,7 +848,7 @@ def _value_type(value: Any) -> str:
 
 
 def _filter_binding_value_valid(operator: str, value: Any) -> bool:
-    if operator == "in":
+    if operator in ("in", "not in"):
         if not isinstance(value, list) or not value:
             return False
         literal_types = [_scalar_literal_type(item) for item in value]
@@ -877,7 +877,7 @@ def _same_filter_value(
     *,
     operator: str,
 ) -> bool:
-    if operator != "in":
+    if operator not in ("in", "not in"):
         return _same_literal(observed, expected)
     if not isinstance(observed, list) or not isinstance(expected, list):
         return False

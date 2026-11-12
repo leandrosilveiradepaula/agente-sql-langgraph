@@ -1,3 +1,13 @@
+## 12/11/2026 - Filtros dinamicos aprovados aplicados a TODAS as fontes
+
+O planner deriva planned_filters (obrigacoes por conceito) e resolved_filter_bindings (alvo/operador/valor) da classificacao e do contexto versionado do tenant. A composicao projeta user_filter_bindings[] com binding_ref, filter_concept, operator, value e source_bindings por tabela. Cada fonte obrigatoriamente mapeia o conceito em dimension_columns; o binding de origem deve apontar exatamente uma coluna da fonte. Sem JOIN novo, coacao de tipos heterogeneos nem aplicar filtro a somente parte das fontes. O renderer PostgreSQL insere predicado WHERE de CADA subconsulta antes da agregacao por UNION ALL. Operadores admitidos: =, <>, IN e NOT IN. Valores tipados para texto, numerico inteiro e booleano; rejeitar valores nao aprovados.
+
+Fail-closed: se o resolvedor detectar termo de filtro mas nao houver binding unico e autorizado, o planner de composicao rejeita a pergunta; NUNCA retorna um total geral. O classificador tinha defeito de projecao intent_resolution_result -> build_plan: semantic_signals opcional ausente fazia desaparecer terms matched. Corrigido mantendo somente termos comprovadamente matched, sem prompts ou SQL. build_sql_generation_request reconcilia cada filtro com a obrigacao do planejamento; SQL Contract Gate valida a SQL gerada e recusa adulteracoes.
+
+Dois contextos fisicos distintos, com colunas de filtro com nomenclatura diferente: 46 testes de composicao, 11 HTTP Canonical Shadow, 6 build_plan, regressao SQL Contract e PostgreSQL 16 descartavel com 28 SELECTs read-only e 2 cross-tenant ACL recusadas. Nenhuma DRE, conta, alias ou formula financeira de cliente foi copiada. Isto NAO constitui homologacao contabil de G5 nem prova do Gemini real.
+
+---
+
 ## Extensão versionada (12/11/2026) - Soma ponderada de fontes
 
 Novo cálculo opcional em metric_source_compositions[].calculation com operação weighted_sum_of_sums e termos de formato:

@@ -976,7 +976,7 @@ def _extract_predicates(tokens: list[SqlToken]) -> list[SqlPredicate]:
                 )
             index += 1
             continue
-        if operator == "in":
+        if operator in ("in", "not in"):
             literal_list = _predicate_literal_list(tokens, cursor)
             if literal_list is None:
                 predicates.append({
@@ -1028,6 +1028,8 @@ def _comparison_operator(
         return "<>", index + 2
     if first in {"=", "<", ">"}:
         return first, index + 1
+    if first == "not" and second == "in":
+        return "not in", index + 2
     if first == "in":
         return "in", index + 1
     return None, index

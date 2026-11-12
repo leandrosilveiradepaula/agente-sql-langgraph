@@ -164,6 +164,18 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
                 f"{qualified_date} < '{end_year + 1:04d}-01-01'",
             ))
         predicates.extend(_predicate(f, table_alias) for f in filters)
+        for user_filter in value.get("user_filter_bindings", []):
+            match = [
+                binding for binding in user_filter["source_bindings"]
+                if binding["source_ref"].casefold() == source["source_ref"].casefold()
+            ]
+            if len(match) != 1:
+                raise PostgresCompositionSqlError("USER_FILTER_NOT_BOUND_TO_SOURCE")
+            predicates.append(_predicate({
+                "column": match[0]["target_column"],
+                "operator": user_filter["operator"],
+                "value": user_filter["value"],
+            }, table_alias))
         if predicates:
             subquery += "\nWHERE " + " AND ".join(predicates)
         subqueries.append(subquery)

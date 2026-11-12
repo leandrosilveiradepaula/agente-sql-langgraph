@@ -941,6 +941,22 @@ def project_planning_context(
         intent_resolution_result=intent_resolution_result,
     )
 
+    if (
+        any(
+            isinstance(item, Mapping)
+            and str(item.get("intent_name", "")).casefold()
+            == str(intent_name).casefold()
+            for item in context.get("metric_source_compositions", [])
+        )
+        and isinstance(planned_filter_diagnostic, Mapping)
+        and planned_filter_diagnostic.get("status") == "unresolved"
+    ):
+        # A matched but unbound semantic constraint can NEVER be dropped and
+        # converted into a broader multi-source financial aggregate.
+        raise PlanningRejection(
+            "PLANNING_METRIC_FILTER_UNRESOLVED",
+            "Filtro solicitado não possui vínculo semântico autorizado.",
+        )
     try:
         metric_source_composition = project_metric_source_composition(
             definitions=context.get("metric_source_compositions", []),
@@ -949,6 +965,7 @@ def project_planning_context(
             detected_dimensions=dimension_projection,
             planned_metrics=planned_metrics,
             planned_filters=planned_filters,
+            resolved_filter_bindings=resolved_filter_bindings,
             analytical_operations=operation_projection,
             temporal_series=temporal_series,
             normalized_question=normalized_question,
@@ -2214,7 +2231,7 @@ def _valid_filter_binding_value(
     if operator is None:
         return False
     normalized = operator.casefold()
-    if normalized == "in":
+    if normalized in ("in", "not in"):
         if not isinstance(value, list) or not value:
             return False
         literal_types = [_filter_literal_type(item) for item in value]

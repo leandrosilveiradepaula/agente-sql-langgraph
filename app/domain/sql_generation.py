@@ -398,7 +398,7 @@ def build_sql_generation_request(
     )
     composition = None
     if planning_context.get("metric_source_composition") is not None:
-        if planned_metrics or planned_filters or analytical_operations or temporal_series:
+        if planned_metrics or analytical_operations or temporal_series:
             raise SqlGenerationInputError(
                 "Composição de métricas incompatível com operações do plano."
             )
@@ -412,6 +412,35 @@ def build_sql_generation_request(
             raise SqlGenerationInputError(
                 "Fontes e colunas da composição não autorizadas."
             ) from None
+        # Reconcile every resolved obligation with the physical projection.
+        # A user filter may never disappear from one stream, change its value
+        # or be injected into the renderer without the planned entity binding.
+        composed_filters = composition.get("user_filter_bindings", [])
+        if len(composed_filters) != len(filter_bindings):
+            raise SqlGenerationInputError(
+                "Composição omitiu ou inventou filtros do plano."
+            )
+        known_bindings = {
+            row["binding_ref"].casefold(): row for row in filter_bindings
+        }
+        for item in composed_filters:
+            binding = known_bindings.get(item["binding_ref"].casefold())
+            if not binding or not all((
+                str(item["filter_concept"]).casefold()
+                == str(binding["filter_concept"]).casefold(),
+                item["operator"] == binding["operator"],
+                item["value"] == binding["value"],
+                any(
+                    str(source["target_table"]).casefold()
+                    == str(binding["target_table"]).casefold()
+                    and str(source["target_column"]).casefold()
+                    == str(binding["target_column"]).casefold()
+                    for source in item["source_bindings"]
+                ),
+            )):
+                raise SqlGenerationInputError(
+                    "Filtro composto diverge do binding semântico aprovado."
+                )
     diagnostics = planning_context.get("diagnostics", {})
     temporal_diagnostic = (
         diagnostics.get("temporal_diagnostic", {})
@@ -534,6 +563,9 @@ def build_sql_generation_request(
                     "construa um SELECT separado para cada source_ref usando "
                     "somente target_table, value_column, source_filters e "
                     "sign_multiplier explicitamente autorizados. Projete "
+                    "cada filtro em user_filter_bindings a TODAS as fontes "
+                    "por source_bindings de modo determinístico, nunca "
+                    "adivinhando outra coluna, literal ou join. Projete "
                     "cada valor numerico com o sinal declarado e cada "
                     "grouping_dimension usando source_bindings daquela "
                     "source_ref. Combine as linhas de todos os SELECTs com "
@@ -1560,7 +1592,7 @@ def _valid_filter_binding_value(
     value: Any,
 ) -> bool:
     normalized = operator.casefold()
-    if normalized == "in":
+    if normalized in ("in", "not in"):
         if not isinstance(value, list) or not value:
             return False
         literal_types = [_filter_literal_type(item) for item in value]

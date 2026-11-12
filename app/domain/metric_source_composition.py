@@ -453,6 +453,134 @@ def normalize_metric_source_compositions(
     return sorted(output, key=lambda c: c["intent_name"].casefold())
 
 
+
+
+def _filter_value_type_verified(type_ref: str, op: object, value: object) -> bool:
+    """Prevent implicit casts / type coercion across unrelated tenant schemas."""
+    allowed_text = {"text", "varchar", "character varying", "character"}
+    allowed_numeric = {"smallint", "integer", "bigint", "numeric", "decimal"}
+    if op not in {"=", "<>", "IN", "NOT IN"}:
+        return False
+    values = value if op in ("IN","NOT IN") else [value]
+    if not isinstance(values,list) or not values:
+        return False
+    if type_ref in allowed_text:
+        return all(isinstance(v,str) and _safe_scalar(v) for v in values)
+    if type_ref in allowed_numeric:
+        return all(type(v) is int and _safe_scalar(v) for v in values)
+    if type_ref == "boolean":
+        return all(type(v) is bool for v in values)
+    return False
+
+
+def _project_source_filter_bindings(
+    *,
+    sources: list[Mapping[str, Any]],
+    required_tables: list[Mapping[str, Any]],
+    obligations: list[Mapping[str, Any]],
+    resolved: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Bind each semantic filter to *every* selected fact stream.
+
+    The origin filter_binding must match one authorized source exactly.
+    Cross-stream applicability is allowed only through the same versioned
+    dimension_concept in dimension_columns on every stream, and only when
+    the columns have matching physical types. No joins or literal invention.
+    """
+    if not obligations and not resolved:
+        return []
+    if (
+        not isinstance(obligations, list) or not isinstance(resolved, list)
+        or not 1 <= len(obligations) <= 24
+        or len(obligations) != len(resolved)
+    ):
+        raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_BINDINGS_INCOMPLETE")
+    tables = {
+        str(item.get("qualified_name", "")).casefold(): item
+        for item in required_tables if isinstance(item, Mapping)
+    }
+    by_ref = {
+        item["binding_ref"].casefold(): item
+        for item in resolved if isinstance(item, Mapping)
+        and _valid_ref(item.get("binding_ref"))
+    }
+    if len(by_ref) != len(resolved):
+        raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_BINDINGS_AMBIGUOUS")
+    selected = []
+    seen = set()
+    source_tables = {s["target_table"].casefold() for s in sources}
+    for obligation in obligations:
+        if not isinstance(obligation, Mapping):
+            raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_INVALID")
+        key = obligation.get("binding_ref")
+        concept = obligation.get("filter_concept")
+        if (
+            not _valid_ref(key) or not _valid_ref(concept)
+            or key.casefold() in seen or key.casefold() not in by_ref
+            or obligation.get("mapping_source") != "filter_binding"
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_UNRESOLVED")
+        seen.add(key.casefold())
+        entry = by_ref[key.casefold()]
+        if (
+            str(entry.get("filter_concept", "")).casefold() != concept.casefold()
+            or entry.get("required") is not obligation.get("required")
+            or entry.get("scope") != obligation.get("scope")
+            or not isinstance(entry.get("join_path"), list)
+            or entry["join_path"]
+            or str(entry.get("target_table", "")).casefold() not in source_tables
+            or entry.get("operator") not in {"=", "<>", "IN", "NOT IN"}
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_SCOPE_UNAUTHORIZED")
+        columns = []
+        types = set()
+        for source in sources:
+            col = next((
+                value for concept_ref,value in source["dimension_columns"].items()
+                if concept_ref.casefold() == concept.casefold()
+            ), None)
+            if col is None:
+                raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_GRAIN_INCOMPLETE")
+            table = source["target_table"]
+            physical = tables.get(table.casefold(), {})
+            schema = physical.get("columns", [])
+            field = next((
+                item for item in schema if isinstance(item, Mapping)
+                and str(item.get("name", "")).casefold() == col.casefold()
+            ), None) if isinstance(schema, list) else None
+            if not isinstance(field, Mapping):
+                raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_COLUMN_UNAUTHORIZED")
+            types.add(str(field.get("data_type", "")).casefold())
+            columns.append({
+                "source_ref": source["source_ref"],
+                "target_table": table,
+                "target_column": col,
+            })
+            if (
+                table.casefold() == str(entry["target_table"]).casefold()
+                and col.casefold() != str(entry.get("target_column", "")).casefold()
+            ):
+                raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_ORIGIN_MISMATCH")
+            _source_filter({
+                "column": col, "operator": entry["operator"],
+                "value": entry.get("value"),
+            }, {str(item.get("name", "")).casefold() for item in schema if isinstance(item, Mapping)})
+        if len(types)!=1 or not next(iter(types)):
+            raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_TYPES_MISMATCH")
+        if not _filter_value_type_verified(
+            next(iter(types)), entry["operator"], entry.get("value")
+        ):
+            raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_TYPE_UNSUPPORTED")
+        selected.append({
+            "binding_ref": key,
+            "filter_concept": concept,
+            "operator": entry["operator"],
+            "value": deepcopy(entry["value"]),
+            "source_bindings": columns,
+        })
+    return sorted(selected, key=lambda item: item["binding_ref"].casefold())
+
+
 def project_metric_source_composition(
     *,
     definitions: object,
@@ -462,6 +590,7 @@ def project_metric_source_composition(
     planned_metrics: list[Mapping[str, Any]],
     planned_filters: list[Mapping[str, Any]],
     analytical_operations: list[Mapping[str, Any]],
+    resolved_filter_bindings: list[Mapping[str, Any]] | None = None,
     temporal_series: Mapping[str, Any] | None,
     normalized_question: str = "",
 ) -> dict[str, Any] | None:
@@ -479,7 +608,7 @@ def project_metric_source_composition(
     source = matches[0]
     # No silent dropping of filters, measures, comparisons or time-series.
     # Multi-source support will expand only with explicit grain mapping.
-    if planned_metrics or planned_filters or analytical_operations or temporal_series:
+    if planned_metrics or analytical_operations or temporal_series:
         raise MetricSourceCompositionError("COMPOSITION_OPERATION_CONFLICT")
     authorized_tables = {
         str(table.get("qualified_name", "")).casefold()
@@ -517,6 +646,12 @@ def project_metric_source_composition(
             "canonical_value": concept,
             "source_bindings": bindings,
         })
+    user_filters = _project_source_filter_bindings(
+        sources=source["sources"],
+        required_tables=required_tables,
+        obligations=planned_filters,
+        resolved=resolved_filter_bindings or [],
+    )
     temporal_grouping = _select_composition_temporal(
         source.get("temporal"), normalized_question
     )
@@ -525,6 +660,7 @@ def project_metric_source_composition(
         has_group=bool(selected) or temporal_grouping is not None,
     )
     return {
+        **({"user_filter_bindings": user_filters} if user_filters else {}),
         **({"result_ranking": result_ranking} if result_ranking is not None else {}),
         **(
             {"calculation": deepcopy(source["calculation"])}
@@ -563,7 +699,7 @@ def validate_projected_metric_composition(
     if (
         not isinstance(value, Mapping)
         or not expected <= set(value)
-        or set(value) - expected - {"temporal_grouping", "calculation", "result_ranking"}
+        or set(value) - expected - {"temporal_grouping", "calculation", "result_ranking", "user_filter_bindings"}
     ):
         raise MetricSourceCompositionError("COMPOSITION_PROVIDER_CONTRACT_INVALID")
     if (
@@ -649,6 +785,59 @@ def validate_projected_metric_composition(
             raise MetricSourceCompositionError("COMPOSITION_PROVIDER_FILTERS_INVALID")
         for predicate in filters:
             _source_filter(predicate, visible)
+    if "user_filter_bindings" in value:
+        bound = value["user_filter_bindings"]
+        if not isinstance(bound, list) or not 1 <= len(bound) <= 24:
+            raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTERS_INVALID")
+        references = set()
+        for item in bound:
+            if not isinstance(item, Mapping) or set(item) != {
+                "binding_ref", "filter_concept", "operator", "value", "source_bindings"
+            }:
+                raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTER_INVALID")
+            identity = item.get("binding_ref")
+            if not _valid_ref(identity) or identity.casefold() in references or not _valid_ref(item.get("filter_concept")):
+                raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTER_AMBIGUOUS")
+            references.add(identity.casefold())
+            mappings = item.get("source_bindings")
+            if not isinstance(mappings, list) or len(mappings)!=len(sources):
+                raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTER_SOURCES_INVALID")
+            seen_sources = set()
+            types = set()
+            for binding in mappings:
+                if not isinstance(binding, Mapping) or set(binding) != {
+                    "source_ref", "target_table", "target_column"
+                }:
+                    raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTER_COLUMN_INVALID")
+                ref,table,col=binding["source_ref"],binding["target_table"],binding["target_column"]
+                if (
+                    not _valid_ref(ref) or ref.casefold() not in ref_to_table
+                    or ref.casefold() in seen_sources
+                    or not isinstance(table,str)
+                    or table.casefold()!=ref_to_table[ref.casefold()]
+                    or not _valid_column(col)
+                ):
+                    raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTER_SOURCE_INVALID")
+                seen_sources.add(ref.casefold())
+                declared=catalog_columns.get(table,[])
+                field=next((
+                    candidate for candidate in declared
+                    if isinstance(candidate, Mapping)
+                    and str(candidate.get("name","")).casefold()==col.casefold()
+                ),None) if isinstance(declared,list) else None
+                if not isinstance(field,Mapping):
+                    raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTER_COLUMN_UNAUTHORIZED")
+                types.add(str(field.get("data_type","")).casefold())
+                _source_filter(
+                    {"column":col,"operator":item["operator"],"value":item["value"]},
+                    {str(candidate.get("name","")).casefold() for candidate in declared if isinstance(candidate,Mapping)},
+                )
+            if seen_sources!=unique_refs or len(types)!=1 or not next(iter(types)):
+                raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTER_TYPES_INVALID")
+            if not _filter_value_type_verified(
+                next(iter(types)), item["operator"], item["value"]
+            ):
+                raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTER_VALUES_INVALID")
     if "calculation" in value:
         approved_calculation = _approved_source_calculation(
             value["calculation"], unique_refs,

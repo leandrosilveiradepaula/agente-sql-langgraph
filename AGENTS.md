@@ -1,3 +1,15 @@
+## 12/11/2026 - Filtros semanticos multifonte no Shadow: lacuna funcional corrigida
+
+Correcao funcional real na PR #233: planejador aplica filtros solicitados em linguagem natural a TODAS as fontes de uma composicao por filter_concept, resolved_filter_bindings e dimension_columns, exclusivamente do contexto versionado tenant. Nao inventa coluna, entidade ou valor, nao consulta benchmark nem copia regras do n8n. Exige origem vinculada, coerencia de operador/valor, mapeamento do conceito em todas as fontes e tipos compativeis, sem joins novos. Operadores para multisource: =, <>, IN e NOT IN. Referencias fisicas incorretas, valores malformados, fontes sem mapeamento e join nao aprovado provocam REJEICAO antes do provedor. SQL Contract Gate rejeita remocao/alteracao dos predicados.
+
+Bug real corrigido no HTTP Canonical Shadow: a passagem classificador -> planejamento descartava termos matched quando semantic_signals opcional estava ausente. O HTTP gerava total geral em vez do filtro pedido. A projecao preserva apenas evidencias matched/normalizadas, sem expor regra de negocio. Teste HTTP comprova filtros nas duas fontes; testes negativos comprovam que nao ha geracao de SQL com source nao mapeada, binding invalido ou fingerprint alterado.
+
+Provas: 46 testes de composicao, 11 HTTP Canonical Shadow, 6 testes de build_plan, 102 regressões SQL Contract e PostgreSQL 16 descartavel: 28 SELECTs read-only em dois esquemas distintos, 2 ACL cross-tenant negadas, perguntas sinonimas, colunas de nomes distintos, filtros =/IN/NOT IN com calculos e ranking. Sem SQL financeira real, Gemini, benchmark gerador, migracao G5 ou n8n alterado. OFFICIAL=n8n; SHADOW=LangGraph; LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false.
+
+Limitacoes: o reconhecimento do filtro depende de conceito identificado pelo resolvedor e binding aprovado; nao se infere semantica contabil de palavras novas. G5 cifrado e homologacao de 77 registros, paridade real e dois clientes reais continuam ABERTOS. PR #233 unica, draft, sem merge.
+
+---
+
 ## 12/11/2026 - AST validada do n8n e expressão aritmética ponderada por contexto
 
 **Fato novo contra a contagem histórica:** parse do workflow publicado de 68 nós/78 conexões (41 Code, hashes exatos) com Acorn 8.15.0 detectou **3.698 strings/templates sintáticos**, NÃO 3.403: 1.719 curtos e 1.979 longos pela definição AST, diferença líquida +295 e 18 nós com divergências. O censo anterior era heurístico, não deve ser tomado como contagem sintática exata. Todos os 3.698 receberam referência exata de offset/linha/coluna e classe candidata F=1.732/T=371/S=830/U=765, sem texto/SQL/valor/hash dos próprios literais publicado. Categorias são triagem audit-only, não classificação contábil homologada nem contagem de regras financeiras. Relatório: docs/audits/LEGACY-N8N-AST-LITERAL-RECONCILIATION-20261112.md, JSON sanitizado e auditor JS isolado (scripts/operations/legacy_js_ast_literal_audit.cjs). O baseline 3.403/1.987/1.416 continua somente como comparação histórica. Nenhum plaintext G5 ou benchmark foi usado.

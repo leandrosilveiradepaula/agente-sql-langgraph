@@ -31,6 +31,7 @@ from app.domain.sql_security import run_sql_security_gate
 from testar_metric_source_composition_e2e import (
     _plan, fixture_a, fixture_b, fixture_calendar_range, fixture_attested_ratio,
     fixture_versioned_ranking, fixture_weighted_source_sum,
+    fixture_approved_question_filter,
 )
 
 EXPECTED_ENV = {
@@ -282,6 +283,45 @@ def main() -> None:
                 ("2025-02-01",Decimal(160))
             ]
 
+            # User semantic concepts resolve to the physical key in EACH
+            # independent fact stream, never just one or an unscoped total.
+            user_filtered=fixture_approved_question_filter(raw)
+            single=_query(
+                user_filtered,
+                "synthetic report for alpha class monthly between 2025 and 2026",
+            )
+            assert _actual(_readonly_query(connection,role,single))==[
+                ("2025-02-01",Decimal(100)),
+                ("2025-08-01",Decimal(25)),
+                ("2026-01-01",Decimal(70)),
+                ("2026-02-01",Decimal(10)),
+            ]
+            multiple=fixture_approved_question_filter(
+                raw,operator="IN",value=["north","west"]
+            )
+            set_filter=_query(
+                multiple,
+                "synthetic report for alpha class monthly between 2025 and 2026",
+            )
+            assert _actual(_readonly_query(connection,role,set_filter))==[
+                ("2025-02-01",Decimal(100)),
+                ("2025-08-01",Decimal(25)),
+                ("2026-01-01",Decimal(78)),
+                ("2026-02-01",Decimal(10)),
+            ]
+            negative=fixture_approved_question_filter(
+                raw,operator="NOT IN",value=["west"]
+            )
+            not_in=_query(
+                negative,
+                "synthetic report for alpha class monthly between 2025 and 2026",
+            )
+            assert _actual(_readonly_query(connection,role,not_in))==[
+                ("2025-02-01",Decimal(100)),
+                ("2025-08-01",Decimal(25)),
+                ("2026-01-01",Decimal(70)),
+                ("2026-02-01",Decimal(10)),
+            ]
             ranked=fixture_versioned_ranking(raw)
             best=_query(
                 ranked,"synthetic report monthly highest 2 between 2025 and 2026"
@@ -345,7 +385,8 @@ def main() -> None:
         _forbidden_cross_tenant(connection, queries[1][0], queries[0][1])
     print("DISPOSABLE_POSTGRES_COMPOSITION=PASS")
     print("TENANT_CONTEXTS=2")
-    print("READONLY_GENERATED_SELECTS=22")
+    print("READONLY_GENERATED_SELECTS=28")
+    print("DYNAMIC_FILTERS_APPLIED_TO_ALL_SOURCES=PASS")
     print("WEIGHTED_SOURCE_ARITHMETIC=PASS")
     print("FRACTIONAL_COEFFICIENT_ACCURACY=PASS")
     print("COMBINED_RANKING_AND_RATIO=PASS")

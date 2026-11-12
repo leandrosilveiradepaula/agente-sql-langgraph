@@ -28,7 +28,7 @@ from app.test_runtime.offline_adapters import ShadowTestSqlRepairer
 from testar_metric_source_composition_e2e import (
     fixture_a, fixture_b, fixture_temporal, fixture_calendar_year,
     fixture_attested_ratio, fixture_versioned_ranking, fixture_calendar_range,
-    fixture_weighted_source_sum,
+    fixture_weighted_source_sum, fixture_approved_question_filter,
 )
 from testar_postgres_context_repository import FakeConnect
 from testar_shadow_test_runtime import _env, _run_asgi
@@ -269,6 +269,77 @@ def test_weighted_source_arithmetic_canonical_shadow_two_tenants_and_drift():
         _request(
             "weight-source-one","weighted-arithmetic-drift",
             question="synthetic report monthly between 2025 and 2026",
+        ),
+    )
+    assert not (status==200 and response.get("status")=="success")
+    assert generator.calls==0
+
+
+
+def test_approved_query_filter_canonical_shadow_per_source_and_context_drift():
+    for tenant, base in (
+        ("filtered-source-one", fixture_a()),
+        ("filtered-source-two", fixture_b()),
+    ):
+        raw=fixture_approved_question_filter(fixture_calendar_range(base))
+        runtime,db,generator,evidence=_instance(raw,tenant)
+        status,response=_run_asgi(
+            runtime.app,"POST","/v1/internal/sql-agent/generate",
+            _request(
+                tenant,"user-filter-"+tenant,
+                question="synthetic report for alpha class monthly between 2025 and 2026",
+            ),
+        )
+        assert status==200,(status,response)
+        assert response["status"]=="success",response
+        assert response["sql"].count('"zone_code" = \'north\'')==2
+        assert generator.calls==1
+        assert db.cursor.executed_parameters["tenant_id"]==tenant
+        assert evidence.create_calls>=1
+
+    raw=fixture_approved_question_filter(fixture_calendar_range(fixture_a()))
+    pinned=normalize_context_snapshot(
+        _canonical_payload(raw,"filtered-source-one")
+    )["fingerprint"]
+    raw["entities"][-1]["business_rule"]["filter_binding"]["value"]="west"
+    runtime,_,generator,_=_instance(
+        raw,"filtered-source-one",pin=pinned
+    )
+    status,response=_run_asgi(
+        runtime.app,"POST","/v1/internal/sql-agent/generate",
+        _request(
+            "filtered-source-one","user-filter-version-drift",
+            question="synthetic report for alpha class monthly between 2025 and 2026",
+        ),
+    )
+    assert not (status==200 and response.get("status")=="success")
+    assert generator.calls==0
+
+
+
+def test_unmapped_user_filter_must_reject_in_canonical_shadow():
+    raw=fixture_approved_question_filter(fixture_calendar_range(fixture_a()))
+    # Source B cannot represent the same approved semantic concept.
+    del raw["metric_source_compositions"][0]["sources"][1]["dimension_columns"]["category_alpha"]
+    runtime,_,generator,_=_instance(raw,"unmapped-filter-tenant")
+    status,response=_run_asgi(
+        runtime.app,"POST","/v1/internal/sql-agent/generate",
+        _request(
+            "unmapped-filter-tenant","unmapped-filter-run",
+            question="synthetic report for alpha class monthly between 2025 and 2026",
+        ),
+    )
+    assert not (status==200 and response.get("status")=="success")
+    assert generator.calls==0
+    # Even a syntactically invalid filter binding cannot be ignored.
+    raw=fixture_approved_question_filter(fixture_calendar_range(fixture_b()))
+    raw["entities"][-1]["business_rule"]["filter_binding"]["operator"]="INVALID"
+    runtime,_,generator,_=_instance(raw,"invalid-filter-tenant")
+    status,response=_run_asgi(
+        runtime.app,"POST","/v1/internal/sql-agent/generate",
+        _request(
+            "invalid-filter-tenant","invalid-filter-run",
+            question="synthetic report for alpha class monthly between 2025 and 2026",
         ),
     )
     assert not (status==200 and response.get("status")=="success")
