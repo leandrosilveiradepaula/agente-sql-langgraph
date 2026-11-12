@@ -93,11 +93,27 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
     except (KeyError, TypeError, MetricSourceCompositionError):
         raise PostgresCompositionSqlError("COMPOSITION_SOURCE_UNAUTHORIZED") from None
     dimensions = value["grouping_dimensions"]
+    temporal = value.get("temporal_grouping")
     aliases = [f"group_{index+1}" for index in range(len(dimensions))]
     subqueries = []
     for source_index, source in enumerate(value["sources"], 1):
         table_alias = f"source_{source_index}"
         columns = []
+        if temporal is not None:
+            date_bindings = [
+                item for item in temporal["source_bindings"]
+                if item["source_ref"] == source["source_ref"]
+            ]
+            if len(date_bindings) != 1:
+                raise PostgresCompositionSqlError("DATE_NOT_BOUND")
+            date_column = _ident(date_bindings[0]["target_column"])
+            grain = temporal["grain"]
+            if grain not in ("day", "week", "month", "quarter", "year"):
+                raise PostgresCompositionSqlError("DATE_GRAIN_UNAUTHORIZED")
+            columns.append(
+                f'date_trunc(\'{grain}\', '
+                f'{_ident(table_alias)}.{date_column}) AS "time_bucket"'
+            )
         for index, dim in enumerate(dimensions):
             matching = [
                 binding for binding in dim["source_bindings"]
@@ -124,7 +140,9 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
                 _predicate(f, table_alias) for f in filters
             )
         subqueries.append(subquery)
-    outer = [f'"{name}"' for name in aliases]
+    outer = (
+        ['"time_bucket"'] if temporal is not None else []
+    ) + [f'"{name}"' for name in aliases]
     outer.append('SUM("measure_value") AS "metric_value"')
     sql = (
         'WITH "combined_sources" AS (\n'
@@ -132,6 +150,7 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
         + "\n)\nSELECT " + ", ".join(outer)
         + '\nFROM "combined_sources"'
     )
-    if aliases:
-        sql += "\nGROUP BY " + ", ".join(f'"{alias}"' for alias in aliases)
+    group_aliases = (["time_bucket"] if temporal is not None else []) + aliases
+    if group_aliases:
+        sql += "\nGROUP BY " + ", ".join(f'"{alias}"' for alias in group_aliases)
     return sql

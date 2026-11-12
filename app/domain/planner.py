@@ -951,6 +951,7 @@ def project_planning_context(
             planned_filters=planned_filters,
             analytical_operations=operation_projection,
             temporal_series=temporal_series,
+            normalized_question=normalized_question,
         )
     except MetricSourceCompositionError:
         raise PlanningRejection(

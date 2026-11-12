@@ -535,7 +535,12 @@ def build_sql_generation_request(
                     "dimensoes solicitadas. Nao use UNION (deduplicante), "
                     "nao infira fontes, filtros, sinais, dimensoes ou "
                     "outras metricas da pergunta; nao introduza DRE nem "
-                    "formula financeira nao atestada pelo catalogo."
+                    "formula financeira nao atestada pelo catalogo. "
+                    "Quando temporal_grouping existir, use o grao "
+                    "autorizado e a coluna DATE especifica de cada fonte, "
+                    "projetando o periodo na UNION ALL e agrupando "
+                    "somente depois dessa combinacao. Nao infira "
+                    "timezone, periodo ou data de outra fonte."
                 ),
             }
         )
