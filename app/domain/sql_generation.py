@@ -250,6 +250,13 @@ def _safe_provider_failure_reason(value: object) -> str:
         "transport_unavailable",
         "tls_failure",
         "unexpected_error",
+        # Generic, sanitized opt-in compiler contract failures. These
+        # disclose no tenant identifiers, schema, column, SQL or secrets.
+        "invalid_compiler_request",
+        "missing_compiler_context",
+        "compiler_context_pin_mismatch",
+        "compiler_composition_not_selected",
+        "compiler_composition_invalid",
     }
     return text if text in allowed else "provider_failed"
 
