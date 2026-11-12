@@ -477,6 +477,10 @@ STEPS = [
         "testar_canonical_composition_shadow_e2e.py",
         [sys.executable, "testar_canonical_composition_shadow_e2e.py"],
     ),
+    (
+        "testar_legacy_functional_inventory_offline.py",
+        [sys.executable, "testar_legacy_functional_inventory_offline.py"],
+    ),
     ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
     ("test_switch_shadow_evidence_tenant.py", [sys.executable, "scripts/test_switch_shadow_evidence_tenant.py"]),
     ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),]
