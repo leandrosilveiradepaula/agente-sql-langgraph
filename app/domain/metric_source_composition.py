@@ -25,6 +25,10 @@ _COMPOSITION_KEYS = {
     "composition_ref", "intent_name", "metric_ref", "strategy",
     "source_use", "accounting_definition_attested", "sources",
 }
+_CALCULATION_KEYS = {
+    "operation", "numerator_source_refs", "denominator_source_refs",
+    "scale", "zero_denominator",
+}
 _TEMPORAL_GRAINS = {"day", "week", "month", "quarter", "year"}
 _NUMERIC_TYPES = {"numeric", "decimal", "smallint", "integer", "bigint"}
 _TEMPORAL_KEYS = {"require_explicit_grain", "granularities", "source_dates"}
@@ -83,6 +87,55 @@ def _source_filter(raw: object, columns: set[str]) -> dict[str, Any]:
     return {"column": col, "operator": op, "value": deepcopy(value)}
 
 
+
+def _approved_source_ratio(
+    raw: object, source_refs: set[str],
+) -> dict[str, Any]:
+    """Versioned generic ratio of SUMs over source streams.
+
+    No business metric, sign, account, DRE, SQL expression, currency, or
+    particular client can be embedded as code. The approved tenant snapshot
+    supplies every operand, inclusion and scale. All streams must contribute
+    to at least one operand to prevent silently dropping financial facts.
+    """
+    if not isinstance(raw, Mapping) or set(raw) != _CALCULATION_KEYS:
+        raise MetricSourceCompositionError("COMPOSITION_CALCULATION_INVALID")
+    if (
+        raw.get("operation") != "ratio_of_sums"
+        or raw.get("zero_denominator") != "null"
+        or type(raw.get("scale")) is not int
+        or not 1 <= raw["scale"] <= 10000
+    ):
+        raise MetricSourceCompositionError("COMPOSITION_CALCULATION_NOT_ATTESTED")
+    normalized = {}
+    for key in ("numerator_source_refs", "denominator_source_refs"):
+        refs = raw[key]
+        if not isinstance(refs, list) or not 1 <= len(refs) <= 24:
+            raise MetricSourceCompositionError("COMPOSITION_OPERANDS_INVALID")
+        chosen = set()
+        for ref in refs:
+            if (
+                not _valid_ref(ref)
+                or ref.casefold() not in source_refs
+                or ref.casefold() in chosen
+            ):
+                raise MetricSourceCompositionError("COMPOSITION_OPERAND_NOT_BOUND")
+            chosen.add(ref.casefold())
+        normalized[key] = chosen
+    if (
+        normalized["numerator_source_refs"]
+        | normalized["denominator_source_refs"]
+    ) != source_refs:
+        raise MetricSourceCompositionError("COMPOSITION_UNUSED_SOURCE")
+    return {
+        "operation": "ratio_of_sums",
+        "numerator_source_refs": sorted(normalized["numerator_source_refs"]),
+        "denominator_source_refs": sorted(normalized["denominator_source_refs"]),
+        "scale": raw["scale"],
+        "zero_denominator": "null",
+    }
+
+
 def normalize_metric_source_compositions(
     raw: object, table_catalog: list[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -111,7 +164,7 @@ def normalize_metric_source_compositions(
         if (
             not isinstance(raw_item, Mapping)
             or not _COMPOSITION_KEYS <= set(raw_item)
-            or set(raw_item) - _COMPOSITION_KEYS - {"temporal"}
+            or set(raw_item) - _COMPOSITION_KEYS - {"temporal", "calculation"}
         ):
             raise MetricSourceCompositionError("COMPOSITION_DEFINITION_INVALID")
         identity = raw_item.get("composition_ref")
@@ -225,7 +278,14 @@ def normalize_metric_source_compositions(
             temporal = _normalize_composition_temporal(
                 raw_item["temporal"], sources, table_index
             )
+        calculation = None
+        if "calculation" in raw_item:
+            calculation = _approved_source_ratio(
+                raw_item["calculation"],
+                {source["source_ref"].casefold() for source in sources},
+            )
         output.append({
+            **({"calculation": calculation} if calculation is not None else {}),
             **({"temporal": temporal} if temporal is not None else {}),
             "composition_ref": identity,
             "intent_name": intent,
@@ -309,6 +369,10 @@ def project_metric_source_composition(
     )
     return {
         **(
+            {"calculation": deepcopy(source["calculation"])}
+            if "calculation" in source else {}
+        ),
+        **(
             {"temporal_grouping": temporal_grouping}
             if temporal_grouping is not None else {}
         ),
@@ -341,7 +405,7 @@ def validate_projected_metric_composition(
     if (
         not isinstance(value, Mapping)
         or not expected <= set(value)
-        or set(value) - expected - {"temporal_grouping"}
+        or set(value) - expected - {"temporal_grouping", "calculation"}
     ):
         raise MetricSourceCompositionError("COMPOSITION_PROVIDER_CONTRACT_INVALID")
     if (
@@ -427,6 +491,12 @@ def validate_projected_metric_composition(
             raise MetricSourceCompositionError("COMPOSITION_PROVIDER_FILTERS_INVALID")
         for predicate in filters:
             _source_filter(predicate, visible)
+    if "calculation" in value:
+        approved_calculation = _approved_source_ratio(
+            value["calculation"], unique_refs,
+        )
+        if value["calculation"] != approved_calculation:
+            raise MetricSourceCompositionError("COMPOSITION_CALCULATION_NOT_CANONICAL")
     if len(set(ref_to_table.values())) != len(ref_to_table):
         raise MetricSourceCompositionError("COMPOSITION_PROVIDER_DUPLICATE_FACT")
     seen_dims: set[str] = set()

@@ -29,7 +29,7 @@ from app.domain.sql_contract import run_sql_contract_gate
 from app.domain.sql_generation import build_sql_generation_request
 from app.domain.sql_security import run_sql_security_gate
 from testar_metric_source_composition_e2e import (
-    _plan, fixture_a, fixture_b, fixture_calendar_range,
+    _plan, fixture_a, fixture_b, fixture_calendar_range, fixture_attested_ratio,
 )
 
 EXPECTED_ENV = {
@@ -227,13 +227,66 @@ def main() -> None:
                 ("2026-01-01", "west", Decimal(8)),
                 ("2026-02-01", "north", Decimal(10)),
             ], grouped_rows
+            ratio_sql = _query(
+                fixture_attested_ratio(raw),
+                "synthetic report monthly between 2025 and 2026",
+            )
+            ratio_rows = _actual(_readonly_query(connection, role, ratio_sql))
+            assert [row[0] for row in ratio_rows] == [
+                "2025-02-01", "2025-08-01", "2026-01-01", "2026-02-01"
+            ]
+            # Assert aggregates-before-divide, not a mean of row ratios.
+            assert [
+                (value.quantize(Decimal("0.001")))
+                for _, value in ratio_rows
+            ] == [
+                Decimal("76.923"), Decimal("62.500"),
+                Decimal("85.714"), Decimal("66.667"),
+            ], ratio_rows
+            # Deliberately introduce a group containing only a denominator-
+            # absent stream in this disposable database. A missing approved
+            # denominator must be NULL, never a fabricated zero or infinity.
+            other = raw["metric_source_compositions"][0]["sources"][1]
+            date_binding = next(
+                item["target_column"]
+                for item in raw["metric_source_compositions"][0]["temporal"]["source_dates"]
+                if item["source_ref"] == other["source_ref"]
+            )
+            schema, table = other["target_table"].split(".")
+            with psycopg.connect(dsn) as privileged:
+                with privileged.cursor() as cur:
+                    cur.execute(
+                        sql.SQL(
+                            "INSERT INTO {}.{} ({}, zone_code, flag, {}) "
+                            "VALUES (%s, %s, %s, %s)"
+                        ).format(
+                            sql.Identifier(schema), sql.Identifier(table),
+                            sql.Identifier(other["value_column"]),
+                            sql.Identifier(date_binding),
+                        ),
+                        (20, "denominator_absent", "approved", "2026-03-05"),
+                    )
+            grouped_ratio_sql = _query(
+                fixture_attested_ratio(raw),
+                "synthetic report monthly between 2025 and 2026",
+                grouped=True,
+            )
+            guarded_rows = _readonly_query(
+                connection, role, grouped_ratio_sql
+            )
+            assert [
+                row for row in guarded_rows
+                if row[1] == "denominator_absent"
+            ][0][-1] is None
             queries.append((role, monthly))
         assert queries[0][1] != queries[1][1]
         _forbidden_cross_tenant(connection, queries[0][0], queries[1][1])
         _forbidden_cross_tenant(connection, queries[1][0], queries[0][1])
     print("DISPOSABLE_POSTGRES_COMPOSITION=PASS")
     print("TENANT_CONTEXTS=2")
-    print("READONLY_GENERATED_SELECTS=6")
+    print("READONLY_GENERATED_SELECTS=10")
+    print("ZERO_DENOMINATOR_RETURNS_NULL=PASS")
+    print("ATTESTED_GENERIC_RATIO_OF_SUMS=PASS")
     print("CROSS_TENANT_ACL_REJECTIONS=2")
     print("CUSTOMER_FINANCIAL_SQL_EXECUTED=false")
 

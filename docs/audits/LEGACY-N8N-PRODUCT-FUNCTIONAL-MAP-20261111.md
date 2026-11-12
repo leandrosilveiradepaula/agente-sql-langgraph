@@ -1,3 +1,11 @@
+## 12/11/2026 - Evidencia atualizada de fonte e formula parametrica (sem homologacao G5)
+
+O novo inventario docs/audits/LEGACY-N8N-BUSINESS-RULE-SITES-20261112.md comprova 24 trechos exatos no n8n publicado (linhas e hash, sem SQL/prompts/valores) em 10 nos, com 41 codigos indexados. Identifica dependencia de formula percentual e regras gerenciais antigas, **sem importar metricas ou constantes contabeis** do legado ao runtime. Nao sao 3.403 literais individualmente homologados. A origem G5 (77 registros da versao ativa) continua sem significado contabil aprovado.
+
+O contrato versionado opcional metric_source_compositions[].calculation agora representa uma razao generica de dois somatorios por fontes, com sinais/operadores/escala escolhidos por tenant, e protege divisao por zero. Gerador PostgreSQL dinamico, SQL Security/Contract Gates e HTTP Shadow canonico validados em 2 tenants sintéticos; PostgreSQL 16 descartavel confirmou 10 SELECTs read-only, 2 ACL cross-tenant rejeitadas, valores e NULL com denominador ausente. **Sem execucao SQL de cliente, Gemini real, decriptacao G5 ou benchmark na geracao**. NAO representa paridade financeira do sistema antigo.
+
+---
+
 ## 12/11/2026 - Inventario funcional dos 68 nos: ENTREGA ESTATICA FECHADA
 
 **O escopo do inventario funcional de nos foi concluido no export n8n publicado e ativo**, sem edicao nem execucao do workflow. Auditoria no codigo real reconfirmou **68/68 identidades e configuracoes/corpos, 78/78 arestas por porta, 41 Code, 11 PostgreSQL, 10 IF, 2 HTTP, 3 respostas e 1 Webhook**, contra o crosswalk privado anterior. Dos 68, **60 sao alcancaveis pelo webhook e 8 (15,17,18,19,20,21,51,53) estao fora dessa rota**, sem presuncao de que sejam excluiveis. Os 10 IF possuem True/False documentados; IF 25, 29 e 62 sao gates tecnicos, **nao aprovacao humana**. Onze operacoes PostgreSQL foram categorizadas como leitura, cache, auditoria/fila, DDL isolada, preflight ou execucao SQL dinamica, sem executar SQL. Dois HTTP POST sao Gemini geracao/reparo.

@@ -94,6 +94,7 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
         raise PostgresCompositionSqlError("COMPOSITION_SOURCE_UNAUTHORIZED") from None
     dimensions = value["grouping_dimensions"]
     temporal = value.get("temporal_grouping")
+    calculation = value.get("calculation")
     aliases = [f"group_{index+1}" for index in range(len(dimensions))]
     subqueries = []
     for source_index, source in enumerate(value["sources"], 1):
@@ -124,6 +125,10 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
                 raise PostgresCompositionSqlError("GROUPING_NOT_BOUND")
             columns.append(
                 f'{_ident(table_alias)}.{_ident(matching[0]["target_column"])} AS {_ident(aliases[index])}'
+            )
+        if calculation is not None:
+            columns.append(
+                _literal(source["source_ref"].casefold()) + ' AS "source_ref"'
             )
         val = _ident(source["value_column"])
         multiplier = source["sign_multiplier"]
@@ -165,7 +170,24 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
     outer = (
         ['"time_bucket"'] if temporal is not None else []
     ) + [f'"{name}"' for name in aliases]
-    outer.append('SUM("measure_value") AS "metric_value"')
+    if calculation is None:
+        outer.append('SUM("measure_value") AS "metric_value"')
+    else:
+        def operand(key: str) -> str:
+            refs = calculation[key]
+            includes = ", ".join(_literal(ref) for ref in refs)
+            return (
+                'SUM(CASE WHEN "source_ref" IN (' + includes
+                + ') THEN "measure_value" ELSE 0 END)'
+            )
+        numerator = operand("numerator_source_refs")
+        denominator = operand("denominator_source_refs")
+        # Both operands are summed at the requested grouping grain BEFORE
+        # dividing. No row-wise ratios, and no divide-by-zero exception.
+        outer.append(
+            '(' + numerator + ' * ' + str(calculation["scale"])
+            + ' / NULLIF(' + denominator + ', 0)) AS "metric_value"'
+        )
     sql = (
         'WITH "combined_sources" AS (\n'
         + "\nUNION ALL\n".join(subqueries)

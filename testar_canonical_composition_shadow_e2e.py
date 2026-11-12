@@ -27,6 +27,7 @@ from app.test_runtime.composition import create_shadow_test_runtime
 from app.test_runtime.offline_adapters import ShadowTestSqlRepairer
 from testar_metric_source_composition_e2e import (
     fixture_a, fixture_b, fixture_temporal, fixture_calendar_year,
+    fixture_attested_ratio,
 )
 from testar_postgres_context_repository import FakeConnect
 from testar_shadow_test_runtime import _env, _run_asgi
@@ -163,6 +164,42 @@ def test_end_to_end_two_canonical_tenants_generate_real_dynamic_sql_offline():
         observed.append(sql)
     assert observed[0] != observed[1]
 
+
+
+def test_canonical_shadow_ratio_rule_is_external_and_context_fingerprinted():
+    for tenant, raw in (
+        ("ratio-fixture-a", fixture_a()),
+        ("ratio-fixture-b", fixture_b()),
+    ):
+        fixture = fixture_attested_ratio(raw)
+        runtime, db, generator, evidence = _instance(fixture, tenant)
+        http, result = _run_asgi(
+            runtime.app, "POST", "/v1/internal/sql-agent/generate",
+            _request(tenant, "ratio-source-test-" + tenant),
+        )
+        assert http == 200, (http, result)
+        assert result["status"] == "success", result
+        generated = result["sql"]
+        assert "NULLIF" in generated
+        assert "CASE WHEN" in generated
+        assert "UNION ALL" in generated
+        assert generator.calls == 1
+        assert db.cursor.executed_parameters["tenant_id"] == tenant
+        assert evidence.create_calls >= 1
+    raw = fixture_attested_ratio(fixture_a())
+    pinned = normalize_context_snapshot(
+        _canonical_payload(raw, "ratio-fixture-a")
+    )["fingerprint"]
+    raw["metric_source_compositions"][0]["calculation"]["scale"] = 1
+    runtime, _, generator, _ = _instance(
+        raw, "ratio-fixture-a", pin=pinned
+    )
+    http, result = _run_asgi(
+        runtime.app, "POST", "/v1/internal/sql-agent/generate",
+        _request("ratio-fixture-a", "ratio-fingerprint-changed"),
+    )
+    assert not (http == 200 and result.get("status") == "success")
+    assert generator.calls == 0
 
 def test_mismatched_principal_cannot_reuse_another_tenants_catalog():
     runtime, _, generator, _ = _instance(fixture_a(), "tenant-C1")

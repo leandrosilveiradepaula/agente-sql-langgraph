@@ -1013,6 +1013,169 @@ def test_calendar_range_policy_and_tamper_fail_closed():
             raise AssertionError(replacement)
 
 
+
+def fixture_attested_ratio(raw: dict) -> dict:
+    candidate = deepcopy(raw)
+    candidate["metric_source_compositions"][0]["calculation"] = {
+        "operation": "ratio_of_sums",
+        "numerator_source_refs": ["A", "B"],
+        "denominator_source_refs": ["A"],
+        "scale": 100,
+        "zero_denominator": "null",
+    }
+    return candidate
+
+
+def test_attested_ratio_two_unrelated_tenants_and_contract():
+    # The ratio is synthetic, independently approved in the test fixture only.
+    # A and B can have distinct tables, physical names, signs and filters.
+    for base in (fixture_a(), fixture_b()):
+        ctx, planned = _plan(
+            fixture_attested_ratio(fixture_calendar_range(base)),
+            "synthetic report monthly between 2025 and 2026",
+        )
+        assert planned["status"] == "planned", planned
+        composition = planned["query_plan"]["planning_context"]["metric_source_composition"]
+        calculation = composition["calculation"]
+        assert calculation["operation"] == "ratio_of_sums"
+        assert calculation["numerator_source_refs"] == ["a", "b"]
+        assert calculation["denominator_source_refs"] == ["a"]
+        generated = build_postgres_metric_source_sql(
+            build_sql_generation_request(planned["query_plan"])
+        )
+        assert "NULLIF" in generated
+        assert 'CASE WHEN "source_ref" IN (' in generated
+        assert 'SUM("measure_value") AS "metric_value"' not in generated
+        security, analysis = run_sql_security_gate(
+            current_sql=generated, query_plan=planned["query_plan"],
+        )
+        contract, _ = run_sql_contract_gate(
+            current_sql=generated, query_plan=planned["query_plan"],
+            analysis=analysis,
+        )
+        assert security["status"] == "approved", security
+        assert contract["status"] == "approved", contract
+        for tampered in (
+            generated.replace(" * 100 / ", " * 99 / "),
+            generated.replace("NULLIF(", "COALESCE("),
+            generated.replace("'a', 'b'", "'a'"),
+            generated.replace("UNION ALL", "UNION"),
+        ):
+            if tampered == generated:
+                raise AssertionError("tamper not applied")
+            check, _ = run_sql_contract_gate(
+                current_sql=tampered,
+                query_plan=planned["query_plan"],
+                analysis=analysis,
+            )
+            assert check["status"] != "approved", check
+        assert ctx["fingerprint"]
+
+
+def test_attested_ratio_invalid_policy_and_unbound_operands_rejected():
+    base = fixture_attested_ratio(fixture_a())
+    def mutate(kind):
+        raw = deepcopy(base)
+        c = raw["metric_source_compositions"][0]["calculation"]
+        if kind == "missing_attested":
+            del raw["metric_source_compositions"][0]["accounting_definition_attested"]
+        elif kind == "unbound":
+            c["denominator_source_refs"] = ["UNKNOWN"]
+        elif kind == "duplicate":
+            c["numerator_source_refs"] = ["A", "A"]
+        elif kind == "uncovered":
+            c["numerator_source_refs"] = ["A"]
+        elif kind == "boolean_scale":
+            c["scale"] = True
+        elif kind == "zero_scale":
+            c["scale"] = 0
+        elif kind == "overflow_scale":
+            c["scale"] = 10001
+        elif kind == "unexpected_sql":
+            c["sql"] = "SELECT *"
+        elif kind == "unapproved_policy":
+            c["zero_denominator"] = "zero"
+        elif kind == "unsupported_operation":
+            c["operation"] = "divide_row_by_row"
+        else:
+            raise AssertionError(kind)
+        return raw
+    for kind in (
+        "missing_attested", "unbound", "duplicate", "uncovered",
+        "boolean_scale", "zero_scale", "overflow_scale", "unexpected_sql",
+        "unapproved_policy", "unsupported_operation",
+    ):
+        try:
+            normalize_context_snapshot(mutate(kind))
+        except ContextNormalizationError:
+            pass
+        else:
+            raise AssertionError(kind)
+    ctx, plan = _plan(base)
+    assert plan["status"] == "planned", plan
+    request = build_sql_generation_request(plan["query_plan"])
+    original = request["generation_context"]["metric_source_composition"]
+    for broken in (
+        {"numerator_source_refs": ["z"]},
+        {"denominator_source_refs": ["a", "a"]},
+        {"operation": "sql_fragment"},
+        {"scale": False},
+        {"scale": 0},
+        {"zero_denominator": "zero"},
+    ):
+        attempt = deepcopy(request)
+        attempt["generation_context"]["metric_source_composition"]["calculation"].update(broken)
+        try:
+            build_postgres_metric_source_sql(attempt)
+        except PostgresCompositionSqlError:
+            pass
+        else:
+            raise AssertionError(broken)
+    assert original["calculation"]["scale"] == 100
+
+
+
+def test_generic_ratio_accepts_three_sources_and_declared_scale():
+    from copy import deepcopy
+    raw = fixture_attested_ratio(fixture_a())
+    first = raw["metric_source_compositions"][0]
+    third_table = deepcopy(raw["table_catalog"][1])
+    third_table["table_name"] = "third_stream"
+    third_table["grain"] = {"grain_ref": "fact_grain_C", "unit": "event"}
+    raw["table_catalog"].append(third_table)
+    third = deepcopy(first["sources"][1])
+    third["source_ref"] = "C"
+    third["target_table"] = "funding.third_stream"
+    third["grain_ref"] = "fact_grain_C"
+    first["sources"].append(third)
+    raw["query_patterns"][0]["required_tables"].append("funding.third_stream")
+    first["calculation"]["numerator_source_refs"].append("C")
+    ctx, planned = _plan(raw)
+    assert planned["status"] == "planned", planned
+    sql = build_postgres_metric_source_sql(
+        build_sql_generation_request(planned["query_plan"])
+    )
+    assert sql.count("UNION ALL") == 2
+    assert "THEN" in sql and "'c'" in sql
+    scaled = deepcopy(raw)
+    scaled["metric_source_compositions"][0]["calculation"]["scale"] = 1
+    ctx_other, plan_other = _plan(scaled)
+    assert plan_other["status"] == "planned", plan_other
+    sql_other = build_postgres_metric_source_sql(
+        build_sql_generation_request(plan_other["query_plan"])
+    )
+    assert ctx["fingerprint"] != ctx_other["fingerprint"]
+    assert sql_other != sql
+    assert " * 1 / NULLIF(" in sql_other
+
+def test_attested_ratio_opt_in_preserves_existing_snapshots():
+    base = fixture_a()
+    without = normalize_context_snapshot(base)
+    with_calc = normalize_context_snapshot(fixture_attested_ratio(base))
+    assert without["fingerprint"] != with_calc["fingerprint"]
+    assert all("calculation" not in d for d in without["metric_source_compositions"])
+    assert with_calc["metric_source_compositions"][0]["calculation"]["operation"] == "ratio_of_sums"
+
 def main() -> None:
     tests = sorted(
         (name, obj) for name, obj in globals().items()
