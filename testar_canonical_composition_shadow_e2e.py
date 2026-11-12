@@ -26,7 +26,7 @@ from app.domain.context_normalizer import normalize_context_snapshot
 from app.test_runtime.composition import create_shadow_test_runtime
 from app.test_runtime.offline_adapters import ShadowTestSqlRepairer
 from testar_metric_source_composition_e2e import (
-    fixture_a, fixture_b, fixture_temporal,
+    fixture_a, fixture_b, fixture_temporal, fixture_calendar_year,
 )
 from testar_postgres_context_repository import FakeConnect
 from testar_shadow_test_runtime import _env, _run_asgi
@@ -263,6 +263,29 @@ def test_opt_in_compiler_rejects_legacy_mode_or_wrong_version_and_request():
         assert err.reason == "compiler_composition_not_selected"
     else:
         raise AssertionError("SQL compiler guessed missing composition")
+
+
+
+def test_http_canonical_year_filtered_metric_composition():
+    for tenant, source in (
+        ("period-tenant-1", fixture_a()),
+        ("period-tenant-2", fixture_b()),
+    ):
+        runtime, _, generator, evidence = _instance(
+            fixture_calendar_year(source), tenant,
+        )
+        http, response = _run_asgi(
+            runtime.app, "POST", "/v1/internal/sql-agent/generate",
+            _request(
+                tenant, f"period-scoped-{tenant}",
+                question="synthetic report monthly in 2026",
+            ),
+        )
+        assert http == 200 and response["status"] == "success", (http, response)
+        sql = response["sql"]
+        assert sql.count("'2026-01-01'") == 2
+        assert sql.count("'2027-01-01'") == 2
+        assert generator.calls == 1 and evidence.create_calls >= 1
 
 
 def main():

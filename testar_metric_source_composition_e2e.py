@@ -786,6 +786,134 @@ def test_unbound_explicit_year_or_period_reference_cannot_be_silently_ignored():
         raise AssertionError("Overlapping period/grain signals accepted")
 
 
+
+def fixture_calendar_year(raw: dict) -> dict:
+    candidate = fixture_temporal(raw)
+    candidate["metric_source_compositions"][0]["temporal"]["period_year"] = {
+        "calendar_year_attested": True,
+        "allow_bare_year": False,
+        "require_year": False,
+        "year_terms": ["in", "for", "em"],
+    }
+    return candidate
+
+
+def test_calendar_year_attested_filters_each_independent_source():
+    for base in (fixture_a(), fixture_b()):
+        data = fixture_calendar_year(base)
+        for term, expected_grain in (
+            ("monthly in 2026", "month"),
+            ("per year in 2025", "year"),
+        ):
+            ctx, planned = _plan(data, f"synthetic report {term}")
+            assert planned["status"] == "planned", planned
+            comp = planned["query_plan"]["planning_context"][
+                "metric_source_composition"
+            ]
+            assert comp["temporal_grouping"]["period_year"] in (2025, 2026)
+            assert comp["temporal_grouping"]["grain"] == expected_grain
+            year = comp["temporal_grouping"]["period_year"]
+            sql = build_postgres_metric_source_sql(
+                build_sql_generation_request(planned["query_plan"])
+            )
+            assert sql.count(f"'{year:04d}-01-01'") == 2
+            assert sql.count(f"'{year + 1:04d}-01-01'") == 2
+            assert sql.count(f"date_trunc('{expected_grain}',") == 2
+            gate, analysis = run_sql_security_gate(
+                current_sql=sql, query_plan=planned["query_plan"],
+            )
+            contract, _ = run_sql_contract_gate(
+                current_sql=sql, query_plan=planned["query_plan"],
+                analysis=analysis,
+            )
+            assert gate["status"] == "approved", gate["errors"]
+            assert contract["status"] == "approved", contract["errors"]
+            assert ctx["fingerprint"]
+
+
+def test_unapproved_calendar_year_semantics_cannot_activate():
+    raw = fixture_calendar_year(fixture_a())
+    for issue in ("no_attestation", "bad_prefix", "unsupported_year"):
+        changed = deepcopy(raw)
+        policy = changed["metric_source_compositions"][0]["temporal"]["period_year"]
+        if issue == "no_attestation":
+            policy["calendar_year_attested"] = False
+        elif issue == "bad_prefix":
+            policy["year_terms"] = ["in\nDROP"]
+        else:
+            policy["unknown"] = True
+        try:
+            normalize_context_snapshot(changed)
+        except ContextNormalizationError:
+            pass
+        else:
+            raise AssertionError("Unapproved year policy was accepted")
+
+
+def test_calendar_year_ambiguous_or_unscoped_or_out_of_range_rejected():
+    raw = fixture_calendar_year(fixture_a())
+    for question in (
+        "synthetic report monthly 2026",
+        "synthetic report monthly in 2025 and in 2026",
+        "synthetic report monthly in 9999",
+        "synthetic report monthly in 0000",
+    ):
+        _, result = _plan(raw, question)
+        assert result["status"] == "rejected", (question, result)
+        assert result["error_code"] == "PLANNING_METRIC_COMPOSITION_INVALID"
+
+
+def test_synthetic_numeric_year_filter_excludes_other_exercises():
+    import sqlite3
+    from datetime import date
+    for base in (fixture_a(), fixture_b()):
+        raw = fixture_calendar_year(base)
+        _, result = _plan(raw, "synthetic report monthly in 2026")
+        assert result["status"] == "planned", result
+        plan = result["query_plan"]
+        sql = build_postgres_metric_source_sql(
+            build_sql_generation_request(plan)
+        )
+        conn = sqlite3.connect(":memory:")
+        try:
+            def bucket(grain: str, value: str) -> str:
+                value_date = date.fromisoformat(value)
+                if grain == "month":
+                    return value_date.replace(day=1).isoformat() + " 00:00:00"
+                raise ValueError("only synthetic month test")
+            conn.create_function("date_trunc", 2, bucket)
+            facts = raw["metric_source_compositions"][0]["sources"]
+            dates = raw["metric_source_compositions"][0]["temporal"]["source_dates"]
+            schema = facts[0]["target_table"].split(".")[0]
+            conn.execute(f'ATTACH DATABASE \':memory:\' AS "{schema}"')
+            for fact, date_ref in zip(facts, dates):
+                name = fact["target_table"].split(".")[1]
+                measure = fact["value_column"]
+                day = date_ref["target_column"]
+                conn.execute(
+                    f'CREATE TABLE "{schema}"."{name}" '
+                    f'("{measure}" NUMERIC, "zone_code" TEXT, '
+                    f'"flag" TEXT, "{day}" DATE)'
+                )
+                sql_insert = (
+                    f'INSERT INTO "{schema}"."{name}" '
+                    f'("{measure}", "zone_code", "flag", "{day}") '
+                    'VALUES (?, ?, ?, ?)'
+                )
+                sign = fact["sign_multiplier"]
+                rows = (
+                    (1000, "north", "approved", "2025-02-10"),
+                    (80 if sign == 1 else 10, "north", "approved", "2026-01-10"),
+                    (999, "north", "approved", "2027-01-10"),
+                    (999, "north", "blocked", "2026-01-21"),
+                )
+                conn.executemany(sql_insert, rows)
+            actual = conn.execute(sql).fetchall()
+            assert actual == [("2026-01-01 00:00:00", 70)], actual
+        finally:
+            conn.close()
+
+
 def main() -> None:
     tests = sorted(
         (name, obj) for name, obj in globals().items()
