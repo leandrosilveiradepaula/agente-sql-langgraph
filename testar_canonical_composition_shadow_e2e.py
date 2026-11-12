@@ -236,7 +236,7 @@ def test_opt_in_compiler_rejects_legacy_mode_or_wrong_version_and_request():
             raise AssertionError("Compiler started without a secure pin")
     from app.domain.sql_generation import build_sql_generation_request
     from testar_metric_source_composition_e2e import _plan
-    _, planned = _plan(raw, "synthetic report monthly")
+    _, planned = _plan(payload, "synthetic report monthly")
     assert planned["status"] == "planned"
     request = build_sql_generation_request(planned["query_plan"])
     compiler = CatalogCompositionSqlGenerator(
