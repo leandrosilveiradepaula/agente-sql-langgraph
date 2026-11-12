@@ -254,12 +254,6 @@ def run_sql_contract_gate(
 
     table_results = _verify_tables(sql_analysis, policy, findings)
     column_results = _verify_columns(sql_analysis, policy, findings)
-    grouping_results = _verify_grouping_dimensions(
-        sql_analysis,
-        query_plan,
-        policy,
-        findings,
-    )
     analytical_operation_results = _verify_analytical_operations(
         current_sql,
         sql_analysis,
@@ -273,6 +267,18 @@ def run_sql_contract_gate(
         query_plan=query_plan,
         findings=findings,
     )
+    if source_composition_check == "passed":
+        # The normal grouping validator checks raw group columns in root
+        # SQL. The compositional plan groups *post-UNION* output aliases.
+        # This path requires proof of all source lineage and aliases against
+        # the reference renderer, then verifies logical dimension parity.
+        grouping_results = _verify_metric_composition_grouping(
+            query_plan=query_plan, findings=findings,
+        )
+    else:
+        grouping_results = _verify_grouping_dimensions(
+            sql_analysis, query_plan, policy, findings,
+        )
     rule_results = _verify_rules(
         sql_token_norms=sql_token_norms,
         analysis=sql_analysis,
@@ -349,6 +355,71 @@ def run_sql_contract_gate(
         ),
         deepcopy(sql_analysis),
     )
+
+
+def _verify_metric_composition_grouping(
+    *,
+    query_plan: QueryPlan,
+    findings: list[SqlContractFinding],
+) -> list[ColumnVerificationResult]:
+    """Validate selected semantic dimensions against every source binding.
+
+    Only called after SQL token-level proof of the exact catalog-derived
+    UNION ALL representation. It never accepts an arbitrary grouping alias.
+    """
+    planned = _planned_grouping_dimensions(query_plan)
+    context = _planning_context(query_plan)
+    definition = context.get("metric_source_composition")
+    if not isinstance(definition, Mapping):
+        raise SqlContractInputError("Composicao de metrica invalida.")
+    selected = definition.get("grouping_dimensions")
+    if not isinstance(selected, list):
+        raise SqlContractInputError("Dimensoes compostas invalidas.")
+    selected_by_concept = {
+        str(item.get("canonical_value", "")).casefold(): item
+        for item in selected if isinstance(item, Mapping)
+    }
+    all_concepts = {
+        row["canonical_value"].casefold() for row in planned
+    }
+    complete = (
+        len(selected_by_concept) == len(selected)
+        and len(all_concepts) == len(planned)
+        and set(selected_by_concept) == all_concepts
+    )
+    if complete:
+        for item in planned:
+            bindings = selected_by_concept[item["canonical_value"].casefold()].get(
+                "source_bindings", []
+            )
+            complete = any(
+                isinstance(binding, Mapping)
+                and _clean_text(binding.get("target_table")).casefold()
+                == item["target_table"].casefold()
+                and _clean_text(binding.get("target_column")).casefold()
+                == item["target_column"].casefold()
+                for binding in bindings
+            )
+            if not complete:
+                break
+    if not complete:
+        findings.append(_finding(
+            "SQL_CONTRACT_GROUPING_DIMENSION_MISMATCH",
+            "Dimensoes compostas nao representam o agrupamento autorizado.",
+            details={"reason": "composition_grouping_evidence_missing"},
+        ))
+    return [
+        {
+            "column": item["target_column"].casefold(),
+            "table": item["target_table"].casefold(),
+            "status": "satisfied" if complete else "violated",
+            "reason": (
+                "post_union_grouping_verified"
+                if complete else "composition_grouping_unverified"
+            ),
+        }
+        for item in planned
+    ]
 
 
 def _verify_metric_source_composition(
