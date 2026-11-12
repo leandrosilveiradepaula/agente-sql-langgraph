@@ -1,0 +1,356 @@
+"""Tenant schema ACL is mandatory inside physical metric planning.
+
+These tests use synthetic catalog contexts; no database, network, LLM, or
+historical SQL. They enforce an independent runtime gate, beyond the static
+catalog auditor and final SQL validator.
+"""
+from __future__ import annotations
+
+from copy import deepcopy
+
+from app.domain.planner import _resolve_planned_metrics, build_query_plan
+from app.domain.planning import PLANNER_VERSION
+from testar_planner import (
+    _metric_context,
+    _append_metric_binding,
+    _intent_metric_evidence,
+)
+from testar_semantic_catalog_audit import _tenant
+
+
+CARDINALITY = {
+    "mode": "single",
+    "minimum": 1,
+    "maximum": 1,
+    "same_metric_concept": True,
+    "distinct_bindings": True,
+}
+
+
+def _metric_result(context: dict, term: str = "amount"):
+    return _resolve_planned_metrics(
+        context=context,
+        matched_user_term=term,
+        binding_context_concepts=[{"concept_name": "mode_a"}],
+        cardinality=CARDINALITY,
+    )
+
+
+def _other_schema_table(context: dict, *, schema: str):
+    source = next(
+        table for table in context["table_catalog"]
+        if table.get("table_name") == "fact_metrics"
+    )
+    foreign = deepcopy(source)
+    foreign["schema_name"] = schema
+    context["table_catalog"].append(foreign)
+
+
+def test_direct_metric_is_rejected_when_schema_not_authorized():
+    context = _metric_context()
+    original, status, _ = _metric_result(context)
+    assert status == "resolved" and len(original) == 1
+    context["allowed_schemas"] = ["other_tenant"]
+    metrics, status, _ = _metric_result(context)
+    assert metrics == []
+    assert status == "invalid_metadata"
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.9,
+        normalized_question="highest amount",
+        intent_resolution_result=_intent_metric_evidence(
+            term="amount", operation_term="highest",
+        ),
+    )
+    assert result["status"] == "rejected"
+    assert result["query_plan"] is None
+    # Tenant table ACL takes precedence over metric-specific error reporting.
+    assert result["error_code"] == "PLANNING_TABLE_SCHEMA_UNAUTHORIZED"
+
+
+def test_unauthorized_metric_binding_cannot_override_direct_alias():
+    context = _metric_context()
+    _other_schema_table(context, schema="tenant_outside")
+    _append_metric_binding(
+        context,
+        target_table="tenant_outside.fact_metrics",
+        when_present=["mode_a"],
+    )
+    metrics, status, detail = _metric_result(context)
+    assert metrics == []
+    assert status == "invalid_metadata"
+    diagnostics = detail["binding_diagnostics"]
+    assert any(
+        item.get("reason") == "schema_not_authorized"
+        for d in diagnostics for item in d.get("rejected", [])
+    )
+    assert all(d.get("applicable_count") == 0 for d in diagnostics)
+
+
+def test_invalid_direct_alias_cannot_seed_valid_conditional_binding():
+    context = _metric_context()
+    _other_schema_table(context, schema="tenant_outside")
+    for entity in context["entities"]:
+        if entity.get("entity_type") == "financial_metric" and (
+            entity.get("user_term") == "amount"
+        ):
+            entity["target_table"] = "tenant_outside.fact_metrics"
+            entity["business_rule"]["metric"]["target_table"] = (
+                "tenant_outside.fact_metrics"
+            )
+    _append_metric_binding(
+        context,
+        target_table="schema_test.fact_metrics",
+        when_present=["mode_a"],
+    )
+    metrics, status, _ = _metric_result(context)
+    assert metrics == []
+    assert status == "invalid_metadata"
+
+
+def test_conditional_binding_remains_usable_inside_authorized_schema():
+    context = _metric_context()
+    _append_metric_binding(
+        context,
+        target_table="schema_test.fact_metrics",
+        when_present=["mode_a"],
+    )
+    metrics, status, detail = _metric_result(context)
+    assert status == "resolved"
+    assert len(metrics) == 1
+    assert metrics[0]["mapping_source"] == "metric_binding"
+    assert detail["binding_diagnostics"][0]["status"] == "resolved"
+
+
+def test_missing_or_malformed_schema_allowlist_fails_closed():
+    for malformed in (None, [], "schema_test", ["schema_test", None]):
+        context = _metric_context()
+        context["allowed_schemas"] = malformed
+        metrics, status, _ = _metric_result(context)
+        assert metrics == []
+        assert status == "invalid_metadata"
+
+
+def test_same_planner_portable_across_two_distinct_authorized_schemas():
+    for schema, table, alias in (
+        ("organization_a", "journal_lines", "gross_value"),
+        ("organization_b", "payment_records", "net_value"),
+    ):
+        context = _tenant(schema=schema, table=table, metric=alias)
+        metrics, status, _ = _metric_result(context, term=alias)
+        assert status == "resolved"
+        assert len(metrics) == 1
+        assert metrics[0]["target_table"] == schema + "." + table
+        context["allowed_schemas"] = ["another_organization"]
+        metrics, status, _ = _metric_result(context, term=alias)
+        assert metrics == [] and status == "invalid_metadata"
+
+
+
+def test_partially_resolved_explicit_metric_is_not_silently_dropped():
+    context = _metric_context()
+    evidence = _intent_metric_evidence(
+        term="amount", operation_term="highest",
+    )
+    # The strict no-partial-binding contract applies to optional semantic
+    # interpretation, not to unchanged legacy deterministic snapshots.
+    evidence["reason"] = "semantic_interpretation_selected"
+    metric_concept = next(
+        c for c in evidence["best_candidate"]["matches"][0][
+            "match_details"
+        ]["concepts"] if c.get("concept_name") == "financial_metric"
+    )
+    missing_term = deepcopy(metric_concept["terms"][0])
+    missing_term["term"] = "unregistered_measure"
+    missing_term["normalized_term"] = "unregistered_measure"
+    details = missing_term.get("match_details")
+    if isinstance(details, dict):
+        signal = details.get("semantic_signal")
+        if isinstance(signal, dict):
+            signal["term"] = "unregistered_measure"
+            signal["normalized_term"] = "unregistered_measure"
+    metric_concept["terms"].append(missing_term)
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.9,
+        normalized_question="highest amount and unregistered_measure",
+        intent_resolution_result=evidence,
+    )
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "PLANNING_METRIC_BINDING_INCOMPLETE"
+    assert result["query_plan"] is None
+    projection = result["projection"]
+    assert projection["planned_metrics"]
+    diagnostic = projection["diagnostics"]["planned_metric_diagnostic"]
+    assert diagnostic["unresolved_terms"] == ["unregistered_measure"]
+
+
+def test_legacy_planning_without_explicit_metric_stays_available():
+    from testar_planner import _context
+
+    result = build_query_plan(
+        context=_context(),
+        intent_name="generic_test_intent",
+        intent_confidence=0.9,
+        normalized_question="generic analysis",
+    )
+    assert result["status"] == "planned"
+    assert result["query_plan"] is not None
+
+
+def test_valid_explicit_metric_plans_with_runtime_acl():
+    context = _metric_context()
+    result = build_query_plan(
+        context=context,
+        intent_name="generic_test_intent",
+        intent_confidence=0.9,
+        normalized_question="highest amount",
+        intent_resolution_result=_intent_metric_evidence(
+            term="amount", operation_term="highest",
+        ),
+    )
+    assert result["status"] == "planned", result.get("error_code")
+    assert result["query_plan"]["planning_context"]["planned_metrics"]
+
+
+def test_planner_rejects_required_tables_outside_tenant_schema():
+    from testar_planner import _dimension_context, _intent_dimension_evidence
+    context = _dimension_context()
+    evidence = _intent_dimension_evidence(
+        term="by region", matched_tokens=["region"],
+    )
+    args = {
+        "intent_name": "generic_test_intent",
+        "intent_confidence": 0.98,
+        "normalized_question": "total amount across regions",
+        "intent_resolution_result": evidence,
+    }
+    assert build_query_plan(context=context, **args)["status"] == "planned"
+    context["allowed_schemas"] = ["another_tenant"]
+    result = build_query_plan(context=context, **args)
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "PLANNING_TABLE_SCHEMA_UNAUTHORIZED"
+    assert result["query_plan"] is None
+
+
+def test_planner_rejects_empty_or_malformed_tenant_scope():
+    from testar_planner import _dimension_context, _intent_dimension_evidence
+    context = _dimension_context()
+    evidence = _intent_dimension_evidence(
+        term="by region", matched_tokens=["region"],
+    )
+    for invalid in (None, [], "schema_test", ["schema_test", None], [""]):
+        candidate = deepcopy(context)
+        candidate["allowed_schemas"] = invalid
+        result = build_query_plan(
+            context=candidate, intent_name="generic_test_intent",
+            intent_confidence=0.98,
+            normalized_question="total amount across regions",
+            intent_resolution_result=evidence,
+        )
+        assert result["status"] == "rejected"
+        assert result["error_code"] == "PLANNING_SCHEMA_SCOPE_INVALID"
+        assert result["query_plan"] is None
+
+
+def test_planner_rejects_cross_tenant_dimension_with_valid_primary_table():
+    from testar_planner import _dimension_context, _intent_dimension_evidence
+    context = _dimension_context()
+    source = next(
+        t for t in context["table_catalog"]
+        if t["table_name"] == "dim_region"
+    )
+    foreign = deepcopy(source)
+    foreign["schema_name"] = "another_tenant"
+    context["table_catalog"].append(foreign)
+    for entry in context["entities"]:
+        if entry.get("entity_type") == "dimension" and (
+            entry.get("user_term") == "region"
+        ):
+            entry["target_table"] = "another_tenant.dim_region"
+    result = build_query_plan(
+        context=context, intent_name="generic_test_intent",
+        intent_confidence=0.98,
+        normalized_question="total amount across regions",
+        intent_resolution_result=_intent_dimension_evidence(
+            term="by region", matched_tokens=["region"],
+        ),
+    )
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "PLANNING_TABLE_SCHEMA_UNAUTHORIZED"
+    assert result["query_plan"] is None
+
+
+def test_planner_never_invents_dimension_columns_from_aliases_or_keys():
+    from testar_planner import _dimension_context, _intent_dimension_evidence
+    evidence = _intent_dimension_evidence(
+        term="by region", matched_tokens=["region"],
+    )
+    for remove_physical_column in (False, True):
+        context = _dimension_context()
+        if remove_physical_column:
+            # The key_columns shortcut alone does not prove physical existence.
+            table = next(
+                t for t in context["table_catalog"]
+                if t["table_name"] == "dim_region"
+            )
+            table["columns"] = [{"name": "region_id"}]
+        else:
+            for entity in context["entities"]:
+                if entity.get("entity_type") == "dimension" and (
+                    entity.get("user_term") == "region"
+                ):
+                    entity["target_column"] = "unpublished_column"
+        result = build_query_plan(
+            context=context, intent_name="generic_test_intent",
+            intent_confidence=0.98,
+            normalized_question="total amount across regions",
+            intent_resolution_result=evidence,
+        )
+        assert result["status"] == "rejected"
+        assert result["error_code"] == "PLANNING_DIMENSION_TARGET_INVALID"
+        assert result["query_plan"] is None
+
+
+def test_planner_authorizes_same_code_in_two_unrelated_client_schemas():
+    from testar_planner import _dimension_context, _intent_dimension_evidence
+
+    def rename(value, old, new):
+        if isinstance(value, dict):
+            return {key: rename(v, old, new) for key, v in value.items()}
+        if isinstance(value, list):
+            return [rename(v, old, new) for v in value]
+        return value.replace(old, new) if isinstance(value, str) else value
+
+    for schema, table in (
+        ("journal_tenant", "geography_axis"),
+        ("billing_tenant", "territory_index"),
+    ):
+        context = rename(_dimension_context(), "schema_test", schema)
+        context = rename(context, "dim_region", table)
+        result = build_query_plan(
+            context=context, intent_name="generic_test_intent",
+            intent_confidence=0.98,
+            normalized_question="total amount across regions",
+            intent_resolution_result=_intent_dimension_evidence(
+                term="by region", matched_tokens=["region"],
+            ),
+        )
+        assert result["status"] == "planned", result.get("error_code")
+        assert result["query_plan"]["planner_version"] == PLANNER_VERSION
+        dimension = result["query_plan"]["planning_context"]["detected_dimensions"]
+        assert len(dimension) == 1
+        assert dimension[0]["target_table"] == schema + "." + table
+
+
+if __name__ == "__main__":
+    tests = sorted(
+        (name, fn) for name, fn in globals().items()
+        if name.startswith("test_") and callable(fn)
+    )
+    for name, fn in tests:
+        fn()
+        print("PASS " + name)
+    print("METRIC_TENANT_SCHEMA_TESTS=" + str(len(tests)))
