@@ -473,6 +473,10 @@ STEPS = [
         "testar_metric_source_composition_e2e.py",
         [sys.executable, "testar_metric_source_composition_e2e.py"],
     ),
+    (
+        "testar_canonical_composition_shadow_e2e.py",
+        [sys.executable, "testar_canonical_composition_shadow_e2e.py"],
+    ),
     ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
     ("test_switch_shadow_evidence_tenant.py", [sys.executable, "scripts/test_switch_shadow_evidence_tenant.py"]),
     ("check_secrets.py", [sys.executable, "scripts/check_secrets.py"]),]
