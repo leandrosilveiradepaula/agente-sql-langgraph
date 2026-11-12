@@ -349,7 +349,7 @@ def main():
     )
     report["raw_export_sha256"] = sha256(workflow_bytes).hexdigest()
     report["previous_export_sha256"] = baseline["source"]["workflow_export_sha256"]
-    report["role_source_sha256"] = sha256(args.roles.read_bytes()).hexdigest()
+    report["role_source_sha256"] = sha256(args.roles.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
     report["baseline_crosswalk_sha256"] = sha256(args.baseline.read_bytes()).hexdigest()
     if args.output.exists() or not args.output.parent.is_dir():
         reject("OUTPUT_EXISTS_OR_MISSING_PARENT")
