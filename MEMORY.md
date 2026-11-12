@@ -1,3 +1,13 @@
+## 12/11/2026 - Bloco 1: intervalo de anos-calendario multifonte (generate-only)
+
+- Evolucao funcional: temporal.period_year_range opt-in no catalogo versionado por tenant; politica calendar_range_attested, max_span_years (1..100), phrases com prefixo/separador autorizados. Pergunta inedita pode declarar intervalo fechado de anos (between 2024 and 2026 somente se aprovado no catalogo). Interpretacao e geracao bloqueiam multiplos intervalos, anos extras, anos invertidos, zero/9999, intervalo excessivo, datas exatas ambiguas, texto nao mapeado e falta de granularidade.
+- SQL PostgreSQL dinamica: cada fluxo recebe DATE >= inicio-01-01 e DATE < ano-final+1-01-01, antes de UNION ALL e SUM/GROUP BY. Sinais, tabelas, filtros, nomes de datas e graos continuam do catalogo; nenhum hardcode financeiro ou cliente novo.
+- Verificacao: testar_metric_source_composition_e2e.py cobre dois tenants de estruturas distintas, Security/Contract gates e alteracao maliciosa dos limites. Nao ha aprovacao contabil nem execucao em banco real.
+- Escopo seguro: PR #233 permanece draft, sem merge/cutover/deploy/alteracao n8n/DB, Gemini e executor real nao chamados. OFFICIAL=n8n, SHADOW=LangGraph, LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false. Capacidade estrutural sintetica, migracao financeira real IMPLEMENTED_UNPROVEN ate revisao custodiada dos 77 registros do G5 e prova de paridade isolada.
+- Evidencias de teste e novo SHA devem ser conferidos no commit da PR, sem confundir com paridade financeira.
+
+---
+
 ## 12/11/2026 — BLOCO 1: calendario com ano filtrado, SQL multifonte e provider pinado (sem ativar n8n)
 
 **Entrega verificada no checkout isolado da VPS:** a composição `union_all_then_aggregate` ganhou agrupamento por período **dinâmico**, com `day/week/month/quarter/year` definidos por termos/versionamento do tenant e **datas diferentes em cada fonte**. PostgreSQL compila `date_trunc` para DATE aprovado; `timestamp/timestamptz` sem timezone homologado falha. Filtros, sinais +1/-1, dimensão e grão são vinculados ao catálogo físico. Colunas de medida só podem ser numéricas (`numeric/decimal/smallint/integer/bigint`) e devem constar em `metric_columns`; `grain_ref` deve coincidir com o catálogo de cada fonte. Mudanças alteram o fingerprint. Ano-calendário em pergunta inédita é agora resolvido **somente** quando `temporal.period_year` aprova `calendar_year_attested=true`, referências textuais e a política `allow_bare_year`; cada fonte recebe limite `>= YYYY-01-01` e `< (YYYY+1)-01-01` antes da união. Anos ambíguos, exercícios fora do alcance, ano sem política aprovada, trimestre relativo, ano fiscal e timestamp com fuso não homologado falham com segurança (não gerar total de todos os anos silenciosamente).

@@ -137,18 +137,26 @@ def build_postgres_metric_source_sql(request: Mapping[str, Any]) -> str:
         )
         filters = source["source_filters"]
         predicates = []
-        if temporal is not None and "period_year" in temporal:
-            period_year = temporal["period_year"]
+        if temporal is not None and (
+            "period_year" in temporal or "period_year_range" in temporal
+        ):
+            if date_column is None:
+                raise PostgresCompositionSqlError("CALENDAR_YEAR_UNAUTHORIZED")
+            if "period_year_range" in temporal:
+                bounds = temporal["period_year_range"]
+                start_year, end_year = bounds["start_year"], bounds["end_year"]
+            else:
+                start_year = end_year = temporal["period_year"]
             if (
-                type(period_year) is not int
-                or not 1 <= period_year <= 9998
-                or date_column is None
+                type(start_year) is not int or type(end_year) is not int
+                or not 1 <= start_year <= end_year <= 9998
+                or end_year - start_year + 1 > 100
             ):
                 raise PostgresCompositionSqlError("CALENDAR_YEAR_UNAUTHORIZED")
             qualified_date = f'{_ident(table_alias)}.{date_column}'
             predicates.extend((
-                f"{qualified_date} >= '{period_year:04d}-01-01'",
-                f"{qualified_date} < '{period_year + 1:04d}-01-01'",
+                f"{qualified_date} >= '{start_year:04d}-01-01'",
+                f"{qualified_date} < '{end_year + 1:04d}-01-01'",
             ))
         predicates.extend(_predicate(f, table_alias) for f in filters)
         if predicates:

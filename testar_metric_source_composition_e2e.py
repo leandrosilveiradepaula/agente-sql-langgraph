@@ -914,6 +914,105 @@ def test_synthetic_numeric_year_filter_excludes_other_exercises():
             conn.close()
 
 
+
+def fixture_calendar_range(raw: dict) -> dict:
+    candidate = fixture_calendar_year(raw)
+    candidate["metric_source_compositions"][0]["temporal"]["period_year_range"] = {
+        "calendar_range_attested": True,
+        "max_span_years": 5,
+        "phrases": [
+            {"prefix": "between", "separator": "and"},
+            {"prefix": "entre", "separator": "e"},
+        ],
+    }
+    return candidate
+
+
+def test_calendar_range_two_tenants_sql_security_and_contract():
+    for base in (fixture_a(), fixture_b()):
+        raw = fixture_calendar_range(base)
+        ctx, planned = _plan(raw, "synthetic report monthly between 2024 and 2026")
+        assert planned["status"] == "planned", planned
+        plan = planned["query_plan"]
+        temporal = plan["planning_context"]["metric_source_composition"]["temporal_grouping"]
+        assert temporal["period_year_range"] == {"start_year": 2024, "end_year": 2026}
+        sql = build_postgres_metric_source_sql(build_sql_generation_request(plan))
+        assert sql.count("'2024-01-01'") == 2
+        assert sql.count("'2027-01-01'") == 2
+        security, analysis = run_sql_security_gate(current_sql=sql, query_plan=plan)
+        contract, _ = run_sql_contract_gate(
+            current_sql=sql, query_plan=plan, analysis=analysis
+        )
+        assert security["status"] == "approved", security
+        assert contract["status"] == "approved", contract
+        altered = sql.replace("'2027-01-01'", "'2028-01-01'")
+        rejected, _ = run_sql_contract_gate(
+            current_sql=altered, query_plan=plan, analysis=analysis
+        )
+        assert rejected["status"] != "approved", rejected
+        assert ctx["fingerprint"]
+
+
+def test_calendar_range_ambiguous_unsupported_or_unsafe_rejected():
+    raw = fixture_calendar_range(fixture_a())
+    for question in (
+        "synthetic report monthly between 2027 and 2025",
+        "synthetic report monthly between 2021 and 2026",
+        "synthetic report monthly between 0000 and 0003",
+        "synthetic report monthly between 9998 and 9999",
+        "synthetic report monthly between 2025 and 2026 and 2027",
+        "synthetic report monthly between 2025 and 2026 between 2027 and 2028",
+        "synthetic report monthly from 2025 to 2026",
+        "synthetic report monthly between 2025 and 2026 in 2024",
+        "synthetic report monthly between 2025 and 2026-01-12",
+        "synthetic report monthly in 2026/01",
+        "synthetic report monthly in 01/01/2026",
+    ):
+        _, result = _plan(raw, question)
+        assert result["status"] == "rejected", (question, result)
+
+
+def test_calendar_range_policy_and_tamper_fail_closed():
+    base = fixture_calendar_range(fixture_a())
+    for issue in ("no_attestation", "too_many_years", "untrusted_phrase", "duplicate_phrase"):
+        raw = deepcopy(base)
+        policy = raw["metric_source_compositions"][0]["temporal"]["period_year_range"]
+        if issue == "no_attestation":
+            policy["calendar_range_attested"] = False
+        elif issue == "too_many_years":
+            policy["max_span_years"] = 101
+        elif issue == "untrusted_phrase":
+            policy["phrases"][0]["separator"] = "and\nDROP"
+        else:
+            policy["phrases"].append(deepcopy(policy["phrases"][0]))
+        try:
+            normalize_context_snapshot(raw)
+        except ContextNormalizationError:
+            pass
+        else:
+            raise AssertionError(issue)
+    _, planned = _plan(base, "synthetic report monthly between 2025 and 2026")
+    assert planned["status"] == "planned", planned
+    plan = planned["query_plan"]
+    original = plan["planning_context"]["metric_source_composition"]
+    for replacement in (
+        {"start_year": 2027, "end_year": 2025},
+        {"start_year": 2025, "end_year": 10000},
+        {"start_year": True, "end_year": 2026},
+        {"start_year": 2025, "end_year": 2026, "sql": "SELECT *"},
+    ):
+        altered = deepcopy(original)
+        altered["temporal_grouping"]["period_year_range"] = replacement
+        request = build_sql_generation_request(plan)
+        request["generation_context"]["metric_source_composition"] = altered
+        try:
+            build_postgres_metric_source_sql(request)
+        except PostgresCompositionSqlError:
+            pass
+        else:
+            raise AssertionError(replacement)
+
+
 def main() -> None:
     tests = sorted(
         (name, obj) for name, obj in globals().items()
