@@ -490,6 +490,10 @@ STEPS = [
         [sys.executable, "testar_g5_p3_original_physical_worklist.py"],
     ),
     (
+        "testar_g5_financial_review_worksheet_offline.py",
+        [sys.executable, "testar_g5_financial_review_worksheet_offline.py"],
+    ),
+    (
         "testar_metric_source_composition_e2e.py",
         [sys.executable, "testar_metric_source_composition_e2e.py"],
     ),

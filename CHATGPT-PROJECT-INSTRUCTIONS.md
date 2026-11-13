@@ -1,3 +1,18 @@
+## Marco 13/11/2026 — pré-homologação G5/P3 preparada; não inventar aprovação
+
+G5/P3 originais já recuperados/validados; 77 registros financeiros e 48
+ligações físicas. Os dois worksheets PRIVADOS de entrada para revisão humana
+foram efetivamente produzidos na VPS, mas contêm somente UNRESOLVED/null.
+Código e CLI agora EXIGEM documento concreto de justificativa de remap em
+arquivo 0600, verificado por SHA e pela aprovação HMAC independente; hash
+arbitrário não basta. Não ativar contexto, nem assumir interpretação contábil
+por semelhança de nome. Próximo gate é especialista financeiro e aprovador
+independente, depois dois contextos reais, Shadow e paridade. Guia:
+`docs/operations/G5-INDEPENDENT-FINANCIAL-REVIEW-HANDOFF.md`. Manter
+OFFICIAL=n8n, SHADOW=LangGraph, execução financeira desabilitada.
+
+---
+
 ## Prioridade factual 13/11/2026 — G5 e P3 originais recuperados, ainda sem aprovação
 
 O operador recuperou G5 real (77 registros) e P3 original (137 metadados físicos, 16 tabelas/2 schemas) com SHA verificado. **Não pedir novamente senha nem coleta P3**. Todo trabalho P3 deve basear-se nos originais autenticados privados. Worklist técnica de 48 indícios: 32 aliases com opção literal única, 8 sem, 6 tabelas homônimas em múltiplos schemas, 0/8 schemas legados fisicamente idênticos. Não mapear automaticamente nem criar hardcodes; revisar significados financeiros. O verificador não depende mais de `source_table_ref` presente nos 8 indícios catálogo, mas resolve por source row autenticada; renomeações só com evidência individual SHA vinculada ao recibo HMAC independente. Os arquivos privados não vão a GitHub, benchmark ou prompts. Continuar com aprovação contábil independente dos 77, assinatura dos 48 vínculos, homologação de dois tenants reais, Shadow/paridade; SQL real separadamente autorizado; nenhum merge, banco, contexto ativo, produção ou cutover.

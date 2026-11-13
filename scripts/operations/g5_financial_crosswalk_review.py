@@ -115,6 +115,7 @@ def verified_review(
     approval_receipt: Mapping[str, Any] | None,
     verifier_key: bytes | None,
     p3_snapshot_bytes: bytes | None = None,
+    physical_remap_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Require exact row coverage AND independent signed accounting decision.
 
@@ -235,6 +236,7 @@ def verified_review(
         packet=packet, review=review,
         approved_catalog=snapshot["table_catalog"],
         p3_bytes=p3_snapshot_bytes,
+        remap_evidence=physical_remap_evidence,
     )
     row_hash = digest(sorted(
         review["rows"], key=lambda item: (item["collection"], item["source_row_sha256"]),

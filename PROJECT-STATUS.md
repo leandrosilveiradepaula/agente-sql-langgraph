@@ -1,3 +1,33 @@
+## 13/11/2026 — G5/P3: entrada completa de revisão financeira independente preparada
+
+**Nova entrega funcional** na PR #233: arquivo de revisão privada G5/P3
+original com **77 classificações UNRESOLVED e 48 decisões físicas sem destino**,
+além de 48 justificativas DRAFT vazias. Executada em VPS usando os originais
+SHA-256 autenticados, escrita 0600 sob diretório 0700 root, sem conteúdo
+financeiro enviado ao GitHub, LLM, benchmark ou serviço. Módulo
+`g5_financial_review_worksheet_offline.py`; guia
+`docs/operations/G5-INDEPENDENT-FINANCIAL-REVIEW-HANDOFF.md`.
+Aprovação contábil e assinatura: **nenhuma**.
+
+**Defeito de segurança funcional corrigido:** a aprovação física antes exigia
+um hash hexadecimal de justificativa, sem conferir arquivo/documento de
+revisão correspondente. `g5_physical_source_evidence.py` agora valida
+rationale real e não vazia por vínculo, versão/digests originais G5/P3,
+tenant/semver, autor diverso do revisor, target/coluna e SHA canônico de cada
+linha; o HMAC independente cobre também o hash do documento completo.
+`g5_financial_crosswalk_review_cli.py` recebe
+`--physical-remap-evidence-file` PRIVADO. Sem documento original ou revisão,
+o gate continua BLOQUEADO. Testes positivos com dois contextos sintéticos e
+negativos para SHA falso, edição, omissão, replay cross-tenant e autores iguais.
+
+Ainda falta revisão material humana de todos os 77 e 48, catálogo real
+versionado aprovado e assinado, perguntas inéditas com dois clientes reais,
+paridade n8n/Shadow e autorização SELECT-only independente. CI do novo SHA
+deve ser verificada; sem ativação de contexto, SQL financeira, merge, n8n
+modificado ou cutover.
+
+---
+
 ## 13/11/2026 — Bloco 1 G5/P3: original físico recuperado; revisão financeira ainda não aprovada
 
 **Evidência REAL:** P3 original preservado pelo operador e confirmado na VPS, 137 linhas físicas, 16 tabelas em dois schemas; SHA coincide exatamente com o G5 original de 77 registros. A indisponibilidade de P3 registrada em seções anteriores foi resolvida. Nova matriz de 48 indícios físicos (40 aliases, 8 catálogos) validada sem SQL: 0/8 schemas originais coincidem com identidade física, 6/8 nomes de tabela multi-schema, 32/40 colunas de aliases com somente um candidato literal, 8/40 sem candidato literal. Nenhuma é correspondência financeira aprovada. Arquivos JSON e HTML de trabalho **privados** (0600, root; não enviar ao LLM/GitHub), nome `g5-p3-original-physical-worklist` sob diretório da revisão original; o dossiê 77 registros permanece intacto.

@@ -11,7 +11,7 @@ from scripts.operations.g5_financial_crosswalk_review import (
     FinancialReviewBlocked, digest, verified_review,
 )
 from scripts.operations.g5_physical_source_evidence import (
-    physical_approval_claims,
+    physical_approval_claims, original_physical_reference,
 )
 from testar_g5_financial_crosswalk_review import (
     TEST_VERIFIER_KEY, case, receipt_for,
@@ -67,12 +67,12 @@ def fixture(other: bool = False):
     return packet, packet_sha, review, context, raw_bytes, seal, p3_bytes
 
 
-def approval(packet, packet_sha, review, context, p3_bytes):
+def approval(packet, packet_sha, review, context, p3_bytes, remap_evidence=None):
     receipt = receipt_for(packet, packet_sha, review)
     physical = physical_approval_claims(
         packet=packet, review=review,
         approved_catalog=normalize_context_snapshot(context)["table_catalog"],
-        p3_bytes=p3_bytes,
+        p3_bytes=p3_bytes, remap_evidence=remap_evidence,
     )
     assert physical["physical_binding_rows"] == 1
     receipt["claims"].update(physical)
@@ -84,8 +84,9 @@ def approval(packet, packet_sha, review, context, p3_bytes):
     return receipt
 
 
-def verify(t, receipt=None, *, p3_bytes=None):
-    packet, packet_sha, review, context, raw_bytes, seal, original = t
+def verify(t, receipt=None, *, p3_bytes=None, remap_evidence_override=None):
+    packet, packet_sha, review, context, raw_bytes, seal, original = t[:7]
+    evidence = (t[7] if len(t) > 7 else None) if remap_evidence_override is None else remap_evidence_override
     return verified_review(
         packet=packet,
         packet_sha256=packet_sha,
@@ -94,10 +95,11 @@ def verify(t, receipt=None, *, p3_bytes=None):
         review=review,
         raw_context=context,
         approval_receipt=receipt if receipt is not None else approval(
-            packet, packet_sha, review, context, original,
+            packet, packet_sha, review, context, original, evidence,
         ),
         verifier_key=TEST_VERIFIER_KEY,
         p3_snapshot_bytes=original if p3_bytes is None else p3_bytes,
+        physical_remap_evidence=evidence,
     )
 
 
@@ -205,6 +207,35 @@ def test_missing_or_duplicate_decision_is_blocked():
     ))
 
 
+def evidence_for(item):
+    packet, packet_sha, review, context, raw, seal, p3 = item[:7]
+    hint = packet["physical_identifier_hints_unapproved"][0]
+    original = original_physical_reference(packet, hint)
+    decision = review["physical_binding_decisions"][0]
+    entry = {
+        "collection": decision["collection"],
+        "source_row_sha256": decision["source_row_sha256"],
+        "source_schema": original[0],
+        "source_table": original[1],
+        "source_column": original[2],
+        "qualified_table": decision["qualified_table"],
+        "target_column": decision["target_column"],
+        "review_rationale": "Synthetic, explicit, independent mapping analysis.",
+    }
+    decision["physical_remap_evidence_sha256"] = digest(entry)
+    return {
+        "contract": "g5-physical-remap-review-evidence-v1",
+        "source_version_sha256": packet["origin"]["source_version_sha256"],
+        "packet_plaintext_sha256": packet_sha,
+        "p3_snapshot_sha256": packet["origin"]["p3_snapshot_sha256"],
+        "tenant_id": review["tenant_id"],
+        "semantic_agent_version": review["semantic_agent_version"],
+        "prepared_by": "synthetic_financial_mapper",
+        "reviewer_id": review["reviewer_id"],
+        "remaps": [entry],
+    }
+
+
 def _historic_changed_table(*, alternate=False, table_only=True):
     """Synthetic old customer layout differs from P3 in schema/table/column."""
     packet, packet_sha, review, ctx, raw, seal, p3 = fixture(other=alternate)
@@ -222,14 +253,13 @@ def _historic_changed_table(*, alternate=False, table_only=True):
         hint["source_table_ref"] = "old_fact_table"
         hint["source_column_ref"] = "old_measure"
         review["physical_binding_decisions"][0]["target_column"] = "value"
-    review["physical_binding_decisions"][0][
-        "physical_remap_evidence_sha256"
-    ] = hashlib.sha256(b"synthetic independent financial reviewer evidence").hexdigest()
     raw = json.dumps(packet, sort_keys=True).encode()
     packet_sha = hashlib.sha256(raw).hexdigest()
     seal["plaintext_sha256"] = packet_sha
     review["packet_plaintext_sha256"] = packet_sha
-    return packet, packet_sha, review, ctx, raw, seal, p3
+    item = (packet, packet_sha, review, ctx, raw, seal, p3)
+    evidence = evidence_for(item)
+    return (*item, evidence)
 
 
 def test_sealed_table_catalog_row_with_null_hint_can_be_reviewed_when_renamed():
@@ -268,17 +298,18 @@ def test_renamed_legacy_column_requires_independently_signed_remap_evidence():
 
 def test_physical_remap_evidence_is_bound_to_independent_hmac_receipt():
     t = _historic_changed_table()
-    original_receipt = approval(t[0], t[1], t[2], t[3], t[6])
+    original_receipt = approval(t[0], t[1], t[2], t[3], t[6], t[7])
     altered = deepcopy(t[2])
     altered["physical_binding_decisions"][0][
         "physical_remap_evidence_sha256"
     ] = hashlib.sha256(b"changed explanation").hexdigest()
-    p, sha, _review, ctx, raw, seal, p3 = t
+    p, sha, _review, ctx, raw, seal, p3 = t[:7]
     deny(lambda: verified_review(
         packet=p, packet_sha256=sha, source_packet_bytes=raw,
         trusted_seal=seal, review=altered, raw_context=ctx,
         approval_receipt=original_receipt,
         verifier_key=TEST_VERIFIER_KEY, p3_snapshot_bytes=p3,
+        physical_remap_evidence=t[7],
     ))
 
 
@@ -305,6 +336,74 @@ def test_exact_source_binding_rejects_spurious_remap_evidence():
         packet=t[0], review=review,
         approved_catalog=normalize_context_snapshot(t[3])["table_catalog"],
         p3_bytes=t[6],
+    ))
+
+
+def test_arbitrary_64hex_proof_does_not_replace_private_evidence_document():
+    t = _historic_changed_table()
+    # Even an authentic-looking SHA and a valid HMAC receipt are
+    # insufficient without the source-bound actual review document.
+    receipt = approval(t[0], t[1], t[2], t[3], t[6], t[7])
+    deny(lambda: verified_review(
+        packet=t[0], packet_sha256=t[1], source_packet_bytes=t[4],
+        trusted_seal=t[5], review=t[2], raw_context=t[3],
+        approval_receipt=receipt, verifier_key=TEST_VERIFIER_KEY,
+        p3_snapshot_bytes=t[6], physical_remap_evidence=None,
+    ))
+
+
+def test_tampered_rationale_is_rejected_even_if_row_sha_was_not_changed():
+    t = _historic_changed_table(table_only=False)
+    evidence = deepcopy(t[7])
+    evidence["remaps"][0]["review_rationale"] = "Modified without re-signing"
+    deny(lambda: physical_approval_claims(
+        packet=t[0], review=t[2],
+        approved_catalog=normalize_context_snapshot(t[3])["table_catalog"],
+        p3_bytes=t[6], remap_evidence=evidence,
+    ))
+
+
+def test_remap_reviewer_must_differ_from_author_and_match_approval():
+    t = _historic_changed_table()
+    copied = deepcopy(t[7])
+    copied["prepared_by"] = copied["reviewer_id"]
+    deny(lambda: physical_approval_claims(
+        packet=t[0], review=t[2],
+        approved_catalog=normalize_context_snapshot(t[3])["table_catalog"],
+        p3_bytes=t[6], remap_evidence=copied,
+    ))
+    copied = deepcopy(t[7])
+    copied["reviewer_id"] = "impostor_reviewer"
+    deny(lambda: physical_approval_claims(
+        packet=t[0], review=t[2],
+        approved_catalog=normalize_context_snapshot(t[3])["table_catalog"],
+        p3_bytes=t[6], remap_evidence=copied,
+    ))
+
+
+def test_cross_tenant_replay_and_missing_remap_row_fail_closed():
+    original = _historic_changed_table()
+    other = _historic_changed_table(alternate=True)
+    deny(lambda: physical_approval_claims(
+        packet=other[0], review=other[2],
+        approved_catalog=normalize_context_snapshot(other[3])["table_catalog"],
+        p3_bytes=other[6], remap_evidence=original[7],
+    ))
+    missing = deepcopy(original[7])
+    missing["remaps"] = []
+    deny(lambda: physical_approval_claims(
+        packet=original[0], review=original[2],
+        approved_catalog=normalize_context_snapshot(original[3])["table_catalog"],
+        p3_bytes=original[6], remap_evidence=missing,
+    ))
+
+
+def test_remap_evidence_cannot_be_injected_for_exact_unchanged_binding():
+    t = fixture()
+    deny(lambda: physical_approval_claims(
+        packet=t[0], review=t[2],
+        approved_catalog=normalize_context_snapshot(t[3])["table_catalog"],
+        p3_bytes=t[6], remap_evidence=_historic_changed_table()[7],
     ))
 
 

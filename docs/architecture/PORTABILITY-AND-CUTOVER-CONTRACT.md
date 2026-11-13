@@ -1,3 +1,22 @@
+## Gate de evidência financeira auditável — 13/11/2026
+
+Para divergência de qualquer schema/tabela/coluna original G5 com identidade
+P3 de destino, não basta `physical_remap_evidence_sha256` com 64 hex. Exigir
+arquivo real de revisão independente em custódia privada: identificação do
+mapeador e revisor diferentes, tenant/version/fingerprint/fonte G5 e P3,
+linhas com origem/destino exatos, justificativa financeira não vazia; digest
+do registro deve corresponder ao presente na decisão física. Recibo HMAC de
+autoridade independente deve vincular SHA do DOCUMENTO e dos vínculos, sem
+signer key acessível ao autor. O validador não determina a veracidade da
+justificativa por LLM nem aprova contas por nome; somente humanos qualificados
+fazem análise material. Zero hardcode de negócio, duas fontes originais
+versionadas e SQL real bloqueada sem autorização separada. Novos worksheets
+privados de 77 registros + 48 mapeamentos são apenas DRAFT, nunca contexto
+autorizado, como descrito em
+`docs/operations/G5-INDEPENDENT-FINANCIAL-REVIEW-HANDOFF.md`.
+
+---
+
 ## Atualização 13/11/2026 — P3 original e contrato de remapeamento explícito
 
 A versão G5 usada pelo n8n (77 registros) e P3 original (137 colunas/16 tabelas/2 schemas) foram recuperados e validados criptograficamente. **Conciliação física não é aprovação financeira:** 8/8 schemas de catálogo antigos não existem com mesma identidade no P3, seis tabelas são homônimas em schemas distintos, 32 aliases possuem apenas um candidato literal de coluna e oito não possuem. Para portabilidade, o validador deve aceitar remapeamento entre quaisquer schemas/tabelas/colunas declaradas no P3 e no catálogo canônico APROVADO, sem nomes de cliente hardcoded, **apenas mediante evidência de remapeamento SHA-256 individual e recibo de aprovador independente vinculado ao destino exato**. Não inferir equivalência por identidade literal nem aceitar mudança implícita. As oito linhas catálogo com indício nulo recuperam schema/tabela de registros de origem com hashes autenticados; não criar dados faltantes. Os 48 vínculos ainda não foram aprovados, nem os 77 significados contábeis. Sem SQL real, mudança de n8n, cutover ou context activation.

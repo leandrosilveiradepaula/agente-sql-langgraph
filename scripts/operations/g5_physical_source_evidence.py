@@ -107,10 +107,90 @@ def original_physical_reference(
     return schema, table, column
 
 
+def validate_independent_remap_evidence(
+    *,
+    packet: Mapping[str, Any],
+    review: Mapping[str, Any],
+    required: Mapping[tuple[str, str], tuple[Mapping[str, Any], tuple[str | None, str, str | None]]],
+    evidence: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Bind independently signed review to actual row-specific rationale bytes.
+
+    A random 64-character digest is not proof that a reviewer ever wrote
+    an explanation. The evidence stays in a private file, never in prompts.
+    This validates provenance, explicit decisions and digest integrity;
+    only the separate HMAC signer can authorize the complete review.
+    """
+    if not required:
+        if evidence is not None:
+            deny("G5_REMAP_EVIDENCE_UNEXPECTED")
+        return {"physical_remap_rows": 0}
+    expected_headers = {
+        "contract", "source_version_sha256", "packet_plaintext_sha256",
+        "p3_snapshot_sha256", "tenant_id", "semantic_agent_version",
+        "prepared_by", "reviewer_id", "remaps",
+    }
+    if not isinstance(evidence, Mapping) or set(evidence) != expected_headers:
+        deny("G5_INDEPENDENT_REMAP_EVIDENCE_REQUIRED")
+    if (
+        evidence["contract"] != "g5-physical-remap-review-evidence-v1"
+        or evidence["source_version_sha256"]
+        != packet["origin"]["source_version_sha256"]
+        or evidence["packet_plaintext_sha256"]
+        != review.get("packet_plaintext_sha256")
+        or evidence["p3_snapshot_sha256"] != packet["origin"].get("p3_snapshot_sha256")
+        or evidence["tenant_id"] != review.get("tenant_id")
+        or evidence["semantic_agent_version"] != review.get("semantic_agent_version")
+        or evidence["reviewer_id"] != review.get("reviewer_id")
+        or not isinstance(evidence["prepared_by"], str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", evidence["prepared_by"])
+        or evidence["prepared_by"] == evidence["reviewer_id"]
+    ):
+        deny("G5_REMAP_REVIEWER_PROVENANCE_INVALID")
+    rows = evidence.get("remaps")
+    if not isinstance(rows, list) or len(rows) != len(required) or len(rows) > 50000:
+        deny("G5_REMAP_REVIEW_COVERAGE_INCOMPLETE")
+    row_keys = {
+        "collection", "source_row_sha256", "source_schema",
+        "source_table", "source_column", "qualified_table",
+        "target_column", "review_rationale",
+    }
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        if not isinstance(row, Mapping) or set(row) != row_keys:
+            deny("G5_REMAP_REVIEW_ROW_FORMAT_INVALID")
+        key = (row["collection"], row["source_row_sha256"])
+        if key not in required or key in seen:
+            deny("G5_REMAP_REVIEW_ROW_MISSING_OR_DUPLICATE")
+        seen.add(key)
+        decision, original = required[key]
+        source_schema, source_table, source_column = original
+        explanation = row["review_rationale"]
+        if (
+            row["source_schema"] != source_schema
+            or row["source_table"] != source_table
+            or row["source_column"] != source_column
+            or row["qualified_table"] != decision["qualified_table"]
+            or row["target_column"] != decision["target_column"]
+            or not isinstance(explanation, str)
+            or not explanation.strip()
+            or len(explanation) > 4096
+            or digest(row) != decision["physical_remap_evidence_sha256"]
+        ):
+            deny("G5_REMAP_REVIEW_RATIONALE_NOT_BOUND")
+    if seen != set(required):
+        deny("G5_REMAP_REVIEW_COVERAGE_INCOMPLETE")
+    return {
+        "physical_remap_rows": len(required),
+        "physical_remap_evidence_sha256": digest(evidence),
+    }
+
+
 def physical_approval_claims(
     *, packet: Mapping[str, Any], review: Mapping[str, Any],
     approved_catalog: list[Mapping[str, Any]],
     p3_bytes: bytes | None,
+    remap_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return exact digests to include in signed review claims.
 
@@ -213,6 +293,7 @@ def physical_approval_claims(
         by_id[key] = item
 
     seen = set()
+    remap_required = {}
     for decision in decisions:
         if (
             not isinstance(decision, Mapping)
@@ -243,6 +324,9 @@ def physical_approval_claims(
         )
         evidence = decision.get(_REMAP_ATTESTATION)
         if remapped:
+            remap_required[key] = (
+                decision, (legacy_schema, legacy_table, legacy_column)
+            )
             # An explicitly reviewed mapping is portable across schema
             # names, table names, and renamed columns. The independent
             # signed receipt binds the evidence digest AND this exact target;
@@ -278,8 +362,15 @@ def physical_approval_claims(
                 deny("G5_PHYSICAL_COLUMN_TYPE_UNVERIFIED")
     if seen != set(by_id):
         deny("G5_PHYSICAL_REVIEW_COVERAGE_INVALID")
+    remap_claims = validate_independent_remap_evidence(
+        packet=packet,
+        review=review,
+        required=remap_required,
+        evidence=remap_evidence,
+    )
     return {
         "p3_snapshot_sha256": expected_sha,
+        **remap_claims,
         "physical_binding_decisions_sha256": digest(sorted(
             decisions, key=lambda d: (d["collection"], d["source_row_sha256"]),
         )),

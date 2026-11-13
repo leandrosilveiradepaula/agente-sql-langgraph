@@ -1,3 +1,28 @@
+## 13/11/2026 — Pacote de revisão financeira pronto, aprovação externa ainda pendente
+
+Implementada correção funcional em `g5_physical_source_evidence.py`: não aceitar
+somente SHA textual de justificativa de remapeamento. Exigir conteúdo real de
+evidência em arquivo PRIVADO, com fonte/destino exatos, justificativa não vazia,
+autor distinto do revisor, tenant/version/G5/P3 vinculados, digest canônico
+individual `physical_remap_evidence_sha256` e digest do conjunto incluído no
+recibo HMAC independente. CLI recebe `--physical-remap-evidence-file`; faltar
+o arquivo agora BLOQUEIA mesmo com um hash aparentemente correto.
+
+Gerado na VPS (0600/root) pacote de entrada para homologação dos **77 G5 e
+48 vínculos P3**: `g5-financial-review-worksheet-unapproved.json` e
+`g5-remap-review-evidence-draft.json`. Zero regras, mapeamentos ou assinaturas
+preenchidos automaticamente. Ferramenta genérica
+`g5_financial_review_worksheet_offline.py` só lê fontes SHA-autenticadas e
+produz drafts não utilizáveis no gerador. Guia operacional:
+`docs/operations/G5-INDEPENDENT-FINANCIAL-REVIEW-HANDOFF.md`.
+
+**Status:** a dependência atual é exclusivamente revisão financeira humana,
+decisões físicas justificadas e assinatura independente, seguida de provas de
+portabilidade e paridade; não pedir nova senha nem recuperação G5/P3. Shadow
+sem SQL real, n8n oficial inalterado, zero context activation/merge/cutover.
+
+---
+
 ## MARCO ATUAL 13/11/2026 — P3 original autenticado e matriz 48/48; sem homologação
 
 A fonte G5 original (77 registros) e o snapshot P3 original (137 colunas em 16 tabelas, 2 schemas) estão recuperados e conferidos por SHA na VPS. O gate `G5_P3_ORIGINAL_METADATA_REQUIRED` foi resolvido; **NÃO repetir a recuperação nem afirmar que P3 falta**. Verificação técnica: 0/8 schemas G5 constam fisicamente sob o mesmo nome no P3, 6/8 tabelas homônimas multi-schema, 32/40 aliases com um candidato literal de coluna e 8/40 sem nenhum. Não há aprovação automática de nenhum.

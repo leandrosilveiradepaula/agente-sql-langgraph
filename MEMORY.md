@@ -1,3 +1,18 @@
+## 2026-11-13 — Entrega da preparação de revisão financeira real (sem homologação)
+
+G5 77 registros e P3 137 metadados já autênticos; 48 vínculos pendentes. Na VPS
+foram produzidos dois arquivos novos privados 0600 root: workbook financeiro
+com 77 linhas UNRESOLVED + 48 destinos nulos, e evidências de remapeamento
+DRAFT com 48 justificativas nulas. Código genérico de preparação valida SHA
+originais, nunca ativa contexto/SQL. Falha anterior: gate aceitando 64hex de
+justificativa sem verificar documento. Corrigido para exigir arquivo real
+privado, fonte/destino/rationale exatos, autor != revisor e digest vinculado ao
+HMAC independente; CLI `--physical-remap-evidence-file`. Não afirmar que
+homologação foi aprovada. Guia para revisor em
+`docs/operations/G5-INDEPENDENT-FINANCIAL-REVIEW-HANDOFF.md`.
+
+---
+
 ## 2026-11-13 — G5/P3 autenticados, worklist física real gerada
 
 P3 original recuperado via SSH `G5_P3_CUSTODY=PASS` e verificado contra SHA da fonte G5 (77 registros); P3 137 colunas, 16 tabelas físicas, dois schemas. Com original cruzado, 48/48 indícios avaliados: 8/8 schemas G5 fisicamente ausentes no mesmo nome, 6 tabelas homônimas em mais de um schema, 32 aliases têm uma correspondência literal de coluna, 8 não têm. Criados arquivos privados root 0600 `g5-p3-original-physical-worklist.json` e `.html`, além do dossiê 77/77. Nenhuma seleção ou homologação. Corrigido validador que rejeitava os 8 registros catálogo com `source_table_ref=null`; agora usa registro original autenticado, exige evidência SHA de remap para renomeação e recibo HMAC independente. P3 já não é bloqueio; próximos gates são revisão contábil 77, decisões físicas 48, catálogo real aprovado, portabilidade real, paridade e cutover. Não repetir senha nem recuperação G5/P3. Sem SQL real, banco, n8n, merge ou contexto ativado.
