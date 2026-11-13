@@ -1,3 +1,25 @@
+## Bloco 1 — Compilação de revisão humana sem assinatura automática (13/11/2026)
+
+O fluxo técnico G5/P3 recuperado evoluiu além do dossiê (77 regras/aliases/
+DRE/catalog rows; 48 vínculos físicos), e agora possui conversor genérico
+`scripts/operations/g5_compile_completed_review_offline.py` para transformar
+**somente** uma planilha realmente preenchida por revisor em dois artefatos
+UNSIGNED que possam ser inspecionados por autoridade financeira independente.
+Ele valida fonte original por SHA, P3 original, cobertura exata, contexto
+tenant/semantic_agent_version/fingerprint aprovado e padrões estruturais,
+destinos físicos e justificativas textuais; não assina ou aprova significado
+contábil. Teste E2E com **77 linhas × 48 vínculos sintéticos** e assinatura de
+TESTE separada confirma apenas CANDIDATE_NOT_ACTIVATED, sem SQL.
+A execução com workbook G5 REAL (77 UNRESOLVED e 48 destinos nulos) retorna
+BLOCKED_EXPECTED. Guia: `docs/operations/G5-REVIEW-COMPILE-AND-INDEPENDENT-APPROVAL.md`.
+
+**Não declarar Block 1 concluído** sem homologação financeira externa material,
+mapeamento físico assinado, catálogo de dois tenants reais e paridade Shadow;
+não inventar aprovação ou usar benchmark como prompt. OFFICIAL=n8n,
+SHADOW=LangGraph, real SQL=false, sem merge/cutover.
+
+---
+
 ## 13/11/2026 — Pacote de revisão financeira pronto, aprovação externa ainda pendente
 
 Implementada correção funcional em `g5_physical_source_evidence.py`: não aceitar

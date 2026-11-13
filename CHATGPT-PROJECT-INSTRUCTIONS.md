@@ -1,3 +1,19 @@
+## 13/11/2026 — Candidato financeiro humano compilável, sem auto-homologação
+
+A migração da fonte G5/P3 original tem 77 registros e 48 vínculos físicos
+preservados e autenticados em área privada. Concluído o compilar técnico
+`g5_compile_completed_review_offline.py`, sem inferência contábil,
+hardcode de negócio, assinatura automática, SQL ou ativação. Só pode gerar
+candidata UNSIGNED se responsável financeiro tiver preenchido todas as
+decisões, justificativas e contexto canônico aprovado/tenant/version/fingerprint;
+testes sintéticos 77×48 completos, entrada real ainda PENDING bloqueada.
+Não confundir esta etapa com homologação do Bloco 1. Seguir documento
+`docs/operations/G5-REVIEW-COMPILE-AND-INDEPENDENT-APPROVAL.md` e manter
+controle humano e validação SELECT financeira separadamente autorizada.
+OFFICIAL=n8n, SHADOW=LangGraph, SQL real=false, sem merge/cutover.
+
+---
+
 ## Marco 13/11/2026 — pré-homologação G5/P3 preparada; não inventar aprovação
 
 G5/P3 originais já recuperados/validados; 77 registros financeiros e 48

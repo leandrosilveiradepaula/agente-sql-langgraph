@@ -494,6 +494,10 @@ STEPS = [
         [sys.executable, "testar_g5_financial_review_worksheet_offline.py"],
     ),
     (
+        "testar_g5_compile_completed_review_offline.py",
+        [sys.executable, "testar_g5_compile_completed_review_offline.py"],
+    ),
+    (
         "testar_metric_source_composition_e2e.py",
         [sys.executable, "testar_metric_source_composition_e2e.py"],
     ),

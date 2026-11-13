@@ -1,3 +1,33 @@
+## 13/11/2026 — Bloco 1: fechamento técnico da compilação para aprovação independente
+
+CI da PR #233 no SHA `8be2865968ef3259ca46478c342f3634f6cee40d`: os
+dois workflows (Offline Windows/Linux, PostgreSQL descartável) PASS.
+Shadow TEST saudável, SQL financeira real desabilitada; n8n oficial ativo.
+
+**Etapa funcional nova:** módulo
+`scripts/operations/g5_compile_completed_review_offline.py` converte
+**APENAS** entrada humana já revisada com 77 regras/destinos e 48 vínculos P3,
+mais justificativa real de remapeamento, em candidata UNSIGNED 0600,
+sem autodeclaração de aprovação nem ativação. Confere todas as origens SHA,
+tipos físicos, destinos e catálogo de tenant/version/fingerprint já aprovado
+fora do módulo. Teste E2E sintético 77×48, assinador de teste distinto,
+retorno `G5_FINANCIAL_MAPPING_CANDIDATE_NOT_ACTIVATED`. Também dois contextos
+sintéticos distintos, negativas de replay, fonte adulterada, hash arbitrário,
+destino não aprovado e planilha incompleta. Executado sobre dossiê REAL não
+aprovado (77 UNRESOLVED, 48 destinos null) e bloqueou corretamente.
+Guia de revisão em
+`docs/operations/G5-REVIEW-COMPILE-AND-INDEPENDENT-APPROVAL.md`.
+
+**NÃO está homologado:** faltam atestação financeira individual e independente
+dos 77 significados e 48 vínculos com justificativas, catálogo canônico
+financeiro real versionado e aprovado por tenant, provas de 2 contextos reais
+e paridade funcional e numérica Shadow/n8n (SELECT-only com autorização
+isolada), além de merge/cutover humanos. Sem SQL financeira, alteração
+do n8n oficial, import, ativação de contexto, banco ou produção. CI do novo
+SHA, depois de publicação, deve ser verificada separadamente.
+
+---
+
 ## 13/11/2026 — G5/P3: entrada completa de revisão financeira independente preparada
 
 **Nova entrega funcional** na PR #233: arquivo de revisão privada G5/P3

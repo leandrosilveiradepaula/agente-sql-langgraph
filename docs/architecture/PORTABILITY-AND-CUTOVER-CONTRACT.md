@@ -1,3 +1,21 @@
+## 13/11/2026 — Compilação de worksheet revisado como etapa distinta da aprovação
+
+Novo módulo estrutural genérico
+`g5_compile_completed_review_offline.py` recebe apenas G5/P3 originais
+hash-pinned, revisão individual preenchida e contexto canônico autorizado
+por tenant; exige cobertura fonte/financeira/física, justificativas materiais
+para remaps e tipos físicos P3, preserva fingerprints, versão e identidade
+do revisor. O resultado é apenas um review JSON privado **UNSIGNED**,
+sem qualquer autorização ou ativação; assinatura HMAC independente e
+validação externa permanecem gate posterior, e SQL numérica read-only real
+exige autorização separada. Testes sintéticos provam dois tenants distintos,
+matriz 77×48 e rejeições de pendências e replay; a fonte G5 real continua
+sem revisão contábil. O mesmo módulo não possui clientes, contas, marcas,
+DRE ou regras financeiras hardcoded.
+Ver `docs/operations/G5-REVIEW-COMPILE-AND-INDEPENDENT-APPROVAL.md`.
+
+---
+
 ## Gate de evidência financeira auditável — 13/11/2026
 
 Para divergência de qualquer schema/tabela/coluna original G5 com identidade

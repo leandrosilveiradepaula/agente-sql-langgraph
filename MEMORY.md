@@ -1,3 +1,19 @@
+## 2026-11-13 — Roteiro técnico de revisão financeira compilável
+
+Criado `g5_compile_completed_review_offline.py` com CLI que só aceita
+worksheet humano totalmente preenchido (77 G5 e 48 P3), evidência material de
+remap, contexto canônico do tenant e G5/P3 originais SHA-verificados. Valida
+todos os vínculos, linha a linha, destinos, contexto/fingerprint e tipos P3;
+produz arquivos UNSIGNED 0600 para verificação externa, nunca ativa contexto
+ou assina. Provas sintéticas com dois tenants e corpus de 77×48 e negativas.
+Execução sobre workbook real ainda não aprovado BLOQUEADA como esperado.
+Documentação de handoff `docs/operations/G5-REVIEW-COMPILE-AND-INDEPENDENT-APPROVAL.md`.
+Gates independentes seguem: 77 homologações financeiras, 48 vínculos
+assinados, dois tenants reais, paridade Shadow, execução financeira SELECT-only
+separadamente autorizada e cutover humano. Nenhuma SQL real.
+
+---
+
 ## 2026-11-13 — Entrega da preparação de revisão financeira real (sem homologação)
 
 G5 77 registros e P3 137 metadados já autênticos; 48 vínculos pendentes. Na VPS
