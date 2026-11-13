@@ -1,3 +1,16 @@
+**13/11/2026, P3 custódia:** cinco fontes históricas privadas têm o MESMO
+hash P3 registrado no G5 real, mas não temos o arquivo de bytes originais:
+busca read-only de 1.535 arquivos nas árvores acessíveis do MCP retornou
+zero. O `PrivateTmp=yes` do MCP pode ocultar `/tmp` do SSH do operador.
+Disponível módulo genérico `g5_preserve_p3_custody_offline.py` para copiar
+somente P3 original com digest exato, arquivo 0600/diretório 0700, sem
+coleta de SQL/n8n/LLM. Um wrapper no diretório persistente do operador
+pode preservar o arquivo histórico se ainda presente no namespace SSH.
+Jamais fabricar snapshot nem substituir por metadados de outra versão;
+77 registros seguem UNRESOLVED até aprovação contábil independente.
+OFFICIAL=n8n, SHADOW=LangGraph, SQL financeira desabilitada.
+
+
 **Atualização de verificação 13/11/2026:** a primeira CI do commit 7e324b5 falhou no teste E2E do recuperador no Windows porque o teste exigia PASS onde o produto exige bloqueio POSIX-only. O teste foi corrigido para exigir BLOCKED sem arquivo persistido em Windows, conferindo a integridade de SHA de forma independente. Não transformar essa exceção de SO em bypass de produção. Busca read-only por SHA do snapshot P3 físico original em 1.535 arquivos privados/código disponíveis retornou 0 correspondências; requisito de custódia P3 e homologação dos 77 registros segue ABERTO. Não usar dados sintéticos ou indícios P3 para inventar equivalência.
 
 ## 13/11/2026 — Bloco 1, G5 original: revisão privada 77 registros e identidade física independente

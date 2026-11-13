@@ -478,6 +478,10 @@ STEPS = [
         [sys.executable, "testar_g5_private_financial_review_dossier.py"],
     ),
     (
+        "testar_g5_preserve_p3_custody_offline.py",
+        [sys.executable, "testar_g5_preserve_p3_custody_offline.py"],
+    ),
+    (
         "testar_g5_physical_source_evidence.py",
         [sys.executable, "testar_g5_physical_source_evidence.py"],
     ),

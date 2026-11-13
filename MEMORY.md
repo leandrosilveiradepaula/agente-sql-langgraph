@@ -1,3 +1,15 @@
+## 13/11/2026 — Próximo gate real: bytes originais P3
+
+Hash P3 original consistente entre 5 artefatos privados de G5; arquivo
+P3 em bytes originais não encontrado na área acessível da VPS (1.535 arquivos
+testados). PrivateTmp do MCP impede visibilidade do /tmp do SSH. Módulo
+`g5_preserve_p3_custody_offline.py` criado, fail-closed, exige 0600/0700,
+mesmo SHA do pacote original G5, sem SQL, sem recapturar P3 ou ativar contexto;
+pode preservar original em SSH se o caminho histórico ainda existir. Sem
+inventar contexto/homologação, revisão financeira 77/77 ainda PENDING.
+
+---
+
 ## 13/11/2026 — Correção de leitura G5/P3; pacote humano privado e gate físico (sem homologação)
 
 G5 oficial 77/77 fontes legíveis com SHA original validado na VPS. Vínculo interno 40 aliases -> 8 tabelas NÃO é vínculo físico: indícios P3 mostram 46 tabelas referenciadas com identidade AMBIGUOUS_TABLE_NAME (40 aliases, 6 entradas catálogo), 40 colunas sem resolução e 2 tabelas TABLE_NAME_ONLY. Criado dossier humano HTML root 0600: `/var/lib/agente-financeiro-mcp-admin/g5-financial-review-20261113/active-version-financial-review-private/confidential-financial-review.html`. NÃO compartilhar/sincronizar com GitHub/LLM. Criada prova física independente genérica por snapshot P3 SHA-pinned, escolhas explícitas de schema/coluna, validação de tipo e assinatura HMAC incluindo digest das 48 decisões. O P3 original completo ainda não foi recuperado; teste real bloqueia corretamente. 77 registros UNRESOLVED, nenhum significado aprovado ou contexto ativado, SQL financeiro false, shadow oficial intacto. Novas suítes (7 dossier + 7 prova física), verificações sintéticas do crosswalk e produção de HTML sem divulgação de valores.

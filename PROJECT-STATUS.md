@@ -1,3 +1,24 @@
+## 13/11/2026 — P3: custódia exata preparada, original ainda não localizado
+
+Verifiquei cinco artefatos históricos privados do G5/P3: todos indicam o mesmo
+SHA-256 de snapshot físico P3 registrado no pacote original recuperado. Isso
+não recupera os dados nem autoriza mapeamento. Um scan em 1.535 arquivos
+acessíveis do serviço não encontrou os bytes correspondentes. O serviço MCP
+usa PrivateTmp; o antigo caminho `/tmp/p3-source-audit.7DIc9fUP/physical-metadata.json`
+pode ainda existir no SSH do operador, mas não foi conferido nesse namespace.
+
+Criado `scripts/operations/g5_preserve_p3_custody_offline.py` para receber
+somente arquivo P3 original em custódia privada, verificar o SHA exatamente
+contra G5 selado, formato/flags sem SQL, copiar bytes idênticos a arquivo 0600
+no diretório 0700 da revisão financeira. Falha fechada se inexistente,
+alterado, com permissões amplas ou se já existir destino. Testes sintéticos
+de dois schemas, hash adulterado, permissões e symlink. Nenhum banco, n8n,
+sistema oficial, benchmark ou LLM acessado. Guia:
+`docs/operations/G5-P3-ORIGINAL-CUSTODY.md`. O gate de aprovação dos 77
+registros/48 vínculos continua pendente; fonte não ativada.
+
+---
+
 ## 13/11/2026 — CI Windows: teste de recuperação corrigido; custódia P3 ainda pendente
 
 **Resultado confirmado do CI no SHA 7e324b5:** `Offline validation` falhou somente no job Windows, em `testar_g5_targeted_financial_review_offline.py`: o teste recém-criado exigia retorno PASS do endpoint de recuperação em Windows, embora o próprio endpoint de segurança deva sempre retornar BLOCKED fora de POSIX. A suíte Linux Shadow e a migração PostgreSQL descartável passaram. Teste alterado para verificar **bloqueio seguro no Windows sem arquivo de saída**, mantendo conferência independente do SHA original em ambas as plataformas. Código de produção e controle POSIX não foram afrouxados. Novo CI do SHA corrigido precisa ser conferido.
