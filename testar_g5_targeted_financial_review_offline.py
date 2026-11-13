@@ -178,6 +178,16 @@ def test_real_entrypoint_preserves_original_plaintext_digest_for_crosswalk():
                     "--version-sha256", seal["source_version_sha256"],
                     "--output-dir", str(out),
                 ])
+            if os.name != "posix":
+                # The real endpoint must fail closed on Windows, even when
+                # a mocked TTY/passphrase/decryptor is supplied. Separately
+                # verify the immutable source digest on every platform.
+                assert result == 2
+                assert not out.exists()
+                packet, report = verify_decrypted_packet(raw, seal)
+                assert report["packet_plaintext_sha256"] == seal["plaintext_sha256"]
+                assert len(source_ids(packet)) == 1
+                continue
             assert result == 0
             assert out.stat().st_mode & 0o077 == 0
             persisted = out / "unapproved-source-packet.json"

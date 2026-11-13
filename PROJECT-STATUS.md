@@ -1,3 +1,11 @@
+## 13/11/2026 — CI Windows: teste de recuperação corrigido; custódia P3 ainda pendente
+
+**Resultado confirmado do CI no SHA 7e324b5:** `Offline validation` falhou somente no job Windows, em `testar_g5_targeted_financial_review_offline.py`: o teste recém-criado exigia retorno PASS do endpoint de recuperação em Windows, embora o próprio endpoint de segurança deva sempre retornar BLOCKED fora de POSIX. A suíte Linux Shadow e a migração PostgreSQL descartável passaram. Teste alterado para verificar **bloqueio seguro no Windows sem arquivo de saída**, mantendo conferência independente do SHA original em ambas as plataformas. Código de produção e controle POSIX não foram afrouxados. Novo CI do SHA corrigido precisa ser conferido.
+
+**Busca por P3 real:** verificados por hash exato 1.535 arquivos candidatos (JSON/JSONL/TXT/snapshot) em raízes privadas autorizadas da VPS e áreas de código; **zero correspondências** ao `p3_snapshot_sha256` selado na fonte G5 original. Não declarar P3 recuperado, nem substituir por arquivo reconstruído ou sintético. Continua pendente localizar/transferir para custódia privada o snapshot físico P3 original e realizar a revisão financeira independente dos 77 registros. Sem SELECT financeira, ativação de contexto, modificação n8n ou cutover.
+
+---
+
 ## 13/11/2026 — G5 real: dossiê 77/77 e prova física P3 independente (não homologado)
 
 Após recuperar a versão G5 original, confrontei os 48 indícios P3 com as declarações do próprio catálogo. **Resultado real:** 40 aliases mapeiam internamente a 8 tabelas, mas P3 identifica 40 aliases e 6 tabelas como AMBIGUOUS_TABLE_NAME (46), 40 colunas como COLUMN_UNRESOLVED e duas tabelas somente TABLE_NAME_ONLY. Nenhuma equivalência física ou financeira foi aprovada. O arquivo HTML de revisão dos 77 registros, com conteúdo original e indícios P3, foi gerado só na VPS privada como 0600/root; não enviar valores ao GitHub/LLM. A ferramenta estruturada é genérica em relação aos nomes/contas de cada cliente; HTML estático com escape e CSP, sem comunicação de rede.
