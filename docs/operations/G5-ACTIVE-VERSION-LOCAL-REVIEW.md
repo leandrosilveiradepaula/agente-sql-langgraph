@@ -1,5 +1,12 @@
 # Desbloqueio local, por versão, do contexto financeiro oficial G5
 
+
+## Resultado operacional confirmado — 13/11/2026
+
+O operador já executou `G5_TARGETED_REVIEW=PASS` para a versão ativa 7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485, recuperando 77 registros. O diretório de saída real e persistente é `/var/lib/agente-financeiro-mcp-admin/g5-financial-review-20261113/active-version-financial-review-private`. O antigo caminho `/tmp/legacy-n8n-g5-inventory-20261111` era **PrivateTmp do serviço MCP** e não é visível no SSH do operador; o comando em /tmp abaixo está registrado apenas como procedimento histórico e NÃO deve ser repetido. O pacote privado foi reparado para preservar exatamente o SHA-256 plaintext original, e o recuperador atualizado para salvar os bytes GPG sem reserializar. Revisão contábil: PENDING, 77/77 registros ainda UNRESOLVED. A candidata privada de linhagem técnica dos 40 aliases com as 8 tabelas não é contexto autorizado. Sem nova senha necessária, sem SQL real, sem ativação.
+
+---
+
 **Objetivo:** remover a dependência do Bloco 1 com uma única interação humana no terminal da VPS. Este procedimento **não usa a senha no ChatGPT, GitHub, linha de comando, variáveis de ambiente nem logs** e não ativa qualquer contexto no n8n/LangGraph. Não há execução de SQL financeira. O pacote fica marcado como evidência NÃO APROVADA para a posterior revisão contábil.
 
 ## Por que apenas este pacote?

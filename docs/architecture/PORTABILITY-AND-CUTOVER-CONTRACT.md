@@ -1,3 +1,9 @@
+## Atualização factual 13/11/2026 — recuperação criptográfica não equivale à aprovação
+
+A versão G5 selecionada no n8n publicado foi DESCRIPTOGRAFADA pelo operador em TTY; o pacote privado SHA-256 verificado contém 77 registros, preservados em área local restrita, sem expor dados ao gerador/benchmark. O bug de reserialização do arquivo recuperado foi reparado. Verificação técnica privada: 40 aliases identificam unicamente 8 tabelas de catálogo e colunas nelas listadas, mas falta validação de tipos, contabilidade e destinos canônicos. Os 77 registros seguem sem aprovação e com estado UNRESOLVED. Os contratos de portabilidade, critérios G1–G6, aprovação independente, paridade numérica SELECT-only separadamente autorizada, n8n oficial, Shadow sem execução e cutover humano permanecem **inalterados**. Não confundir acesso ao corpus com homologação funcional financeira.
+
+---
+
 ## 13/11/2026 — Bloco 1: ponte real de G5 para revisão contábil (SEM homologação)
 
 **Verificado na VPS:** versão G5 selecionada pelo n8n publicado ligada ao manifesto privado de 11 ciphertexts; versão ativa SHA-256 7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485 e 77 registros (18 regras, 40 aliases, 11 DRE, 8 catálogo), com hash do ciphertext íntegro. As 11 versões contêm 1.275 registros sem SQL patterns. Todos seguem ENCRYPTED_NOT_APPROVED; zero significados contábeis validados e zero SQL financeira executada. Fonte e benchmark de 63 perguntas permanecem separados.

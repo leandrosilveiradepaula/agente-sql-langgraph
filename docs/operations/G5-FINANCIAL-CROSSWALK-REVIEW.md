@@ -1,5 +1,14 @@
 # G5 para catálogo canônico: revisão financeira individual
 
+
+## Atualização verificada após recuperação no terminal da VPS — 13/11/2026
+
+O operador completou a descriptografia sem ecoar a passphrase. O pacote ORIGINAL foi validado no SHA-256 selado, com **77/77 linhas** e segregação das 106 SQL históricas. O recuperador tinha uma falha: salvava o JSON com separadores/espaços diferentes, produzindo um SHA incompatível com a verificação de `verify_private_review`. O arquivo privado foi restaurado ao byte stream original e `verify_decrypted_packet` passou sobre esse arquivo. A PR #233 foi corrigida para persistir `content` original, e um teste de entrada real sintética (dois schemas) exige bytes idênticos e rejeita a reserialização. O pacote não precisa ser decifrado novamente para revisão offline.
+
+Uma inspeção estruturada PRIVADA localizou 40 aliases com tabela sem schema, todos vinculáveis univocamente às **8** definições de tabela pelo nome legado; as 40 colunas de destino ocorrem nas listas de metadados do catálogo. Foi criado `unapproved-physical-lineage-candidates.json` com ligações registro-origem -> registro-tabela -> coluna física candidata, sob 0600/0700, explicitamente não aprovado. **Essa confirmação estrutural não comprova que os campos existam fisicamente com tipos corretos na base original inativa, nem seus significados, regras, sinais, joins ou resultados.** Todos os 77 registros continuam `UNRESOLVED` em `financial-crosswalk-review-draft.json`; nenhum destino canônico foi chancelado e nenhum recibo de especialista independente foi fornecido. O caminho `G5_FINANCIAL_MAPPING_CANDIDATE_NOT_ACTIVATED` ainda não foi atingido. Não importar o candidato como contexto, não usar como prompt e não executar SQL financeira.
+
+---
+
 ## Fonte e estado real — 13/11/2026
 
 A versão selecionada pelo n8n publicado (source-version SHA-256

@@ -262,8 +262,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             write_private_once(
                 output / "unapproved-source-packet.json",
-                json.dumps(packet, sort_keys=True, ensure_ascii=True).encode()
-                + b"\n",
+                # Preserve the exact authenticated plaintext bytes: re-encoding
+                # JSON changes its SHA and breaks the downstream sealed review.
+                content,
             )
             write_private_once(
                 output / "sanitized-review-evidence.json",

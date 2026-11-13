@@ -1,3 +1,9 @@
+## Atualização operacional vinculante — 13/11/2026, G5 original recuperado
+
+A dependência de **descriptografia** da versão financeira G5 publicada no n8n foi resolvida pelo operador em TTY local. Há um pacote privado autêntico de **77 registros** (18 regras, 40 aliases, 11 DRE, 8 tabelas) recuperado em /var/lib/agente-financeiro-mcp-admin/g5-financial-review-20261113/active-version-financial-review-private na VPS. A reserialização prévia havia alterado o hash; o arquivo foi restaurado em bytes exatos e a CLI de recuperação corrigida na mesma PR #233 para não repetir. O digest da origem foi conferido, assim como 40/40 vínculos unívocos de alias->tabela e coluna declarada; candidatos PRIVADOS ainda não aprovados. **Não solicitar nova senha para esta leitura, não enviar valores financeiros nem plaintext ao GitHub/LLM/benchmark.** Revisão por especialista e aprovação independente dos 77 registros, contexto validado e prova de funcionalidade/paridade ainda não foram feitos. A execução de SQL financeira continua proibida sem autorização separada. OFFICIAL=n8n, SHADOW=LangGraph, real SQL=false. Sem cutover, merge automático, mudança de serviços ou banco.
+
+---
+
 ## 13/11/2026 — Bloco 1: ponte real de G5 para revisão contábil (SEM homologação)
 
 **Verificado na VPS:** versão G5 selecionada pelo n8n publicado ligada ao manifesto privado de 11 ciphertexts; versão ativa SHA-256 7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485 e 77 registros (18 regras, 40 aliases, 11 DRE, 8 catálogo), com hash do ciphertext íntegro. As 11 versões contêm 1.275 registros sem SQL patterns. Todos seguem ENCRYPTED_NOT_APPROVED; zero significados contábeis validados e zero SQL financeira executada. Fonte e benchmark de 63 perguntas permanecem separados.

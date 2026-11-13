@@ -143,6 +143,70 @@ def test_no_raw_business_values_in_sanitized_report():
     assert "source_row_sha256" not in view
 
 
+def test_real_entrypoint_preserves_original_plaintext_digest_for_crosswalk():
+    """A reserialized JSON is NOT the original G5 sealed payload."""
+    from unittest.mock import patch
+    import scripts.operations.g5_targeted_financial_review_offline as module
+    from scripts.operations.g5_financial_crosswalk_review import draft, source_ids
+
+    class SyntheticTTY:
+        def isatty(self):
+            return True
+
+    for alternate in (False, True):
+        raw, seal, manifest = fixture(alternate=alternate)
+        # Synthetic input varies only the source object, never uses financial SQL.
+        cipher_content = b"synthetic encrypted fixture only"
+        seal["ciphertext_sha256"] = hashlib.sha256(cipher_content).hexdigest()
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            encrypted = root / seal["file"]
+            encrypted.write_bytes(cipher_content)
+            encrypted.chmod(0o600)
+            manifest_path = root / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+            manifest_path.chmod(0o600)
+            out = root / "private"
+            with (
+                patch.object(module.sys, "stdin", SyntheticTTY()),
+                patch.object(module.getpass, "getpass",
+                             return_value="synthetic-test-only"),
+                patch.object(module, "decrypt_local_gpg", return_value=raw),
+            ):
+                result = module.main([
+                    "--manifest", str(manifest_path),
+                    "--version-sha256", seal["source_version_sha256"],
+                    "--output-dir", str(out),
+                ])
+            assert result == 0
+            assert out.stat().st_mode & 0o077 == 0
+            persisted = out / "unapproved-source-packet.json"
+            assert persisted.stat().st_mode & 0o077 == 0
+            assert persisted.read_bytes() == raw
+            packet, report = verify_decrypted_packet(
+                persisted.read_bytes(), seal,
+            )
+            saved_report = json.loads(
+                (out / "sanitized-review-evidence.json").read_bytes()
+            )
+            assert saved_report == report
+            review = json.loads(
+                (out / "financial-crosswalk-review-draft.json").read_bytes()
+            )
+            assert review == draft(packet, report["packet_plaintext_sha256"])
+            assert len(source_ids(packet)) == len(review["rows"]) == 1
+            assert review["accounting_approved"] is False
+            assert review["ready_for_generation"] is False
+            # Original formatter re-encoded with extra separators/newline;
+            # it must not be accepted as the original sealed source bytes.
+            reformatted = (
+                json.dumps(packet, sort_keys=True, ensure_ascii=True).encode()
+                + b"\n"
+            )
+            assert reformatted != raw
+            denied(verify_decrypted_packet, reformatted, seal)
+
+
 if __name__ == "__main__":
     all_tests = sorted(
         (name, fn) for name, fn in globals().items()

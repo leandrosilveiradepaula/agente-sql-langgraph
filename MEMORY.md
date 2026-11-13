@@ -1,3 +1,9 @@
+## 2026-11-13 — Recuperação real G5 e reparo da cadeia de integridade (não homologado)
+
+Operador executou a recuperação no SSH; G5 versão publicada 7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485: 77 registros originais recuperados, conferidos contra SHA do manifesto e preservados em arquivo privado 0600 na VPS. Identificado defeito de reserialização no recuperador (SHA do plaintext alterado); arquivo privado reconstruído com SHA original confirmado e script corrigido para persistir bytes exatos, com teste negativo. Triagem de linhagem: 40/40 aliases têm tabela única entre 8 entradas de catálogo e coluna citada nas listas aprováveis legadas; NÃO prova tipo físico nem semântica financeira. Artefato privado de candidatos, nenhum dado real no GitHub. Os 77 registros permanecem UNRESOLVED no crosswalk e exigem revisão contábil independente, contexto canônico versionado, assinaturas e gates. Sem SQL financeira, ativação, merge ou cutover. Shadow seguro. Não voltar a pedir a senha apenas para reler o pacote já recuperado.
+
+---
+
 **Vinculação adicional 13/11/2026:** a CLI exige agora evidência local e privada de seleção da versão n8n publicada; hashes e row_counts dos 77 registros devem coincidir com o pacote cifrado. G5 não pode ser substituído por DEMO nem outra versão ao construir a prova de migração. Testes positivos/negativos com origem sintética; verificado também, sem decrypt, o manifesto real 77/77 vinculado à versão do n8n. Nenhuma ativação ou aprovação contábil.
 
 ## 13/11/2026 — Bloco 1: ponte real de G5 para revisão contábil (SEM homologação)
