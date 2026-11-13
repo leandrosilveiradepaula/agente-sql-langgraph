@@ -1,3 +1,13 @@
+## MARCO ATUAL 13/11/2026 — P3 original autenticado e matriz 48/48; sem homologação
+
+A fonte G5 original (77 registros) e o snapshot P3 original (137 colunas em 16 tabelas, 2 schemas) estão recuperados e conferidos por SHA na VPS. O gate `G5_P3_ORIGINAL_METADATA_REQUIRED` foi resolvido; **NÃO repetir a recuperação nem afirmar que P3 falta**. Verificação técnica: 0/8 schemas G5 constam fisicamente sob o mesmo nome no P3, 6/8 tabelas homônimas multi-schema, 32/40 aliases com um candidato literal de coluna e 8/40 sem nenhum. Não há aprovação automática de nenhum.
+
+Nova matriz privada `g5-p3-original-physical-worklist.json/.html` (48 indícios; 0600/root) e dossiê privado `confidential-financial-review.html` (77/77). Código do gate corrigido: oito indícios de catálogo `source_table_ref=null` resolvidos exclusivamente via registro de origem G5 autenticado; remapeamento de schema/tabela/coluna exige `physical_remap_evidence_sha256` e assinatura independente que cobre a decisão. Dois contextos sintéticos e casos negativos testados. Tudo em `docs/operations/G5-P3-ORIGINAL-PHYSICAL-WORKLIST.md`.
+
+**Pendência REAL:** 77 significados contábeis e 48 vínculos físicos não aprovados, catálogo canônico tenant/version/fingerprint, perguntas inéditas em dois contextos reais e paridade Shadow. OFFICIAL=n8n, SHADOW=LangGraph, real SQL=false. Nenhum contexto/DB/n8n/produção/merge/cutover ativado. Textos antigos sobre P3 ausente são históricos, não estado atual.
+
+---
+
 **13/11/2026, P3 custódia:** cinco fontes históricas privadas têm o MESMO
 hash P3 registrado no G5 real, mas não temos o arquivo de bytes originais:
 busca read-only de 1.535 arquivos nas árvores acessíveis do MCP retornou

@@ -1,3 +1,13 @@
+## 13/11/2026 — Bloco 1 G5/P3: original físico recuperado; revisão financeira ainda não aprovada
+
+**Evidência REAL:** P3 original preservado pelo operador e confirmado na VPS, 137 linhas físicas, 16 tabelas em dois schemas; SHA coincide exatamente com o G5 original de 77 registros. A indisponibilidade de P3 registrada em seções anteriores foi resolvida. Nova matriz de 48 indícios físicos (40 aliases, 8 catálogos) validada sem SQL: 0/8 schemas originais coincidem com identidade física, 6/8 nomes de tabela multi-schema, 32/40 colunas de aliases com somente um candidato literal, 8/40 sem candidato literal. Nenhuma é correspondência financeira aprovada. Arquivos JSON e HTML de trabalho **privados** (0600, root; não enviar ao LLM/GitHub), nome `g5-p3-original-physical-worklist` sob diretório da revisão original; o dossiê 77 registros permanece intacto.
+
+**Correção funcional de gate:** oito indícios de catálogo P3 possuem `source_table_ref=null`; o validador anterior nunca conseguiria aprovar a fonte real. Agora obtém identificadores do registro G5 vinculado por SHA, distingue referência original de destino físico, e para mudança explícita de schema, tabela ou coluna exige `physical_remap_evidence_sha256` incluído na aprovação HMAC independente. Prova sintética de dois tenants, tabelas homônimas, nomes de coluna diferentes, recibos adulterados e recusa de preenchimento automático. Verificação de dados reais agora para no bloqueio correto `G5_PHYSICAL_DECISIONS_INCOMPLETE`, não mais `G5_P3_ORIGINAL_METADATA_REQUIRED`.
+
+**Não concluído:** 77 classificações contábeis, 48 decisões físicas, contexto canônico com tenant/version/fingerprint aprovado e assinado, teste de perguntas inéditas em duas empresas reais, paridade funcional e financeira; SELECT financeira real somente com autorização separada. OFFICIAL=n8n, SHADOW=LangGraph, SQL real=false. Nenhum merge/produção/DB/n8n/cutover. Contrato detalhado em `docs/operations/G5-P3-ORIGINAL-PHYSICAL-WORKLIST.md`.
+
+---
+
 ## 13/11/2026 — P3: custódia exata preparada, original ainda não localizado
 
 Verifiquei cinco artefatos históricos privados do G5/P3: todos indicam o mesmo

@@ -30,10 +30,81 @@ _ALLOWED_HINT = {
 _DECISION_KEYS = {
     "collection", "source_row_sha256", "qualified_table", "target_column",
 }
+_REMAP_ATTESTATION = "physical_remap_evidence_sha256"
 
 
 def deny(code: str) -> None:
     raise FinancialReviewBlocked(code)
+
+
+def original_physical_reference(
+    packet: Mapping[str, Any], hint: Mapping[str, Any],
+) -> tuple[str | None, str, str | None]:
+    """Resolve a G5 source-row reference, NEVER a physical target.
+
+    Table-catalog hints in the real G5 archive have NULL source_table_ref,
+    despite the exact table name/schema being present in that source row.
+    A purely hint-based resolver can never approve any of those 8 rows.
+    Aliases may inherit an unambiguous *legacy* schema from their catalog,
+    which is only historical provenance, never proof of the new P3 schema.
+    """
+    collection = hint.get("collection")
+    record_sha = hint.get("source_record_sha256")
+    records = packet.get("collections", {}).get(collection)
+    if not isinstance(records, list):
+        deny("G5_ORIGINAL_SOURCE_COLLECTION_MISSING")
+    matches = [
+        row for row in records
+        if isinstance(row, Mapping)
+        and row.get("source_row_sha256") == record_sha
+    ]
+    if len(matches) != 1:
+        deny("G5_ORIGINAL_SOURCE_ROW_NOT_UNIQUE")
+    fields = matches[0].get("source_fields_unreviewed")
+    if not isinstance(fields, Mapping):
+        deny("G5_ORIGINAL_SOURCE_FIELDS_INVALID")
+
+    schema = fields.get("schema_name")
+    if isinstance(fields.get("table_name"), str) and fields["table_name"]:
+        table = fields["table_name"]
+        column = None
+        if not isinstance(schema, str) or not _IDENT.fullmatch(schema):
+            deny("G5_ORIGINAL_SOURCE_SCHEMA_INVALID")
+    elif isinstance(fields.get("target_table"), str) and fields["target_table"]:
+        table = fields["target_table"]
+        column = fields.get("target_column")
+        if not isinstance(column, str) or not _IDENT.fullmatch(column):
+            deny("G5_ORIGINAL_SOURCE_COLUMN_INVALID")
+        source_catalog_schemas = {
+            original.get("source_fields_unreviewed", {}).get("schema_name")
+            for group in packet["collections"].values()
+            for original in group
+            if isinstance(original, Mapping)
+            and isinstance(original.get("source_fields_unreviewed"), Mapping)
+            and original["source_fields_unreviewed"].get("table_name") == table
+            and isinstance(
+                original["source_fields_unreviewed"].get("schema_name"), str
+            )
+        }
+        schema = next(iter(source_catalog_schemas)) if len(source_catalog_schemas) == 1 else None
+    else:
+        # Structurally different tenant source/fixture without a table
+        # catalog: only an explicit source hint is available; never infer
+        # an equivalent physical table from business semantics.
+        table = hint.get("source_table_ref")
+        column = hint.get("source_column_ref")
+        schema = None
+    if not isinstance(table, str) or not _IDENT.fullmatch(table):
+        deny("G5_ORIGINAL_SOURCE_TABLE_INVALID")
+    hint_table = hint.get("source_table_ref")
+    if hint_table not in (None, "", table, f"{schema}.{table}" if schema else table):
+        deny("G5_ORIGINAL_SOURCE_HINT_CONFLICT")
+    hint_column = hint.get("source_column_ref")
+    if hint_column not in (None, "", column):
+        deny("G5_ORIGINAL_COLUMN_HINT_CONFLICT")
+    if column is not None and hint_column != column:
+        deny("G5_ORIGINAL_COLUMN_HINT_MISSING")
+    return schema, table, column
 
 
 def physical_approval_claims(
@@ -143,7 +214,12 @@ def physical_approval_claims(
 
     seen = set()
     for decision in decisions:
-        if not isinstance(decision, Mapping) or set(decision) != _DECISION_KEYS:
+        if (
+            not isinstance(decision, Mapping)
+            or set(decision) not in (
+                _DECISION_KEYS, _DECISION_KEYS | {_REMAP_ATTESTATION}
+            )
+        ):
             deny("G5_PHYSICAL_DECISION_FORMAT_INVALID")
         key = (decision.get("collection"), decision.get("source_row_sha256"))
         if key not in by_id or key in seen:
@@ -157,16 +233,27 @@ def physical_approval_claims(
         schema, table = target.split(".")
         if not _IDENT.fullmatch(schema) or not _IDENT.fullmatch(table):
             deny("G5_PHYSICAL_QUALIFIED_TABLE_INVALID")
-        legacy_table = hint.get("source_table_ref")
-        if (
-            not isinstance(legacy_table, str)
-            or legacy_table not in (table, target)
-            or (schema, table) not in physical
-            or (schema, table) not in approved_tables
-        ):
+        legacy_schema, legacy_table, legacy_column = original_physical_reference(
+            packet, hint,
+        )
+        remapped = (
+            table != legacy_table
+            or (legacy_schema is not None and schema != legacy_schema)
+            or column != legacy_column
+        )
+        evidence = decision.get(_REMAP_ATTESTATION)
+        if remapped:
+            # An explicitly reviewed mapping is portable across schema
+            # names, table names, and renamed columns. The independent
+            # signed receipt binds the evidence digest AND this exact target;
+            # neither aliases nor name similarity can authorize a remap.
+            if not isinstance(evidence, str) or not _SHA.fullmatch(evidence):
+                deny("G5_PHYSICAL_REMAP_INDEPENDENT_EVIDENCE_REQUIRED")
+        elif _REMAP_ATTESTATION in decision:
+            deny("G5_PHYSICAL_REMAP_EVIDENCE_NOT_APPLICABLE")
+        if (schema, table) not in physical or (schema, table) not in approved_tables:
             deny("G5_PHYSICAL_BINDING_NOT_PROVEN")
-        hint_column = hint.get("source_column_ref")
-        if hint_column is None or hint_column == "":
+        if legacy_column is None:
             if column is not None:
                 deny("G5_PHYSICAL_COLUMN_NOT_EXPECTED")
             if not physical[(schema, table)]:
@@ -181,9 +268,8 @@ def physical_approval_claims(
                 deny("G5_PHYSICAL_TABLE_UNVERIFIED")
         else:
             if (
-                not isinstance(hint_column, str)
-                or not _IDENT.fullmatch(hint_column)
-                or column != hint_column
+                not isinstance(column, str)
+                or not _IDENT.fullmatch(column)
                 or column not in physical[(schema, table)]
                 or column not in approved_tables[(schema, table)]
                 or physical[(schema, table)][column].casefold()

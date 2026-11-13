@@ -1,3 +1,11 @@
+## ATUALIZAÇÃO 13/11/2026 — Fonte G5 + metadados P3 verificados; decisões financeiras pendentes
+
+O P3 original (137 metadados/16 tabelas/2 schemas) foi finalmente recuperado com SHA conferido ao pacote G5 de 77 registros. Seções históricas abaixo que afirmam que P3 ainda não foi encontrado estão superadas. O cruzamento técnico autenticado de 48 indícios revelou 32 aliases com uma correspondência literal de nome físico, 8 aliases sem e seis tabelas homônimas em dois schemas. O catálogo G5 declara 8/8 schemas ausentes fisicamente no P3. Os artefatos privados `g5-p3-original-physical-worklist.json/.html` (0600) registram TODAS as opções, nunca uma escolha; há também dossiê HTML privado com os 77 textos originais.
+
+O verificador foi corrigido para os 8 indícios `source_table_ref=null` provenientes do catálogo original e para remapeamento de schema/tabela/coluna autenticado: uma alteração só pode ser validada com `physical_remap_evidence_sha256` da análise financeira independente, anexado à decisão e à assinatura HMAC do aprovador junto aos hashes P3/contexto/fonte. Ainda faltam 48 decisões físicas e 77 aprovações de significado; o gate real retorna `G5_PHYSICAL_DECISIONS_INCOMPLETE` conforme esperado. Consulte `docs/operations/G5-P3-ORIGINAL-PHYSICAL-WORKLIST.md`. Nenhuma aprovação contábil foi simulada, nem SQL financeira real, importação ou cutover.
+
+---
+
 ## 13/11/2026 — Revisão material disponível e requisito adicional de identidade P3
 
 **Dossiê real criado** em `/var/lib/agente-financeiro-mcp-admin/g5-financial-review-20261113/active-version-financial-review-private/confidential-financial-review.html` (0600, owner root; diretório 0700). HTML estático, sem scripts/rede, com valores originais escapados, cada SHA de fonte, campos de origem, estado PENDING e indícios físicos ainda não aprovados. Não transferir por GitHub nem usar em LLM. Seu conteúdo é *confidencial*; só especialista financeiro autorizado deve lê-lo no ambiente controlado. Já existem 77 registros íntegros: não executar a recuperação novamente.

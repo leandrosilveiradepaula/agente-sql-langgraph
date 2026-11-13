@@ -486,6 +486,10 @@ STEPS = [
         [sys.executable, "testar_g5_physical_source_evidence.py"],
     ),
     (
+        "testar_g5_p3_original_physical_worklist.py",
+        [sys.executable, "testar_g5_p3_original_physical_worklist.py"],
+    ),
+    (
         "testar_metric_source_composition_e2e.py",
         [sys.executable, "testar_metric_source_composition_e2e.py"],
     ),

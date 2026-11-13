@@ -205,6 +205,109 @@ def test_missing_or_duplicate_decision_is_blocked():
     ))
 
 
+def _historic_changed_table(*, alternate=False, table_only=True):
+    """Synthetic old customer layout differs from P3 in schema/table/column."""
+    packet, packet_sha, review, ctx, raw, seal, p3 = fixture(other=alternate)
+    fields = packet["collections"]["semantic_rules"][0]["source_fields_unreviewed"]
+    hint = packet["physical_identifier_hints_unapproved"][0]
+    if table_only:
+        fields["schema_name"] = "old_ledger_schema"
+        fields["table_name"] = "old_fact_table"
+        hint["source_table_ref"] = None  # Real G5 table-catalog hint shape.
+        hint["source_column_ref"] = None
+        review["physical_binding_decisions"][0]["target_column"] = None
+    else:
+        fields["target_table"] = "old_fact_table"
+        fields["target_column"] = "old_measure"
+        hint["source_table_ref"] = "old_fact_table"
+        hint["source_column_ref"] = "old_measure"
+        review["physical_binding_decisions"][0]["target_column"] = "value"
+    review["physical_binding_decisions"][0][
+        "physical_remap_evidence_sha256"
+    ] = hashlib.sha256(b"synthetic independent financial reviewer evidence").hexdigest()
+    raw = json.dumps(packet, sort_keys=True).encode()
+    packet_sha = hashlib.sha256(raw).hexdigest()
+    seal["plaintext_sha256"] = packet_sha
+    review["packet_plaintext_sha256"] = packet_sha
+    return packet, packet_sha, review, ctx, raw, seal, p3
+
+
+def test_sealed_table_catalog_row_with_null_hint_can_be_reviewed_when_renamed():
+    for alt in (False, True):
+        t = _historic_changed_table(alternate=alt)
+        result = verify(t)
+        assert result["status"] == "G5_FINANCIAL_MAPPING_CANDIDATE_NOT_ACTIVATED"
+        assert result["context_persisted"] is False
+        assert result["activation_authorized"] is False
+        assert result["financial_sql_executed"] is False
+
+
+def test_renamed_legacy_column_requires_independently_signed_remap_evidence():
+    t = _historic_changed_table(table_only=False)
+    result = verify(t)
+    assert result["status"] == "G5_FINANCIAL_MAPPING_CANDIDATE_NOT_ACTIVATED"
+    missing = deepcopy(t[2])
+    missing["physical_binding_decisions"][0].pop(
+        "physical_remap_evidence_sha256"
+    )
+    deny(lambda: physical_approval_claims(
+        packet=t[0], review=missing,
+        approved_catalog=normalize_context_snapshot(t[3])["table_catalog"],
+        p3_bytes=t[6],
+    ))
+    bogus = deepcopy(t[2])
+    bogus["physical_binding_decisions"][0][
+        "physical_remap_evidence_sha256"
+    ] = "bad-justification"
+    deny(lambda: physical_approval_claims(
+        packet=t[0], review=bogus,
+        approved_catalog=normalize_context_snapshot(t[3])["table_catalog"],
+        p3_bytes=t[6],
+    ))
+
+
+def test_physical_remap_evidence_is_bound_to_independent_hmac_receipt():
+    t = _historic_changed_table()
+    original_receipt = approval(t[0], t[1], t[2], t[3], t[6])
+    altered = deepcopy(t[2])
+    altered["physical_binding_decisions"][0][
+        "physical_remap_evidence_sha256"
+    ] = hashlib.sha256(b"changed explanation").hexdigest()
+    p, sha, _review, ctx, raw, seal, p3 = t
+    deny(lambda: verified_review(
+        packet=p, packet_sha256=sha, source_packet_bytes=raw,
+        trusted_seal=seal, review=altered, raw_context=ctx,
+        approval_receipt=original_receipt,
+        verifier_key=TEST_VERIFIER_KEY, p3_snapshot_bytes=p3,
+    ))
+
+
+def test_source_hint_cannot_replace_original_private_table_name():
+    t = _historic_changed_table()
+    bad = deepcopy(t[0])
+    bad["physical_identifier_hints_unapproved"][0][
+        "source_table_ref"
+    ] = "unrelated_table"
+    deny(lambda: physical_approval_claims(
+        packet=bad, review=t[2],
+        approved_catalog=normalize_context_snapshot(t[3])["table_catalog"],
+        p3_bytes=t[6],
+    ))
+
+
+def test_exact_source_binding_rejects_spurious_remap_evidence():
+    t = fixture()
+    review = deepcopy(t[2])
+    review["physical_binding_decisions"][0][
+        "physical_remap_evidence_sha256"
+    ] = hashlib.sha256(b"not actually remapped").hexdigest()
+    deny(lambda: physical_approval_claims(
+        packet=t[0], review=review,
+        approved_catalog=normalize_context_snapshot(t[3])["table_catalog"],
+        p3_bytes=t[6],
+    ))
+
+
 if __name__ == "__main__":
     tests = sorted(
         (name, func) for name, func in globals().items()
