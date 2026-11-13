@@ -13,7 +13,7 @@ from scripts.operations.g5_financial_crosswalk_review import FinancialReviewBloc
 from scripts.operations.g5_owner_review_tui import (
     atomic_private_update, counts, edit_financial, edit_physical,
     export_unsigned_draft, initial_state, open_review,
-    private_file_location, safe_terminal, validate_state,
+    private_file_location, review_loop, safe_terminal, validate_state,
 )
 from scripts.operations.g5_p3_original_physical_worklist import physical_index
 from testar_g5_p3_original_physical_worklist import inputs
@@ -309,6 +309,34 @@ def test_real_size_77_by_48_synthetic_review_is_resumable_without_auto_approving
             saved=json.loads(session.read_bytes())
             validate_state(saved,state,physical)
             assert stat.S_IMODE(session.stat().st_mode)==0o600
+
+
+def test_next_review_advances_past_business_row_waiting_for_context():
+    if os.name != "posix":return
+    import hashlib
+    with TemporaryDirectory() as folder:
+        root=Path(folder)
+        files,packet,p3,_state,physical,session=fixture(root)
+        bucket=next(iter(packet["collections"]))
+        second=deepcopy(packet["collections"][bucket][0])
+        second["source_row_sha256"]="e"*64
+        packet["collections"][bucket].append(second)
+        packet["row_counts"][bucket]=2
+        packet_sha=hashlib.sha256(json.dumps(packet,sort_keys=True).encode()).hexdigest()
+        state=initial_state(packet,packet_sha,p3)
+        template=deepcopy(state)
+        tty=FakeTTY("f\nb\n\nf\ns\nq\n")
+        review_loop(
+            state=state,template=template,packet=packet,physical=physical,
+            private_dir=root,session_path=session,tty=tty,
+        )
+        first,second=state["workbook"]["financial_source_rows"]
+        assert first["classification"]=="FORBIDDEN"
+        assert first["destinations"]==[]
+        assert second["classification"]=="STRUCTURAL"
+        assert counts(state)["financial_classified"]==2
+        assert counts(state)["financial_destinations_needed"]==1
+        assert stat.S_IMODE(session.stat().st_mode)==0o600
 
 
 if __name__=="__main__":

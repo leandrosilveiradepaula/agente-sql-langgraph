@@ -399,11 +399,20 @@ def review_loop(*, state: dict, template: dict, packet: Mapping, physical: Mappi
             parts = choice.split()
             if len(parts) == 1 and parts[0] in ("f", "p"):
                 if parts[0] == "f":
+                    financial_rows = state["workbook"]["financial_source_rows"]
+                    # Review all source meanings first. A business row may
+                    # legitimately await a separately reviewed canonical
+                    # context; do not trap the owner on that same row.
                     wanted = next((
-                        i for i, row in enumerate(state["workbook"]["financial_source_rows"])
+                        i for i, row in enumerate(financial_rows)
                         if row["classification"] == "UNRESOLVED"
-                        or (row["classification"] == "FORBIDDEN" and not row["destinations"])
                     ), None)
+                    if wanted is None:
+                        wanted = next((
+                            i for i, row in enumerate(financial_rows)
+                            if row["classification"] == "FORBIDDEN"
+                            and not row["destinations"]
+                        ), None)
                 else:
                     wanted = next((
                         i for i, row in enumerate(state["workbook"]["physical_binding_decisions"])
