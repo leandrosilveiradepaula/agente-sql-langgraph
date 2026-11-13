@@ -474,6 +474,14 @@ STEPS = [
         [sys.executable, "testar_g5_financial_crosswalk_review.py"],
     ),
     (
+        "testar_g5_private_financial_review_dossier.py",
+        [sys.executable, "testar_g5_private_financial_review_dossier.py"],
+    ),
+    (
+        "testar_g5_physical_source_evidence.py",
+        [sys.executable, "testar_g5_physical_source_evidence.py"],
+    ),
+    (
         "testar_metric_source_composition_e2e.py",
         [sys.executable, "testar_metric_source_composition_e2e.py"],
     ),

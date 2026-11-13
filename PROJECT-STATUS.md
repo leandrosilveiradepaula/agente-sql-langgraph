@@ -1,3 +1,11 @@
+## 13/11/2026 — G5 real: dossiê 77/77 e prova física P3 independente (não homologado)
+
+Após recuperar a versão G5 original, confrontei os 48 indícios P3 com as declarações do próprio catálogo. **Resultado real:** 40 aliases mapeiam internamente a 8 tabelas, mas P3 identifica 40 aliases e 6 tabelas como AMBIGUOUS_TABLE_NAME (46), 40 colunas como COLUMN_UNRESOLVED e duas tabelas somente TABLE_NAME_ONLY. Nenhuma equivalência física ou financeira foi aprovada. O arquivo HTML de revisão dos 77 registros, com conteúdo original e indícios P3, foi gerado só na VPS privada como 0600/root; não enviar valores ao GitHub/LLM. A ferramenta estruturada é genérica em relação aos nomes/contas de cada cliente; HTML estático com escape e CSP, sem comunicação de rede.
+
+**Nova defesa de segurança funcional:** o `verified_review` exige, para pacotes com indícios P3, os bytes exatos do snapshot P3 original vinculados ao SHA do pacote, lista de decisões explícitas de schema/tabela/coluna por indício, tipos físicos compatíveis com o contexto canônico versionado, e HMAC de aprovação incluindo SHA do P3 e das decisões. A CLI aceita `--p3-metadata-file` privado. Sem snapshot, sem decisão ou com tabela homônima em outro schema, a candidatura financeira permanece bloqueada; nenhum SQL real ou alteração de serviço foi feita. G5 original 77/77 continua UNRESOLVED; 48 vínculos físicos sem atestação. Testes locais específicos: 8/8 de dossier, 7/7 de prova física, 6/6 crosswalk, 8/8 recuperação, 47/47 composição e 11/11 Shadow; hardcodes/segredos PASS. Sem comprovação de cliente real, homologação contábil, paridade numérica, CI pós-commit ou cutover.
+
+---
+
 ## 13/11/2026 — Recuperação G5 concluída; crosswalk financeiro permanece PENDING
 
 **Verificado na VPS:** o operador recuperou a versão G5 publicada no n8n (SHA-256 da versão 7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485), com 77/77 registros de fonte: 18 regras, 40 aliases, 11 DRE, 8 entradas de catálogo. O plaintext confidencial permanece privado, em arquivos 0600 sob diretório 0700. Nenhum dado da origem, SQL histórica ou senha foi enviado ao gerador ou GitHub.

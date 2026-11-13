@@ -1,3 +1,13 @@
+## 13/11/2026 — Bloco 1, G5 original: revisão privada 77 registros e identidade física independente
+
+**Fatos conferidos na VPS:** G5 original da versão usada no n8n foi recuperado (77 linhas, bytes/sha de plaintext verificados). Todos os 40 aliases encontram seu nome de tabela/coluna no próprio catálogo legado, **mas esse vínculo não prova a base física**: os indícios P3 da mesma versão registram **40 aliases e 6 das 8 tabelas como AMBIGUOUS_TABLE_NAME**, e 40 colunas como COLUMN_UNRESOLVED. Outras 2 tabelas são apenas TABLE_NAME_ONLY. Nunca chamar 40/40 de prova física ou contábil.
+
+**Entrega funcional:** dossier HTML local e restrito `/var/lib/agente-financeiro-mcp-admin/g5-financial-review-20261113/active-version-financial-review-private/confidential-financial-review.html`, 0600/root, 77 registros originais e os 48 indícios de P3, sem scripts nem envio de valores. Código e 8 testes de privacidade/fail-closed em `scripts/operations/g5_private_financial_review_dossier.py` e `testar_g5_private_financial_review_dossier.py`. Novo gate de identidade física em `g5_physical_source_evidence.py`: exige o snapshot P3 ORIGINAL por SHA, nenhuma execução SQL/LLM, decisão explícita de schema/tabela/coluna para todo indício G5, tipos físicos idênticos ao catálogo canônico aprovado e digest de todas as decisões dentro do recibo financeiro independente. Integração com `verified_review` e CLI via `--p3-metadata-file`. Testes de dois tenants sintéticos, ambiguidade, assinatura, ausência de snapshot, case/type mismatch.
+
+**Status atual:** 77/77 UNRESOLVED, 48 vínculos P3 sem atestação; original P3 completo não disponível como arquivo privado no ambiente inspecionado. O gate real retorna BLOCKED_EXPECTED, não CANDIDATE. Não utilizar o dossier como contexto/LLM, não copiar conteúdo privado para GitHub. Não repetir decriptação G5 para esta etapa; somente obter evidência física P3 custodiada, revisão contábil independente e catálogos por tenant aprovados. OFFICIAL=n8n; SHADOW=LangGraph; LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false; nenhum merge/produção/cutover/SQL financeira.
+
+---
+
 ## Marco confirmado 13/11/2026 — G5 real recuperado, revisão ainda não homologada
 
 O operador introduziu localmente a senha no terminal da VPS; a versão G5 fixada pelo n8n publicado foi recuperada e sua integridade verificada: **77/77 registros reais**, 18 regras, 40 aliases, 11 DRE, 8 catálogo. A fonte privada não está mais bloqueada por senha. Todo conteúdo bruto permanece 0600 em diretório 0700 na VPS, fora do repositório, prompts e benchmark.

@@ -1,3 +1,15 @@
+## 13/11/2026 — Revisão material disponível e requisito adicional de identidade P3
+
+**Dossiê real criado** em `/var/lib/agente-financeiro-mcp-admin/g5-financial-review-20261113/active-version-financial-review-private/confidential-financial-review.html` (0600, owner root; diretório 0700). HTML estático, sem scripts/rede, com valores originais escapados, cada SHA de fonte, campos de origem, estado PENDING e indícios físicos ainda não aprovados. Não transferir por GitHub nem usar em LLM. Seu conteúdo é *confidencial*; só especialista financeiro autorizado deve lê-lo no ambiente controlado. Já existem 77 registros íntegros: não executar a recuperação novamente.
+
+**Diferença crítica:** 40/40 aliases têm referência consistente ao catálogo LEGADO (8 tabelas), mas nos indícios do snapshot físico P3 há 46 referências `AMBIGUOUS_TABLE_NAME` (40 aliases + 6 tabelas) e 40 `COLUMN_UNRESOLVED`; as duas tabelas restantes são `TABLE_NAME_ONLY`, não atestação. Nenhum desses nomes pode ser promovido como verdadeiro só por similaridade de string. O P3 físico ORIGINAL, cujo SHA está em `packet.origin.p3_snapshot_sha256`, ainda precisa de disponibilização custodiada como arquivo 0600; não foi encontrado no conjunto privado consultado. O gate real `G5_P3_ORIGINAL_METADATA_REQUIRED` é esperado até isso.
+
+**Novo contrato genérico de promoção somente de CANDIDATO:** `g5_physical_source_evidence.py` recebe o P3 completo (JSON original; `physical` de [schema,table,column,type]; `sql_executed=false`, `llm_calls=0`) sem acessar dados financeiros, valida seu SHA contra a origem G5 e exige `review.physical_binding_decisions` para todo indício. Cada entrada deve conter precisamente `collection`, `source_row_sha256`, `qualified_table` (schema.table) e `target_column` (nulo para referências apenas à tabela). A escolha só é válida se o schema/tabela/coluna realmente ocorrerem no P3 e corresponderem ao catálogo canônico aprovado inclusive no tipo físico, respeitando caixa do identificador entre aspas. Escolher arbitrariamente entre tabelas homônimas, alterar tipo/coluna, misturar versões, retirar registros ou fornecer P3 sem digest original é BLOQUEADO. A CLI `g5_financial_crosswalk_review_cli.py` recebe `--p3-metadata-file` como caminho privado, exigido quando a fonte traz indícios, e o recibo HMAC de aprovação independente precisa incluir `p3_snapshot_sha256`, `physical_binding_decisions_sha256` e `physical_binding_rows` entre seus claims autenticados. Revisão de significado financeiro dos 77 registros e assinatura do aprovador ainda não existem; não construir recibo fictício.
+
+O dossier foi validado sobre o pacote original real, com 77/77 linhas, 48 indícios, 46 ambiguidades de tabela e 40 de coluna; as duas suítes novas incluem 15 testes sintéticos de dois contextos distintos e adulterações. Nenhuma SQL financeira foi executada ou foi concedido acesso a LLM/contexto. Não afirmar paridade ou preparação para merge/cutover.
+
+---
+
 # G5 para catálogo canônico: revisão financeira individual
 
 

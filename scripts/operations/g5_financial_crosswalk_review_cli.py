@@ -66,6 +66,7 @@ def verify_private_review(
     context_path: Path,
     approval_path: Path,
     verification_key_path: Path,
+    p3_metadata_path: Path | None = None,
 ) -> dict:
     manifest = private_json(manifest_path)
     seal = select_verified_seal(manifest, source_version_sha256)
@@ -107,6 +108,10 @@ def verify_private_review(
         raw_context=private_json(context_path),
         approval_receipt=private_json(approval_path),
         verifier_key=verification_key,
+        p3_snapshot_bytes=(
+            private_bytes(p3_metadata_path, 3_000_000)
+            if p3_metadata_path is not None else None
+        ),
     )
 
 
@@ -120,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--context-file", type=Path, required=True)
     parser.add_argument("--approval-file", type=Path, required=True)
     parser.add_argument("--verification-key-file", type=Path, required=True)
+    parser.add_argument("--p3-metadata-file", type=Path)
     args = parser.parse_args(argv)
     try:
         result = verify_private_review(
@@ -131,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             context_path=args.context_file,
             approval_path=args.approval_file,
             verification_key_path=args.verification_key_file,
+            p3_metadata_path=args.p3_metadata_file,
         )
     except (FinancialReviewBlocked, ReviewBlocked, OSError, ValueError):
         print("G5_FINANCIAL_MAPPING=BLOCKED")

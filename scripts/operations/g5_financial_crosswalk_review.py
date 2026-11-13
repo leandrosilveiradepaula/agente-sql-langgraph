@@ -114,6 +114,7 @@ def verified_review(
     raw_context: Mapping[str, Any],
     approval_receipt: Mapping[str, Any] | None,
     verifier_key: bytes | None,
+    p3_snapshot_bytes: bytes | None = None,
 ) -> dict[str, Any]:
     """Require exact row coverage AND independent signed accounting decision.
 
@@ -223,6 +224,18 @@ def verified_review(
         classified[category] += 1
     if present != expected:
         deny("G5_SOURCE_REVIEW_INCOMPLETE")
+    # Real G5 source snapshots carry unapproved P3 hints, including
+    # duplicate physical table names across schemas. An accountant's
+    # approval cannot silently select a schema without independently
+    # anchored physical metadata and explicit, signed source bindings.
+    from scripts.operations.g5_physical_source_evidence import (
+        physical_approval_claims,
+    )
+    physical_claims = physical_approval_claims(
+        packet=packet, review=review,
+        approved_catalog=snapshot["table_catalog"],
+        p3_bytes=p3_snapshot_bytes,
+    )
     row_hash = digest(sorted(
         review["rows"], key=lambda item: (item["collection"], item["source_row_sha256"]),
     ))
@@ -235,6 +248,7 @@ def verified_review(
         "source_version_sha256": packet["origin"]["source_version_sha256"],
         "packet_plaintext_sha256": packet_sha256,
         "review_rows_sha256": row_hash,
+        **physical_claims,
     }
     if (
         not isinstance(approval_receipt, Mapping)
