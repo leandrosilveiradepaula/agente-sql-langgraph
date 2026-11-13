@@ -121,3 +121,27 @@ O contrato rejeita itens extras contendo SQL histórica, sinais sem origem, tabe
 **Não comprovado:** regras e sinais da versão G5 original (77 registros cifrados), uso do Gemini real com esse contrato, paridade de números, dois clientes reais, execução SELECT autorizada e cutover. A primeira capacidade financeira do legado continua `NOT_PROVEN`; somente sua **operação estrutural genérica** funciona demonstravelmente com dados sintéticos. A comparação das 63 perguntas continua exclusivamente no avaliador posterior.
 
 **Limites atuais intencionais:** composição multitemporal, joins de dimensão externa, fórmulas derivadas, comparação interfonte e filtros dinâmicos da pergunta não estão cobertos por esse contrato e devem resultar em recusa segura em vez de SQL especulativa. Para outros dialetos, implementar adaptador estrutural autorizado: nenhum `if cliente`.
+
+
+## Quoted PostgreSQL identifiers: exact physical binding (13/11/2026)
+
+The canonical multi-source path now compares **physical** schema/table/column
+identifiers case-sensitively, matching the actual `"identifier"` syntax emitted
+by the PostgreSQL adapter. A tenant catalog declaring `gross_units` must not
+approve a request or projected plan referencing `GROSS_UNITS`: these are
+different quoted PostgreSQL identifiers. The exact comparison covers source
+tables, measures, fixed predicates, grouping, resolved semantic filters,
+DATE columns and the independent pre-provider validation boundary. Semantic
+references (intent, source_ref and dimension concepts) retain their separate
+case-insensitive resolution. No business-specific table, accounting metric,
+customer name or SQL example was added to production code.
+
+The defect was reproduced before the change: planner, SQL Security and SQL
+Contract Gates all approved a synthetic SQL statement with the wrong quoted
+measure identifier. The new regression test rejects wrong casing before
+planning and tampered plans before the generator, while accepting a distinct
+mixed-case identifier explicitly declared by the tenant. The 47 synthetic
+composition tests, 11 canonical Shadow HTTP tests, 6 build_plan cases and
+13 G5 synthetic review tests passed in the isolated VPS checkout. No client
+SQL execution or G5 plaintext access occurred. Business equivalence is still
+unproven and approval/cutover gates are unchanged.

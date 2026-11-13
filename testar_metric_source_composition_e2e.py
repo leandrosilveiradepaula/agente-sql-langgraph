@@ -1622,6 +1622,81 @@ def test_filter_portable_across_different_column_names_and_aliases():
         assert contract["status"]=="approved",contract
 
 
+def test_postgres_quoted_physical_identifiers_are_case_sensitive():
+    """Do not approve SQL referencing a different quoted PostgreSQL identifier."""
+    from app.domain.metric_source_composition import (
+        validate_projected_metric_composition,
+    )
+
+    baseline = fixture_a()
+    _, planned = _plan(baseline)
+    assert planned["status"] == "planned"
+    approved = planned["query_plan"]
+    generation = build_sql_generation_request(approved)
+    projected = generation["generation_context"]["metric_source_composition"]
+    catalog = generation["generation_context"]
+
+    # A valid approved physical column retains the original spelling.
+    normal_sql = build_postgres_metric_source_sql(generation)
+    assert '"gross_units"' in normal_sql
+
+    # Only textual casing is changed; legacy code wrongly accepted this
+    # through the planner AND both SQL security and contract gates.
+    for change in ("value_column", "target_table", "dimension", "source_filter"):
+        other = deepcopy(baseline)
+        first = other["metric_source_compositions"][0]["sources"][0]
+        if change == "value_column":
+            first["value_column"] = "GROSS_UNITS"
+        elif change == "target_table":
+            first["target_table"] = "funding.INFLOWS"
+        elif change == "dimension":
+            first["dimension_columns"]["region"] = "ZONE_CODE"
+        else:
+            first["source_filters"][0]["column"] = "FLAG"
+        try:
+            normalize_context_snapshot(other)
+        except (ContextNormalizationError, MetricSourceCompositionError, ValueError):
+            pass
+        else:
+            raise AssertionError(f"Unapproved quoted identifier case accepted: {change}")
+
+    # Defense in depth: a compromised planner cannot introduce a
+    # different quoted column despite a valid approved catalog.
+    cases = (
+        ("value_column", lambda p: p["sources"][0].__setitem__("value_column", "GROSS_UNITS")),
+        ("target_table", lambda p: p["sources"][0].__setitem__("target_table", "funding.INFLOWS")),
+        ("source_filter", lambda p: p["sources"][0]["source_filters"][0].__setitem__("column", "FLAG")),
+    )
+    for label, change in cases:
+        fake = deepcopy(projected)
+        change(fake)
+        try:
+            validate_projected_metric_composition(
+                fake,
+                authorized_tables=catalog["authorized_tables"],
+                catalog_columns=catalog["catalog_columns"],
+            )
+        except MetricSourceCompositionError:
+            pass
+        else:
+            raise AssertionError(f"Unapproved provider column accepted: {label}")
+
+    # Case is significant only for PostgreSQL physical names, not
+    # semantic concept aliases. A new, exactly declared quoted column is safe.
+    distinct = fixture_a()
+    fact = distinct["metric_source_compositions"][0]["sources"][0]
+    fact["value_column"] = "GrossUnits"
+    target = distinct["table_catalog"][0]
+    target["metric_columns"] = ["GrossUnits"]
+    target["columns"][1]["name"] = "GrossUnits"
+    _, checked = _plan(distinct)
+    assert checked["status"] == "planned"
+    sql = build_postgres_metric_source_sql(
+        build_sql_generation_request(checked["query_plan"])
+    )
+    assert '"GrossUnits"' in sql
+
+
 def main() -> None:
     tests = sorted(
         (name, obj) for name, obj in globals().items()

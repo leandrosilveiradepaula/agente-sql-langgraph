@@ -82,7 +82,7 @@ def _source_filter(raw: object, columns: set[str]) -> dict[str, Any]:
     if not isinstance(raw, Mapping) or set(raw) != _FILTER_KEYS:
         raise MetricSourceCompositionError("COMPOSITION_FILTER_INVALID")
     col, op, value = raw["column"], raw["operator"], raw["value"]
-    if not _valid_column(col) or col.casefold() not in columns:
+    if not _valid_column(col) or col not in columns:
         raise MetricSourceCompositionError("COMPOSITION_FILTER_COLUMN_UNKNOWN")
     if op not in _FILTER_OPS:
         raise MetricSourceCompositionError("COMPOSITION_FILTER_OPERATOR_INVALID")
@@ -353,24 +353,26 @@ def normalize_metric_source_compositions(
             seen_refs.add(source_ref.casefold())
             seen_tables.add(table_ref.casefold())
             table = table_index[table_ref.casefold()]
+            if table_ref != f"{table['schema_name']}.{table['table_name']}":
+                raise MetricSourceCompositionError("COMPOSITION_TABLE_CASE_MISMATCH")
             declared_columns = table.get("columns", [])
             if not isinstance(declared_columns, list):
                 raise MetricSourceCompositionError("COMPOSITION_COLUMNS_MISSING")
             available = {
-                str(col.get("name", "")).casefold()
+                str(col.get("name", ""))
                 for col in declared_columns if isinstance(col, Mapping)
             }
             metric_columns = table.get("metric_columns", [])
             if not isinstance(metric_columns, list) or (
-                value_column.casefold() not in {
-                    str(col).casefold() for col in metric_columns
+                value_column not in {
+                    str(col) for col in metric_columns
                 }
-            ) or value_column.casefold() not in available:
+            ) or value_column not in available:
                 raise MetricSourceCompositionError("COMPOSITION_METRIC_NOT_AUTHORIZED")
             numeric_col = next((
                 col for col in declared_columns
                 if isinstance(col, Mapping)
-                and str(col.get("name", "")).casefold() == value_column.casefold()
+                and str(col.get("name", "")) == value_column
             ), None)
             if (
                 not isinstance(numeric_col, Mapping)
@@ -395,7 +397,7 @@ def normalize_metric_source_compositions(
                 if (
                     not _valid_ref(concept)
                     or not _valid_column(column)
-                    or column.casefold() not in available
+                    or column not in available
                 ):
                     raise MetricSourceCompositionError(
                         "COMPOSITION_DIMENSION_UNAUTHORIZED"
@@ -496,7 +498,7 @@ def _project_source_filter_bindings(
     ):
         raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_BINDINGS_INCOMPLETE")
     tables = {
-        str(item.get("qualified_name", "")).casefold(): item
+        str(item.get("qualified_name", "")): item
         for item in required_tables if isinstance(item, Mapping)
     }
     by_ref = {
@@ -508,7 +510,7 @@ def _project_source_filter_bindings(
         raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_BINDINGS_AMBIGUOUS")
     selected = []
     seen = set()
-    source_tables = {s["target_table"].casefold() for s in sources}
+    source_tables = {s["target_table"] for s in sources}
     for obligation in obligations:
         if not isinstance(obligation, Mapping):
             raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_INVALID")
@@ -528,7 +530,7 @@ def _project_source_filter_bindings(
             or entry.get("scope") != obligation.get("scope")
             or not isinstance(entry.get("join_path"), list)
             or entry["join_path"]
-            or str(entry.get("target_table", "")).casefold() not in source_tables
+            or str(entry.get("target_table", "")) not in source_tables
             or entry.get("operator") not in {"=", "<>", "IN", "NOT IN"}
         ):
             raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_SCOPE_UNAUTHORIZED")
@@ -542,11 +544,11 @@ def _project_source_filter_bindings(
             if col is None:
                 raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_GRAIN_INCOMPLETE")
             table = source["target_table"]
-            physical = tables.get(table.casefold(), {})
+            physical = tables.get(table, {})
             schema = physical.get("columns", [])
             field = next((
                 item for item in schema if isinstance(item, Mapping)
-                and str(item.get("name", "")).casefold() == col.casefold()
+                and str(item.get("name", "")) == col
             ), None) if isinstance(schema, list) else None
             if not isinstance(field, Mapping):
                 raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_COLUMN_UNAUTHORIZED")
@@ -557,14 +559,14 @@ def _project_source_filter_bindings(
                 "target_column": col,
             })
             if (
-                table.casefold() == str(entry["target_table"]).casefold()
-                and col.casefold() != str(entry.get("target_column", "")).casefold()
+                table == str(entry["target_table"])
+                and col != str(entry.get("target_column", ""))
             ):
                 raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_ORIGIN_MISMATCH")
             _source_filter({
                 "column": col, "operator": entry["operator"],
                 "value": entry.get("value"),
-            }, {str(item.get("name", "")).casefold() for item in schema if isinstance(item, Mapping)})
+            }, {str(item.get("name", "")) for item in schema if isinstance(item, Mapping)})
         if len(types)!=1 or not next(iter(types)):
             raise MetricSourceCompositionError("COMPOSITION_USER_FILTER_TYPES_MISMATCH")
         if not _filter_value_type_verified(
@@ -611,11 +613,11 @@ def project_metric_source_composition(
     if planned_metrics or analytical_operations or temporal_series:
         raise MetricSourceCompositionError("COMPOSITION_OPERATION_CONFLICT")
     authorized_tables = {
-        str(table.get("qualified_name", "")).casefold()
+        str(table.get("qualified_name", ""))
         for table in required_tables if isinstance(table, Mapping)
     }
     for fact in source["sources"]:
-        if fact["target_table"].casefold() not in authorized_tables:
+        if fact["target_table"] not in authorized_tables:
             raise MetricSourceCompositionError("COMPOSITION_SOURCE_NOT_SELECTED")
 
     requested_dimensions = [
@@ -719,11 +721,11 @@ def validate_projected_metric_composition(
     ):
         raise MetricSourceCompositionError("COMPOSITION_PROVIDER_SOURCES_INVALID")
     allowed = {
-        str(table.get("qualified_name", "")).casefold()
+        str(table.get("qualified_name", ""))
         for table in authorized_tables if isinstance(table, Mapping)
     }
     table_index = {
-        str(item.get("qualified_name", "")).casefold(): item
+        str(item.get("qualified_name", "")): item
         for item in authorized_tables if isinstance(item, Mapping)
     }
     unique_refs: set[str] = set()
@@ -740,7 +742,7 @@ def validate_projected_metric_composition(
             not _valid_ref(ref)
             or ref.casefold() in unique_refs
             or not isinstance(table, str)
-            or table.casefold() not in allowed
+            or table not in allowed
             or not _valid_column(col)
             or not _valid_ref(source.get("grain_ref"))
             or type(source.get("sign_multiplier")) is not int
@@ -748,21 +750,21 @@ def validate_projected_metric_composition(
         ):
             raise MetricSourceCompositionError("COMPOSITION_PROVIDER_BINDING_INVALID")
         unique_refs.add(ref.casefold())
-        ref_to_table[ref.casefold()] = table.casefold()
+        ref_to_table[ref.casefold()] = table
         visible = {
-            str(item.get("name", "")).casefold()
+            str(item.get("name", ""))
             for item in catalog_columns.get(table, [])
             if isinstance(item, Mapping)
         }
-        if col.casefold() not in visible:
+        if col not in visible:
             raise MetricSourceCompositionError("COMPOSITION_PROVIDER_COLUMN_UNAUTHORIZED")
-        declared = table_index.get(table.casefold(), {})
+        declared = table_index.get(table, {})
         declared_measures = declared.get("metric_columns", [])
         declared_grain = declared.get("grain")
         if (
             not isinstance(declared_measures, list)
-            or col.casefold() not in {
-                str(item).casefold() for item in declared_measures
+            or col not in {
+                str(item) for item in declared_measures
             }
             or not isinstance(declared_grain, Mapping)
             or declared_grain.get("grain_ref") != source["grain_ref"]
@@ -773,7 +775,7 @@ def validate_projected_metric_composition(
             not isinstance(column_definitions, list)
             or not any(
                 isinstance(item, Mapping)
-                and str(item.get("name", "")).casefold() == col.casefold()
+                and str(item.get("name", "")) == col
                 and str(item.get("data_type", "")).casefold()
                 in _NUMERIC_TYPES
                 for item in column_definitions
@@ -814,7 +816,7 @@ def validate_projected_metric_composition(
                     not _valid_ref(ref) or ref.casefold() not in ref_to_table
                     or ref.casefold() in seen_sources
                     or not isinstance(table,str)
-                    or table.casefold()!=ref_to_table[ref.casefold()]
+                    or table!=ref_to_table[ref.casefold()]
                     or not _valid_column(col)
                 ):
                     raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTER_SOURCE_INVALID")
@@ -823,14 +825,14 @@ def validate_projected_metric_composition(
                 field=next((
                     candidate for candidate in declared
                     if isinstance(candidate, Mapping)
-                    and str(candidate.get("name","")).casefold()==col.casefold()
+                    and str(candidate.get("name",""))==col
                 ),None) if isinstance(declared,list) else None
                 if not isinstance(field,Mapping):
                     raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTER_COLUMN_UNAUTHORIZED")
                 types.add(str(field.get("data_type","")).casefold())
                 _source_filter(
                     {"column":col,"operator":item["operator"],"value":item["value"]},
-                    {str(candidate.get("name","")).casefold() for candidate in declared if isinstance(candidate,Mapping)},
+                    {str(candidate.get("name","")) for candidate in declared if isinstance(candidate,Mapping)},
                 )
             if seen_sources!=unique_refs or len(types)!=1 or not next(iter(types)):
                 raise MetricSourceCompositionError("COMPOSITION_PROVIDER_USER_FILTER_TYPES_INVALID")
@@ -886,17 +888,17 @@ def validate_projected_metric_composition(
                 or ref.casefold() not in ref_to_table
                 or ref.casefold() in present
                 or not isinstance(table, str)
-                or table.casefold() != ref_to_table[ref.casefold()]
+                or table != ref_to_table[ref.casefold()]
                 or not _valid_column(col)
             ):
                 raise MetricSourceCompositionError("COMPOSITION_PROVIDER_GROUPING_INVALID")
             present.add(ref.casefold())
             visible = {
-                str(item.get("name", "")).casefold()
+                str(item.get("name", ""))
                 for item in catalog_columns.get(table, [])
                 if isinstance(item, Mapping)
             }
-            if col.casefold() not in visible:
+            if col not in visible:
                 raise MetricSourceCompositionError(
                     "COMPOSITION_PROVIDER_GROUP_COLUMN_UNAUTHORIZED"
                 )
@@ -936,7 +938,7 @@ def validate_projected_metric_composition(
             raise MetricSourceCompositionError("COMPOSITION_PROVIDER_TEMPORAL_INVALID")
         dates: set[str] = set()
         allowed_by_table = {
-            str(table.get("qualified_name", "")).casefold(): table
+            str(table.get("qualified_name", "")): table
             for table in authorized_tables if isinstance(table, Mapping)
         }
         for binding in temporal["source_bindings"]:
@@ -952,15 +954,15 @@ def validate_projected_metric_composition(
                 or ref.casefold() not in ref_to_table
                 or ref.casefold() in dates
                 or not isinstance(table, str)
-                or table.casefold() != ref_to_table[ref.casefold()]
+                or table != ref_to_table[ref.casefold()]
                 or not _valid_column(col)
             ):
                 raise MetricSourceCompositionError("COMPOSITION_PROVIDER_DATE_INVALID")
             dates.add(ref.casefold())
-            declared = allowed_by_table.get(table.casefold(), {})
+            declared = allowed_by_table.get(table, {})
             date_fields = declared.get("date_columns", [])
-            if not isinstance(date_fields, list) or col.casefold() not in {
-                str(item if isinstance(item, str) else item.get("name", "")).casefold()
+            if not isinstance(date_fields, list) or col not in {
+                str(item if isinstance(item, str) else item.get("name", ""))
                 for item in date_fields
                 if isinstance(item, (str, Mapping))
             }:
@@ -968,7 +970,7 @@ def validate_projected_metric_composition(
             columns = catalog_columns.get(table, [])
             if not isinstance(columns, list) or not any(
                 isinstance(item, Mapping)
-                and str(item.get("name", "")).casefold() == col.casefold()
+                and str(item.get("name", "")) == col
                 and str(item.get("data_type", "")).casefold() == "date"
                 for item in columns
             ):
@@ -1156,8 +1158,8 @@ def _normalize_composition_temporal(
         fact = by_ref[ref.casefold()]
         table = table_index[fact["target_table"].casefold()]
         date_fields = table.get("date_columns", [])
-        if not isinstance(date_fields, list) or col.casefold() not in {
-            str(item if isinstance(item, str) else item.get("name", "")).casefold()
+        if not isinstance(date_fields, list) or col not in {
+            str(item if isinstance(item, str) else item.get("name", ""))
             for item in date_fields if isinstance(item, (str, Mapping))
         }:
             raise MetricSourceCompositionError("COMPOSITION_TEMPORAL_DATE_NOT_ALLOWED")
@@ -1166,7 +1168,7 @@ def _normalize_composition_temporal(
         # are explicitly validated. TIMESTAMPTZ would change months by zone.
         if not isinstance(metadata, list) or not any(
             isinstance(item, Mapping)
-            and str(item.get("name", "")).casefold() == col.casefold()
+            and str(item.get("name", "")) == col
             and str(item.get("data_type", "")).casefold() == "date"
             for item in metadata
         ):

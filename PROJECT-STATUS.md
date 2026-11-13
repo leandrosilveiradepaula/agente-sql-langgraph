@@ -1,3 +1,9 @@
+## 13/11/2026 — SQL quoted identifiers: erro funcional corrigido na PR #233 (sem homologação G5)
+
+Bug reproduzido em pergunta sintética: catálogo físico com `gross_units`, plano com `GROSS_UNITS` era aceito pelo normalizador, SQL Security e SQL Contract, apesar de identificadores distintos em PostgreSQL quando entre aspas. Correção na mesma branch da PR #233: verificação **exata** de esquema/tabela/colunas em composição multifonte, filtros semânticos, agrupamentos, DATE e gate independente pré-provedor; aliases e conceitos semânticos continuam insensíveis a caixa. Regressão agora rejeita adulteração do contexto/plano e aceita coluna mista explicitamente cadastrada. Testes VPS: 47/47 composição, 11/11 Shadow canônico, 6 build_plan, 13/13 G5, hardcodes/segredos PASS. Não equivale a validação de dois clientes reais. G5 da versão oficial segue cifrado sem homologação contábil e sem autorização para SQL financeira. OFFICIAL=n8n, SHADOW=LangGraph, LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false. Sem alteração de n8n/DB/serviços/cutover.
+
+---
+
 **Vinculação adicional 13/11/2026:** a CLI exige agora evidência local e privada de seleção da versão n8n publicada; hashes e row_counts dos 77 registros devem coincidir com o pacote cifrado. G5 não pode ser substituído por DEMO nem outra versão ao construir a prova de migração. Testes positivos/negativos com origem sintética; verificado também, sem decrypt, o manifesto real 77/77 vinculado à versão do n8n. Nenhuma ativação ou aprovação contábil.
 
 ## 13/11/2026 — Bloco 1: ponte real de G5 para revisão contábil (SEM homologação)
