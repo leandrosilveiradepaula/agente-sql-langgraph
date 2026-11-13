@@ -498,6 +498,10 @@ STEPS = [
         [sys.executable, "testar_g5_compile_completed_review_offline.py"],
     ),
     (
+        "testar_g5_owner_review_tui.py",
+        [sys.executable, "testar_g5_owner_review_tui.py"],
+    ),
+    (
         "testar_metric_source_composition_e2e.py",
         [sys.executable, "testar_metric_source_composition_e2e.py"],
     ),

@@ -1,3 +1,19 @@
+## 13/11/2026 — operador é a autoridade responsável pelo Agente Financeiro
+
+O operador explicitou responder integralmente pelo projeto e quer concluir
+Bloco 1. Nunca continuar parando por falta de "outro responsável financeiro".
+A revisão humana pode ser conduzida por ele, com assistência TTY offline
+privada `g5_owner_review_tui.py`, 77 G5/48 P3 e progresso retomável.
+É proibido simular aprovação, escolher semântica por semelhança ou copiar
+dados privados ao GitHub/LLM. Assinatura independente do gerador e da
+preparação técnica é operação separada e explícita, sob controle do
+operador, não uma aprovação automática. Foco na portabilidade e paridade
+reais após catálogo versionado aprovado. Wrapper e guia
+`docs/operations/G5-OWNER-INTERACTIVE-REVIEW.md`, sem SQL financeira,
+alteração n8n/produção/merge/cutover implicitamente.
+
+---
+
 ## 13/11/2026 — Candidato financeiro humano compilável, sem auto-homologação
 
 A migração da fonte G5/P3 original tem 77 registros e 48 vínculos físicos

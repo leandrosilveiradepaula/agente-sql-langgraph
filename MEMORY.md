@@ -1,3 +1,20 @@
+## 2026-11-13 — autorresponsabilidade do operador e revisão TTY local
+
+O operador é responsável integral pelo projeto; não exigir contratação ou
+nomeação de outra pessoa como pré-condição artificial. Implementado
+`g5_owner_review_tui.py`, revisão interativa/root na VPS dos 77 registros
+G5 + 48 vínculos físicos P3 com apresentação de origem apenas em /dev/tty,
+autosalvamento privado 0600, retomada e exportação UNSIGNED somente após
+cobertura completa, sem adivinhar DRE, contas, schemas ou sinais.
+Nenhum dado bruto ao ChatGPT/GitHub/benchmark. TUI não assina, não aprova,
+não liga SQL. Guia `docs/operations/G5-OWNER-INTERACTIVE-REVIEW.md`;
+wrapper root-only em `/var/lib/agente-financeiro-mcp-admin/g5-financial-review-20261113/run-owner-review.sh`.
+Assinatura de autoridade humana separada da preparação técnica, com
+evidências, permanece obrigatória; dois tenants reais, Shadow e paridade
+também ainda pendem.
+
+---
+
 ## 2026-11-13 — Roteiro técnico de revisão financeira compilável
 
 Criado `g5_compile_completed_review_offline.py` com CLI que só aceita

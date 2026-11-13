@@ -1,3 +1,11 @@
+## 13/11/2026 — Autoridade humana do operador e revisão local sem autoaprovação
+
+O operador explicitou assumir a responsabilidade integral pelo Agente Financeiro. O contrato não exige nomear outra pessoa para conduzir a revisão: o proprietário pode ser a autoridade humana final. Porém o ato de aprovação e a assinatura devem permanecer operacionalmente separados da construção técnica de propostas, sem recibo autoemitido pelo motor nem atestação fictícia de independência.
+
+`g5_owner_review_tui.py` apenas apresenta na sessão /dev/tty os G5/P3 originais autenticados (77/48), registra decisões individuais no próprio ambiente privado e retoma o progresso. Não seleciona tabela/coluna ou significado contábil automaticamente, não envia dados à LLM, não recebe SQL benchmark e só exporta drafts UNSIGNED. A compilação G5/P3 e o crosswalk financeiro com assinatura independente continuam etapas distintas; duas empresas reais, paridade Shadow e autorização read-only separada seguem obrigatórias. OFFICIAL=n8n; SHADOW=LangGraph; SQL real=false.
+
+---
+
 ## 13/11/2026 — Compilação de worksheet revisado como etapa distinta da aprovação
 
 Novo módulo estrutural genérico

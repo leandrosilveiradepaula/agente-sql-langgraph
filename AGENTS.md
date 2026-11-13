@@ -1,3 +1,27 @@
+## 13/11/2026 — operador assume diretamente revisão G5/P3; não pedir novo responsável
+
+O operador declarou explicitamente ser responsável por **100% do Agente
+Financeiro**. Não solicitar a designação de outro responsável financeiro como
+condição artificial. A autoridade humana de aprovação pode ser o próprio
+operador; preservar a separação operacional entre autor da proposta técnica
+e aprovador, revisão material individual e assinatura explícita, sem
+autoassinar nem declarar independência fictícia.
+
+Criado `scripts/operations/g5_owner_review_tui.py`: assistente local de
+revisão dos 77 registros G5 e 48 vínculos P3 originais. Mostra origem
+confidencial SOMENTE no /dev/tty root, sem retornar valores ao MCP/LLM;
+apresenta escolhas de tabelas e colunas P3 sem autoseleção; grava progresso
+privado 0600/0700 após cada decisão e retoma, bloqueia alterações de
+proveniência, versão, permissão ou flags de aprovação. Exporta worksheets
+somente completos e explicitamente UNSIGNED. Testes com duas estruturas
+sintéticas, corpus 77×48, segurança de TTY, replays e exportação.
+Guia `docs/operations/G5-OWNER-INTERACTIVE-REVIEW.md`.
+**Não marcar Block 1 pronto** enquanto faltar homologação material,
+contexto real versionado, portabilidade e paridade Shadow; SQL financeira
+permanece desabilitada, n8n oficial intacto.
+
+---
+
 ## Bloco 1 — Compilação de revisão humana sem assinatura automática (13/11/2026)
 
 O fluxo técnico G5/P3 recuperado evoluiu além do dossiê (77 regras/aliases/

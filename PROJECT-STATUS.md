@@ -1,3 +1,26 @@
+## 13/11/2026 — Bloco 1: revisão privada operacional pelo responsável integral
+
+PR #233 recebe `scripts/operations/g5_owner_review_tui.py`, que resolve o
+desvio de exigir outro especialista do operador que assumiu integralmente
+o projeto. G5/P3 originais já conferidos (77 fontes e 48 vínculos físicos).
+A ferramenta local, com TTY root e sem rede, mostra os registros somente
+ao operador, permite revisão individual e rastreável (estrutura vs negócio,
+destino no catálogo, tabela/coluna P3, justificativa), salva progresso
+privado 0600/0700 e exporta apenas material UNSIGNED depois de escolhas
+completas, sem assinatura/SQL/contexto ativo.
+
+**Validação:** 12 testes novos de TUI, inclusive matriz sintética 77×48,
+permissões, adulteração, fonte vazando em stdout, sessões e exportação.
+`--status` executado sobre fonte REAL: 0/77 classificações e 0/48 vínculos
+revisados pelo operador; nenhuma aprovação inventada. CI e verificações
+completas do novo commit devem ser verificadas após publicação. Provas
+de contexto real, paridade Shadow e aprovação material permanecem gates
+necessários. n8n oficial mantido e SQL real desabilitada.
+
+Guia: `docs/operations/G5-OWNER-INTERACTIVE-REVIEW.md`.
+
+---
+
 ## 13/11/2026 — Bloco 1: fechamento técnico da compilação para aprovação independente
 
 CI da PR #233 no SHA `8be2865968ef3259ca46478c342f3634f6cee40d`: os
