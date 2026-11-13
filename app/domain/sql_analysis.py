@@ -850,6 +850,13 @@ def _extract_columns(
             current_clause in {"select", "where", "on", "group", "order", "having"}
             and _is_identifier(tokens[index])
             and norm not in _RESERVED_WORDS
+            and not (
+                current_clause == "order"
+                and (
+                    (norm == "nulls" and _norm_at(tokens, index + 1) in {"first", "last"})
+                    or (norm in {"first", "last"} and _norm_at(tokens, index - 1) == "nulls")
+                )
+            )
             # An output alias is a declaration only at AS <identifier>.
             # The same identifier may also be a genuine source column in
             # SUM(column) AS column; hiding every spelling match destroys
@@ -969,7 +976,7 @@ def _extract_predicates(tokens: list[SqlToken]) -> list[SqlPredicate]:
                 )
             index += 1
             continue
-        if operator == "in":
+        if operator in ("in", "not in"):
             literal_list = _predicate_literal_list(tokens, cursor)
             if literal_list is None:
                 predicates.append({
@@ -1021,6 +1028,8 @@ def _comparison_operator(
         return "<>", index + 2
     if first in {"=", "<", ">"}:
         return first, index + 1
+    if first == "not" and second == "in":
+        return "not in", index + 2
     if first == "in":
         return "in", index + 1
     return None, index

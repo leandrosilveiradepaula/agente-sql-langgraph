@@ -50,6 +50,18 @@ STEPS = [
         [sys.executable, "testar_context_normalizer.py"],
     ),
     (
+        "testar_canonical_context_repository.py",
+        [sys.executable, "testar_canonical_context_repository.py"],
+    ),
+    (
+        "testar_tenant_semantic_readiness.py",
+        [sys.executable, "testar_tenant_semantic_readiness.py"],
+    ),
+    (
+        "testar_physical_catalog_reader.py",
+        [sys.executable, "testar_physical_catalog_reader.py"],
+    ),
+    (
         "testar_context_validator.py",
         [sys.executable, "testar_context_validator.py"],
     ),
@@ -444,6 +456,74 @@ STEPS = [
     (
         "testar_g1_public_temp_preserve_roles.py",
         [sys.executable, "testar_g1_public_temp_preserve_roles.py"],
+    ),
+    (
+        "testar_legacy_migration_source_crosswalk.py",
+        [sys.executable, "testar_legacy_migration_source_crosswalk.py"],
+    ),
+    (
+        "testar_legacy_semantic_static_coupling.py",
+        [sys.executable, "testar_legacy_semantic_static_coupling.py"],
+    ),
+    (
+        "testar_g5_targeted_financial_review_offline.py",
+        [sys.executable, "testar_g5_targeted_financial_review_offline.py"],
+    ),
+    (
+        "testar_g5_financial_crosswalk_review.py",
+        [sys.executable, "testar_g5_financial_crosswalk_review.py"],
+    ),
+    (
+        "testar_g5_private_financial_review_dossier.py",
+        [sys.executable, "testar_g5_private_financial_review_dossier.py"],
+    ),
+    (
+        "testar_g5_preserve_p3_custody_offline.py",
+        [sys.executable, "testar_g5_preserve_p3_custody_offline.py"],
+    ),
+    (
+        "testar_g5_physical_source_evidence.py",
+        [sys.executable, "testar_g5_physical_source_evidence.py"],
+    ),
+    (
+        "testar_g5_p3_original_physical_worklist.py",
+        [sys.executable, "testar_g5_p3_original_physical_worklist.py"],
+    ),
+    (
+        "testar_g5_financial_review_worksheet_offline.py",
+        [sys.executable, "testar_g5_financial_review_worksheet_offline.py"],
+    ),
+    (
+        "testar_g5_compile_completed_review_offline.py",
+        [sys.executable, "testar_g5_compile_completed_review_offline.py"],
+    ),
+    (
+        "testar_g5_owner_review_tui.py",
+        [sys.executable, "testar_g5_owner_review_tui.py"],
+    ),
+    (
+        "testar_metric_source_composition_e2e.py",
+        [sys.executable, "testar_metric_source_composition_e2e.py"],
+    ),
+    (
+        "testar_canonical_composition_shadow_e2e.py",
+        [sys.executable, "testar_canonical_composition_shadow_e2e.py"],
+    ),
+    (
+        "testar_legacy_functional_inventory_offline.py",
+        [sys.executable, "testar_legacy_functional_inventory_offline.py"],
+    ),
+    (
+        "testar_legacy_business_rule_sites_offline.py",
+        [sys.executable, "testar_legacy_business_rule_sites_offline.py"],
+    ),
+    (
+        "testar_legacy_long_literal_triage_offline.py",
+        [sys.executable, "testar_legacy_long_literal_triage_offline.py"],
+    ),
+    (
+        "testar_legacy_ast_literal_evidence.py",
+        [sys.executable, "testar_legacy_ast_literal_evidence.py"],
     ),
     ("check_hardcodes.py", [sys.executable, "scripts/check_hardcodes.py"]),
     ("test_switch_shadow_evidence_tenant.py", [sys.executable, "scripts/test_switch_shadow_evidence_tenant.py"]),

@@ -341,6 +341,7 @@ class ContextSnapshot(TypedDict, total=False):
     dre_mappings: list[DreMapping]
     query_patterns: list[QueryPattern]
     table_catalog: list[TableCatalogEntry]
+    metric_source_compositions: list[dict[str, Any]]
 
     # Projeções derivadas
     allowed_schemas: list[str]

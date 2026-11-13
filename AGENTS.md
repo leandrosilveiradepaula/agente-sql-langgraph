@@ -1,3 +1,301 @@
+## 13/11/2026 — operador assume diretamente revisão G5/P3; não pedir novo responsável
+
+O operador declarou explicitamente ser responsável por **100% do Agente
+Financeiro**. Não solicitar a designação de outro responsável financeiro como
+condição artificial. A autoridade humana de aprovação pode ser o próprio
+operador; preservar a separação operacional entre autor da proposta técnica
+e aprovador, revisão material individual e assinatura explícita, sem
+autoassinar nem declarar independência fictícia.
+
+Criado `scripts/operations/g5_owner_review_tui.py`: assistente local de
+revisão dos 77 registros G5 e 48 vínculos P3 originais. Mostra origem
+confidencial SOMENTE no /dev/tty root, sem retornar valores ao MCP/LLM;
+apresenta escolhas de tabelas e colunas P3 sem autoseleção; grava progresso
+privado 0600/0700 após cada decisão e retoma, bloqueia alterações de
+proveniência, versão, permissão ou flags de aprovação. Exporta worksheets
+somente completos e explicitamente UNSIGNED. Testes com duas estruturas
+sintéticas, corpus 77×48, segurança de TTY, replays e exportação.
+Guia `docs/operations/G5-OWNER-INTERACTIVE-REVIEW.md`.
+**Não marcar Block 1 pronto** enquanto faltar homologação material,
+contexto real versionado, portabilidade e paridade Shadow; SQL financeira
+permanece desabilitada, n8n oficial intacto.
+
+---
+
+## Bloco 1 — Compilação de revisão humana sem assinatura automática (13/11/2026)
+
+O fluxo técnico G5/P3 recuperado evoluiu além do dossiê (77 regras/aliases/
+DRE/catalog rows; 48 vínculos físicos), e agora possui conversor genérico
+`scripts/operations/g5_compile_completed_review_offline.py` para transformar
+**somente** uma planilha realmente preenchida por revisor em dois artefatos
+UNSIGNED que possam ser inspecionados por autoridade financeira independente.
+Ele valida fonte original por SHA, P3 original, cobertura exata, contexto
+tenant/semantic_agent_version/fingerprint aprovado e padrões estruturais,
+destinos físicos e justificativas textuais; não assina ou aprova significado
+contábil. Teste E2E com **77 linhas × 48 vínculos sintéticos** e assinatura de
+TESTE separada confirma apenas CANDIDATE_NOT_ACTIVATED, sem SQL.
+A execução com workbook G5 REAL (77 UNRESOLVED e 48 destinos nulos) retorna
+BLOCKED_EXPECTED. Guia: `docs/operations/G5-REVIEW-COMPILE-AND-INDEPENDENT-APPROVAL.md`.
+
+**Não declarar Block 1 concluído** sem homologação financeira externa material,
+mapeamento físico assinado, catálogo de dois tenants reais e paridade Shadow;
+não inventar aprovação ou usar benchmark como prompt. OFFICIAL=n8n,
+SHADOW=LangGraph, real SQL=false, sem merge/cutover.
+
+---
+
+## 13/11/2026 — Pacote de revisão financeira pronto, aprovação externa ainda pendente
+
+Implementada correção funcional em `g5_physical_source_evidence.py`: não aceitar
+somente SHA textual de justificativa de remapeamento. Exigir conteúdo real de
+evidência em arquivo PRIVADO, com fonte/destino exatos, justificativa não vazia,
+autor distinto do revisor, tenant/version/G5/P3 vinculados, digest canônico
+individual `physical_remap_evidence_sha256` e digest do conjunto incluído no
+recibo HMAC independente. CLI recebe `--physical-remap-evidence-file`; faltar
+o arquivo agora BLOQUEIA mesmo com um hash aparentemente correto.
+
+Gerado na VPS (0600/root) pacote de entrada para homologação dos **77 G5 e
+48 vínculos P3**: `g5-financial-review-worksheet-unapproved.json` e
+`g5-remap-review-evidence-draft.json`. Zero regras, mapeamentos ou assinaturas
+preenchidos automaticamente. Ferramenta genérica
+`g5_financial_review_worksheet_offline.py` só lê fontes SHA-autenticadas e
+produz drafts não utilizáveis no gerador. Guia operacional:
+`docs/operations/G5-INDEPENDENT-FINANCIAL-REVIEW-HANDOFF.md`.
+
+**Status:** a dependência atual é exclusivamente revisão financeira humana,
+decisões físicas justificadas e assinatura independente, seguida de provas de
+portabilidade e paridade; não pedir nova senha nem recuperação G5/P3. Shadow
+sem SQL real, n8n oficial inalterado, zero context activation/merge/cutover.
+
+---
+
+## MARCO ATUAL 13/11/2026 — P3 original autenticado e matriz 48/48; sem homologação
+
+A fonte G5 original (77 registros) e o snapshot P3 original (137 colunas em 16 tabelas, 2 schemas) estão recuperados e conferidos por SHA na VPS. O gate `G5_P3_ORIGINAL_METADATA_REQUIRED` foi resolvido; **NÃO repetir a recuperação nem afirmar que P3 falta**. Verificação técnica: 0/8 schemas G5 constam fisicamente sob o mesmo nome no P3, 6/8 tabelas homônimas multi-schema, 32/40 aliases com um candidato literal de coluna e 8/40 sem nenhum. Não há aprovação automática de nenhum.
+
+Nova matriz privada `g5-p3-original-physical-worklist.json/.html` (48 indícios; 0600/root) e dossiê privado `confidential-financial-review.html` (77/77). Código do gate corrigido: oito indícios de catálogo `source_table_ref=null` resolvidos exclusivamente via registro de origem G5 autenticado; remapeamento de schema/tabela/coluna exige `physical_remap_evidence_sha256` e assinatura independente que cobre a decisão. Dois contextos sintéticos e casos negativos testados. Tudo em `docs/operations/G5-P3-ORIGINAL-PHYSICAL-WORKLIST.md`.
+
+**Pendência REAL:** 77 significados contábeis e 48 vínculos físicos não aprovados, catálogo canônico tenant/version/fingerprint, perguntas inéditas em dois contextos reais e paridade Shadow. OFFICIAL=n8n, SHADOW=LangGraph, real SQL=false. Nenhum contexto/DB/n8n/produção/merge/cutover ativado. Textos antigos sobre P3 ausente são históricos, não estado atual.
+
+---
+
+**13/11/2026, P3 custódia:** cinco fontes históricas privadas têm o MESMO
+hash P3 registrado no G5 real, mas não temos o arquivo de bytes originais:
+busca read-only de 1.535 arquivos nas árvores acessíveis do MCP retornou
+zero. O `PrivateTmp=yes` do MCP pode ocultar `/tmp` do SSH do operador.
+Disponível módulo genérico `g5_preserve_p3_custody_offline.py` para copiar
+somente P3 original com digest exato, arquivo 0600/diretório 0700, sem
+coleta de SQL/n8n/LLM. Um wrapper no diretório persistente do operador
+pode preservar o arquivo histórico se ainda presente no namespace SSH.
+Jamais fabricar snapshot nem substituir por metadados de outra versão;
+77 registros seguem UNRESOLVED até aprovação contábil independente.
+OFFICIAL=n8n, SHADOW=LangGraph, SQL financeira desabilitada.
+
+
+**Atualização de verificação 13/11/2026:** a primeira CI do commit 7e324b5 falhou no teste E2E do recuperador no Windows porque o teste exigia PASS onde o produto exige bloqueio POSIX-only. O teste foi corrigido para exigir BLOCKED sem arquivo persistido em Windows, conferindo a integridade de SHA de forma independente. Não transformar essa exceção de SO em bypass de produção. Busca read-only por SHA do snapshot P3 físico original em 1.535 arquivos privados/código disponíveis retornou 0 correspondências; requisito de custódia P3 e homologação dos 77 registros segue ABERTO. Não usar dados sintéticos ou indícios P3 para inventar equivalência.
+
+## 13/11/2026 — Bloco 1, G5 original: revisão privada 77 registros e identidade física independente
+
+**Fatos conferidos na VPS:** G5 original da versão usada no n8n foi recuperado (77 linhas, bytes/sha de plaintext verificados). Todos os 40 aliases encontram seu nome de tabela/coluna no próprio catálogo legado, **mas esse vínculo não prova a base física**: os indícios P3 da mesma versão registram **40 aliases e 6 das 8 tabelas como AMBIGUOUS_TABLE_NAME**, e 40 colunas como COLUMN_UNRESOLVED. Outras 2 tabelas são apenas TABLE_NAME_ONLY. Nunca chamar 40/40 de prova física ou contábil.
+
+**Entrega funcional:** dossier HTML local e restrito `/var/lib/agente-financeiro-mcp-admin/g5-financial-review-20261113/active-version-financial-review-private/confidential-financial-review.html`, 0600/root, 77 registros originais e os 48 indícios de P3, sem scripts nem envio de valores. Código e 8 testes de privacidade/fail-closed em `scripts/operations/g5_private_financial_review_dossier.py` e `testar_g5_private_financial_review_dossier.py`. Novo gate de identidade física em `g5_physical_source_evidence.py`: exige o snapshot P3 ORIGINAL por SHA, nenhuma execução SQL/LLM, decisão explícita de schema/tabela/coluna para todo indício G5, tipos físicos idênticos ao catálogo canônico aprovado e digest de todas as decisões dentro do recibo financeiro independente. Integração com `verified_review` e CLI via `--p3-metadata-file`. Testes de dois tenants sintéticos, ambiguidade, assinatura, ausência de snapshot, case/type mismatch.
+
+**Status atual:** 77/77 UNRESOLVED, 48 vínculos P3 sem atestação; original P3 completo não disponível como arquivo privado no ambiente inspecionado. O gate real retorna BLOCKED_EXPECTED, não CANDIDATE. Não utilizar o dossier como contexto/LLM, não copiar conteúdo privado para GitHub. Não repetir decriptação G5 para esta etapa; somente obter evidência física P3 custodiada, revisão contábil independente e catálogos por tenant aprovados. OFFICIAL=n8n; SHADOW=LangGraph; LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false; nenhum merge/produção/cutover/SQL financeira.
+
+---
+
+## Marco confirmado 13/11/2026 — G5 real recuperado, revisão ainda não homologada
+
+O operador introduziu localmente a senha no terminal da VPS; a versão G5 fixada pelo n8n publicado foi recuperada e sua integridade verificada: **77/77 registros reais**, 18 regras, 40 aliases, 11 DRE, 8 catálogo. A fonte privada não está mais bloqueada por senha. Todo conteúdo bruto permanece 0600 em diretório 0700 na VPS, fora do repositório, prompts e benchmark.
+
+Descoberta funcional: o recuperador reformatava o JSON antes de persistir, invalidando o SHA-256 do plaintext exigido pela CLI de crosswalk. A versão persistida foi restaurada **byte a byte ao hash original autenticado** sem nova senha, e o código corrigido para guardar os bytes originais. Teste da entrada real sintética em dois formatos de fonte, com negativo de reserialização. Conferência estrutural privada encontrou **40/40 aliases vinculáveis univocamente às 8 tabelas**; todas as 40 colunas de destino ocorrem nas listas do catálogo legado. Arquivo privado de candidatos foi gerado com status explicitamente não aprovado, sem presumir tipos físicos, sinais, fórmulas ou significado contábil.
+
+**Status de gate:** 77 classificações individuais continuam UNRESOLVED; nenhuma assinatura contábil independente, contexto canônico G5 aprovado/ativado, SQL financeira executada, paridade financeira, merge ou cutover. Todos os efeitos oficiais continuam bloqueados: OFFICIAL=n8n+Gemini, SHADOW=n8n+LangGraph+Gemini, LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false. Próximo trabalho: classificação financeira independente e mapeamento aprovado do corpus real, prova de pergunta inédita sem benchmark no gerador, paridade controlada; pedir autorização separada para SELECT real.
+
+---
+
+**Correção funcional 13/11/2026 (PR #233):** identificadores físicos PostgreSQL emitidos entre aspas exigem correspondência exata de maiúsculas/minúsculas entre catálogo e plano, incluindo medidas, tabelas, predicados, agrupamento, filtros semânticos, datas e validação pré-provedor. Antes, a SQL com coluna `GROSS_UNITS` era aprovada contra catálogo `gross_units`; reproduzido antes e bloqueado após a correção. Referências semânticas (conceitos/aliases) permanecem normalizadas sem impor regra de negócio. Provas sintéticas e scanners PASS, sem G5 plaintext, SQL financeira, merge nem cutover. Bloco 1 continua não homologado financeiramente.
+
+**Vinculação adicional 13/11/2026:** a CLI exige agora evidência local e privada de seleção da versão n8n publicada; hashes e row_counts dos 77 registros devem coincidir com o pacote cifrado. G5 não pode ser substituído por DEMO nem outra versão ao construir a prova de migração. Testes positivos/negativos com origem sintética; verificado também, sem decrypt, o manifesto real 77/77 vinculado à versão do n8n. Nenhuma ativação ou aprovação contábil.
+
+## 13/11/2026 — Bloco 1: ponte real de G5 para revisão contábil (SEM homologação)
+
+**Verificado na VPS:** versão G5 selecionada pelo n8n publicado ligada ao manifesto privado de 11 ciphertexts; versão ativa SHA-256 7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485 e 77 registros (18 regras, 40 aliases, 11 DRE, 8 catálogo), com hash do ciphertext íntegro. As 11 versões contêm 1.275 registros sem SQL patterns. Todos seguem ENCRYPTED_NOT_APPROVED; zero significados contábeis validados e zero SQL financeira executada. Fonte e benchmark de 63 perguntas permanecem separados.
+
+**Engenharia nova:** scripts/operations/g5_financial_crosswalk_review.py exige cobertura linha a linha do registro original por hash/versão, classificação STRUCTURAL/FORBIDDEN e, para toda regra de negócio, destino canônico explícito; rejeita TRANSITIONAL/UNRESOLVED, ausência/duplicação de registros, troca de tenant, contexto ou fingerprint, destino inexistente, SQL histórica, assinatura ausente ou inválida. Um aprovador independente precisa autenticar digest integral de revisões, contexto e fonte; o código apenas verifica, não emite assinatura. O script g5_targeted_financial_review_offline.py gera um draft privado junto ao pacote verificado, depois de TTY/passphrase local. A nova g5_financial_crosswalk_review_cli.py verifica todos os artefatos privados em modo read-only e pode emitir somente CANDIDATE_NOT_ACTIVATED. Sem importar/aprovar/ativar catálogos por conta própria. Testes sintéticos em dois contextos e 77 linhas simuladas. Documentação: docs/operations/G5-FINANCIAL-CROSSWALK-REVIEW.md.
+
+**Aceite BLOQUEADO por dependência real:** a passphrase local não está disponível nesta sessão e não existe unapproved-source-packet.json já decifrado. A revisão financeira efetiva de 77 linhas e aprovação independente não foram realizadas. A prova de paridade financeira n8n/Gemini × LangGraph/Gemini continua sem autorização read-only. CI e protótipos sintéticos não substituem isso. Preservar PR #233 sem merge, n8n oficial inalterado, LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false. Não anunciar Bloco 1 concluído.
+
+---
+
+## 12/11/2026 - Filtros semanticos multifonte no Shadow: lacuna funcional corrigida
+
+Correcao funcional real na PR #233: planejador aplica filtros solicitados em linguagem natural a TODAS as fontes de uma composicao por filter_concept, resolved_filter_bindings e dimension_columns, exclusivamente do contexto versionado tenant. Nao inventa coluna, entidade ou valor, nao consulta benchmark nem copia regras do n8n. Exige origem vinculada, coerencia de operador/valor, mapeamento do conceito em todas as fontes e tipos compativeis, sem joins novos. Operadores para multisource: =, <>, IN e NOT IN. Referencias fisicas incorretas, valores malformados, fontes sem mapeamento e join nao aprovado provocam REJEICAO antes do provedor. SQL Contract Gate rejeita remocao/alteracao dos predicados.
+
+Bug real corrigido no HTTP Canonical Shadow: a passagem classificador -> planejamento descartava termos matched quando semantic_signals opcional estava ausente. O HTTP gerava total geral em vez do filtro pedido. A projecao preserva apenas evidencias matched/normalizadas, sem expor regra de negocio. Teste HTTP comprova filtros nas duas fontes; testes negativos comprovam que nao ha geracao de SQL com source nao mapeada, binding invalido ou fingerprint alterado.
+
+Provas: 46 testes de composicao, 11 HTTP Canonical Shadow, 6 testes de build_plan, 102 regressões SQL Contract e PostgreSQL 16 descartavel: 28 SELECTs read-only em dois esquemas distintos, 2 ACL cross-tenant negadas, perguntas sinonimas, colunas de nomes distintos, filtros =/IN/NOT IN com calculos e ranking. Sem SQL financeira real, Gemini, benchmark gerador, migracao G5 ou n8n alterado. OFFICIAL=n8n; SHADOW=LangGraph; LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false.
+
+Limitacoes: o reconhecimento do filtro depende de conceito identificado pelo resolvedor e binding aprovado; nao se infere semantica contabil de palavras novas. G5 cifrado e homologacao de 77 registros, paridade real e dois clientes reais continuam ABERTOS. PR #233 unica, draft, sem merge.
+
+---
+
+## 12/11/2026 - AST validada do n8n e expressão aritmética ponderada por contexto
+
+**Fato novo contra a contagem histórica:** parse do workflow publicado de 68 nós/78 conexões (41 Code, hashes exatos) com Acorn 8.15.0 detectou **3.698 strings/templates sintáticos**, NÃO 3.403: 1.719 curtos e 1.979 longos pela definição AST, diferença líquida +295 e 18 nós com divergências. O censo anterior era heurístico, não deve ser tomado como contagem sintática exata. Todos os 3.698 receberam referência exata de offset/linha/coluna e classe candidata F=1.732/T=371/S=830/U=765, sem texto/SQL/valor/hash dos próprios literais publicado. Categorias são triagem audit-only, não classificação contábil homologada nem contagem de regras financeiras. Relatório: docs/audits/LEGACY-N8N-AST-LITERAL-RECONCILIATION-20261112.md, JSON sanitizado e auditor JS isolado (scripts/operations/legacy_js_ast_literal_audit.cjs). O baseline 3.403/1.987/1.416 continua somente como comparação histórica. Nenhum plaintext G5 ou benchmark foi usado.
+
+**Capacidade nova no LangGraph:** cálculo genérico weighted_sum_of_sums opcional em metric_source_compositions[].calculation: termos {source_ref, coefficient} versionados por tenant, decimal canônico explícito e vinculação exata a todas as fontes permitidas. O motor soma por grão cada fonte com seu sinal já aprovado e coeficiente declarado; não inventa orçamento, DRE, receita, cliente ou taxa. Projeção, normalização, fingerprint, SQL Security/Contract Gates, HTTP Canonical Shadow e PostgreSQL foram exercitados. Aceita ranking genérico; rejeita coeficiente inválido, SQL embutida, fonte omitida/duplicada/desconhecida, zero, mudança de plano e fingerprint. Dados sintéticos: 42 testes composição, 9 HTTP, PostgreSQL 16 descartável 22 SELECTs read-only em dois esquemas distintos, 2 ACL cross-tenant bloqueadas, frações decimais exatas. Nenhum SQL financeiro de cliente foi executado nem a flag accounting_definition_attested substitui aprovação contábil.
+
+**Segurança operacional:** PR #233 única, sem merge, ativação de contexto, mudança n8n, banco cliente, produção ou cutover. OFFICIAL=n8n; SHADOW=LangGraph; LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false. G5 real cifrado e paridade oficial/Shadow seguem condicionados a custódia, aprovação contábil e gates humanos específicos.
+
+---
+
+## 12/11/2026 - Triagem ampla dos literais e ranking generico versionado
+
+Fonte n8n: export publicado e ativo, auditado somente em ambiente privado. Todos os 41 Code conferidos por SHA no baseline de 68 identidades/78 arestas. Dos 3.403 literais registrados, **1.987 longos possuem indice e linha**, 1.416 curtos NAO possuem ancora individual. Manifesto audit-only aponta CANDIDATOS: 1.144 FORBIDDEN, 187 TRANSITIONAL, 424 STRUCTURAL e 232 INDETERMINADOS. Triagem por linha/familia de funcao, NAO aprovacao contabil individual; falsos positivos/negativos sao possiveis. Politica de termos versionada em docs/audits/legacy-n8n-review-signal-policy-v1.json, fora do runtime. Relatorio completo: docs/audits/LEGACY-N8N-LONG-LITERAL-TRIAGE-20261112.md e JSON sanitizado de ocorrencias sem palavras, valores, SQL, prompts ou hashes dos valores das strings.
+
+Externalizacao: contrato opcional metric_source_compositions[].ranking com termos e direcao asc/desc, default_limit e maximum_limit configurados pelo contexto versionado do tenant. Planejador interpreta perguntas ineditas sem termos hardcoded, exige grao/dimensao autorizada e rejeita ambiguidades, numeros fora da politica, sinais invalidos e planos alterados. Gerador PostgreSQL soma fontes/razoes antes do ORDER BY metric_value e LIMIT, com empate deterministico, NULLS LAST e SQL Contract Gate. Sem regra topN fixa por cliente, DRE, conta, marca ou SQL historica. Ajuste no parser SQL para NULLS FIRST/LAST em ordenacao preserva colunas homonimas.
+
+Prova local: 38 testes E2E de composicao, 8 HTTP Canonical Shadow, 4 testes de triagem; hardcode/secret scanners PASS. PostgreSQL 16 descartavel em dois contextos sinteticos diferentes: 16 SELECTs read-only, 2 tentativas cross-tenant negadas, agregacao, razao, ranking e ranking+razao numericamente corretos. Nenhuma SQL financeira real, G5 plaintext, benchmark, n8n modificado, merge, producao ou cutover. PR #233 unica. OFFICIAL=n8n; SHADOW=LangGraph; LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false.
+
+Pendencias: certificacao contabil das regras, ancora individual dos 1.416 curtos, revisao humana dos 1.987 candidatos, mapeamentos G5 homologados e equivalencia oficial/Shadow. Nao declarar financeiramente completo.
+
+---
+
+## 12/11/2026 - Fonte real n8n ancorada e formula generica externalizada
+
+TAREFA 1 (ORIGEM): no workflow n8n publicado, **41 Code indexados e 24 pontos classificados por SHA-256 de linha em 10 nos** (inclui PostgreSQL 5), indicando destinos: versionamento, aliases/intencoes, metricas, formula de razao, mapa fisico, regras gerenciais e relatorio. Auditor fail-closed compara corpos e 78 arestas ao baseline privado, sem publicar SQL, prompts, valores de negocio ou credenciais. Evidencias: docs/audits/LEGACY-N8N-BUSINESS-RULE-SITES-20261112.md e JSON sanitizado. 24 pontos NAO sao classificacao final de todos os 3.403 literais; o G5 da versao oficial (77 registros) permanece cifrado e nao homologado.
+
+TAREFA 2 (MOTOR): novo contrato opcional metric_source_compositions[].calculation com **ratio_of_sums**, numerador/denominador/escala/refs definidos exclusivamente pelo contexto aprovado por tenant, reutilizando sinais, fontes, filtros, graos e periodos existentes. PostgreSQL faz SUM por grupo antes de dividir e retorna NULL se denominador zero. Rejeita alteracao nao autorizada por validacao fisica, fingerprint do contexto, Security Gate e SQL Contract Gate; sem regra financeira especifica, DRE, cliente, tabela ou pergunta conhecida hardcoded em app. Sem calculo configurado, preserva SQL e fingerprint anteriores.
+
+PROVA: 33 testes de composicao, 7 HTTP Canonical Shadow e 3 testes de origens PASS; PostgreSQL 16 isolado e descartavel (dois esquemas sinteticos materialmente diferentes) confirmou 10 SELECTs read-only, razao numerica, NULL com denominador ausente e 2 tentativas cross-tenant negadas. Nenhuma SQL financeira de cliente, Gemini, benchmark, alteracao n8n/DB, credencial, deploy ou cutover. Essa prova NAO valida que a formula do G5 especifico tenha significado contabil aprovado.
+
+PENDENTE: completar classificacao financeira dos demais sites/literais nos 41 Code e aprovar origens de regras reais no contexto versionado; nao transferir G5 cifrado nem comportamento DEMO para a versao oficial. PR #233 unica; sem merge. OFFICIAL=n8n; SHADOW=LangGraph; LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false.
+
+---
+
+## 12/11/2026 - Inventario funcional dos 68 nos: ENTREGA ESTATICA FECHADA
+
+**O escopo do inventario funcional de nos foi concluido no export n8n publicado e ativo**, sem edicao nem execucao do workflow. Auditoria no codigo real reconfirmou **68/68 identidades e configuracoes/corpos, 78/78 arestas por porta, 41 Code, 11 PostgreSQL, 10 IF, 2 HTTP, 3 respostas e 1 Webhook**, contra o crosswalk privado anterior. Dos 68, **60 sao alcancaveis pelo webhook e 8 (15,17,18,19,20,21,51,53) estao fora dessa rota**, sem presuncao de que sejam excluiveis. Os 10 IF possuem True/False documentados; IF 25, 29 e 62 sao gates tecnicos, **nao aprovacao humana**. Onze operacoes PostgreSQL foram categorizadas como leitura, cache, auditoria/fila, DDL isolada, preflight ou execucao SQL dinamica, sem executar SQL. Dois HTTP POST sao Gemini geracao/reparo.
+
+**Artefatos rastreaveis:** docs/audits/LEGACY-N8N-FUNCTIONAL-INVENTORY-20261112.md (matriz humana dos 68 nos), docs/audits/legacy-n8n-functional-inventory-20261112.json (matriz por porta, hashes e classes), scripts/operations/legacy_functional_inventory_offline.py (revisor deterministico fail-closed, sem negocio em runtime), testar_legacy_functional_inventory_offline.py (negativas e 68/78). Arquivo de workflow bruto permaneceu PRIVADO na VPS; nao houve SQL/prompt/credencial exposta, benchmark, chamada de modelo, alteracao do n8n, Supabase ou cutover.
+
+**Classificacao preliminar por responsabilidade de no:** 25 STRUCTURAL, 33 TRANSITIONAL, 10 nos com FORBIDDEN de negocio identificado no legado (candidatos a externalizar). Nao equivale a revisao literal individual de 3.403 strings nem a homologacao contabil. A identidade/configuracao e corpos dos 68 nos e todas as arestas conferem com o baseline; hashes dos exports brutos diferem porque ha metadados/serializacao ainda nao homologados no nivel integral de arquivo. Nao confundir com drift funcional demonstrado.
+
+**SEPARACAO DO GATE:** esta entrega encerra o inventario FUNCIONAL ESTATICO dos nos do Bloco 1, mas NAO atesta que a inteligencia financeira foi migrada. Regras/aliases/metricas/joins do G5 (77 registros da versao ativa cifrada) seguem sem aprovacao contabil; paridade real, Gemini e dois clientes reais pertencem a homologacao posterior. OFFICIAL=n8n; SHADOW=LangGraph; LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false. PR #233 segue draft, sem merge e sem custo/privilegios ampliados. Nao criar PRs de evidencia parcial.
+
+---
+
+## 12/11/2026 - Prova PostgreSQL descartavel e bloqueio contábil real do Bloco 1
+
+**Evolucao funcional verificavel na PR #233:** gerador multifonte versionado foi exercitado contra um PostgreSQL 16 real e *descartavel* na VPS. Dois catalogos synthetic/tenants materialmente distintos geraram SQL dinamica a partir de perguntas com intervalo de anos, ano unico e agrupamento por dimensao. Foram **6 SELECTs somente leitura e 2 rejeicoes de acesso cruzado por roles separadas**, com checks numericos de agregacao/sinais/filtros e Security + SQL Contract Gates. Resultado: DISPOSABLE_POSTGRES_COMPOSITION=PASS. Teste implementado em scripts/validation/test_generic_multisource_disposable_postgres.py, com gate de ambiente estrito, e integrado a .github/workflows/v11-disposable-postgres.yml. Docker PostgreSQL da VPS encerrado e imagem temporaria removida. **Nao representa execucao de SQL financeira de cliente ou paridade G5.** Validacao local do codigo: composicao 29/29, HTTP Shadow 6/6, hardcode e secrets scanners PASS. Teste no GitHub Actions do novo SHA permanece a confirmar, nao declarar CI aprovado por esta entrega.
+
+**Verificacao externa read-only do bloqueio:** projeto Supabase SOURCE Agente Financeiro continua INACTIVE. G5 contem 77 registros cifrados na unica versao selecionada pelo no n8n 5 e continua sem plaintext validado/aprovacao contabil; a revisao privada requer custodiante da senha GPG em TTY, sem acesso pelo conector VPS. Metadados historicos do projeto DEMO mostram 53 runs oficiais e 211 shadow, com ultimo dia em 10/11; a presenca historica nao comprova correlacao operacional atual nem paridade financeira. Nao misturar DEMO com a versao original G5, nao extrair SQL historica para o gerador.
+
+**Estado:** Bloco 1 **AINDA ABERTO**, capacidade estrutural *COMPROVADA SOMENTE EM DADOS SINTETICOS*; legado real IMPLEMENTED_UNPROVEN. Nao abrir PRs paralelas para vanity work. OFFICIAL=n8n, SHADOW=LangGraph, LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false. Nenhum merge, execucao financeira, ativacao de DB, alteracao n8n, privilégio ou cutover autorizados ou executados. Prioridade para prova real: custodia G5 + validacao de semantica financeira + teste com pergunta inedita e Gemini Shadow correlacionado.
+
+---
+
+## 12/11/2026 - Bloco 1: intervalo de anos-calendario multifonte (generate-only)
+
+- Evolucao funcional: temporal.period_year_range opt-in no catalogo versionado por tenant; politica calendar_range_attested, max_span_years (1..100), phrases com prefixo/separador autorizados. Pergunta inedita pode declarar intervalo fechado de anos (between 2024 and 2026 somente se aprovado no catalogo). Interpretacao e geracao bloqueiam multiplos intervalos, anos extras, anos invertidos, zero/9999, intervalo excessivo, datas exatas ambiguas, texto nao mapeado e falta de granularidade.
+- SQL PostgreSQL dinamica: cada fluxo recebe DATE >= inicio-01-01 e DATE < ano-final+1-01-01, antes de UNION ALL e SUM/GROUP BY. Sinais, tabelas, filtros, nomes de datas e graos continuam do catalogo; nenhum hardcode financeiro ou cliente novo.
+- Verificacao: testar_metric_source_composition_e2e.py cobre dois tenants de estruturas distintas, Security/Contract gates e alteracao maliciosa dos limites. Nao ha aprovacao contabil nem execucao em banco real.
+- Escopo seguro: PR #233 permanece draft, sem merge/cutover/deploy/alteracao n8n/DB, Gemini e executor real nao chamados. OFFICIAL=n8n, SHADOW=LangGraph, LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false. Capacidade estrutural sintetica, migracao financeira real IMPLEMENTED_UNPROVEN ate revisao custodiada dos 77 registros do G5 e prova de paridade isolada.
+- Evidencias de teste e novo SHA devem ser conferidos no commit da PR, sem confundir com paridade financeira.
+
+---
+
+## 12/11/2026 — BLOCO 1: calendario com ano filtrado, SQL multifonte e provider pinado (sem ativar n8n)
+
+**Entrega verificada no checkout isolado da VPS:** a composição `union_all_then_aggregate` ganhou agrupamento por período **dinâmico**, com `day/week/month/quarter/year` definidos por termos/versionamento do tenant e **datas diferentes em cada fonte**. PostgreSQL compila `date_trunc` para DATE aprovado; `timestamp/timestamptz` sem timezone homologado falha. Filtros, sinais +1/-1, dimensão e grão são vinculados ao catálogo físico. Colunas de medida só podem ser numéricas (`numeric/decimal/smallint/integer/bigint`) e devem constar em `metric_columns`; `grain_ref` deve coincidir com o catálogo de cada fonte. Mudanças alteram o fingerprint. Ano-calendário em pergunta inédita é agora resolvido **somente** quando `temporal.period_year` aprova `calendar_year_attested=true`, referências textuais e a política `allow_bare_year`; cada fonte recebe limite `>= YYYY-01-01` e `< (YYYY+1)-01-01` antes da união. Anos ambíguos, exercícios fora do alcance, ano sem política aprovada, trimestre relativo, ano fiscal e timestamp com fuso não homologado falham com segurança (não gerar total de todos os anos silenciosamente).
+
+**Prova numérica adicional:** usando duas estruturas sintéticas diferentes, o mesmo SQL gerado foi executado em SQLite in-memory com `date_trunc` emulada; mês de 2026 retornou **70** ao excluir registros sintéticos de 2025 e 2027. O ano em cada filtro foi extraído de **pergunta inédita**, sem SQL pronta/golden answer. A política de ano pertence ao catálogo (não a Python). Dois catálogos × duas granularidades de ano filtrado produziram quatro hashes SQL distintos; relatório privado SHA-256 `b085eadba30c4125f215c722d8363591a631e0eafebb0bdfb87e5b66fc8f1db5`.
+
+**Evidência funcional, NÃO financeira real:** `testar_metric_source_composition_e2e.py` **26/26 PASS**, incluindo duas estruturas sintéticas com SQLs diferentes, agrupamento mês/ano, sinais, filtros, e **resultado numérico realmente calculado em SQLite in-memory** (função date_trunc simulada, **não** um PostgreSQL real). `testar_canonical_composition_shadow_e2e.py` **6/6 PASS**, no HTTP/ASGI LangGraph completo em contêiner descartável `--network none`, usando **o adaptador real** `CatalogCompositionSqlGenerator` injetado, autorizado apenas com `canonical_snapshot + semantic_version + fingerprint`. **Gemini não chamado**, nenhuma SQL de cliente executada ou contexto ativado. Regressões Planner 105 e SQL Contract 102 PASS; scanners hardcodes/segredos PASS. Evidência privada de quatro combinações context/period + gates: SHA-256 `b085eadba30c4125f215c722d8363591a631e0eafebb0bdfb87e5b66fc8f1db5`.
+
+**Gates intactos:** PR #233 continua draft, sem merge; `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. **Capacidade genérica demonstrada com dados sintéticos**; migração contábil verdadeira `IMPLEMENTED_UNPROVEN` enquanto os 77 registros da versão G5 original não forem interpretados/aprovados. Portabilidade entre **dois clientes reais**, paridade financeira n8n+Gemini, SQL de produção, cutover e comparação de LLMs seguem não comprovados. Adaptador estrutural **não está registrado como padrão na produção**. Não usar a DEMO nem benchmark como substituto do G5.
+
+**Continuidade exigida:** executar autonomamente GitHub/VPS, não transferir SSH ao usuário, não interromper turno com progresso/desculpas/`prossiga`; relatar **somente entregas finais**. Próximo bloqueio funcional: intervalos entre exercícios, ano fiscal, timezones, joins dimensionais com cardinalidade, regras contábeis G5, mesmo provedor Gemini em Shadow n8n e dois clientes reais. Contrato: `docs/architecture/GENERIC-MULTISOURCE-METRIC-COMPOSITION.md`.
+
+---
+
+## DECISÃO DO OPERADOR — CONTINUIDADE AUTÔNOMA E SÓ RESULTADO FINAL (11/11/2026 23:56 UTC)
+
+**Não interromper uma execução substancial com mensagens de progresso, desculpas ou pedido de `prossiga`.** O operador quer **somente o resultado final**, depois de completar todo o trabalho técnico seguro executável naquele turno. Não alegar trabalho em segundo plano, prometer entrega futura ou fazer alterações sujeitas a gate humano; continuar autonomamente com GitHub e VPS até haver uma entrega funcional ou bloqueio externo incontornável. Se houver pausa técnica, resolver sem enviar relatório intermediário. Consultar o código e evidências reais a cada retomada.
+
+**Entrega funcional desta execução:** implementado o mecanismo universal *multi-source fact stream → `UNION ALL` → aggregate* encontrado estruturalmente no nó n8n 22, com contexto versionado por tenant, granularidade, sinais, filtros, dimensões, SQL dinâmica e contrato SQL que **não aceita** semântica de união alterada. **Dois contextos sintéticos diferentes passaram** no LangGraph HTTP real em contêiner sem rede com adaptador estrutural injetado; nenhum LLM, DB financeira ou benchmark foi chamado. A documentação de mecanismo/evidências está em `docs/architecture/GENERIC-MULTISOURCE-METRIC-COMPOSITION.md`; `testar_metric_source_composition_e2e.py` (15) + `testar_canonical_composition_shadow_e2e.py` (3) e regressões aprovados. Evidência privada SHA `7d072603f211ad1fde940d809c366246bfa3c2cfdfda77a7b328ea89e6dc2db6`.
+
+**Estado honesto:** capacidade **estrutural demonstrada somente em cenários sintéticos**; a migração financeira real permanece `IMPLEMENTED_UNPROVEN`/`NOT_PROVEN` porque o pacote G5 original da versão oficial contém 77 registros cifrados sem aprovação contábil. Não usar a DEMO como substituto, não inventar signo, fórmula, join ou coluna, não declarar paridade com n8n+Gemini. Sem deploy/migration/merge, n8n oficial não alterado, SQL real Shadow false. Expandir para outros comportamentos com a mesma abordagem, sem hardcode. O código do renderer está isolado, **não** substituiu o provider Gemini em produção.
+
+---
+
+## 11/11/2026 — FONTE DEMO NÃO É A SEMÂNTICA DO LEGADO (VERIFICAÇÃO REAL)
+
+**Sem perguntar ao operador nem executar SQL financeira**, foram verificadas as duas fontes Supabase já conectadas. O projeto SOURCE original do Agente Financeiro está `INACTIVE` e sua API de esquema retorna indisponível. A DEMO está `ACTIVE_HEALTHY` e, além das 13 tabelas do schema `public` anteriormente examinadas, **possui as cinco coleções `ai_ducklake_*` no schema `semantic_context`** (regra, aliases, DRE, catálogo e padrões históricos). Na DEMO, SELECT agregado **somente de hashes de versão e contagens** sobre as quatro coleções de conhecimento — sem tocar as linhas de `sql_patterns` ou consultar valores financeiros — confirmou **10 versões**, totalizando 110 regras, 605 aliases, 130 DRE e 80 registros de catálogo. Os 10 hashes foram comparados ao manifesto G5 original na VPS: **0/10 versões comuns às 11 versões do G5**. A versão selecionada pelo workflow oficial permanece **somente no G5** (`7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485`).
+
+**Consequência obrigatória:** jamais copiar a semântica da DEMO para substituir a fonte antiga ou declarar paridade só porque os nomes das cinco tabelas coincidem. O workflow n8n usa duas identidades de credencial PG: grupo G1 (nó 5 e outros de contexto/cache), grupo G2 (nós 66/67 preflight/executor); IDs separados **não provam** bancos nem autorizações iguais. As definições contábeis dos 77 registros da versão oficial permanecem cifradas e **não homologadas**; requerem custódia GPG legítima, que não deve ser contornada nem exigida ao operador como tarefa de rotina. Continuar engenharia reversa dos JS e mecanismos genéricos com as fontes disponíveis. SQL financeira real, alterações de banco, ativação de contexto, cutover e merges continuam bloqueados pelos gates humanos.
+
+**Correção de CI:** no commit `86733408284d728caf91bc3735a24d6d6ab22de5`, o teste GPG trata Windows de forma *fail-closed* sem enfraquecer Linux POSIX. A suíte local (7 testes G5 + 16 de versão + 10 de crosswalk) passou; CI do HEAD deve ser reconfirmado. Acesso à VPS já está concedido: **não pedir comandos SSH ao usuário**.
+
+---
+
+## 11/11/2026 — ACESSO À VPS JÁ AUTORIZADO: NÃO TRANSFERIR OPERAÇÃO AO USUÁRIO
+
+**Decisão explícita do operador:** o ChatGPT já dispõe do conector Agente Financeiro VPS e deve executar autonomamente nele as leituras, análises, inspeções, testes e verificações permitidas. **Não pedir ao operador para copiar/colar comandos SSH ou reiterar “autorize usar VPS”.** Tratar somente gates realmente indelegáveis (segredo de criptografia indisponível, aprovação contábil, alteração de privilégios/DB, execução financeira SQL, produção, merge e cutover) como bloqueios distintos. Acesso administrativo à VPS **não fornece automaticamente a senha GPG**; jamais procurá-la em locais não autorizados, contornar a criptografia ou solicitar envio de segredos pelo chat.
+
+**Apuração do próprio agente:** fonte Supabase original do Agente Financeiro está `INACTIVE` e a API de schema respondeu indisponível; DEMO está ativa, mas as coleções G5 não foram encontradas entre as tabelas do schema `public` consultado. No acervo privado G5 examinado na VPS há 11 pacotes cifrados, índices/lineages/hints e evidências sanitizadas; **não foi verificado texto contábil legível**. Não tratar metadados de versões nem coincidências de nomes como mapeamento aprovado. Continuar reversão dos 68 nós e melhorias genéricas com ferramentas existentes, sem questionamento repetitivo.
+
+**Falha real CI #233 identificada:** runner Windows `Full offline checks` rejeitou criação privada porque o teste tentava atestar `0700/0600` em sistema de arquivos sem semântica POSIX. Correção em `86733408284d728caf91bc3735a24d6d6ab22de5`: o utilitário G5 recusa persistência em Windows, o teste exige recusa segura, Linux mantém restrições. Testes locais 7 G5 + 16 reconciliação + 10 crosswalk PASS; revalidar CI do HEAD efetivo. Sem prova financeira nem SQL real.
+
+---
+
+## 11/11/2026 — M1 verificado: versão oficial única + fronteira de avaliação no loader
+
+Foi verificado na VPS que os **cinco SELECTs de contexto do nó 5** fixam a mesma versão semântica, SHA-256 7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485. **Um único pacote do manifesto G5**, índice 10/11, tem exatamente esse hash: **77 registros** (18 regras, 40 aliases, 11 mapeamentos DRE, 8 registros de catálogo) e 48 hints. Na versão correta, **3 dos 8 bindings de tabelas do nó 22** têm match textual, todos AMBIGUOUS_TABLE_NAME; análise agregada entre versões indicava 4/8 e não pode servir de mapeamento contábil. Relatório privado SHA-256 e376d3a3555d67467b57ece1949af4d26e1ca622f54487fc922c7d921521fbea. Nenhum conteúdo contábil cifrado foi aberto ou aprovado.
+
+No modo canônico (não no legado), app/domain/canonical_source_boundary.py bloqueia SQL pronta, exemplos de perguntas, notas livres e padrões sem proveniência estrutural aprovada, mesmo com flag historical_evaluation_sql_excluded=true: **correção efetiva**, não declaração. Testes de isolamento/negativas com dois clientes sintéticos passaram, sem LLM, SQL financeira, mudança n8n ou cutover. O bloqueio GPG real continua: próxima etapa é desbloquear **somente a versão selecionada** no terminal local e revisar seus 77 registros sob custódia. Ver docs/operations/G5-ACTIVE-VERSION-LOCAL-REVIEW.md. Isso não é prova financeira ou produto concluído.
+
+---
+
+# 2026-11-11 21:36 UTC — ORDEM VINCULANTE: PROVAR A MIGRAÇÃO FINANCEIRA REAL
+
+**Missão única:** migrar a inteligência do Agente Financeiro EXISTENTE, estudando juntos o workflow n8n publicado (**68 nós, 78 conexões**) e as **11 versões semânticas do banco/backup G5**, para Produto + n8n (preservado) + LangGraph + Gemini. Não criar outro agente, não confundir com Factory/CRM, não copiar código/SQL/regras casuísticas ou hardcodes financeiros do n8n para Python/TypeScript.
+
+**Próxima entrega, antes de mais infraestrutura/benchmark/documentação:** selecionar uma capacidade financeira **real** do legado e demonstrar rastreavelmente **nó/branch do n8n + regra/registro/versão G5 + significado financeiro validado → contexto semântico versionado por tenant → pergunta inédita → interpretação/plano LangGraph → SQL dinâmica generate-only e gates**. Depois expandir até cobrir os comportamentos necessários, preservando logs, cache, relatórios, aprovações e outros efeitos na camada correta. Sem vínculo contábil aprovado não afirmar migração.
+
+**Zero hardcode e multicliente:** motor conhece processo, catálogo aprovado/versionado conhece o negócio. Sem nomes de clientes, tabelas, colunas, DRE obrigatória, métricas, aliases, joins, sinais, filtros ou fórmulas no código novo; clientes podem ter estruturas distintas e exigir adaptadores de dialeto. Significado contábil não comprovado gera falha segura/pendência humana. Testar pelo menos dois contextos materialmente diferentes e perguntas inéditas.
+
+**Métrica de progresso por capacidade:** `NOT_MIGRATED`, `IMPLEMENTED_UNPROVEN` ou `PROVEN`, com SHA/PR, fonte, versão/fingerprint, teste, resultado e riscos. CI verde, número de documentos, 68 nós enumerados, mocks ou benchmark alto **não** provam migração. A estimativa de 12–20 semanas anterior foi **retirada**: não inventar novos prazos ou percentuais sem medição real.
+
+**Benchmark e SQL histórica:** 63 perguntas oficiais e 106 padrões SQL históricos são **somente para avaliação cega posterior** n8n+Gemini versus n8n+LangGraph+Gemini, nunca exemplos, prompt, input do planner, SQL esperada ou resposta a copiar. Correção de divergência deve ser genérica, não por benchmark.
+
+**Gates:** `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false`. `Generate`, `Repair` e `Execute Approved` separados; SQL reparada exige `requires_reapproval=true`. SQL financeira read-only para comparação numérica requer autorização separada em isolamento; merge, migração, alteração de DB/n8n/produção/permissões, custos e cutover são humanos. Gemini × SQL-InfoDive somente após cutover homologado.
+
+**Retomada e execução:** verificar GitHub HEAD/PRs #230/#231/#233, CI, runtime VPS e fontes reais; trabalhar em blocos substantivos sem pedir `prossiga` a cada microtarefa. Não reauditar continuamente o que já foi provado. Relatar apenas capacidades com evidência real. Ler `MEMORY.md`, `docs/operations/FIRST-FINANCIAL-CAPABILITY-PROOF.md`, `docs/operations/LEGACY-N8N-DATABASE-MIGRATION-MAP.md` e o contrato de portabilidade.
+
+**Baseline verificado antes desta atualização:** `main@955eda46015d35dbe44a40f9240b821b1f493201`, VPS checkout `87d167969345c3dfcf9deaf36e33ab07a1f9c890`, PRs #230/#231/#233 draft, n8n running, Shadow TEST healthy e execução financeira Shadow desabilitada. A PR #233 em `5b29a89036ac80c1a3a792e8184e96a91662ee5a` falhou no Windows no passo `Whitespace check` do roadmap; CI Linux PASS. Migração completa/paridade financeira **não demonstradas**.
+
+---
+
+# 2026-11-11 — DIRETRIZ VINCULANTE: MIGRAR O SISTEMA EXISTENTE INTEIRO (N8N + BANCO → N8N + LANGGRAPH)
+
+**INSTRUÇÃO EXPLÍCITA MAIS RECENTE DO OPERADOR (prioritária):** o trabalho consiste em **engenharia reversa e migração funcional do Agente Financeiro que já existe**, e NÃO em criar um agente paralelo do zero, apenas elevar a pontuação de 63 perguntas, nem remendar isoladamente parsers/validadores. O alvo é **Produto → n8n (mantido) → LangGraph (inteligência) → Gemini**, com conhecimento financeiro **externalizado, segregado e versionado por tenant**, usando o comportamento real legado como fonte de estudo, **não como hardcode a copiar**.
+
+**DUAS FONTES INDISSOCIÁVEIS DE ORIGEM** antes de afirmar qualquer equivalência:
+1. **Fluxo n8n realmente publicado e alcançado pelo Produto:** inventariar **TODOS** os nós (export atualmente observado com 68), conexões, JS, prompts, SQL, condições, credenciais referenciadas (somente IDs/hash), webhooks, permissões, funções, regras, transformação de dados, erros, Gemini, aprovações e execução. Confirmar versão publicada, caminho real do webhook e execução correlacionada. Export histórico/draft não prova o caminho oficial.
+2. **Banco e seu backup recuperado:** inventariar **TODOS** os catálogos semânticos, versões, esquemas físicos, relações, dimensões, métricas, aliases, regras, DRE quando existir, mapeamentos, joins, sinais, períodos, filtros, intenções, dados e procedência. Usar evidências G5 com custódia e integridade verificadas, em isolamento somente leitura; separar versões e tenants. Backup/cópia cifrada não comprova significado contábil; não cruzar versões silenciosamente.
+
+**PASSO OBRIGATÓRIO ANTES DE NOVA CAPACIDADE:** construir matriz rastreável **cada nó/branch/prompts/consulta n8n → regra/objeto e versão do banco → função financeira e dependências → destino (n8n determinístico, LangGraph estrutural, catálogo versionado, Produto) → evidência e teste → risco/gap**. Classificar cada regra como STRUCTURAL, TRANSITIONAL ou FORBIDDEN; nenhum literal de negócio em código novo. Não declarar a análise do fluxo ou da base completa com base em flags heurísticas, contagens de tabelas ou seis termos isolados. Faltas de evidência financeira devem ser explicitadas, não preenchidas com suposições ou SQL esperada.
+
+**IMPLEMENTAÇÃO E HOMOLOGAÇÃO:** reconstruir o comportamento completo preservando n8n como orquestrador, LangGraph para interpretação/planejamento/SQL/repair/gates, Produto para autenticação/aprovação/histórico e contexto versionado para semântica. Demonstrar SQL dinâmica para perguntas inéditas, dois contextos materialmente distintos, integração e correlação real do Shadow e paridade com n8n/Gemini. As **63 perguntas históricas** e SQL/respostas antigas são **somente avaliação posterior e cega**; nunca entrar no prompt, no planejador ou no contexto de geração. Não baixar thresholds nem criar pergunta→SQL.
+
+**GATES OPERACIONAIS:** `OFFICIAL=n8n`, `SHADOW=LangGraph`, `LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false` até decisão explícita. Nenhuma alteração de n8n, banco, tenant, credenciais, permissões, produção, merge ou cutover por inferência. Execução de SQL financeira para equivalência numérica depende de autorização read-only separada com menor privilégio. Repair invalida aprovação e exige reaprovação. Gemini × SQL-InfoDive somente após cutover humano homologado. Preservar rastros sanitizados (IDs, fingerprints, commits, versões e evidências) sem publicar SQL bruta, prompts sensíveis ou credenciais.
+
+**PROCEDIMENTO ANTI-DESVIO EM CADA CHAT:** (1) verificar `main`, PRs, CI, VPS e fonte n8n/backup reais; (2) ler este bloco, `MEMORY.md` e `docs/operations/LEGACY-N8N-DATABASE-MIGRATION-MAP.md`; (3) continuar a matriz, eliminar lacunas por investigação das **duas fontes** e então entregar implementação de jornada completa; (4) reportar progresso em **funcionalidades migradas e testes reais**, não quantidade de pequenos PRs/CI. Se evidência ou acesso estiver bloqueado, registrar bloqueio específico; não inventar conclusão nem solicitar sucessivos "prossiga".
+
+---
+
 # 28/10/2026 18:24 UTC — G5 RESTORE REAL PASS / SOURCE AINDA INELEGÍVEL À APOSENTADORIA
 
 **EVIDÊNCIA DA VPS DO OPERADOR:** PR #193 mergeada (`18ca3fcd0227f3ed11bde0bc50ea0e400aa8e444`). Em contêiner rootless `supabase/postgres:17.6.1.136` SHA `f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`, sem rede/host volumes, GPG→pg_restore com transação única e cleanup: `G5_RESTORED_TABLES=86`, `G5_ISOLATED_CONTAINER_CLEANUP=PASS`, `G5_RESTORE_TEST=PASS`, **`G5_SUPABASE_FULL_RECOVERY=NOT_ATTESTED`**. Restauração PostgreSQL isolada comprovada; **não declarar plataforma, Auth, Storage, Vault/chave, roles/grants, RLS, SQL financeira, paridade ou cutover concluídos**. Não houve alterações SOURCE/DEMO/n8n/Shadow.

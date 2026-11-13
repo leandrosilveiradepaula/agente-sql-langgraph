@@ -9,6 +9,9 @@ from app.adapters.engine_preflight import (
 from app.adapters.postgres.context_repository import (
     PostgresContextRepository,
 )
+from app.adapters.postgres.canonical_context_repository import (
+    CanonicalContextRepository,
+)
 from app.config.engine_preflight_runtime import (
     EnginePreflightRuntimeConfig,
 )
@@ -114,7 +117,7 @@ class CompiledGraphRuntime:
 
 def create_postgres_context_repository(
     config: PostgresContextRuntimeConfig,
-) -> PostgresContextRepository:
+) -> ContextRepository:
     """
     Cria o repositorio PostgreSQL a partir da configuracao validada.
 
@@ -122,6 +125,24 @@ def create_postgres_context_repository(
     somente quando o grafo executa load_active_context.
     """
 
+    if config.context_source_mode == "canonical_snapshot":
+        if (
+            config.tenant_id is None
+            or config.canonical_context_table is None
+            or config.expected_context_fingerprint is None
+        ):
+            raise ValueError("Contexto canônico exige tenant, tabela e fingerprint.")
+        return CanonicalContextRepository(
+            dsn=config.dsn,
+            tenant_id=config.tenant_id,
+            semantic_agent_version=config.semantic_agent_version,
+            expected_context_fingerprint=config.expected_context_fingerprint,
+            context_schema=config.context_schema,
+            context_table=config.canonical_context_table,
+            connect_timeout_seconds=config.connect_timeout_seconds,
+        )
+    if config.context_source_mode != "legacy_tables":
+        raise ValueError("Modo de contexto desconhecido.")
     return PostgresContextRepository(
         dsn=config.dsn,
         semantic_agent_version=config.semantic_agent_version,

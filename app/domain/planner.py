@@ -39,6 +39,10 @@ from app.domain.planning import (
     SelectedPattern,
     selected_pattern_from_query_pattern,
 )
+from app.domain.metric_source_composition import (
+    MetricSourceCompositionError,
+    project_metric_source_composition,
+)
 from app.domain.search_text import (
     normalize_search_text,
     tokenize_search_text,
@@ -937,6 +941,41 @@ def project_planning_context(
         intent_resolution_result=intent_resolution_result,
     )
 
+    if (
+        any(
+            isinstance(item, Mapping)
+            and str(item.get("intent_name", "")).casefold()
+            == str(intent_name).casefold()
+            for item in context.get("metric_source_compositions", [])
+        )
+        and isinstance(planned_filter_diagnostic, Mapping)
+        and planned_filter_diagnostic.get("status") == "unresolved"
+    ):
+        # A matched but unbound semantic constraint can NEVER be dropped and
+        # converted into a broader multi-source financial aggregate.
+        raise PlanningRejection(
+            "PLANNING_METRIC_FILTER_UNRESOLVED",
+            "Filtro solicitado não possui vínculo semântico autorizado.",
+        )
+    try:
+        metric_source_composition = project_metric_source_composition(
+            definitions=context.get("metric_source_compositions", []),
+            intent_name=intent_name,
+            required_tables=required_tables,
+            detected_dimensions=dimension_projection,
+            planned_metrics=planned_metrics,
+            planned_filters=planned_filters,
+            resolved_filter_bindings=resolved_filter_bindings,
+            analytical_operations=operation_projection,
+            temporal_series=temporal_series,
+            normalized_question=normalized_question,
+        )
+    except MetricSourceCompositionError:
+        raise PlanningRejection(
+            "PLANNING_METRIC_COMPOSITION_INVALID",
+            "Composição de fontes sem mapeamento/grão autorizado.",
+        ) from None
+
     relevant_columns = {
         table["qualified_name"]: deepcopy(
             table.get("columns", [])
@@ -968,6 +1007,7 @@ def project_planning_context(
         "planned_metrics": planned_metrics,
         "planned_filters": planned_filters,
         "resolved_filter_bindings": resolved_filter_bindings,
+        "metric_source_composition": metric_source_composition,
         "allowed_schemas": list(context.get("allowed_schemas", [])),
         "component_configs": deepcopy(
             context.get("component_configs", {})
@@ -2191,7 +2231,7 @@ def _valid_filter_binding_value(
     if operator is None:
         return False
     normalized = operator.casefold()
-    if normalized == "in":
+    if normalized in ("in", "not in"):
         if not isinstance(value, list) or not value:
             return False
         literal_types = [_filter_literal_type(item) for item in value]

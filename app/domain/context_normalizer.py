@@ -11,6 +11,10 @@ from decimal import Decimal
 from typing import Any
 
 from app.domain.context import ContextSnapshot
+from app.domain.metric_source_composition import (
+    MetricSourceCompositionError,
+    normalize_metric_source_compositions,
+)
 from app.domain.search_text import normalize_search_text
 
 
@@ -61,6 +65,20 @@ def normalize_context_snapshot(raw_snapshot: Mapping[str, Any]) -> ContextSnapsh
     table_catalog = _normalize_table_catalog(
         _first_present(raw_snapshot, "catalogo", "table_catalog", default=[])
     )
+
+    # Opt-in, generic fact-source composition. Absent keys preserve every
+    # legacy snapshot fingerprint and planning contract unmodified.
+    metric_source_compositions = None
+    if "metric_source_compositions" in raw_snapshot:
+        try:
+            metric_source_compositions = normalize_metric_source_compositions(
+                raw_snapshot["metric_source_compositions"], table_catalog
+            )
+        except MetricSourceCompositionError:
+            raise ContextNormalizationError(
+                "metric_source_compositions",
+                "definições físicas/versionadas não autorizadas.",
+            ) from None
 
     rules.sort(
         key=lambda item: _record_sort_key(
@@ -163,6 +181,11 @@ def normalize_context_snapshot(raw_snapshot: Mapping[str, Any]) -> ContextSnapsh
         "component_configs": component_configs,
         "intent_resolution": intent_resolution,
     }
+
+    if metric_source_compositions is not None:
+        canonical_without_fingerprint["metric_source_compositions"] = (
+            metric_source_compositions
+        )
 
     fingerprint = _calculate_fingerprint(canonical_without_fingerprint)
 

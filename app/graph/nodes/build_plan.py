@@ -285,6 +285,32 @@ def _project_planner_concept(concept: Any) -> dict[str, Any] | None:
                 ).strip()
             )
         ]
+    # Matched terms from the resolver can have an optional
+    # semantic_signal (singular), a list of semantic_signals, or only the
+    # normalized term. Preserve every *matched* term, including when some
+    # signals are present but others are not. Never copy unmatched terms.
+    existing = {
+        str(entry.get("normalized_term", "")).casefold()
+        for entry in projected.get("terms", [])
+        if isinstance(entry, Mapping)
+    }
+    for term in concept.get("terms", []):
+        if not isinstance(term, Mapping) or term.get("matched") is not True:
+            continue
+        normalized = term.get("normalized_term")
+        if (
+            not isinstance(normalized, str)
+            or not 1 <= len(normalized.strip()) <= 120
+            or any(ord(ch) < 32 for ch in normalized)
+        ):
+            continue
+        normalized = normalized.strip()
+        if normalized.casefold() in existing:
+            continue
+        existing.add(normalized.casefold())
+        projected.setdefault("terms", []).append({
+            "matched": True, "normalized_term": normalized,
+        })
     return projected
 
 
