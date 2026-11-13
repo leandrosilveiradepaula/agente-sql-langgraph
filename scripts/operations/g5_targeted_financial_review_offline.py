@@ -44,7 +44,9 @@ def select_verified_seal(
     if not _hex(version_sha256) or not isinstance(manifest, Mapping):
         raise ReviewBlocked("VERSION_OR_MANIFEST_INVALID")
     if (
-        manifest.get("approved_for_generation") is not False
+        manifest.get("contract") != "g5-private-source-review-manifest-v1"
+        or manifest.get("status") != "ENCRYPTED_NOT_APPROVED"
+        or manifest.get("approved_for_generation") is not False
         or manifest.get("approved_for_import") is not False
         or manifest.get("financial_sql_executed") is not False
         or manifest.get("context_activated") is not False
@@ -227,6 +229,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if os.name != "posix":
             raise ReviewBlocked("G5_REVIEW_POSIX_ONLY")
+        if args.manifest.is_symlink():
+            raise ReviewBlocked("MANIFEST_SYMLINK_UNSAFE")
         manifest_path = args.manifest.resolve(strict=True)
         if manifest_path.is_symlink() or stat.S_IMODE(
             manifest_path.stat().st_mode
@@ -252,6 +256,8 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             del phrase
         packet, report = verify_decrypted_packet(content, seal)
+        from scripts.operations.g5_financial_crosswalk_review import draft
+        review_draft = draft(packet, report["packet_plaintext_sha256"])
         os.mkdir(output, 0o700)
         try:
             write_private_once(
@@ -264,6 +270,11 @@ def main(argv: list[str] | None = None) -> int:
                 json.dumps(report, sort_keys=True, ensure_ascii=True).encode()
                 + b"\n",
             )
+            write_private_once(
+                output / "financial-crosswalk-review-draft.json",
+                json.dumps(review_draft, sort_keys=True, ensure_ascii=True).encode()
+                + b"\n",
+            )
         except BaseException:
             for file in output.iterdir():
                 if file.is_file() and not file.is_symlink():
@@ -273,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
         print("G5_TARGETED_REVIEW=PASS")
         print("G5_VERSION_SHA256=" + seal["source_version_sha256"])
         print("G5_SOURCE_ROW_COUNT=" + str(report["source_row_count"]))
+        print("G5_RECORD_REVIEW_ROWS=" + str(len(review_draft["rows"])))
+        print("G5_RECORD_REVIEW_STATUS=PENDING")
         print("FINANCIAL_MEANING_APPROVED=false")
         print("SQL_EXECUTED=false")
         print("PRIVATE_REVIEW_OUTPUT=" + str(output))

@@ -45,6 +45,8 @@ def fixture(version: str = "f" * 64, alternate: bool = False):
         "sealed_and_roundtrip_verified": True,
     }
     manifest = {
+        "contract": "g5-private-source-review-manifest-v1",
+        "status": "ENCRYPTED_NOT_APPROVED",
         "approved_for_generation": False,
         "approved_for_import": False,
         "financial_sql_executed": False,
