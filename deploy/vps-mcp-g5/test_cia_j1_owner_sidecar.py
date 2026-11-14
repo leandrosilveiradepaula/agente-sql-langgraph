@@ -208,6 +208,7 @@ class D323OwnerTests(unittest.TestCase):
             (literal, 1000),
             (b'{"op":"cia_ws_d323","path":"/tmp/db"}\n', 0),
             (b'{"op":"cia_ws_d323","sql":"SELECT *"}\n', 0),
+            (b'{"op":"cia_ws_d323","op":"cia_ws_d323"}\n', 0),
             (b'{"op":"cia_ws_d323","enable_live":true}\n', 0),
             (b'{"op":"cia_ws_d323"}\n\n', 1000),
         ):
