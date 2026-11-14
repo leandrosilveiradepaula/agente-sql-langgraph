@@ -82,6 +82,7 @@ def test_authorization_is_explicit_and_rejects_browser_cookie_bypass():
 
 
 def test_status_contains_no_business_values_or_sql_and_creates_no_session():
+    if os.name != "posix": return
     for alt in (False,True):
         with TemporaryDirectory() as d:
             s,f=setup(Path(d),alt=alt)
@@ -99,6 +100,7 @@ def test_status_contains_no_business_values_or_sql_and_creates_no_session():
 
 
 def test_item_can_be_read_only_with_separate_admin_s2s_credential():
+    if os.name != "posix": return
     with TemporaryDirectory() as d:
         s,f=setup(Path(d))
         result,body=req(s,kind="item",payload={"kind":"financial","index":0})
@@ -207,6 +209,7 @@ def test_audit_corruption_or_uncommitted_event_fails_closed():
 
 
 def test_cross_tenant_revision_and_source_cannot_be_replayed():
+    if os.name != "posix": return
     if os.name!="posix":return
     with TemporaryDirectory() as a, TemporaryDirectory() as b:
         first,_=setup(Path(a),alt=False)
@@ -221,6 +224,17 @@ def test_cross_tenant_revision_and_source_cannot_be_replayed():
         # A source-agnostic initial workbook revision could otherwise coincide
         # across tenants; here the sealed source digest differs.
         assert r["status_code"]==409
+
+
+def test_non_posix_rejects_private_file_access_even_for_valid_service_token():
+    if os.name=="posix":return
+    with TemporaryDirectory() as d:
+        s,f=setup(Path(d),enabled=True)
+        result,body=req(s)
+        assert result["status_code"]==409
+        assert body["status"]=="blocked"
+        assert body["sql_executed"] is False
+        assert not s.config.session.exists()
 
 
 if __name__=="__main__":
