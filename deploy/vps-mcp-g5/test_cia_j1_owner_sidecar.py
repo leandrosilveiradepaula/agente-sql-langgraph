@@ -358,6 +358,29 @@ class D323ReleaseContractTests(unittest.TestCase):
         self.assertNotIn("DROP DATABASE", script)
         self.assertNotIn('install -m 0644 -o root -g root "$SRC/crypto_j1_readonly.py"', script)
 
+    def test_release_uses_private_pinned_worktree_without_touching_main(self):
+        script = (Path(__file__).with_name(
+            "upgrade_cia_ws_d323_owner_once.sh"
+        )).read_text(encoding="utf-8")
+        for marker in (
+            "PRIMARY_REPO=/docker/agente-sql-langgraph-repo",
+            "SOURCE_PARENT=/var/lib/agente-financeiro-mcp-admin",
+            "REPO=$SOURCE_PARENT/cia-ws-d323-235-source",
+            "SOURCE_PARENT_NOT_PRIVATE", "SOURCE_WORKTREE_NOT_PRIVATE",
+            "ORIGIN_MAIN_MISMATCH", "WORKTREE_ORIGIN_MISMATCH",
+            "WORKTREE_NOT_DETACHED", "SOURCE_WORKTREE_DIRTY",
+            'git -C "$REPO" rev-parse HEAD',
+            'git -C "$REPO" status --porcelain',
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, script)
+        for dangerous in (
+            "git stash", "git clean", "git reset",
+            "git checkout", "git merge", "mv \"$PRIMARY_REPO",
+            "rm -f \"$PRIMARY_REPO", "git -C \"$PRIMARY_REPO\" pull",
+        ):
+            self.assertNotIn(dangerous, script)
+
     def test_witness_module_is_separate_from_immutable_rest_auditor(self):
         root = Path(__file__).parent
         legacy = (root / "crypto_j1_readonly.py").read_text(encoding="utf-8")
