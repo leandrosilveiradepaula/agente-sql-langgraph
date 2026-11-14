@@ -156,5 +156,18 @@ class PrivateState(unittest.TestCase):
                 )
 
 
+class D323BrokerRoutingTests(unittest.TestCase):
+    def test_exact_d323_operation_is_parameterless_and_fail_closed(self):
+        result = {"status": "owner_active_ws_epoch_unavailable",
+                  "orders_sent": False}
+        with mock.patch.object(broker, "cia_ws_d323_audit",
+                               return_value=result) as witness:
+            self.assertEqual(broker.dispatch("cia_ws_d323"), result)
+            witness.assert_called_once_with()
+        self.assertIn("cia_ws_d323", broker.ALLOWLIST)
+        self.assertEqual(broker.dispatch("cia_ws_d323_with_path")["status"],
+                         "rejected")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
