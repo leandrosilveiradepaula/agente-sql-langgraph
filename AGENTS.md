@@ -1,3 +1,20 @@
+## 14/11/2026 — G5 review BFF boundary (offline only, NOT deployed)
+
+Created generic `g5_owner_review_http_contract.py` and synthetic tests for
+a future **Product-admin** review path that can avoid root SSH. All sensitive
+G5/P3 data stay on VPS until operator-approved private BFF ingress exists.
+The Python handler is unmounted, feature default OFF, tenant-pinned,
+dedicated S2S token, explicit role, 0600/0700 source checks, SHA revisions,
+exclusive lock, durable two-phase audit, no SQL or automatic approvals.
+A missing Product admin UI / authenticated server adapter and deploy gate
+still block its use; do NOT claim the browser path is active. See
+`docs/architecture/G5-OWNER-REVIEW-BFF-BOUNDARY.md`.
+77 financial meanings and 48 physical bindings remain awaiting the
+owner's material decisions, despite full source provenance.
+OFFICIAL=n8n, SHADOW=LangGraph, real SQL=false, no cutover.
+
+---
+
 ## 13/11/2026 — operador assume diretamente revisão G5/P3; não pedir novo responsável
 
 O operador declarou explicitamente ser responsável por **100% do Agente

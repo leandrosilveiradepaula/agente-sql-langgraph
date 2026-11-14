@@ -1,3 +1,16 @@
+## 14/11/2026 — Native Product review route contract (not activated)
+
+Pure Python G5 owner review HTTP contract built for existing Next.js
+auth/admin; default disabled and not mounted/deployed. Single-item
+read and typed review-draft updates require dedicated S2S admin token,
+tenant pin, source hash and expected revision. Private fsync audit
+prepare/commit, no raw values in logs/errors, no SQL/approval. Nine
+synthetic tests PASS. Product BFF integration and operator's 77/48
+financial choices remain; no independent accounting signoff fabricated.
+Docs in G5-OWNER-REVIEW-BFF-BOUNDARY.md; official n8n unaffected.
+
+---
+
 ## 2026-11-13 — autorresponsabilidade do operador e revisão TTY local
 
 O operador é responsável integral pelo projeto; não exigir contratação ou

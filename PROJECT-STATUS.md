@@ -1,3 +1,25 @@
+## 14/11/2026 — Block 1: no-SSH owner review backend contract (not deployed)
+
+Product repo `leandrosilveiradepaula/Agente-Financeiro` verified: Next.js
+has genuine sessions and admin routes. New pure internal G5 review service
+contract in `scripts/operations/g5_owner_review_http_contract.py`
+is disabled by default, unmounted, no network or production changes.
+Backend requires dedicated token, tenant-bound admin claims and private
+G5/P3 SHA-verified sources; supports sanitized status, protected single
+record read and explicit human draft decision. State changes use optimistic
+version and an fsynced two-phase audit journal; never mark financial
+approval or activate context/SQL. Nine synthetic tests PASS.
+
+This does NOT complete owner UI or financial review. An authenticated
+Next.js BFF adapter and protected internal transport must be separately
+reviewed and connected, then operator must make real decisions on the
+77 source rows and 48 P3 bindings. Two real materially different tenants,
+questions inéditas, numerical read-only approval and Shadow parity remain
+unproven. No merge, DB, n8n, live SQL, privilege change or cutover performed.
+See `docs/architecture/G5-OWNER-REVIEW-BFF-BOUNDARY.md`.
+
+---
+
 ## 13/11/2026 — Bloco 1: revisão privada operacional pelo responsável integral
 
 PR #233 recebe `scripts/operations/g5_owner_review_tui.py`, que resolve o
