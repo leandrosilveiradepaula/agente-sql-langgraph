@@ -85,6 +85,11 @@ def validate_ws_d323_report(report: object) -> bool:
     if report["status"] == "ws_24h_local_evidence_verified":
         return (
             report["ws_journal_integrity_verified"] is True
+            and all(report[key] is True for key in (
+                "ws_timer_active_enabled", "rotation_timer_active_enabled",
+                "n2_quiesced", "old_rest_n50_quiesced",
+                "ws_service_not_failed",
+            ))
             and report["ws_closed_24h_local_verified"] is True
             and report["verified_closed_hours"] == 24
             and report["verified_contracts_per_hour"] == 50
