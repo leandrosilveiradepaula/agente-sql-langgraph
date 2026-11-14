@@ -105,6 +105,9 @@ restore() {
            "$(/usr/bin/git hash-object "$BACKUP/$file")" || verified=0
     done
     test ! -e "$DST/$NEW_MODULE" || verified=0
+    for unit in "$OWNER_SVC" "$OWNER_SOCKET" "$BROKER_SVC" "$TUNNEL_SVC"; do
+      test "$(/usr/bin/systemctl show "$unit" -p ActiveState --value)" = active || verified=0
+    done
     if test "$verified" != 1; then
       echo D323_MCP_ROLLBACK=UNVERIFIED >&2
       exit 75
