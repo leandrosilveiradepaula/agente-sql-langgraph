@@ -20,6 +20,7 @@ def _load(name: str):
 
 
 reader = _load("crypto_j1_readonly")
+ws = _load("crypto_j1_ws_d323")
 sidecar = _load("cia_j1_sqlite_owner_sidecar")
 
 
@@ -213,7 +214,7 @@ class D323OwnerTests(unittest.TestCase):
                 self.assertFalse(sidecar._authorized(data, uid))
 
     def test_exact_ws_witness_and_no_trading_promotion(self):
-        self.assertTrue(reader.validate_ws_d323_report(valid_ws_report()))
+        self.assertTrue(ws.validate_ws_d323_report(valid_ws_report()))
         self.assertTrue(reader.validate_ws_d323_report(accumulating_ws_report()))
         bad = [
             {**valid_ws_report(), "orders_sent": True},
@@ -239,7 +240,7 @@ class D323OwnerTests(unittest.TestCase):
         for payload in (valid_ws_report(), accumulating_ws_report()):
             fake = FakeSocket(payload)
             with patch.object(reader.socket, "socket", return_value=fake):
-                self.assertEqual(reader.ws_d323_audit_via_owner(), payload)
+                self.assertEqual(ws.ws_d323_audit_via_owner(), payload)
             self.assertEqual(fake.sent, b'{"op":"cia_ws_d323"}\n')
             self.assertEqual(fake.connected, reader.OWNER_SOCKET)
         for payload in (
