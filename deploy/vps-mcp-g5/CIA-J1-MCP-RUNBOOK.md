@@ -85,3 +85,13 @@ O sidecar executa somente o entrypoint scripts.audit_j1_n50_ws_24h_once no check
 Limite crítico: D323 audita a epoch ativa. Como houve rotação 14/11 15:13 UTC, a nova coorte tinha menos de 24h no momento desta PR. A resposta accumulating_or_incomplete_ws_24h é esperada até atingir a janela da nova epoch, mesmo com 24 logs de serviço 50/50. Sem prova de continuidade da mesma coorte entre epochs, global Top50 elegível ou permissão de ordens.
 
 Gates de release: PR/CI/merge não instalam root-owned gateway/sidecar nem atualizam ferramentas do plugin. Conferir previamente Git blobs instalados: mcp_server.py 52c03b32367985593e3207f0131cd48165bb58e7, operations_broker.py 1699b553d174b90f208fc9878ebb3d157ed13312, cia_j1_sqlite_owner_sidecar.py 499c396c6936c6c63c5551c4d4e7956a198d3c45, crypto_j1_readonly.py e876c2ae46d1164b05b76b323a527f2a31dcceea (14/11), além da unidade sandbox. Fazer backup root-only, preparar rollback e obter aprovação operacional de reinício dos leitores; não reiniciar os coletores. Após release, atualizar o catálogo MCP e verificar cia_j1_ws_d323_owner_audit. Nenhum deploy foi realizado por esta PR.
+
+## D323/#235 — preflight por worktree isolado (14/11/2026 UTC)
+
+O checkout financeiro principal da VPS tem um arquivo nao rastreado de uma operacao G5 (`scripts/operations/p3_migrate_shadow_evidence.py`). O sincronizador oficial recusou o fast-forward com `repo_not_clean`. Nao apagar, mover, esconder nem sobrescrever esse arquivo para forcar um release.
+
+O instalador D323 exige agora fonte separada em `/var/lib/agente-financeiro-mcp-admin/cia-ws-d323-235-source`, um Git worktree ROOT:ROOT 0700, detached em commit SHA que deve coincidir exatamente com `refs/remotes/origin/main` da arvore principal. A arvore financeira primaria permanece intacta, inclusive seu arquivo nao rastreado. Verifica SHA exato, ancestria, mesma Git common dir, tracked blobs, ausencia de alteracoes na fonte e hashes reais dos componentes root-owned instalados. Qualquer desvio resulta em bloqueio.
+
+Preparacao autorizada apenas como codigo/checkout e preflight: `git fetch --no-tags --no-recurse-submodules origin main` no repositorio existente; confirmar SHA do merge na origem; criar o worktree apenas no caminho fixo e verificar arquivos e permissoes. Nao executar o modo `--confirm-readonly-owner-release` sem gate proprio. O modo `--preflight` nao altera daemon, arquivo de gateway instalado, socket, collector, D323 owner SQLite ou operacao financeira.
+
+O proprio instalador nao faz `git stash`, `git clean`, `git reset`, pull no repositorio principal ou qualquer migracao. A instalacao final ainda requer autorizacao de release root, reinicios somente de leitores do gateway com backup e rollback, e recarga do catalogo MCP.
