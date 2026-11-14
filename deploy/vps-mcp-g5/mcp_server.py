@@ -29,7 +29,7 @@ def _read(operation: str, expected_sha: str | None = None,
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(3700 if operation == "benchmark_recover" else
-                              150 if operation in ("repo_sync", "import_evidence", "admin_exec") else 90)
+                              150 if operation in ("repo_sync", "import_evidence", "admin_exec", "cia_ws_d323") else 90)
             client.connect(SOCKET)
             payload = {"op": operation}
             if operation == "repo_sync":
