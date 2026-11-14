@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import stat
+import subprocess
 import struct
 import time
 from pathlib import Path
@@ -324,6 +325,44 @@ class D323OwnerTests(unittest.TestCase):
         self.assertEqual(witness.call_count, 1)
         self.assertEqual(json.loads(conn.sendall.call_args.args[0])["status"],
                          "accumulating_or_incomplete_ws_24h")
+
+
+class D323ReleaseContractTests(unittest.TestCase):
+    def test_release_script_is_off_by_default_and_never_touches_collectors(self):
+        source = Path(__file__).with_name("upgrade_cia_ws_d323_owner_once.sh")
+        script = source.read_text(encoding="utf-8")
+        result = subprocess.run(["bash", "-n", str(source)],
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for requirement in (
+            "--preflight", "--confirm-readonly-owner-release",
+            "BACKUP_ALREADY_EXISTS", "MCP_VERSION_CHANGED",
+            "REST_AUDITOR_DRIFT", "SOURCE_BLOB_MISMATCH",
+            "D323_MCP_ROLLBACK=PASS", "D323_MCP_SMOKE=PASS",
+            "D323_MCP_DEPLOYED=NO", "D323_MCP_DEPLOYED=PASS",
+            "ProtectHome", "RestrictAddressFamilies",
+            "read-only", "AF_UNIX",
+        ):
+            self.assertIn(requirement, script)
+        self.assertNotIn("systemctl restart cia-j1-n50-ws", script)
+        self.assertNotIn("systemctl stop cia-j1-n50-ws", script)
+        self.assertNotIn("chmod 777", script)
+        self.assertNotIn("git reset --hard", script)
+        self.assertNotIn("curl ", script)
+        self.assertNotIn("api.bybit.com", script)
+        self.assertNotIn("CREATE TABLE", script)
+        self.assertNotIn("TRUNCATE ", script)
+        self.assertNotIn("DROP DATABASE", script)
+        self.assertNotIn('install -m 0644 -o root -g root "$SRC/crypto_j1_readonly.py"', script)
+
+    def test_witness_module_is_separate_from_immutable_rest_auditor(self):
+        root = Path(__file__).parent
+        legacy = (root / "crypto_j1_readonly.py").read_text(encoding="utf-8")
+        witness = (root / "crypto_j1_ws_d323.py").read_text(encoding="utf-8")
+        self.assertNotIn("def ws_d323_audit_via_owner", legacy)
+        self.assertIn("def ws_d323_audit_via_owner", witness)
+        self.assertIn("def validate_ws_d323_report", witness)
+        self.assertIn("from crypto_j1_readonly import OWNER_SOCKET", witness)
 
 
 if __name__ == "__main__":
