@@ -31,7 +31,10 @@ test -d "$PRIMARY_REPO" && test ! -L "$PRIMARY_REPO" || fail PRIMARY_REPOSITORY_
 test -d "$SOURCE_PARENT" && test ! -L "$SOURCE_PARENT" || fail SOURCE_PARENT_UNTRUSTED
 test "$(stat -c %U:%G:%a "$SOURCE_PARENT")" = root:root:700 || fail SOURCE_PARENT_NOT_PRIVATE
 test -d "$REPO" && test ! -L "$REPO" || fail SOURCE_WORKTREE_MISSING
-test "$(stat -c %U:%G:%a "$REPO")" = root:root:700 || fail SOURCE_WORKTREE_NOT_PRIVATE
+test "$(stat -c %u:%a "$REPO")" = 0:700 || fail SOURCE_WORKTREE_NOT_PRIVATE
+# Group ownership is irrelevant with mode 0700: no group/other traversal.
+# The broker runs uid=0 with gid=agente-mcp and lacks CAP_CHOWN.
+# Require root UID, private 0700, and a trusted parent rather than CAP_CHOWN.
 test "$(/usr/bin/git -C "$PRIMARY_REPO" remote get-url origin)" = \
   https://github.com/leandrosilveiradepaula/agente-sql-langgraph.git || fail ORIGIN_UNTRUSTED
 test "$(/usr/bin/git -C "$PRIMARY_REPO" rev-parse refs/remotes/origin/main)" = "$EXPECTED" || fail ORIGIN_MAIN_MISMATCH
