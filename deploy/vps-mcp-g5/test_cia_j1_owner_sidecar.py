@@ -228,6 +228,8 @@ class D323OwnerTests(unittest.TestCase):
             {**valid_ws_report(), "persisted_ws_rows": 1199},
             {**valid_ws_report(), "verified_closed_hours": 23},
             {**valid_ws_report(), "ws_journal_integrity_verified": False},
+            {**valid_ws_report(), "rotation_timer_active_enabled": False},
+            {**valid_ws_report(), "n2_quiesced": False},
             {**valid_ws_report(), "last_hour_sha256": "1notahash"},
             {**valid_ws_report(), "persisted_ws_rows": True},
             {**valid_ws_report(), "symbol": "BTCUSDT"},
