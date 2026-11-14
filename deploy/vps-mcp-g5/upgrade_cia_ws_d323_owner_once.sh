@@ -5,7 +5,11 @@
 set -Eeuo pipefail
 umask 077
 
-REPO=/docker/agente-sql-langgraph-repo
+# Existing root checkout may contain unrelated in-progress untracked G5 files.
+# Source from one exact, root-only detached Git worktree instead; never touch them.
+PRIMARY_REPO=/docker/agente-sql-langgraph-repo
+SOURCE_PARENT=/var/lib/agente-financeiro-mcp-admin
+REPO=$SOURCE_PARENT/cia-ws-d323-235-source
 SRC=$REPO/deploy/vps-mcp-g5
 DST=/opt/agente-financeiro-mcp
 BACKUP=$DST/backup-before-cia-ws-d323-235
@@ -23,10 +27,20 @@ case "$MODE" in --preflight|--confirm-readonly-owner-release) ;; *) fail MODE_NO
 [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]] || fail EXACT_SHA_REQUIRED
 test "$(id -u)" -eq 0 || fail ROOT_REQUIRED
 test "$(hostname)" = srv1319424 || fail HOSTNAME_MISMATCH
-test -d "$REPO" && test ! -L "$REPO" || fail REPOSITORY_UNTRUSTED
-test "$(/usr/bin/git -C "$REPO" branch --show-current)" = main || fail MAIN_REQUIRED
+test -d "$PRIMARY_REPO" && test ! -L "$PRIMARY_REPO" || fail PRIMARY_REPOSITORY_UNTRUSTED
+test -d "$SOURCE_PARENT" && test ! -L "$SOURCE_PARENT" || fail SOURCE_PARENT_UNTRUSTED
+test "$(stat -c %U:%G:%a "$SOURCE_PARENT")" = root:root:700 || fail SOURCE_PARENT_NOT_PRIVATE
+test -d "$REPO" && test ! -L "$REPO" || fail SOURCE_WORKTREE_MISSING
+test "$(stat -c %U:%G:%a "$REPO")" = root:root:700 || fail SOURCE_WORKTREE_NOT_PRIVATE
+test "$(/usr/bin/git -C "$PRIMARY_REPO" remote get-url origin)" = \
+  https://github.com/leandrosilveiradepaula/agente-sql-langgraph.git || fail ORIGIN_UNTRUSTED
+test "$(/usr/bin/git -C "$PRIMARY_REPO" rev-parse refs/remotes/origin/main)" = "$EXPECTED" || fail ORIGIN_MAIN_MISMATCH
+/usr/bin/git -C "$PRIMARY_REPO" merge-base --is-ancestor HEAD "$EXPECTED" || fail UNEXPECTED_ANCESTRY
+test "$(/usr/bin/git -C "$REPO" rev-parse --show-toplevel)" = "$REPO" || fail WORKTREE_ROOT_MISMATCH
+test "$(/usr/bin/git -C "$REPO" rev-parse --git-common-dir)" = "$PRIMARY_REPO/.git" || fail WORKTREE_ORIGIN_MISMATCH
+test -z "$(/usr/bin/git -C "$REPO" branch --show-current)" || fail WORKTREE_NOT_DETACHED
 test "$(/usr/bin/git -C "$REPO" rev-parse HEAD)" = "$EXPECTED" || fail HEAD_SHA_MISMATCH
-test -z "$(/usr/bin/git -C "$REPO" status --porcelain)" || fail CHECKOUT_DIRTY
+test -z "$(/usr/bin/git -C "$REPO" status --porcelain)" || fail SOURCE_WORKTREE_DIRTY
 test -d "$DST" && test ! -L "$DST" || fail GATEWAY_DIRECTORY_UNTRUSTED
 test ! -e "$BACKUP" && test ! -L "$BACKUP" || fail BACKUP_ALREADY_EXISTS
 test ! -e "$DST/$NEW_MODULE" && test ! -L "$DST/$NEW_MODULE" || fail D323_MODULE_ALREADY_PRESENT
