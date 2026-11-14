@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from benchmark_ops import repo_sync, benchmark_plan, benchmark_recover, benchmark_status
 import vps_admin
-from crypto_j1_readonly import timer_status as cia_timer_status, journal_summary as cia_journal_summary, sqlite_audit_via_owner as cia_sqlite_audit
+from crypto_j1_readonly import timer_status as cia_timer_status, journal_summary as cia_journal_summary, sqlite_audit_via_owner as cia_sqlite_audit, ws_d323_audit_via_owner as cia_ws_d323_audit
 
 SOCKET = Path("/run/agente-financeiro-mcp/operations.sock")
 ROOT = Path("/docker/agente-sql-langgraph-repo")
@@ -30,7 +30,7 @@ SHADOW = "agente-sql-langgraph-shadow-test-langgraph-shadow-test-1"
 KNOWN_WEBHOOKS = ("langgraph-shadow-parallel-v1", "langgraph-shadow-evidence-v1")
 ALLOWLIST = {"revision", "runtime_status", "n8n_inventory", "import_evidence", "audit_evidence",
              "repo_sync", "benchmark_plan", "benchmark_recover", "benchmark_status",
-             "cia_timer", "cia_journal", "cia_sqlite",
+             "cia_timer", "cia_journal", "cia_sqlite", "cia_ws_d323",
              "admin_exec", "admin_start", "admin_status", "admin_cancel"}
 ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
@@ -231,6 +231,8 @@ def dispatch(op: str, expected_sha: str | None = None,
         return cia_journal_summary()
     if op == "cia_sqlite":
         return cia_sqlite_audit()
+    if op == "cia_ws_d323":
+        return cia_ws_d323_audit()
     if op == "repo_sync":
         return repo_sync(expected_sha)
     if op == "benchmark_plan":
