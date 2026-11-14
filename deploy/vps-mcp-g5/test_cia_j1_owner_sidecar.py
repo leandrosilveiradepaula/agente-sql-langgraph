@@ -215,7 +215,7 @@ class D323OwnerTests(unittest.TestCase):
 
     def test_exact_ws_witness_and_no_trading_promotion(self):
         self.assertTrue(ws.validate_ws_d323_report(valid_ws_report()))
-        self.assertTrue(reader.validate_ws_d323_report(accumulating_ws_report()))
+        self.assertTrue(ws.validate_ws_d323_report(accumulating_ws_report()))
         bad = [
             {**valid_ws_report(), "orders_sent": True},
             {**valid_ws_report(), "marketwide_top50_verified": True},
@@ -234,7 +234,7 @@ class D323OwnerTests(unittest.TestCase):
         ]
         for altered in bad:
             with self.subTest(keys=altered):
-                self.assertFalse(reader.validate_ws_d323_report(altered))
+                self.assertFalse(ws.validate_ws_d323_report(altered))
 
     def test_proxy_accepts_only_exact_json_from_owner_socket(self):
         for payload in (valid_ws_report(), accumulating_ws_report()):
@@ -253,7 +253,7 @@ class D323OwnerTests(unittest.TestCase):
         ):
             with patch.object(reader.socket, "socket",
                               return_value=FakeSocket(payload)):
-                response = reader.ws_d323_audit_via_owner()
+                response = ws.ws_d323_audit_via_owner()
             self.assertEqual(response["status"], "blocked")
             self.assertFalse(response["trading_enabled"])
             self.assertNotIn("private-secret-token", json.dumps(response))
