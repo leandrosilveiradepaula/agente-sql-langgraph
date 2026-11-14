@@ -1,3 +1,18 @@
+## 14/11/2026 — G5 review transport code ready, operational activation gated
+
+Built `scripts/operations/g5_owner_review_asgi.py`, no-network unmounted
+ASGI adapter for only G5 administrative review status/item/draft-decision
+paths. Tests with two synthetic tenant contexts and denied malformed,
+duplicate, non-HTTPS, oversized and approval-injection requests.
+Registered in offline validation. Product PR #44 now contains disabled
+Next.js admin review UI, private BFF and S2S client, currently CI green
+on SHA 99f3adca4e4cd2bd3e863ac956ccbf45cfaa7944. No VPS service
+mounted/production deployment, no credential minted or exposed.
+Owner financial 77/77 and physical 48/48 decisions remain pending; n8n
+official unchanged, real financial SQL off.
+
+---
+
 ## 14/11/2026 — Native Product review route contract (not activated)
 
 Pure Python G5 owner review HTTP contract built for existing Next.js

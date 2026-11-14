@@ -1,3 +1,19 @@
+## 14/11/2026 — Disabled G5 review ASGI bridge (NOT mounted)
+
+Completed pure ASGI ingress `g5_owner_review_asgi.py` for the existing
+Next.js Product BFF, with exact HTTPS routes, distinct S2S tenant/admin
+auth, strict headers/query, 8KiB request/400KiB response ceilings and
+no-store/no SQL or automatic approvals. Registered offline tests covering
+two distinct synthetic tenant schemas, interleaved request chunks, mutation
+audit, replay/stale revisions, CSRF-like input and source read constraints.
+The ASGI adapter is deliberately **UNMOUNTED**, no listening socket,
+no n8n or Shadow service change. Product PR #44 adds admin UI and API,
+default OFF. Explicit release/secret/network approval is still required
+to connect the private BFF; this is not live integration or financial
+homologation. Source 77, physical mappings 48 still awaiting owner decisions.
+
+---
+
 ## 14/11/2026 — G5 review BFF boundary (offline only, NOT deployed)
 
 Created generic `g5_owner_review_http_contract.py` and synthetic tests for

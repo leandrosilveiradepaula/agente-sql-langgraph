@@ -1,3 +1,26 @@
+## 14/11/2026 — Bloco 1 owner-review Product ↔ LangGraph offline handshake
+
+Implementation: LangGraph PR #233 now includes private HTTPS-only ASGI
+review adapter (unmounted) matching Product PR #44 request contracts.
+It rejects unauthenticated or cross-tenant requests, duplicate/bad
+headers, oversized input, invalid selectors, unknown fields and any
+attempt to approve/execute via the draft endpoint. Audit is 0600/0700,
+two-phase and rejects stale optimistic revisions. The Product branch
+`feature/g5-owner-review-bff-20261114` includes an admin-only page,
+`/api/admin/g5-review` BFF and separate S2S client; CI green at
+`99f3adca4e4cd2bd3e863ac956ccbf45cfaa7944`.
+Neither service has been deployed or feature-flag enabled.
+
+No actual G5 text is emitted to GitHub/LLM, no SQL or n8n changes.
+Outstanding real gate: operator-specific finance review of 77 source
+records + 48 physical bindings, approval of tenant/version/fingerprint,
+two real contexts and fresh question/n8n shadow numeric parity with
+separate SELECT-only approval. Stage remains SHADOW no real SQL,
+no merge/cutover. Further activation requires explicit operator
+human credential/service/deploy authorization.
+
+---
+
 ## 14/11/2026 — Block 1: no-SSH owner review backend contract (not deployed)
 
 Product repo `leandrosilveiradepaula/Agente-Financeiro` verified: Next.js

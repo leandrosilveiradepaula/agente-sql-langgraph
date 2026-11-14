@@ -1,3 +1,34 @@
+## 14/11/2026 — ASGI transport contract implemented, NOT mounted or deployed
+
+A companion transport adapter now exists at
+`scripts/operations/g5_owner_review_asgi.py`. It accepts only HTTPS
+ASGI scopes with the exact three Product-BFF review paths and methods.
+It rejects unexpected origin/cookie/forwarded headers, duplicate
+Authorization or tenant headers, arbitrary path/query/SQL fields, GET bodies,
+non-JSON POSTs, bodies larger than 8KiB and responses larger than 400KiB.
+It passes a product-supplied authenticated actor ID, separate bearer and
+tenant pin to the already independent review service; no bare browser
+connection is trusted. Every response is no-store and no source values
+appear in logs. Its constructor accepts the disabled-by-default
+`ReviewConfig`, never reads arbitrary env paths or creates network sockets.
+
+The interface and BFF calls were added in the **separate existing Product**
+PR #44 (`leandrosilveiradepaula/Agente-Financeiro`) and are also disabled
+by default. The backend adapter is tested with ASGI request/response events
+but is NOT registered in the Shadow runtime/router, no server is listening
+on its routes, and no credentials/deployment permissions were changed.
+Before real use it must be mounted in a separately secured private service
+and undergo full authentication, tenant and audit acceptance tests with the
+operator's authorization. Neither the Product CI nor this mock ASGI test
+proves live HTTP reachability.
+
+The existing owner TTY and secure 0600/0700 originals remain available.
+The 77 financial rows and 48 physical references are still entirely
+unapproved, with no real SQL execution. No numeric parity / second real
+tenant is claimed.
+
+---
+
 # Review G5/P3 via existing Product BFF — disabled-by-default contract
 
 **Phase: code contract tested, NOT deployed or exposed.** This is not another
