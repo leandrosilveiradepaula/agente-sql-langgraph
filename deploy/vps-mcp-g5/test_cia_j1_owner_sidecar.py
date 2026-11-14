@@ -367,6 +367,8 @@ class D323ReleaseContractTests(unittest.TestCase):
             "SOURCE_PARENT=/var/lib/agente-financeiro-mcp-admin",
             "REPO=$SOURCE_PARENT/cia-ws-d323-235-source",
             "SOURCE_PARENT_NOT_PRIVATE", "SOURCE_WORKTREE_NOT_PRIVATE",
+            'stat -c %u:%a "$REPO"',
+            '= 0:700 || fail SOURCE_WORKTREE_NOT_PRIVATE',
             "ORIGIN_MAIN_MISMATCH", "WORKTREE_ORIGIN_MISMATCH",
             "WORKTREE_NOT_DETACHED", "SOURCE_WORKTREE_DIRTY",
             'git -C "$REPO" rev-parse HEAD',
