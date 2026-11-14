@@ -23,13 +23,13 @@ def _read(operation: str, expected_sha: str | None = None,
     """Send only typed, explicitly advertised broker operations."""
     if operation not in {"runtime_status", "revision", "n8n_inventory", "import_evidence", "audit_evidence",
                          "repo_sync", "benchmark_plan", "benchmark_recover", "benchmark_status",
-                         "cia_timer", "cia_journal", "cia_sqlite",
+                         "cia_timer", "cia_journal", "cia_sqlite", "cia_ws_d323",
                          "admin_exec", "admin_start", "admin_status", "admin_cancel"}:
         return {"status": "rejected", "reason": "operation_not_allowed"}
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(3700 if operation == "benchmark_recover" else
-                              150 if operation in ("repo_sync", "import_evidence", "admin_exec") else 90)
+                              150 if operation in ("repo_sync", "import_evidence", "admin_exec", "cia_ws_d323") else 90)
             client.connect(SOCKET)
             payload = {"op": operation}
             if operation == "repo_sync":
@@ -178,6 +178,12 @@ def cia_j1_rest_journal_summary() -> dict[str, object]:
 def cia_j1_rest_sqlite_audit() -> dict[str, object]:
     """Replay the fixed J1 REST SQLite journal read-only, count-only."""
     return _read("cia_sqlite")
+
+
+@mcp.tool()
+def cia_j1_ws_d323_owner_audit() -> dict[str, object]:
+    """Run the fixed, read-only N50 WS D323 witness as cia-probe; counts/digests only."""
+    return _read("cia_ws_d323")
 
 
 @mcp.tool()

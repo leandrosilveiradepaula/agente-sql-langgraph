@@ -72,3 +72,16 @@ O leitor offline deste repositório agora admite prefixo rígido original de 26 
 **Gates:** CI offline Python de auditor/proxy, `bash -n`, teste estático de hash/escopo/rollback, SHA final da PR, revisão e merge sem deploy. A instalação **não está autorizada apenas pela integração da PR**. Antes de eventual release, revalidar SHAs/states realmente instalados e pedir aprovação quando aplicável. A operação depende de root externo: o MCP financeiro conectado não dispõe de uma ação genérica para atualizar esse serviço com privilégios. Nunca pedir que o usuário copie comandos enquanto está longe da VPS; manter a tarefa pendente/registrada e trabalhar em outras jornadas.
 
 J1 #429/#319 não são encerradas por esse upgrade: auditor do N2 é fallback, não certificado N50 nem elegibilidade crypto-only.
+
+
+## CIA/J1 #235 — auditoria WS N50 D323 via socket owner-only (14/11/2026)
+
+Evidência operacional existente: 24 logs WebSocket 50/50 de 13/11 às 18h até 14/11 às 17h UTC, 22 horas na epoch anterior e duas na nova; rotação real 14/11 15:13:39 UTC com ativação de nova epoch e preservação declarada da anterior. Observação do serviço não é replay de SQLite.
+
+Esta alteração reutiliza o serviço existente cia-j1-owner-sqlite.service, que roda como cia-probe, com home somente leitura, sem rede e sem capabilities. Acrescenta request literal sem parâmetros {"op":"cia_ws_d323"}, mantendo {"op":"cia_sqlite"} intacto e peer UID root obrigatório no socket Unix.
+
+O sidecar executa somente o entrypoint scripts.audit_j1_n50_ws_24h_once no checkout proprietário instalado, Python existente, argv fixo, -B, shell=False e timeout 90 segundos. Não recebe path, SQL, símbolo ou intervalo do cliente. O proxy valida conjunto exato de campos, contagens, digests e flags negativas de trading, Top50, rotação, alteração de banco, rede e serviços. Nunca devolve stdout cru, stderr ou dados de mercado. Exit 65 é abstenção, não falha de coleta.
+
+Limite crítico: D323 audita a epoch ativa. Como houve rotação 14/11 15:13 UTC, a nova coorte tinha menos de 24h no momento desta PR. A resposta accumulating_or_incomplete_ws_24h é esperada até atingir a janela da nova epoch, mesmo com 24 logs de serviço 50/50. Sem prova de continuidade da mesma coorte entre epochs, global Top50 elegível ou permissão de ordens.
+
+Gates de release: PR/CI/merge não instalam root-owned gateway/sidecar nem atualizam ferramentas do plugin. Conferir previamente Git blobs instalados: mcp_server.py 52c03b32367985593e3207f0131cd48165bb58e7, operations_broker.py 1699b553d174b90f208fc9878ebb3d157ed13312, cia_j1_sqlite_owner_sidecar.py 499c396c6936c6c63c5551c4d4e7956a198d3c45, crypto_j1_readonly.py e876c2ae46d1164b05b76b323a527f2a31dcceea (14/11), além da unidade sandbox. Fazer backup root-only, preparar rollback e obter aprovação operacional de reinício dos leitores; não reiniciar os coletores. Após release, atualizar o catálogo MCP e verificar cia_j1_ws_d323_owner_audit. Nenhum deploy foi realizado por esta PR.

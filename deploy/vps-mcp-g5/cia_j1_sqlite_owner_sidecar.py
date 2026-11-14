@@ -7,6 +7,7 @@ symbol names or timestamps are caller-controlled. No network or writes.
 from __future__ import annotations
 
 import json
+import subprocess
 import os
 import pwd
 import grp
@@ -16,11 +17,15 @@ import struct
 import sys
 
 from crypto_j1_readonly import sqlite_audit
+from crypto_j1_ws_d323 import validate_ws_d323_report
 
 SOCKET = "/run/cia-j1-owner/readonly.sock"
 MAX_REQUEST = 128
 MAX_REPLY = 4096
 CLIENT_GROUP = "agente-mcp"
+WS_D323_CODE = "/home/cia-probe/agent/j1-n50-ws-70dec97d0a39-code-20261113T014549Z"
+WS_D323_PY = "/home/cia-probe/agent/ws-venv/bin/python"
+WS_D323_SCRIPT = "scripts/audit_j1_n50_ws_24h_once.py"
 
 
 def _denied() -> dict[str, object]:
@@ -31,13 +36,61 @@ def _denied() -> dict[str, object]:
 
 
 def _authorized(raw: bytes, peer_uid: int) -> bool:
-    if peer_uid != 0 or len(raw) > MAX_REQUEST or not raw.endswith(b"\n"):
+    if (peer_uid != 0 or len(raw) > MAX_REQUEST or not raw.endswith(b"\n")
+            or raw.count(b"\n") != 1):
         return False
     try:
-        obj = json.loads(raw)
+        # Retain JSON pairs so duplicate op keys cannot silently overwrite.
+        pairs = json.loads(raw, object_pairs_hook=tuple)
     except (ValueError, TypeError, UnicodeError):
         return False
-    return type(obj) is dict and obj == {"op": "cia_sqlite"}
+    return type(pairs) is tuple and pairs in (
+        (("op", "cia_sqlite"),), (("op", "cia_ws_d323"),),
+    )
+
+
+def ws_d323_audit() -> dict[str, object]:
+    """Execute exactly one owner-pinned, read-only D323 witness; no caller args."""
+    denied = {
+        "status": "blocked", "reason": "ws_d323_owner_audit_unavailable",
+        "trading_enabled": False, "marketwide_top50_verified": False,
+    }
+    try:
+        owner = pwd.getpwnam("cia-probe").pw_uid
+        root = os.lstat(WS_D323_CODE)
+        script = os.lstat(os.path.join(WS_D323_CODE, WS_D323_SCRIPT))
+        if (os.getuid() != owner or os.geteuid() != owner
+                or not stat.S_ISDIR(root.st_mode) or root.st_uid != owner
+                or stat.S_IMODE(root.st_mode) != 0o700
+                or not stat.S_ISREG(script.st_mode) or script.st_uid != owner
+                or script.st_nlink != 1):
+            return denied
+        run = subprocess.run(
+            (
+                WS_D323_PY, "-B", "-m", "scripts.audit_j1_n50_ws_24h_once",
+                "--allow-private-readonly-audit", "--enable-ws-24h-witness",
+            ),
+            cwd=WS_D323_CODE, env={
+                "PATH": "/usr/bin:/bin", "LANG": "C",
+                "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1",
+            }, stdin=subprocess.DEVNULL, capture_output=True,
+            timeout=90, shell=False, check=False,
+        )
+        raw = run.stdout
+        if (run.returncode not in (0, 65)
+                or not 1 <= len(raw) <= MAX_REPLY
+                or raw.count(b"\n") != 1 or not raw.endswith(b"\n")):
+            return denied
+        report = json.loads(raw[:-1])
+        if not validate_ws_d323_report(report):
+            return denied
+        passed = report["status"] == "ws_24h_local_evidence_verified"
+        if (run.returncode == 0) != passed:
+            return denied
+        return report
+    except (OSError, ValueError, TypeError, UnicodeError,
+            subprocess.TimeoutExpired):
+        return denied
 
 
 def _serve_client(conn: socket.socket) -> None:
@@ -53,7 +106,12 @@ def _serve_client(conn: socket.socket) -> None:
             raw.extend(block)
             if b"\n" in block:
                 break
-        result = sqlite_audit() if _authorized(bytes(raw), uid) else _denied()
+        if not _authorized(bytes(raw), uid):
+            result = _denied()
+        elif json.loads(bytes(raw))["op"] == "cia_ws_d323":
+            result = ws_d323_audit()
+        else:
+            result = sqlite_audit()
     except (OSError, TimeoutError, ValueError, TypeError):
         result = _denied()
     data = json.dumps(result, sort_keys=True, separators=(",", ":")).encode("ascii") + b"\n"
