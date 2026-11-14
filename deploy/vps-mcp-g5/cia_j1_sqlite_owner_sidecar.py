@@ -36,14 +36,16 @@ def _denied() -> dict[str, object]:
 
 
 def _authorized(raw: bytes, peer_uid: int) -> bool:
-    if peer_uid != 0 or len(raw) > MAX_REQUEST or not raw.endswith(b"\n"):
+    if (peer_uid != 0 or len(raw) > MAX_REQUEST or not raw.endswith(b"\n")
+            or raw.count(b"\n") != 1):
         return False
     try:
-        obj = json.loads(raw)
+        # Retain JSON pairs so duplicate op keys cannot silently overwrite.
+        pairs = json.loads(raw, object_pairs_hook=tuple)
     except (ValueError, TypeError, UnicodeError):
         return False
-    return type(obj) is dict and obj in (
-        {"op": "cia_sqlite"}, {"op": "cia_ws_d323"},
+    return type(pairs) is tuple and pairs in (
+        (("op", "cia_sqlite"),), (("op", "cia_ws_d323"),),
     )
 
 
