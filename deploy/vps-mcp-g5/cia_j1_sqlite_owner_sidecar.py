@@ -16,7 +16,8 @@ import stat
 import struct
 import sys
 
-from crypto_j1_readonly import sqlite_audit, validate_ws_d323_report
+from crypto_j1_readonly import sqlite_audit
+from crypto_j1_ws_d323 import validate_ws_d323_report
 
 SOCKET = "/run/cia-j1-owner/readonly.sock"
 MAX_REQUEST = 128
