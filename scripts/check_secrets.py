@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import gzip
 import subprocess
 import sys
 from pathlib import Path
@@ -114,6 +115,22 @@ def _is_text_candidate(relative_path: str) -> bool:
     return bool(suffixes & TEXT_SUFFIXES)
 
 
+
+def _read_candidate_text(path: Path) -> str:
+    """Scan compressed text too, with a fixed expansion ceiling.
+
+    A compressed JSON evidence artifact must not bypass the secret scanner.
+    An invalid or oversized compressed text artifact fails closed.
+    """
+    if path.suffix != ".gz":
+        return path.read_text(encoding="utf-8")
+    with gzip.open(path,"rb") as stream:
+        payload=stream.read(5_000_001)
+    if len(payload)>5_000_000:
+        raise ValueError("COMPRESSED_TEXT_TOO_LARGE")
+    return payload.decode("utf-8")
+
+
 def main() -> int:
     findings: list[str] = []
 
@@ -125,8 +142,10 @@ def main() -> int:
 
         path = ROOT / relative_path
         try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
+            text = _read_candidate_text(path)
+        except (UnicodeDecodeError,OSError,ValueError):
+            if path.suffix == ".gz":
+                findings.append(relative_path)
             continue
 
         for pattern in SECRET_PATTERNS:

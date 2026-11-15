@@ -13,6 +13,10 @@ on:
       - "semantic_context/candidate_parity_demo_finance_v11.json"
       - "app/adapters/postgres/context_repository.py"
       - "app/domain/context_normalizer.py"
+      - "app/domain/metric_source_composition.py"
+      - "app/adapters/postgres/metric_source_composition_sql.py"
+      - "testar_metric_source_composition_e2e.py"
+      - "scripts/validation/test_generic_multisource_disposable_postgres.py"
       - ".github/workflows/v11-disposable-postgres.yml"
   push:
     branches:
@@ -28,6 +32,10 @@ on:
       - "semantic_context/candidate_parity_demo_finance_v11.json"
       - "app/adapters/postgres/context_repository.py"
       - "app/domain/context_normalizer.py"
+      - "app/domain/metric_source_composition.py"
+      - "app/adapters/postgres/metric_source_composition_sql.py"
+      - "testar_metric_source_composition_e2e.py"
+      - "scripts/validation/test_generic_multisource_disposable_postgres.py"
       - ".github/workflows/v11-disposable-postgres.yml"
   workflow_dispatch:
 
@@ -71,3 +79,10 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
       - name: Validate candidate transaction (synthetic data only)
         run: bash scripts/validation/test_v11_postgres_transaction.sh
+      - name: Install pinned semantic planner dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Execute generated multi-source SQL against real disposable PostgreSQL
+        env:
+          CI: "true"
+          COMPOSITION_DISPOSABLE_POSTGRES_TEST: "true"
+        run: python scripts/validation/test_generic_multisource_disposable_postgres.py

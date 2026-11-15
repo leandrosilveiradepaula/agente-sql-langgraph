@@ -8,6 +8,10 @@ from copy import deepcopy
 from typing import Any, Literal, NotRequired, TypedDict
 
 from app.domain.planning import QueryPlan, selected_pattern_for_provider
+from app.domain.metric_source_composition import (
+    MetricSourceCompositionError,
+    validate_projected_metric_composition,
+)
 
 
 SQL_GENERATION_CONTRACT_VERSION = (
@@ -134,6 +138,7 @@ class SqlGenerationContext(TypedDict):
     planned_filters: list[PlannedFilter]
     filter_bindings: list[FilterBinding]
     pattern_metadata: dict[str, Any]
+    metric_source_composition: NotRequired[dict[str, Any]]
 
 
 class SqlGenerationRequest(TypedDict):
@@ -245,6 +250,13 @@ def _safe_provider_failure_reason(value: object) -> str:
         "transport_unavailable",
         "tls_failure",
         "unexpected_error",
+        # Generic, sanitized opt-in compiler contract failures. These
+        # disclose no tenant identifiers, schema, column, SQL or secrets.
+        "invalid_compiler_request",
+        "missing_compiler_context",
+        "compiler_context_pin_mismatch",
+        "compiler_composition_not_selected",
+        "compiler_composition_invalid",
     }
     return text if text in allowed else "provider_failed"
 
@@ -384,6 +396,51 @@ def build_sql_generation_request(
         authorized_tables=authorized_tables,
         catalog_columns=catalog_columns,
     )
+    composition = None
+    if planning_context.get("metric_source_composition") is not None:
+        if planned_metrics or analytical_operations or temporal_series:
+            raise SqlGenerationInputError(
+                "Composição de métricas incompatível com operações do plano."
+            )
+        try:
+            composition = validate_projected_metric_composition(
+                planning_context["metric_source_composition"],
+                authorized_tables=authorized_tables,
+                catalog_columns=catalog_columns,
+            )
+        except MetricSourceCompositionError:
+            raise SqlGenerationInputError(
+                "Fontes e colunas da composição não autorizadas."
+            ) from None
+        # Reconcile every resolved obligation with the physical projection.
+        # A user filter may never disappear from one stream, change its value
+        # or be injected into the renderer without the planned entity binding.
+        composed_filters = composition.get("user_filter_bindings", [])
+        if len(composed_filters) != len(filter_bindings):
+            raise SqlGenerationInputError(
+                "Composição omitiu ou inventou filtros do plano."
+            )
+        known_bindings = {
+            row["binding_ref"].casefold(): row for row in filter_bindings
+        }
+        for item in composed_filters:
+            binding = known_bindings.get(item["binding_ref"].casefold())
+            if not binding or not all((
+                str(item["filter_concept"]).casefold()
+                == str(binding["filter_concept"]).casefold(),
+                item["operator"] == binding["operator"],
+                item["value"] == binding["value"],
+                any(
+                    str(source["target_table"]).casefold()
+                    == str(binding["target_table"]).casefold()
+                    and str(source["target_column"]).casefold()
+                    == str(binding["target_column"]).casefold()
+                    for source in item["source_bindings"]
+                ),
+            )):
+                raise SqlGenerationInputError(
+                    "Filtro composto diverge do binding semântico aprovado."
+                )
     diagnostics = planning_context.get("diagnostics", {})
     temporal_diagnostic = (
         diagnostics.get("temporal_diagnostic", {})
@@ -497,6 +554,36 @@ def build_sql_generation_request(
             }
         )
 
+    if composition is not None:
+        instructions.append(
+            {
+                "name": "multi_source_metric_composition",
+                "content": (
+                    "Quando metric_source_composition estiver presente, "
+                    "construa um SELECT separado para cada source_ref usando "
+                    "somente target_table, value_column, source_filters e "
+                    "sign_multiplier explicitamente autorizados. Projete "
+                    "cada filtro em user_filter_bindings a TODAS as fontes "
+                    "por source_bindings de modo determinístico, nunca "
+                    "adivinhando outra coluna, literal ou join. Projete "
+                    "cada valor numerico com o sinal declarado e cada "
+                    "grouping_dimension usando source_bindings daquela "
+                    "source_ref. Combine as linhas de todos os SELECTs com "
+                    "UNION ALL, sem JOIN entre fatos brutos; somente depois "
+                    "aplique SUM da metrica composta e GROUP BY das "
+                    "dimensoes solicitadas. Nao use UNION (deduplicante), "
+                    "nao infira fontes, filtros, sinais, dimensoes ou "
+                    "outras metricas da pergunta; nao introduza DRE nem "
+                    "formula financeira nao atestada pelo catalogo. "
+                    "Quando temporal_grouping existir, use o grao "
+                    "autorizado e a coluna DATE especifica de cada fonte, "
+                    "projetando o periodo na UNION ALL e agrupando "
+                    "somente depois dessa combinacao. Nao infira "
+                    "timezone, periodo ou data de outra fonte."
+                ),
+            }
+        )
+
     if temporal_series is not None:
         instructions.append(
             {
@@ -588,6 +675,8 @@ def build_sql_generation_request(
 
     if temporal_series is not None:
         request["generation_context"]["temporal_series"] = temporal_series
+    if composition is not None:
+        request["generation_context"]["metric_source_composition"] = composition
 
     _validate_request(request)
     return deepcopy(request)
@@ -904,6 +993,13 @@ def _validate_request(
     ):
         raise SqlGenerationInputError(
             "generation_context.temporal_series deve ser objeto."
+        )
+    if (
+        "metric_source_composition" in context
+        and not isinstance(context["metric_source_composition"], Mapping)
+    ):
+        raise SqlGenerationInputError(
+            "generation_context.metric_source_composition deve ser objeto."
         )
 
 
@@ -1496,7 +1592,7 @@ def _valid_filter_binding_value(
     value: Any,
 ) -> bool:
     normalized = operator.casefold()
-    if normalized == "in":
+    if normalized in ("in", "not in"):
         if not isinstance(value, list) or not value:
             return False
         literal_types = [_filter_literal_type(item) for item in value]

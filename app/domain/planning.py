@@ -36,6 +36,7 @@ PlanningErrorCode = Literal[
     "PLANNING_REQUIRED_RULE_NOT_FOUND",
     "PLANNING_REQUIRED_TABLE_NOT_FOUND",
     "PLANNING_CONTEXT_INVALID",
+    "PLANNING_METRIC_COMPOSITION_INVALID",
     "PLANNING_TEMPORAL_BINDING_INCOMPLETE",
     "PLANNING_TEMPORAL_REFERENCE_UNSUPPORTED",
     "PLANNING_UNEXPECTED_ERROR",
@@ -270,6 +271,7 @@ class PlanningContextProjection(TypedDict):
     planned_metrics: list[ProjectedPlannedMetric]
     planned_filters: list[ProjectedPlannedFilter]
     resolved_filter_bindings: list[ProjectedFilterBinding]
+    metric_source_composition: dict[str, Any] | None
     allowed_schemas: list[str]
     component_configs: dict[str, dict[str, Any]]
     diagnostics: ProjectionDiagnostic

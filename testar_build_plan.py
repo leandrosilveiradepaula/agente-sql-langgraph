@@ -148,6 +148,35 @@ def test_planner_evidence_preserva_sinal_semantico_seguro() -> None:
     assert operation["terms"][0]["normalized_term"] == "highest"
 
 
+
+def test_planner_preserves_resolver_matched_terms_without_optional_signals():
+    # Some intent-catalog resolvers emit term-level matches without the
+    # optional semantic_signals array. Losing these previously dropped an
+    # approved user filter from the canonical HTTP query.
+    raw={
+        "intent":"synthetic_intent",
+        "best_candidate":{
+            "intent_name":"synthetic_intent",
+            "matches":[{"match_details":{"concepts":[{
+                "concept_name":"category_concept",
+                "satisfied":True,
+                "terms":[
+                    {"matched":True,"normalized_term":"approved category"},
+                    {"matched":False,"normalized_term":"unmatched condition"},
+                    {"matched":True,"normalized_term":"unsafe\ntext"},
+                ],
+            }]}}],
+        },
+    }
+    projected=_planner_intent_evidence(raw)
+    assert projected is not None
+    concepts=projected["best_candidate"]["matches"][0]["match_details"]["concepts"]
+    terms=concepts[0]["terms"]
+    assert terms==[{"matched":True,"normalized_term":"approved category"}]
+    # Business mapping remains in the catalog; only matched evidence crosses.
+    assert "business_rule" not in str(projected)
+
+
 def main() -> None:
     tests = [
         ("build_plan sucesso", test_build_plan_sucesso_sem_mutacao),
@@ -166,6 +195,10 @@ def main() -> None:
         (
             "planner preserva evidencia semantica segura",
             test_planner_evidence_preserva_sinal_semantico_seguro,
+        ),
+        (
+            "planner preserva termos de filtro sem sinais opcionais",
+            test_planner_preserves_resolver_matched_terms_without_optional_signals,
         ),
     ]
 

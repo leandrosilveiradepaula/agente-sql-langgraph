@@ -1,6 +1,87 @@
+## 13/11/2026 — Autoridade humana do operador e revisão local sem autoaprovação
+
+O operador explicitou assumir a responsabilidade integral pelo Agente Financeiro. O contrato não exige nomear outra pessoa para conduzir a revisão: o proprietário pode ser a autoridade humana final. Porém o ato de aprovação e a assinatura devem permanecer operacionalmente separados da construção técnica de propostas, sem recibo autoemitido pelo motor nem atestação fictícia de independência.
+
+`g5_owner_review_tui.py` apenas apresenta na sessão /dev/tty os G5/P3 originais autenticados (77/48), registra decisões individuais no próprio ambiente privado e retoma o progresso. Não seleciona tabela/coluna ou significado contábil automaticamente, não envia dados à LLM, não recebe SQL benchmark e só exporta drafts UNSIGNED. A compilação G5/P3 e o crosswalk financeiro com assinatura independente continuam etapas distintas; duas empresas reais, paridade Shadow e autorização read-only separada seguem obrigatórias. OFFICIAL=n8n; SHADOW=LangGraph; SQL real=false.
+
+---
+
+## 13/11/2026 — Compilação de worksheet revisado como etapa distinta da aprovação
+
+Novo módulo estrutural genérico
+`g5_compile_completed_review_offline.py` recebe apenas G5/P3 originais
+hash-pinned, revisão individual preenchida e contexto canônico autorizado
+por tenant; exige cobertura fonte/financeira/física, justificativas materiais
+para remaps e tipos físicos P3, preserva fingerprints, versão e identidade
+do revisor. O resultado é apenas um review JSON privado **UNSIGNED**,
+sem qualquer autorização ou ativação; assinatura HMAC independente e
+validação externa permanecem gate posterior, e SQL numérica read-only real
+exige autorização separada. Testes sintéticos provam dois tenants distintos,
+matriz 77×48 e rejeições de pendências e replay; a fonte G5 real continua
+sem revisão contábil. O mesmo módulo não possui clientes, contas, marcas,
+DRE ou regras financeiras hardcoded.
+Ver `docs/operations/G5-REVIEW-COMPILE-AND-INDEPENDENT-APPROVAL.md`.
+
+---
+
+## Gate de evidência financeira auditável — 13/11/2026
+
+Para divergência de qualquer schema/tabela/coluna original G5 com identidade
+P3 de destino, não basta `physical_remap_evidence_sha256` com 64 hex. Exigir
+arquivo real de revisão independente em custódia privada: identificação do
+mapeador e revisor diferentes, tenant/version/fingerprint/fonte G5 e P3,
+linhas com origem/destino exatos, justificativa financeira não vazia; digest
+do registro deve corresponder ao presente na decisão física. Recibo HMAC de
+autoridade independente deve vincular SHA do DOCUMENTO e dos vínculos, sem
+signer key acessível ao autor. O validador não determina a veracidade da
+justificativa por LLM nem aprova contas por nome; somente humanos qualificados
+fazem análise material. Zero hardcode de negócio, duas fontes originais
+versionadas e SQL real bloqueada sem autorização separada. Novos worksheets
+privados de 77 registros + 48 mapeamentos são apenas DRAFT, nunca contexto
+autorizado, como descrito em
+`docs/operations/G5-INDEPENDENT-FINANCIAL-REVIEW-HANDOFF.md`.
+
+---
+
+## Atualização 13/11/2026 — P3 original e contrato de remapeamento explícito
+
+A versão G5 usada pelo n8n (77 registros) e P3 original (137 colunas/16 tabelas/2 schemas) foram recuperados e validados criptograficamente. **Conciliação física não é aprovação financeira:** 8/8 schemas de catálogo antigos não existem com mesma identidade no P3, seis tabelas são homônimas em schemas distintos, 32 aliases possuem apenas um candidato literal de coluna e oito não possuem. Para portabilidade, o validador deve aceitar remapeamento entre quaisquer schemas/tabelas/colunas declaradas no P3 e no catálogo canônico APROVADO, sem nomes de cliente hardcoded, **apenas mediante evidência de remapeamento SHA-256 individual e recibo de aprovador independente vinculado ao destino exato**. Não inferir equivalência por identidade literal nem aceitar mudança implícita. As oito linhas catálogo com indício nulo recuperam schema/tabela de registros de origem com hashes autenticados; não criar dados faltantes. Os 48 vínculos ainda não foram aprovados, nem os 77 significados contábeis. Sem SQL real, mudança de n8n, cutover ou context activation.
+
+---
+
+## Guardrail P3 — atestação física obrigatória, 13/11/2026
+
+O G5 oficial contém indícios físicos ainda não aprovados: na versão de 77 registros, 48 referências a tabela/coluna, das quais 46 `AMBIGUOUS_TABLE_NAME` e 40 `COLUMN_UNRESOLVED`. Matching entre aliases e catálogo legado não comprova que um schema físico, tipo ou conta sejam os corretos. O crosswalk real precisa: (1) snapshot P3 offline exatamente correspondente ao SHA de origem, com `sql_executed=false` e `llm_calls=0`; (2) `physical_binding_decisions` para cada indício, escolhendo schema.qualifier e coluna explicitamente; (3) comparação exata e sensível a caixa com P3 e colunas tipadas de catálogo canônico aprovado; (4) incluir digest de decisões e SHA do P3 na mesma assinatura de aprovação independente. Arquivo P3 não identificado na custódia acessível: gate BLOQUEADO, não se inventa mapeamento. HTML humano confidencial na VPS facilita revisão, sem ativação nem alteração de n8n/SQL. Este requisito é STRUCTURAL e multicliente, sem cliente hardcoded em código; preserva todas as exigências de aprovação humana e paridade separada.
+
+---
+
+## Atualização factual 13/11/2026 — recuperação criptográfica não equivale à aprovação
+
+A versão G5 selecionada no n8n publicado foi DESCRIPTOGRAFADA pelo operador em TTY; o pacote privado SHA-256 verificado contém 77 registros, preservados em área local restrita, sem expor dados ao gerador/benchmark. O bug de reserialização do arquivo recuperado foi reparado. Verificação técnica privada: 40 aliases identificam unicamente 8 tabelas de catálogo e colunas nelas listadas, mas falta validação de tipos, contabilidade e destinos canônicos. Os 77 registros seguem sem aprovação e com estado UNRESOLVED. Os contratos de portabilidade, critérios G1–G6, aprovação independente, paridade numérica SELECT-only separadamente autorizada, n8n oficial, Shadow sem execução e cutover humano permanecem **inalterados**. Não confundir acesso ao corpus com homologação funcional financeira.
+
+---
+
+## 13/11/2026 — Bloco 1: ponte real de G5 para revisão contábil (SEM homologação)
+
+**Verificado na VPS:** versão G5 selecionada pelo n8n publicado ligada ao manifesto privado de 11 ciphertexts; versão ativa SHA-256 7f36f6619fe64b5d537bb4a84b5e148347e3b594a7e9f129ed9b55e9f6ac6485 e 77 registros (18 regras, 40 aliases, 11 DRE, 8 catálogo), com hash do ciphertext íntegro. As 11 versões contêm 1.275 registros sem SQL patterns. Todos seguem ENCRYPTED_NOT_APPROVED; zero significados contábeis validados e zero SQL financeira executada. Fonte e benchmark de 63 perguntas permanecem separados.
+
+**Engenharia nova:** scripts/operations/g5_financial_crosswalk_review.py exige cobertura linha a linha do registro original por hash/versão, classificação STRUCTURAL/FORBIDDEN e, para toda regra de negócio, destino canônico explícito; rejeita TRANSITIONAL/UNRESOLVED, ausência/duplicação de registros, troca de tenant, contexto ou fingerprint, destino inexistente, SQL histórica, assinatura ausente ou inválida. Um aprovador independente precisa autenticar digest integral de revisões, contexto e fonte; o código apenas verifica, não emite assinatura. O script g5_targeted_financial_review_offline.py gera um draft privado junto ao pacote verificado, depois de TTY/passphrase local. A nova g5_financial_crosswalk_review_cli.py verifica todos os artefatos privados em modo read-only e pode emitir somente CANDIDATE_NOT_ACTIVATED. Sem importar/aprovar/ativar catálogos por conta própria. Testes sintéticos em dois contextos e 77 linhas simuladas. Documentação: docs/operations/G5-FINANCIAL-CROSSWALK-REVIEW.md.
+
+**Aceite BLOQUEADO por dependência real:** a passphrase local não está disponível nesta sessão e não existe unapproved-source-packet.json já decifrado. A revisão financeira efetiva de 77 linhas e aprovação independente não foram realizadas. A prova de paridade financeira n8n/Gemini × LangGraph/Gemini continua sem autorização read-only. CI e protótipos sintéticos não substituem isso. Preservar PR #233 sem merge, n8n oficial inalterado, LANGGRAPH_ALLOW_REAL_SQL_EXECUTION=false. Não anunciar Bloco 1 concluído.
+
+---
+
 # Contrato de portabilidade, equivalência Shadow e cutover do Agente Financeiro
 
 **Decisão operacional explícita:** 2026-10-19. **Status:** objetivo e critérios de aceitação; **não representa cutover autorizado ou concluído**. Em conflito com notas históricas, prevalecem a decisão atual do operador, este contrato e `AGENTS.md`. Consulte `DOCUMENTATION-MAP.md` para precedência.
+
+## Bloqueio obrigatório de entrega: prova funcional, não implementação isolada (11/11/2026)
+
+Uma capacidade financeira migrada exige **nó/branch e regra do n8n legado → objeto/versão G5 e significado contábil aprovado → contexto semântico versionado por tenant → interpretação/plano/SQL dinâmica e gates LangGraph em pergunta inédita**. O resultado só recebe status `PROVEN` com evidência reproduzível e sem SQL financeira real no Shadow. Código disponível, prompt, CI, mocks, documentação e acerto no benchmark não bastam. Expandir prova para todas as capacidades necessárias do legado; a migração não termina na primeira.
+
+Benchmarks: 63 perguntas e SQL históricas usadas **somente em avaliação comparativa posterior**. Sem hardcodes, `if cliente`, DRE obrigatório, thresholds casuísticos ou SQL conhecida por pergunta. Em caso de campo contábil ambíguo, validar mapeamento e falhar com segurança. Preservar Fase 1 oficial n8n+Gemini, Shadow n8n+LangGraph+Gemini com SQL real desabilitada; Generate/Repair/Execute Approved separados; testes numéricos SELECT-only exigem autorização adicional; cutover humano. A estimativa de 12–20 semanas foi **retirada** por falta de medição.
+
+Especificação de aceite: `docs/operations/FIRST-FINANCIAL-CAPABILITY-PROOF.md`.
 
 ## Objetivo verificável
 

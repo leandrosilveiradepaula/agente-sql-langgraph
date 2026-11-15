@@ -1,0 +1,14 @@
+{
+  "contract": "legacy-n8n-audit-review-signals-v1",
+  "source_use": "EVALUATION_ONLY_NEVER_GENERATOR",
+  "business_review_nodes": [6, 8, 11, 22, 23, 32, 54],
+  "transitional_review_nodes": [15, 17, 19, 20, 53, 64],
+  "review_stems": [
+    "metric", "metrica", "dre", "orcament", "orcad", "receit",
+    "despes", "resultado", "margem", "opex", "conta", "centro",
+    "custo", "fatur", "budget", "variac", "rateio", "filial",
+    "marca", "realizad", "financial", "financeir", "filtro",
+    "alias", "plano", "estouro", "ranking", "setor"
+  ],
+  "human_financial_approval": false
+}
