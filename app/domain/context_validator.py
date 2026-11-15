@@ -1235,11 +1235,67 @@ def _validate_component_configs(
             continue
         if component_name == "intent_resolver":
             _validate_versioned_concept_negation(config, snapshot, errors)
+        if component_name == "semantic_intent_fallback":
+            _validate_semantic_intent_fallback(config, snapshot, errors)
         if component_name == "semantic_defaults":
             _validate_semantic_defaults_config(config, errors)
         if component_name == "temporal_planning":
             _validate_temporal_planning_config(config, snapshot, errors)
 
+
+
+
+def _validate_semantic_intent_fallback(
+    config: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    errors: list[ContextValidationIssue],
+) -> None:
+    """Strict opt-in policy. No business aliases, intent labels or weights here."""
+    path = "component_configs.semantic_intent_fallback"
+    valid = (
+        set(config) == {"component", "enabled", "applied_confidence"}
+        and config.get("component") == "semantic_intent_fallback"
+        and type(config.get("enabled")) is bool
+        and type(config.get("applied_confidence")) in (int, float)
+        and math.isfinite(float(config["applied_confidence"]))
+        and 0.0 < float(config["applied_confidence"]) <= 1.0
+    )
+    if not valid:
+        _add_issue(
+            errors,
+            code="SEMANTIC_INTENT_FALLBACK_CONFIG_INVALID",
+            message="A configuracao de interpretacao semantica e invalida.",
+            path=path,
+            details={},
+        )
+        return
+    if config["enabled"]:
+        resolution = snapshot.get("intent_resolution")
+        entries = (
+            resolution.get("intent_catalog")
+            if isinstance(resolution, Mapping) else None
+        )
+        patterns = snapshot.get("query_patterns")
+        authorized = {
+            p.get("intent_name")
+            for p in patterns if isinstance(p, Mapping)
+        } if isinstance(patterns, list) else set()
+        if not isinstance(entries, list) or not entries or any(
+            not isinstance(entry, Mapping)
+            or entry.get("intent_name") not in authorized
+            or not isinstance(entry.get("semantic_description"), str)
+            or not entry["semantic_description"].strip()
+            or not isinstance(entry.get("rules"), list)
+            or not entry["rules"]
+            for entry in entries
+        ):
+            _add_issue(
+                errors,
+                code="SEMANTIC_INTENT_FALLBACK_CATALOG_INCOMPLETE",
+                message="O fallback exige catalogo versionado de intencoes com descricoes.",
+                path=path,
+                details={},
+            )
 
 
 def _validate_versioned_concept_negation(

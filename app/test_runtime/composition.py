@@ -55,6 +55,7 @@ from app.integrations.google_gemini.sql_generator_adapter import (
     GoogleGeminiSqlGeneratorAdapter,
 )
 from app.integrations.openai_compatible.client import OpenAiCompatibleClient
+from app.ports.semantic_intent_interpreter import OpenAiCompatibleSemanticIntentInterpreter
 from app.integrations.openai_compatible.configuration import (
     load_openai_compatible_configuration,
 )
@@ -68,6 +69,7 @@ from app.integrations.google_gemini.sql_repairer_adapter import (
     GoogleGeminiSqlRepairerAdapter,
 )
 from app.integrations.google_gemini.client import GoogleGeminiClient
+from app.integrations.google_gemini.semantic_intent_interpreter import GeminiSemanticIntentInterpreter
 from app.integrations.google_gemini.configuration import (
     load_google_gemini_configuration,
     load_google_gemini_repairer_configuration,
@@ -135,6 +137,7 @@ def create_shadow_test_runtime(
     )
     default_selection = _shadow_default_llm_selection(environ)
     engine_preflight = ShadowTestEnginePreflight()
+    semantic_intent_interpreter = None
 
     if default_selection is not None:
         # An explicitly selected private model must not construct, validate
@@ -157,6 +160,11 @@ def create_shadow_test_runtime(
         sql_generator = OpenAiCompatibleSqlGeneratorAdapter(
             client=private_client, configuration=compatible,
         )
+        semantic_intent_interpreter = OpenAiCompatibleSemanticIntentInterpreter(
+            private_client,
+            provider_name=compatible.provider_key,
+            provider_model=compatible.model_id,
+        )
         sql_repairer = OpenAiCompatibleSqlRepairerAdapter(
             client=private_client, configuration=compatible,
         )
@@ -178,6 +186,28 @@ def create_shadow_test_runtime(
         ])
     else:
         # Backward compatible legacy mode: no implicit operational cutover.
+        # The interpretation model shares exactly the configured generator
+        # model identity and is never implicitly switched to SQL-InfoDive.
+        gemini_configuration = load_google_gemini_configuration(environ)
+        gemini_client = GoogleGeminiClient(
+            configuration=gemini_configuration,
+            secret_provider=secret_provider,
+            http_transport=http_transport,
+        )
+        semantic_intent_interpreter = GeminiSemanticIntentInterpreter(
+            client=gemini_client,
+            configuration=gemini_configuration,
+        )
+        source = os.environ if environ is None else environ
+        default_selection = {
+            "provider_key": str(source.get(
+                "GEMINI_SQL_GENERATOR_PROVIDER_KEY", "google_gemini"
+            )).strip(),
+            "model_key": gemini_configuration.model_id,
+            "config_version": str(source.get(
+                "GEMINI_SQL_GENERATOR_CONFIG_VERSION", "gemini-demo-v1"
+            )).strip(),
+        }
         sql_generator = sql_generator_override or _gemini_sql_generator(
             environ=environ,
             http_transport=http_transport,
@@ -216,6 +246,8 @@ def create_shadow_test_runtime(
             langgraph_version=config.langgraph_version,
             langgraph_commit=config.langgraph_commit,
             expected_organization_id=config.expected_organization_id,
+            semantic_intent_interpreter=semantic_intent_interpreter,
+            semantic_intent_identity=default_selection,
         ),
         execute_approved_shadow_use_case=ExecuteApprovedSqlShadowUseCase(
             engine_preflight=engine_preflight,
