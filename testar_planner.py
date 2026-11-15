@@ -176,7 +176,16 @@ def _context() -> dict:
                 "component": "generic_component",
             }
         },
-        "intent_resolution": {},
+        "intent_resolution": {
+            "config": {
+                "concept_roles": {
+                    "grouping": ["dimension_grouping"],
+                    "operation": ["analytical_operation"],
+                    "metric": ["financial_metric"],
+                    "period": ["period_reference", "explicit_period_reference"],
+                }
+            },
+        },
     }
 
 
@@ -423,6 +432,12 @@ def _intent_metric_operation_dimension_evidence(
 def _dimension_context() -> dict:
     context = _context()
     context["intent_resolution"] = {
+        "config": {"concept_roles": {
+            "grouping": ["dimension_grouping"],
+            "operation": ["analytical_operation"],
+            "metric": ["financial_metric"],
+            "period": ["period_reference", "explicit_period_reference"],
+        }},
         "intent_catalog": [
             {
                 "business_rule": {
@@ -949,6 +964,11 @@ def _metric_plan_for_term(
             context_concepts=context_concepts,
         ),
     )
+    # Physical projection diagnostics remain available after a fail-closed
+    # rejection. Tests must inspect those diagnostics, not assume that an
+    # invalid metric can still create an accepted query_plan.
+    if result["status"] == "rejected" and result["projection"] is not None:
+        return result["projection"]
     return result["query_plan"]["planning_context"]
 
 

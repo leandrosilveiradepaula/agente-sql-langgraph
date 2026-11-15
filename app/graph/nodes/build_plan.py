@@ -6,6 +6,7 @@ from typing import Any
 from typing import cast
 
 from app.domain.context import ContextSnapshot
+from app.domain.semantic_plan_gate import missing_semantic_plan_bindings
 from app.domain.planner import (
     PlanningInputError,
     build_query_plan,
@@ -63,6 +64,26 @@ def build_plan(
                 code="PLANNING_CONTEXT_INVALID",
             )
 
+        missing = missing_semantic_plan_bindings(
+            context=context,
+            interpretation=state.get("intent_resolution_result"),
+            query_plan=query_plan,
+        )
+        if missing:
+            return {
+                "query_plan": {},
+                "errors": [
+                    *state.get("errors", []),
+                    _planning_error(
+                        code="PLANNING_SEMANTIC_BINDING_INCOMPLETE",
+                        message="Interpretacao sem vinculo semantico fisico completo.",
+                        details={"unresolved_roles": missing},
+                    ),
+                ],
+                "current_stage": "build_plan",
+                "final_status": "rejected",
+                "failure_stage": "build_plan",
+            }
         return {
             "query_plan": query_plan,
             "current_stage": "build_plan",
@@ -182,7 +203,7 @@ def _planner_intent_evidence(
                     and item.get("concept_name", "").strip()
                 )
             ]
-    best_candidate = _project_dimension_grouping_candidate(
+    best_candidate = _project_intent_concept_candidate(
         intent_resolution_result.get("best_candidate")
     )
     if best_candidate is not None:
@@ -193,7 +214,7 @@ def _planner_intent_evidence(
         projected_candidates = [
             candidate
             for candidate in (
-                _project_dimension_grouping_candidate(candidate)
+                _project_intent_concept_candidate(candidate)
                 for candidate in candidates
             )
             if candidate is not None
@@ -206,7 +227,7 @@ def _planner_intent_evidence(
     return projected
 
 
-def _project_dimension_grouping_candidate(
+def _project_intent_concept_candidate(
     candidate: Any,
 ) -> dict[str, Any] | None:
     if not isinstance(candidate, Mapping):
@@ -302,10 +323,20 @@ def _project_semantic_signals(
         details = term.get("match_details")
         if not isinstance(details, Mapping):
             continue
-        for signal in details.get("semantic_signals", []):
-            projected = _project_semantic_signal(signal)
+        # Both the legacy resolver (singular semantic_signal) and the
+        # optional interpreter (semantic_signals) are valid evidence forms.
+        # Never silently discard a resolver binding during graph projection.
+        one_signal = details.get("semantic_signal")
+        if isinstance(one_signal, Mapping):
+            projected = _project_semantic_signal(one_signal)
             if projected is not None:
                 signals.append(projected)
+        grouped_signals = details.get("semantic_signals")
+        if isinstance(grouped_signals, list):
+            for signal in grouped_signals:
+                projected = _project_semantic_signal(signal)
+                if projected is not None:
+                    signals.append(projected)
     output: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str, tuple[str, ...]]] = set()
     for signal in signals:

@@ -6,6 +6,10 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any, Literal, TypedDict
 
+from app.domain.semantic_concept_roles import (
+    ConceptRoleConfigurationError,
+    unknown_role_concepts,
+)
 from app.domain.search_text import normalize_search_text
 
 
@@ -1634,6 +1638,28 @@ def _validate_intent_resolution(
             details={"received_type": type(signals).__name__},
         )
         return
+
+    # Versioned structural-to-semantic bindings must reference concepts
+    # already defined by the same tenant snapshot. No implicit default name.
+    try:
+        unresolved = unknown_role_concepts(intent_resolution)
+    except ConceptRoleConfigurationError as exc:
+        _add_issue(
+            errors,
+            code="INTENT_CONCEPT_ROLE_CONFIG_INVALID",
+            message="Mapeamento versionado de papeis conceituais invalido.",
+            path="intent_resolution.config.concept_roles",
+            details={"reason": str(exc)},
+        )
+    else:
+        if unresolved:
+            _add_issue(
+                errors,
+                code="INTENT_CONCEPT_ROLE_UNKNOWN",
+                message="Papel conceitual aponta para conceitos ausentes do catalogo.",
+                path="intent_resolution.config.concept_roles",
+                details={"roles": sorted(unresolved)},
+            )
 
     for index, signal in enumerate(signals):
         _validate_intent_signal(

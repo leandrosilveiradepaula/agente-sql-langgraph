@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from collections.abc import Mapping
@@ -39,6 +40,7 @@ from app.domain.planning import (
     SelectedPattern,
     selected_pattern_from_query_pattern,
 )
+from app.domain.semantic_concept_roles import role_concepts
 from app.domain.search_text import (
     normalize_search_text,
     tokenize_search_text,
@@ -100,6 +102,31 @@ def build_query_plan(
             "selection planned sem selected_pattern."
         )
 
+    # Explicit intent evidence must never be reused for a different
+    # intent, even if that intent has a valid query pattern. This is a
+    # structural authorization boundary; no tenant-specific labels apply.
+    if isinstance(intent_resolution_result, Mapping):
+        evidence_intent = intent_resolution_result.get("intent")
+        if (
+            isinstance(evidence_intent, str)
+            and evidence_intent.strip()
+            and not _same_text(evidence_intent, intent_name)
+        ):
+            failed_selection = deepcopy(selection)
+            failed_selection["status"] = "rejected"
+            failed_selection["error_code"] = "PLANNING_INTENT_EVIDENCE_MISMATCH"
+            failed_selection["error_message"] = (
+                "Evidencia semantica nao pertence a intencao selecionada."
+            )
+            return {
+                "status": "rejected",
+                "query_plan": None,
+                "selection_result": failed_selection,
+                "projection": None,
+                "error_code": "PLANNING_INTENT_EVIDENCE_MISMATCH",
+                "error_message": failed_selection["error_message"],
+            }
+
     # An explicitly selected temporal reference must never be ignored by an
     # intent that is outside the configured temporal-planning scope.
     # This runs after intent/pattern resolution and before any SQL generation.
@@ -144,6 +171,29 @@ def build_query_plan(
             "projection": None,
             "error_code": rejection.code,
             "error_message": rejection.message,
+        }
+
+    if not _explicit_metric_bindings_complete(
+        projection,
+        strict_grounding=(
+            isinstance(intent_resolution_result, Mapping)
+            and intent_resolution_result.get("reason")
+            == "semantic_interpretation_selected"
+        ),
+    ):
+        failed_selection = deepcopy(selection)
+        failed_selection["status"] = "rejected"
+        failed_selection["error_code"] = "PLANNING_METRIC_BINDING_INCOMPLETE"
+        failed_selection["error_message"] = (
+            "Metrica financeira solicitada sem vinculo fisico completo."
+        )
+        return {
+            "status": "rejected",
+            "query_plan": None,
+            "selection_result": failed_selection,
+            "projection": projection,
+            "error_code": "PLANNING_METRIC_BINDING_INCOMPLETE",
+            "error_message": failed_selection["error_message"],
         }
 
     if not _analytical_operand_bindings_complete(projection):
@@ -202,6 +252,51 @@ def build_query_plan(
         "error_code": None,
         "error_message": None,
     }
+
+
+def _explicit_metric_bindings_complete(
+    projection: Mapping[str, Any],
+    *,
+    strict_grounding: bool,
+) -> bool:
+    """Prevent invalid metric targets and guard opt-in semantic interpretation.
+
+    Invalid physical metric metadata must never pass regardless of caller.
+    The stricter no-partial-binding requirement is applied to the new
+    LLM interpretation path in Shadow. Historical deterministic catalogs
+    may recognize metric words without physical aliases; preserve their
+    existing planning behavior until a reviewed tenant context is migrated.
+    This is transitional compatibility, not certification of a valid metric.
+    """
+    diagnostics = projection.get("diagnostics")
+    if not isinstance(diagnostics, Mapping):
+        return False
+    metric = diagnostics.get("planned_metric_diagnostic")
+    if not isinstance(metric, Mapping):
+        return False
+    requested = metric.get("metric_requested")
+    if type(requested) is not bool:
+        return False
+    if not requested:
+        return True
+    invalid = metric.get("invalid_metadata_terms")
+    if not isinstance(invalid, list) or invalid:
+        # A known alias with invalid physical metadata (including a schema
+        # outside the tenant allowlist) cannot be accepted in either mode.
+        return False
+    if not strict_grounding:
+        return True
+    planned = projection.get("planned_metrics")
+    if not isinstance(planned, list) or not planned:
+        return False
+    count = metric.get("projected_count")
+    if type(count) is not int or count != len(planned):
+        return False
+    for field in ("unresolved_terms", "binding_failures"):
+        failures = metric.get(field)
+        if not isinstance(failures, list) or failures:
+            return False
+    return True
 
 
 def _temporal_bindings_complete(projection: Mapping[str, Any]) -> bool:
@@ -591,7 +686,12 @@ def _project_temporal_series(
         }
 
     grain = next(iter(matches))
-    period_terms = _matched_temporal_period_terms(intent_resolution_result)
+    period_terms = _matched_temporal_period_terms(
+        intent_resolution_result,
+        period_concepts=role_concepts(
+            context.get("intent_resolution", {}), "period",
+        ),
+    )
     return {
         "operation_type": "time_series",
         "time_grain": grain,
@@ -613,6 +713,8 @@ def _project_temporal_series(
 
 def _matched_temporal_period_terms(
     intent_resolution_result: Mapping[str, Any] | None,
+    *,
+    period_concepts: frozenset[str],
 ) -> list[str]:
     if not isinstance(intent_resolution_result, Mapping):
         return []
@@ -623,9 +725,9 @@ def _matched_temporal_period_terms(
         selected_intent=selected_intent,
     ):
         for concept in _concepts_from_candidate(candidate):
-            if str(concept.get("concept_name", "")).casefold() not in {
-                "period_reference", "explicit_period_reference"
-            }:
+            if str(concept.get("concept_name", "")).casefold() not in (
+                period_concepts
+            ):
                 continue
             if not concept.get("satisfied"):
                 continue
@@ -654,20 +756,39 @@ def _analytical_operand_bindings_complete(
     for operation in operations:
         if not isinstance(operation, Mapping):
             return False
-        if operation.get("operation_type") != "comparison":
-            continue
-        cardinality = operation.get("binding_cardinality", {})
+        cardinality = operation.get("binding_cardinality")
         if not isinstance(cardinality, Mapping):
             return False
         minimum = cardinality.get("minimum")
-        if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 1:
+        maximum = cardinality.get("maximum")
+        if (
+            type(minimum) is not int or minimum < 1
+            or type(maximum) is not int or maximum < minimum
+        ):
             return False
-        operand_refs = operation.get("operand_metric_refs", [])
-        if not isinstance(operand_refs, list):
-            return False
-        if len(operand_refs) < minimum or len(operand_refs) != len(set(operand_refs)):
-            return False
-        if any(not isinstance(ref, str) or ref not in refs for ref in operand_refs):
+        kind = operation.get("operation_type")
+        if kind == "ranking":
+            # Preserve the existing plan stage contract. A strict required
+            # ranking operand is a separate versioned policy/cutover decision.
+            # If the planner actually supplied a binding, it must be valid.
+            metric_ref = operation.get("metric_ref")
+            if metric_ref is not None and (
+                type(metric_ref) is not str
+                or not metric_ref.strip()
+                or metric_ref not in refs
+            ):
+                return False
+        elif kind == "comparison":
+            operand_refs = operation.get("operand_metric_refs")
+            if not isinstance(operand_refs, list):
+                return False
+            if (
+                not minimum <= len(operand_refs) <= maximum
+                or len(operand_refs) != len(set(operand_refs))
+                or any(type(ref) is not str or ref not in refs for ref in operand_refs)
+            ):
+                return False
+        else:
             return False
     return True
 
@@ -817,6 +938,26 @@ def project_planning_context(
             "context deve ser um objeto canonico."
         )
 
+    # Never plan any table without an explicit tenant schema scope.
+    # This runtime boundary also protects direct planner callers which have
+    # not passed through context validation, including optional LLM paths.
+    schema_scope = context.get("allowed_schemas")
+    if (
+        not isinstance(schema_scope, list)
+        or not schema_scope
+        or any(
+            not isinstance(schema, str) or not schema.strip()
+            for schema in schema_scope
+        )
+    ):
+        raise PlanningRejection(
+            "PLANNING_SCHEMA_SCOPE_INVALID",
+            "Escopo de schemas autorizados ausente ou invalido.",
+        )
+    authorized_schemas = {
+        schema.strip().casefold() for schema in schema_scope
+    }
+
     required_rules, missing_rules = _project_rules(
         context.get("rules", []),
         intent_name=intent_name,
@@ -882,6 +1023,44 @@ def project_planning_context(
         raise PlanningRejection(
             "PLANNING_REQUIRED_TABLE_NOT_FOUND",
             "Uma ou mais tabelas requeridas pelo padrao nao existem.",
+        )
+
+    # Catalog presence is not permission. A dimension or pattern may
+    # reference a real table belonging to another allowed-catalog schema,
+    # but it must never cross the tenant's active authorization boundary.
+    if any(
+        table["schema_name"].strip().casefold() not in authorized_schemas
+        for table in required_tables
+    ):
+        raise PlanningRejection(
+            "PLANNING_TABLE_SCHEMA_UNAUTHORIZED",
+            "Tabela requerida fora do escopo autorizado para consulta.",
+        )
+
+    # An entity alias cannot authorize a column absent from the physical
+    # catalog, and key_columns alone are not evidence that a column exists.
+    # Fail before constructing a plan that could reach SQL generation.
+    catalog_columns = {
+        table["qualified_name"].casefold(): {
+            column["name"].strip().casefold()
+            for column in table.get("columns", [])
+            if isinstance(column, Mapping)
+            and isinstance(column.get("name"), str)
+            and column["name"].strip()
+        }
+        for table in required_tables
+    }
+    if any(
+        not isinstance(dim.get("target_table"), str)
+        or not isinstance(dim.get("target_column"), str)
+        or dim["target_column"].strip().casefold() not in catalog_columns.get(
+            dim["target_table"].strip().casefold(), set()
+        )
+        for dim in dimension_projection
+    ):
+        raise PlanningRejection(
+            "PLANNING_DIMENSION_TARGET_INVALID",
+            "Dimensao sem tabela e coluna fisica autorizada.",
         )
 
     table_names = {
@@ -1300,8 +1479,12 @@ def _detect_grouping_dimensions(
     normalized_question: str,
     intent_resolution_result: Mapping[str, Any] | None = None,
 ) -> tuple[list[ProjectedDimension], dict[str, Any]]:
+    grouping_concepts = role_concepts(
+        context.get("intent_resolution", {}), "grouping",
+    )
     evidence_terms = _grouping_terms_from_intent_evidence(
         intent_resolution_result,
+        grouping_concepts=grouping_concepts,
     )
     evidence_dimensions: list[ProjectedDimension] = []
     evidence_unresolved: list[str] = []
@@ -1333,6 +1516,7 @@ def _detect_grouping_dimensions(
     requested_terms = _grouping_terms_from_context(
         context.get("intent_resolution", {}),
         normalized_question,
+        grouping_concepts=grouping_concepts,
     )
     if not requested_terms:
         return [], {
@@ -1369,23 +1553,18 @@ def _detect_grouping_dimensions(
 
 def _grouping_terms_from_intent_evidence(
     intent_resolution_result: Mapping[str, Any] | None,
+    *,
+    grouping_concepts: frozenset[str],
 ) -> list[tuple[str, str]]:
     if not isinstance(intent_resolution_result, Mapping):
         return []
 
     selected_intent = intent_resolution_result.get("intent")
-    best_candidate = intent_resolution_result.get("best_candidate")
-    candidates: list[Any] = []
-    if isinstance(best_candidate, Mapping):
-        candidates.append(best_candidate)
-    candidates.extend(
-        candidate
-        for candidate in intent_resolution_result.get("candidates", [])
-        if isinstance(candidate, Mapping)
-        and (
-            selected_intent is None
-            or _same_text(candidate.get("intent_name"), selected_intent)
-        )
+    # Grouping must observe the same selected-intent boundary as metrics,
+    # operations and periods; never import a foreign best_candidate.
+    candidates = _selected_intent_candidates(
+        intent_resolution_result,
+        selected_intent=selected_intent,
     )
 
     matches: list[tuple[str, str]] = []
@@ -1399,8 +1578,8 @@ def _grouping_terms_from_intent_evidence(
             for concept in details.get("concepts", []):
                 if not isinstance(concept, Mapping):
                     continue
-                if str(concept.get("concept_name", "")).casefold() != (
-                    "dimension_grouping"
+                if str(concept.get("concept_name", "")).casefold() not in (
+                    grouping_concepts
                 ):
                     continue
                 if not concept.get("satisfied"):
@@ -1434,8 +1613,12 @@ def _detect_analytical_operations(
     normalized_question: str = "",
     intent_resolution_result: Mapping[str, Any] | None = None,
 ) -> tuple[list[ProjectedAnalyticalOperation], dict[str, Any]]:
+    operation_concepts = role_concepts(
+        context.get("intent_resolution", {}), "operation",
+    )
     evidence_terms = _operation_terms_from_intent_evidence(
         intent_resolution_result,
+        operation_concepts=operation_concepts,
     )
     operations: list[ProjectedAnalyticalOperation] = []
     unresolved: list[str] = []
@@ -1496,7 +1679,9 @@ def _detect_analytical_operations(
             selected_intent=selected_intent,
         ):
             for concept in _concepts_from_candidate(candidate):
-                if str(concept.get("concept_name", "")).casefold() != "analytical_operation":
+                if str(concept.get("concept_name", "")).casefold() not in (
+                    operation_concepts
+                ):
                     continue
                 for evidence in concept.get("terms", []):
                     if not isinstance(evidence, Mapping) or not evidence.get("matched"):
@@ -1566,6 +1751,8 @@ def _detect_analytical_operations(
 
 def _operation_terms_from_intent_evidence(
     intent_resolution_result: Mapping[str, Any] | None,
+    *,
+    operation_concepts: frozenset[str],
 ) -> list[str]:
     if not isinstance(intent_resolution_result, Mapping):
         return []
@@ -1578,8 +1765,8 @@ def _operation_terms_from_intent_evidence(
     matches: list[str] = []
     for candidate in candidates:
         for concept in _concepts_from_candidate(candidate):
-            if str(concept.get("concept_name", "")).casefold() != (
-                "analytical_operation"
+            if str(concept.get("concept_name", "")).casefold() not in (
+                operation_concepts
             ):
                 continue
             if not concept.get("satisfied"):
@@ -1645,8 +1832,12 @@ def _detect_planned_metrics(
     normalized_question: str = "",
     dimension_terms: list[str] | None = None,
 ) -> tuple[list[ProjectedPlannedMetric], dict[str, Any]]:
+    metric_concepts = role_concepts(
+        context.get("intent_resolution", {}), "metric",
+    )
     raw_evidence_terms = _metric_terms_from_intent_evidence(
         intent_resolution_result,
+        metric_concepts=metric_concepts,
     )
     evidence_terms = [
         term for term in raw_evidence_terms
@@ -1766,6 +1957,8 @@ def _detect_planned_metrics(
 
 def _metric_terms_from_intent_evidence(
     intent_resolution_result: Mapping[str, Any] | None,
+    *,
+    metric_concepts: frozenset[str],
 ) -> list[str]:
     if not isinstance(intent_resolution_result, Mapping):
         return []
@@ -1778,8 +1971,8 @@ def _metric_terms_from_intent_evidence(
     matches: list[str] = []
     for candidate in candidates:
         for concept in _concepts_from_candidate(candidate):
-            if str(concept.get("concept_name", "")).casefold() != (
-                "financial_metric"
+            if str(concept.get("concept_name", "")).casefold() not in (
+                metric_concepts
             ):
                 continue
             if not concept.get("satisfied"):
@@ -2252,6 +2445,9 @@ def _metric_binding_cardinality_from_operations(
 ) -> dict[str, Any]:
     evidence_terms = _operation_terms_from_intent_evidence(
         intent_resolution_result,
+        operation_concepts=role_concepts(
+            context.get("intent_resolution", {}), "operation",
+        ),
     )
     cardinalities: list[dict[str, Any]] = []
     for matched_user_term in evidence_terms:
@@ -2329,8 +2525,6 @@ def _resolve_planned_metrics(
             invalid_seen = True
             continue
         canonical_value = str(entity.get("canonical_value", "")).strip()
-        if canonical_value:
-            metric_concepts.add(canonical_value)
         target_table = str(entity.get("target_table", "")).strip()
         target_column = str(entity.get("target_column", "")).strip()
         if not (
@@ -2340,6 +2534,7 @@ def _resolve_planned_metrics(
             and target_column
             and metric["target_table"] == target_table
             and metric["target_column"] == target_column
+            and _metric_target_schema_authorized(context, target_table)
             and _metric_column_allowed(
                 table_catalog,
                 target_table=target_table,
@@ -2348,6 +2543,9 @@ def _resolve_planned_metrics(
         ):
             invalid_seen = True
             continue
+        # An invalid alias must not seed a concept that could be selected
+        # through a separate conditional binding.
+        metric_concepts.add(canonical_value)
         priority = _optional_int(entity.get("priority"))
         legacy_candidates.append(
             (
@@ -2401,6 +2599,18 @@ def _resolve_planned_metrics(
 
     if not legacy_candidates:
         return [], "invalid_metadata" if invalid_seen else "unresolved", {}
+    # Priority is not financial authorization. The same lexical alias may
+    # have multiple distinct physical metric meanings across tenants.
+    # Without explicit conditional bindings, no deterministic priority
+    # can choose the correct business metric.
+    distinct_refs = {
+        candidate["metric_ref"] for _priority, candidate in legacy_candidates
+    }
+    if len(distinct_refs) != 1:
+        raise PlanningRejection(
+            "PLANNING_METRIC_ALIAS_AMBIGUOUS",
+            "Alias semantico associado a multiplas metricas fisicas.",
+        )
     return [
         sorted(
             legacy_candidates,
@@ -2490,9 +2700,11 @@ def _resolve_metric_bindings(
     cardinality: dict[str, Any],
 ) -> tuple[list[ProjectedPlannedMetric], dict[str, Any]]:
     concepts_present = {
-        item["concept_name"].casefold()
+        item["concept_name"].strip().casefold()
         for item in binding_context_concepts
-        if isinstance(item.get("concept_name"), str)
+        if isinstance(item, Mapping)
+        and isinstance(item.get("concept_name"), str)
+        and item["concept_name"].strip()
     }
     configured: list[dict[str, Any]] = []
     configured_count = 0
@@ -2524,13 +2736,27 @@ def _resolve_metric_bindings(
             continue
         if not _same_text(binding["metric_concept"], metric_concept):
             continue
+        if not _metric_target_schema_authorized(
+            context, binding["target_table"]
+        ):
+            rejected.append({
+                "binding_ref": binding["binding_ref"],
+                "reason": "schema_not_authorized",
+            })
+            continue
         configured.append(binding)
         missing_present = sorted(
-            set(binding["when_present"]) - concepts_present,
+            (
+                name for name in binding["when_present"]
+                if name.casefold() not in concepts_present
+            ),
             key=str.casefold,
         )
         blocked_absent = sorted(
-            set(binding["when_absent"]) & concepts_present,
+            (
+                name for name in binding["when_absent"]
+                if name.casefold() in concepts_present
+            ),
             key=str.casefold,
         )
         if missing_present or blocked_absent:
@@ -2656,7 +2882,9 @@ def _metric_binding_rule(
         binding.get("required_filter_concepts", []),
         allow_empty=True,
     )
-    if set(when_present) & set(when_absent):
+    if {item.casefold() for item in when_present} & {
+        item.casefold() for item in when_absent
+    }:
         return None
     if required_filter_concepts is None:
         return None
@@ -2829,6 +3057,36 @@ def _metric_metadata(
     }
 
 
+def _metric_target_schema_authorized(
+    context: Mapping[str, Any],
+    target_table: str,
+) -> bool:
+    """A physical metric route must belong to this tenant's schema allowlist.
+
+    The table catalog confirms physical existence; that is not sufficient
+    authorization. Derive schema ownership from the same versioned catalog,
+    never from a table-name string or any client-specific conditional.
+    """
+    schemas = context.get("allowed_schemas")
+    catalog = context.get("table_catalog")
+    if not isinstance(schemas, list) or not isinstance(catalog, list):
+        return False
+    if any(not isinstance(name, str) or not name.strip() for name in schemas):
+        return False
+    authorized = {name.strip().casefold() for name in schemas}
+    for entry in catalog:
+        if not isinstance(entry, Mapping):
+            continue
+        schema = entry.get("schema_name")
+        if (
+            isinstance(schema, str)
+            and schema.strip().casefold() in authorized
+            and _same_text(_qualified_table_name(entry), target_table)
+        ):
+            return True
+    return False
+
+
 def _metric_column_allowed(
     table_catalog: Any,
     *,
@@ -2870,8 +3128,8 @@ def _binding_ref(
             metric_concept,
             target_table,
             target_column,
-            ",".join(sorted(when_present, key=str.casefold)),
-            ",".join(sorted(when_absent, key=str.casefold)),
+            ",".join(sorted({item.casefold() for item in when_present})),
+            ",".join(sorted({item.casefold() for item in when_absent})),
         )
     )
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
@@ -3145,7 +3403,13 @@ def _selected_intent_candidates(
 ) -> list[Mapping[str, Any]]:
     candidates: list[Mapping[str, Any]] = []
     best_candidate = intent_resolution_result.get("best_candidate")
-    if isinstance(best_candidate, Mapping):
+    if (
+        isinstance(best_candidate, Mapping)
+        and (
+            selected_intent is None
+            or _same_text(best_candidate.get("intent_name"), selected_intent)
+        )
+    ):
         candidates.append(best_candidate)
     candidates.extend(
         candidate
@@ -3215,6 +3479,26 @@ def _resolve_analytical_operation(
         )
     if not candidates:
         return None
+    # Operation priority must not decide between incompatible analytical
+    # semantics. Equivalent duplicate alias records may still be deduped.
+    semantic_signatures = {
+        json.dumps(
+            {
+                key: value for key, value in candidate.items()
+                if key not in {
+                    "priority", "matched_user_term",
+                    "detection_source", "mapping_source",
+                }
+            },
+            sort_keys=True,
+        )
+        for _priority, candidate in candidates
+    }
+    if len(semantic_signatures) != 1:
+        raise PlanningRejection(
+            "PLANNING_OPERATION_ALIAS_AMBIGUOUS",
+            "Alias semantico associado a operacoes analiticas conflitantes.",
+        )
     return sorted(
         candidates,
         key=lambda item: (
@@ -3414,6 +3698,8 @@ def _dimension_name_from_semantic_signal(
 def _grouping_terms_from_context(
     intent_resolution: Any,
     normalized_question: str,
+    *,
+    grouping_concepts: frozenset[str],
 ) -> list[tuple[str, str]]:
     if not isinstance(intent_resolution, Mapping):
         return []
@@ -3451,8 +3737,8 @@ def _grouping_terms_from_context(
             for concept in concepts:
                 if not isinstance(concept, Mapping):
                     continue
-                if str(concept.get("concept_name", "")).casefold() != (
-                    "dimension_grouping"
+                if str(concept.get("concept_name", "")).casefold() not in (
+                    grouping_concepts
                 ):
                     continue
                 terms = concept.get("terms", [])

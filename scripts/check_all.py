@@ -54,6 +54,34 @@ STEPS = [
         [sys.executable, "testar_context_validator.py"],
     ),
     (
+        "testar_semantic_concept_roles.py",
+        [sys.executable, "testar_semantic_concept_roles.py"],
+    ),
+    (
+        "testar_semantic_role_migration.py",
+        [sys.executable, "testar_semantic_role_migration.py"],
+    ),
+    (
+        "testar_semantic_plan_gate.py",
+        [sys.executable, "testar_semantic_plan_gate.py"],
+    ),
+    (
+        "testar_semantic_catalog_audit.py",
+        [sys.executable, "testar_semantic_catalog_audit.py"],
+    ),
+    (
+        "testar_semantic_binding_feasibility.py",
+        [sys.executable, "testar_semantic_binding_feasibility.py"],
+    ),
+    (
+        "testar_semantic_alias_integrity.py",
+        [sys.executable, "testar_semantic_alias_integrity.py"],
+    ),
+    (
+        "testar_metric_tenant_schema.py",
+        [sys.executable, "testar_metric_tenant_schema.py"],
+    ),
+    (
         "testar_p3_semantic_context_candidate.py",
         [sys.executable, "testar_p3_semantic_context_candidate.py"],
     ),

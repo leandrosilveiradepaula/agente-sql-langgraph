@@ -1520,8 +1520,13 @@ def _semantic_metric_context() -> dict:
         ),
     }
 
+    grouping_config = _config()
+    grouping_config["concept_roles"] = {
+        "grouping": ["dimension_grouping"],
+    }
     return _context(
         [],
+        config=grouping_config,
         intent_catalog=[
             _catalog_entry(
                 intent_name="synthetic_metric",
